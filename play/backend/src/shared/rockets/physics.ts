@@ -164,9 +164,20 @@ export function stepBody(b: Body, input: MoveInput, map: MapData, dt = RK.dt): S
       b.vel.y = RK.jumpSpeed;
       b.onGround = false;
     }
-  } else {
-    accelerate(b, wishX, wishZ, wishLen * RK.airSpeed, RK.airAccel, dt);
-    if (input.s === 0 && input.f !== 0 && wishLen > 0) airControl(b, wishX, wishZ, dt);
+  } else if (wishLen > 0) {
+    // CPM/Warsow-style air movement. Every key combination does something useful:
+    // - pushing against the current motion is a gentle air brake (never a hard stop, so knockback keeps its punch);
+    // - forward + strafe is plain Quake air acceleration, so strafe jumping still builds speed;
+    // - strafe alone adds a sharp, capped sideways push on top: turn the mouse with it to carve tight air turns;
+    // - forward (or back) alone bends the velocity toward the view without changing its speed.
+    const along = b.vel.x * wishX + b.vel.z * wishZ;
+    if (along < 0) {
+      accelerate(b, wishX, wishZ, wishLen * RK.airSpeed, RK.airStopAccel, dt);
+    } else {
+      accelerate(b, wishX, wishZ, wishLen * RK.airSpeed, RK.airAccel, dt);
+      if (input.f === 0) accelerate(b, wishX, wishZ, wishLen * RK.airStrafeSpeed, RK.airStrafeAccel, dt);
+    }
+    if (input.s === 0) airControl(b, wishX, wishZ, dt);
   }
   b.vel.y -= RK.gravity * dt;
 

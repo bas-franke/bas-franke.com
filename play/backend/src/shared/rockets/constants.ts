@@ -14,9 +14,15 @@ export const RK = {
   friction: 6,
   stopSpeed: 3,
   airSpeed: 9.5,
-  airAccel: 1.2,
-  /** Extra steering while airborne with only forward pressed (CPM-style). Makes rocket jumps controllable. */
-  airControl: 2.6,
+  /** Quake air acceleration, used for forward + strafe (strafe jumping) and for drifting with any key. */
+  airAccel: 1.4,
+  /** Air acceleration when the keys push against the current motion: a soft brake (about 7.6 m/s^2), so knockback keeps its punch. */
+  airStopAccel: 0.8,
+  /** Strafe-only extra push (CPM): tiny top speed, huge acceleration, so A/D plus mouse turns sharply in the air. */
+  airStrafeSpeed: 0.9,
+  airStrafeAccel: 60,
+  /** Steering while airborne with only forward or back pressed (CPM-style). Makes rocket jumps controllable. */
+  airControl: 5,
   stepHeight: 0.5,
 
   halfWidth: 0.4,
