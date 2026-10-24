@@ -33,7 +33,8 @@ Usage: node tools/compare/compare.mjs [options]
                            menu: the home screen;  map: the campaign map
   --size WxH             viewport (default 1536x1024, the reference size; try 390x844 for a phone)
   --port N               port for the Vite dev server this script starts (default 5201; pick a unique one)
-  --frames N             frames to time with __ww.engine.step(1/60) after the screenshot (default 120)
+  --frames N             frames to time with __ww.engine.step(1/60) after the screenshot (default 120), after
+                         10 warm-up frames reported apart as warmupMsMax (shader compiles land there)
   --seed N               seed for the Math.random replacement, so runs are repeatable (default 7)
   --creatures N          creatures to spawn in the play scene (default 6)
   --letters N            correct letters typed at the target before the shot (default 3)
@@ -344,6 +345,14 @@ try {
     const g = window.__ww;
     const e = g.engine;
     const r = e.renderer;
+    // Warm-up frames first, timed apart: they include shader compiles for anything new on screen (a hitch, not a
+    // steady cost).
+    const warm = [];
+    for (let i = 0; i < 10; i++) {
+      const t = window.__realNow();
+      e.step(1 / 60);
+      warm.push(window.__realNow() - t);
+    }
     const ms = [];
     const calls = [];
     const tris = [];
@@ -386,6 +395,7 @@ try {
     });
     return {
       frames,
+      warmupMsMax: +Math.max(...warm).toFixed(1),
       stepMsAvg: +avg(ms).toFixed(2),
       stepMsP50: +pct(ms, 0.5).toFixed(2),
       stepMsP95: +pct(ms, 0.95).toFixed(2),
