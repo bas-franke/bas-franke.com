@@ -70,14 +70,14 @@ function friction(b: Body, dt: number) {
 }
 
 /** CPM air control: steer the horizontal velocity toward the wish direction without adding speed. */
-function airControl(b: Body, wishX: number, wishZ: number, dt: number) {
+function airControl(b: Body, wishX: number, wishZ: number, strength: number, dt: number) {
   const speed = Math.hypot(b.vel.x, b.vel.z);
   if (speed < 1e-4) return;
   let dx = b.vel.x / speed;
   let dz = b.vel.z / speed;
   const dot = dx * wishX + dz * wishZ;
   if (dot <= 0) return;
-  const k = 32 * RK.airControl * dot * dot * dt;
+  const k = 32 * strength * dot * dot * dt;
   dx = dx * speed + wishX * k;
   dz = dz * speed + wishZ * k;
   const l = Math.hypot(dx, dz) || 1;
@@ -169,7 +169,8 @@ export function stepBody(b: Body, input: MoveInput, map: MapData, dt = RK.dt): S
     // - pushing against the current motion is a gentle air brake (never a hard stop, so knockback keeps its punch);
     // - forward + strafe is plain Quake air acceleration, so strafe jumping still builds speed;
     // - strafe alone adds a sharp, capped sideways push on top: turn the mouse with it to carve tight air turns;
-    // - forward (or back) alone bends the velocity toward the view without changing its speed.
+    // - every key also bends the velocity toward the wish direction without changing its speed: fully with W or S
+    //   alone, partly once a strafe key is held (so a key alone cannot swing a rocket jump or knockback around).
     const along = b.vel.x * wishX + b.vel.z * wishZ;
     if (along < 0) {
       accelerate(b, wishX, wishZ, wishLen * RK.airSpeed, RK.airStopAccel, dt);
@@ -177,7 +178,7 @@ export function stepBody(b: Body, input: MoveInput, map: MapData, dt = RK.dt): S
       accelerate(b, wishX, wishZ, wishLen * RK.airSpeed, RK.airAccel, dt);
       if (input.f === 0) accelerate(b, wishX, wishZ, wishLen * RK.airStrafeSpeed, RK.airStrafeAccel, dt);
     }
-    if (input.s === 0) airControl(b, wishX, wishZ, dt);
+    airControl(b, wishX, wishZ, input.s === 0 ? RK.airControl : RK.airControl * RK.airControlStrafeScale, dt);
   }
   b.vel.y -= RK.gravity * dt;
 
