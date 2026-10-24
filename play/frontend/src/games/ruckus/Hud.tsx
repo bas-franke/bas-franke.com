@@ -3,6 +3,7 @@ import { colorHex } from '@shared/protocol';
 import { RU } from '@shared/ruckus/constants';
 import type { RuckusScore } from '@shared/ruckus/protocol';
 import { MINIGAMES } from '@shared/ruckus/world';
+import { TouchControls, useTouchMode } from '../rockets/TouchControls';
 import { type ClientContext, useStore } from '../types';
 import { type RuckusClient, minigameName, minigameRules } from './client';
 
@@ -10,6 +11,7 @@ export function RuckusHud({ client, ctx }: { client: RuckusClient; ctx: ClientCo
   const s = useStore(client.hud);
   const [board, setBoard] = useState(false);
   const [menu, setMenu] = useState(false);
+  const touchMode = useTouchMode();
   const room = ctx.room();
   const nameOf = (id: string) => room.players.find((p) => p.id === id)?.name ?? '…';
   const colorOf = (id: string) => colorHex(room.players.find((p) => p.id === id)?.color ?? 0xffffff);
@@ -41,7 +43,9 @@ export function RuckusHud({ client, ctx }: { client: RuckusClient; ctx: ClientCo
   const holderName = s.holder ? nameOf(s.holder) : null;
 
   return (
-    <div className="hud">
+    <div className={`hud ru ${touchMode ? 'touch-mode' : ''}`}>
+      {touchMode && !s.ended && !menu && <TouchControls touch={client.touch} onMenu={() => setMenu(true)} onScores={setBoard} fireLabel="Dash!" jump={false} className="ruckus" />}
+
       <div className="corner tc">
         {s.mg && (
           <div>

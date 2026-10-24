@@ -1,0 +1,13 @@
+{
+  "name": "play.bas-franke.com",
+  "short_name": "play",
+  "description": "Small online multiplayer games. Host a room, share the code, no account needed.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#1a1319",
+  "theme_color": "#1a1319",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

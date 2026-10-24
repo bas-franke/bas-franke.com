@@ -1,7 +1,7 @@
 // Ruckus client: a chase camera over the arena, predicted movement for the local pawn, interpolation for the rest.
 
 import * as THREE from 'three';
-import { fromTuple, hdist, type Vec3, v3, vadd, vsub } from '@shared/math';
+import { clamp, fromTuple, hdist, type Vec3, v3, vadd, vsub } from '@shared/math';
 import type { GameServerMsg, RoomView } from '@shared/protocol';
 import { RU } from '@shared/ruckus/constants';
 import type { PawnSnap, Phase, RuckusEvent, RuckusScore, RuckusServerMsg, RuckusSnapshot } from '@shared/ruckus/protocol';
@@ -10,6 +10,7 @@ import { sfx } from '../../engine/audio';
 import { Effects } from '../../engine/effects';
 import { Engine } from '../../engine/engine';
 import { Input } from '../../engine/input';
+import { TouchInput } from '../../engine/touch';
 import { INTERP_DELAY, SnapshotBuffer, damp, lerpAngle } from '../../engine/interp';
 import { instantiate, loadModel } from '../../engine/models';
 import { type ClientContext, type GameClient, createStore } from '../types';
@@ -65,6 +66,9 @@ export class RuckusClient implements GameClient {
 
   private engine?: Engine;
   private input?: Input;
+  /** Phone and tablet controls: the move stick and the dash button (the overlay's fire button). */
+  readonly touch = new TouchInput();
+  private touchDash = false;
   private effects?: Effects;
   private arena?: RuckusArena;
   private models: { pawn: THREE.Group | null; bomb: THREE.Group | null; coin: THREE.Group | null; crown: THREE.Group | null } | null = null;
@@ -125,6 +129,7 @@ export class RuckusClient implements GameClient {
   unmount() {
     this.disposed = true;
     this.input?.dispose();
+    this.touch.dispose();
     this.effects?.dispose();
     this.arena?.dispose();
     this.engine?.dispose();
@@ -136,6 +141,7 @@ export class RuckusClient implements GameClient {
       this.input.enabled = !paused;
       this.input.clearOnce();
     }
+    this.touch.enabled = !paused;
     this.hud.set({ paused });
   }
 
@@ -336,9 +342,16 @@ export class RuckusClient implements GameClient {
     const { input, me, layout } = this;
     if (!input || !layout) return;
     // Camera looks down -z from +z, so screen-up is -z and screen-right is +x.
-    const mz = this.paused ? 0 : input.axis(['KeyW', 'ArrowUp'], ['KeyS', 'ArrowDown']);
-    const mx = this.paused ? 0 : input.axis(['KeyA', 'ArrowLeft'], ['KeyD', 'ArrowRight']);
-    const dash = !this.paused && (input.once('Space') || input.once('ShiftLeft') || input.clicked());
+    // The touch stick reads forward as +1, which is -z here.
+    const touch = this.touch;
+    const mz = this.paused ? 0 : clamp(input.axis(['KeyW', 'ArrowUp'], ['KeyS', 'ArrowDown']) - touch.f, -1, 1);
+    const mx = this.paused ? 0 : clamp(input.axis(['KeyA', 'ArrowLeft'], ['KeyD', 'ArrowRight']) + touch.s, -1, 1);
+    // The dash button is held; a dash is the moment it goes down.
+    const held = touch.fire();
+    const tapped = held && !this.touchDash;
+    this.touchDash = held;
+    touch.look(); // drags on the right half have nothing to aim here; drain them
+    const dash = !this.paused && (input.once('Space') || input.once('ShiftLeft') || input.clicked() || tapped);
     const inp: RuckusInput = { seq: ++me.seq, mx, mz, dash };
     const res = stepPawn(me.body, inp, layout, this.world);
     if (res.dashed) {

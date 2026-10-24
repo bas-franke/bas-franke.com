@@ -170,7 +170,7 @@ export function Lobby() {
             <p>No game matches “{query}”.</p>
           </div>
         )}
-        <p className="hint" style={{ marginTop: 14 }}>
+        <p className="hint kbd-hint" style={{ marginTop: 14 }}>
           Every game: <kbd>WASD</kbd> to move, <kbd>Tab</kbd> for scores, <kbd>Esc</kbd> for the menu. Rooms live as long as someone is in them.
         </p>
       </section>

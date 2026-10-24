@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isTouchDevice, type TouchInput } from '../../engine/touch';
+import { FullscreenIcon, useFullscreen } from '../../ui/fullscreen';
 import './touch.css';
 
 /** True while the player is using a touchscreen. Starts from the device type, then follows the last pointer used. */
@@ -19,9 +20,25 @@ export function useTouchMode() {
 /**
  * On-screen controls for phones and tablets. Left half: a floating move stick. Right half: drag to look.
  * Fire and jump are hold buttons that also look while dragged. All event handling lives in TouchInput.
+ * Ruckus uses the same overlay with one action button (`fireLabel="Dash!"`, no jump) and the menu buttons top left.
  */
-export function TouchControls({ touch, onMenu, onScores }: { touch: TouchInput; onMenu: () => void; onScores: (show: boolean) => void }) {
+export function TouchControls({
+  touch,
+  onMenu,
+  onScores,
+  fireLabel = 'Fire!',
+  jump = true,
+  className = '',
+}: {
+  touch: TouchInput;
+  onMenu: () => void;
+  onScores: (show: boolean) => void;
+  fireLabel?: string;
+  jump?: boolean;
+  className?: string;
+}) {
   const root = useRef<HTMLDivElement>(null);
+  const fs = useFullscreen();
 
   useEffect(() => {
     if (!root.current) return;
@@ -30,16 +47,18 @@ export function TouchControls({ touch, onMenu, onScores }: { touch: TouchInput; 
   }, [touch]);
 
   return (
-    <div className="touch" ref={root}>
+    <div className={`touch ${className}`} ref={root}>
       <div className="touch-stick-zone" data-touch="stick" />
       <div className="touch-stick" data-touch-base>
         <div className="touch-knob" data-touch-knob />
       </div>
-      <div className="touch-btn touch-jump" data-touch="jump">
-        <span>Jump</span>
-      </div>
+      {jump && (
+        <div className="touch-btn touch-jump" data-touch="jump">
+          <span>Jump</span>
+        </div>
+      )}
       <div className="touch-btn touch-fire" data-touch="fire">
-        <span>Fire!</span>
+        <span>{fireLabel}</span>
       </div>
       <div className="touch-ui">
         <button
@@ -55,6 +74,12 @@ export function TouchControls({ touch, onMenu, onScores }: { touch: TouchInput; 
         <button data-touch-ui aria-label="Menu" onPointerDown={onMenu}>
           ❚❚
         </button>
+        {fs.supported && (
+          // A click, not pointerdown: browsers only grant fullscreen from a completed tap.
+          <button data-touch-ui aria-label={fs.active ? 'Exit fullscreen' : 'Fullscreen'} onClick={() => void fs.toggle()}>
+            <FullscreenIcon active={fs.active} />
+          </button>
+        )}
       </div>
     </div>
   );
