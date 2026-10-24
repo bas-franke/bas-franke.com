@@ -173,95 +173,176 @@ function spires(): MapData {
   return b.build({ id: 'spires', accent: 0xffb020, name: 'Spires', half, skyColor: 0x7ac8ff, fogColor: 0x60b0e8, tint: { tower: 0x6a9ae8, floor: 0xd8d0c4, stair: 0xf2a040, wall: 0x5a4ab0, ledge: 0xe86a8a, crate: 0x5ac88a, platform: 0xf2c14e, pillar: 0xf4f0e8 } });
 }
 
-/** A walled keep with battlements, corner turrets and bunkers in the yard. */
+/**
+ * A walled keep. The battlements run all the way round (past the turrets and over the gates), staircases climb the
+ * inside faces, pads in front of each gate throw attackers onto the wall and pads in the yard reach the turrets.
+ */
 function fortress(): MapData {
   const half = 36;
   const b = new B().shell(half, 10);
   const wallH = 5;
   b.block('platform', 0, 0, 3, 3, 1.5).pack(0, 1.5, 0);
   b.quad((p) => {
-    // One side of the keep: two wall segments with a doorway between, and a staircase up to the battlements.
-    p.box('ledge', 2, 0, 10.5, 12, wallH, 12).box('ledge', -12, 0, 10.5, -2, wallH, 12);
-    p.stairs('z', 1, -7, 10.5 - B.run(0, wallH), 3, 0, wallH);
+    // One side of the keep, 2.5 m thick: a gate under a lintel, merlons along the outer edge for cover.
+    p.box('ledge', 2, 0, 10, 12.5, wallH, 12.5).box('ledge', -12.5, 0, 10, -2, wallH, 12.5).box('ledge', -2, 3.2, 10, 2, wallH, 12.5);
+    for (const x of [-7, -3.5, 3.5, 7]) p.box('ledge', x - 0.6, wallH, 12, x + 0.6, wallH + 1.3, 12.5);
+    // Stairs up the inside face from both gate posts, and a solid corner so the yard has no pockets.
+    p.stairs('x', 1, 2, 9.2, 1.6, 0, wallH, 0.6).stairs('x', -1, -2, 9.2, 1.6, 0, wallH, 0.6);
+    p.box('ledge', 8, 0, 8, 10, wallH, 10).pack(9, wallH, 9);
     p.stairs('z', -1, 0, 3 + B.run(0, 1.5), 2, 0, 1.5);
-    p.block('tower', 12, 12, 2.5, 2.5, 8).padTo(v3(18, 0, 18), v3(12, 8, 12)).pack(12, 8, 12);
+    p.block('pillar', 6, 6, 0.7, 0.7, 3.5);
+    // The turret sits outside the corner so the wall walk squeezes past it.
+    p.block('tower', 13.5, 13.5, 2, 2, 8).padTo(v3(18, 0, 18), v3(13.5, 8, 13.5)).pack(13.5, 8, 13.5);
+    p.padTo(v3(0, 0, 20), v3(0, wallH, 11.25), 1.4, 1);
+    p.box('ledge', -3, 0, 15.6, 3, 1.3, 16.4);
+    // Outer yard: a raised bunker in each corner, shielded from the long diagonal by two low walls.
     p.box('ledge', 23, 0, 23, 33, 3, 33).stairs('x', 1, 23 - B.run(0, 3), 28, 3, 0, 3);
+    p.block('ledge', 21.5, 15.8, 2.5, 0.5, 2.6).block('ledge', 15.8, 21.5, 0.5, 2.5, 2.6);
     p.block('crate', 22, 4, 1, 1, 2).block('crate', 14, 26, 0.8, 0.8, 1.6);
-    p.spawn(28, 3, 28).spawn(27, 0, -2).spawn(4, 0, -8);
+    p.spawn(28, 3, 28).spawn(27, 0, -2).spawn(6.5, 0, 1.5).spawn(-5, wallH, 11.2);
     p.pack(30, 0, 10);
   });
-  return b.build({ id: 'fortress', accent: 0xffd23a, name: 'Fortress', half, skyColor: 0x5aa8e0, fogColor: 0xdcecf4, tint: { ledge: 0xb8b0a0, tower: 0xa09888, floor: 0x86c060, wall: 0x9a9284, stair: 0xc8bfae, platform: 0xc84a3a } });
+  return b.build({
+    id: 'fortress',
+    accent: 0xffd23a,
+    name: 'Fortress',
+    half,
+    skyColor: 0x5aa8e0,
+    fogColor: 0x4a8cc4,
+    tint: { ledge: 0xd8b878, tower: 0xd05a40, floor: 0x86c060, wall: 0x5a6ea8, stair: 0xa89a86, platform: 0xc84a3a, pillar: 0xd05a40 },
+  });
 }
 
-/** A ring of floor around a bottomless pit, an island in the middle and a raised walkway all the way round. */
+/**
+ * A ring of floor around a bottomless pit. Narrow ramps on two sides and pads on the other two reach the island in
+ * the middle; a cannon pad on each pad side throws players over the pit onto a perch above it.
+ */
 function pit(): MapData {
   const half = 32;
   const b = new B().shell(half, 10, false);
-  b.box('platform', -3.5, 2, -3.5, 3.5, 3, 3.5).pack(0, 3, 0);
+  const islandY = 3;
+  b.box('platform', -4.5, islandY - 1, -4.5, 4.5, islandY, 4.5).block('pillar', 0, 0, 0.8, 0.8, islandY + 3, islandY).pack(0, islandY + 3, 0);
   b.quad((p) => {
-    p.box('floor', 9, -1, -half, half, 0, 9);
-    p.padTo(v3(12, 0, 0), v3(0, 3, 0), 1.6);
-    p.padTo(v3(2.2, 3, 2.2), v3(16, 0, 16), 1.6, 0.8);
+    // The ring, with a drain in the middle of each side: splash someone near it and they are gone.
+    p.box('floor', 11, -1, -half, 17, 0, 11).box('floor', 22, -1, -half, half, 0, 11);
+    p.box('floor', 17, -1, -half, 22, 0, -3).box('floor', 17, -1, 3, 22, 0, 11);
+    p.padTo(v3(3.4, islandY, 3.4), v3(18, 0, 14), 1.6, 0.8);
+    p.block('ledge', 15, 15, 1.6, 0.4, 1.3).block('ledge', 22.5, 17, 0.4, 2, 1.3);
+    // Corner tower and the raised walkway along the outer edge; a pad in the corner pocket climbs back up.
     p.block('platform', 24, 24, 4, 4, 5).box('platform', -20, 4.5, 27, 20, 5, half);
-    p.stairs('x', 1, 20 - B.run(0, 5), 21.5, 3, 0, 5);
-    p.block('crate', 16, -6, 1, 1, 2);
-    p.spawn(22, 0, -10).spawn(24, 5, 24).spawn(20, 0, 0);
+    p.stairs('x', 1, 20 - B.run(0, 5), 21.5, 3, 0, 5).padTo(v3(30, 0, 30), v3(23.5, 5, 23.5), 4);
+    p.block('crate', 15, -8, 1, 1, 2);
+    p.spawn(24, 5, 22).spawn(26, 0, -8).spawn(14, 0, -14);
     p.pack(0, 5, 29.5);
   });
-  return b.build({ id: 'pit', accent: 0xffe03a, name: 'The Pit', half, skyColor: 0xe8483a, fogColor: 0xffb88a, tint: { floor: 0x8a5a4a, platform: 0x6a3a5a, wall: 0x5a3442, stair: 0x9a6a5a, crate: 0xffa020 } });
+  b.pair((p) => {
+    p.stairs('x', -1, 11.1, 0, 2.2, 0, islandY, 1.1);
+  });
+  b.pair((p) => {
+    p.padTo(v3(0, 0, 12.5), v3(0, islandY, 2.4), 1.6, 1);
+    p.box('platform', -2, 8.5, 5, 2, 9, 9).pack(0, 9, 7);
+    p.padTo(v3(0, 0, 25), v3(0, 9, 7), 1.4, 1);
+  });
+  return b.build({
+    id: 'pit',
+    accent: 0xffe03a,
+    name: 'The Pit',
+    half,
+    skyColor: 0x8a2a5a,
+    fogColor: 0x6a1e4a,
+    tint: { floor: 0xb87a5a, platform: 0xa85aa8, wall: 0x9a4ac0, stair: 0xd8946a, crate: 0xffa020, ledge: 0xe8c060, pillar: 0x3ec8ff },
+  });
 }
 
-/** Two raised bases facing each other, a long bridge between them and towers either side. */
+/**
+ * Two raised bases facing each other across a long bridge. Each base tower pads up to a sky platform over the
+ * bridge middle, and each side tower is a cannon that throws players onto the enemy base.
+ */
 function twinBases(): MapData {
   const half = 36;
   const b = new B().shell(half, 10);
   const baseH = 4;
+  b.box('platform', -3, 8.5, -3, 3, 9, 3).pack(0, 9, 0);
   b.pair((p) => {
     p.box('ledge', -12, 0, 22, 12, baseH, half);
     p.stairs('z', 1, 8, 22 - B.run(0, baseH), 3, 0, baseH).stairs('z', 1, -8, 22 - B.run(0, baseH), 3, 0, baseH);
+    // Parapets along the front of the base, gaps left for the stairs and the bridge.
+    p.box('ledge', 2.5, baseH, 22, 6.2, baseH + 1.2, 22.8).box('ledge', -6.2, baseH, 22, -2.5, baseH + 1.2, 22.8);
+    p.box('ledge', 9.9, baseH, 22, 12, baseH + 1.2, 22.8).box('ledge', -12, baseH, 22, -9.9, baseH + 1.2, 22.8);
+    // The bridge with a support underneath and staggered cover on top.
     p.box('platform', -2, baseH - 0.5, 0, 2, baseH, 22).pack(0, baseH, 10);
+    p.block('pillar', 0, 12, 0.7, 0.7, baseH - 0.5);
+    p.block('crate', -1.1, 12, 0.8, 0.6, baseH + 1.4, baseH).block('crate', 1.1, 18, 0.8, 0.6, baseH + 1.4, baseH);
     p.block('tower', 0, 30, 2.5, 2.5, 8).padTo(v3(5, baseH, 26), v3(0, 8, 30));
+    p.padTo(v3(0, 8, 28.2), v3(0, 9, 2), 1.4, 0.7);
     p.padTo(v3(8, 0, 4), v3(0, baseH, 4)).padTo(v3(-8, 0, 8), v3(0, baseH, 8));
     p.block('tower', 20, 10, 3.5, 3.5, 6).stairs('x', -1, 23.5 + B.run(0, 6), 10, 3, 0, 6);
     p.block('tower', -20, 10, 3.5, 3.5, 6).stairs('x', 1, -23.5 - B.run(0, 6), 10, 3, 0, 6);
+    p.padTo(v3(18, 6, 8), v3(5, baseH, -33), 5, 0.8).padTo(v3(-18, 6, 8), v3(-5, baseH, -33), 5, 0.8);
     p.block('crate', 12, -2, 1, 1, 2).block('crate', -14, 24, 1, 1, 1.8);
-    p.spawn(6, baseH, 30).spawn(-6, baseH, 30).spawn(14, 0, 20).spawn(-24, 0, 24).spawn(20, 6, 10);
+    p.spawn(10, baseH, 25).spawn(-10, baseH, 33).spawn(14, 0, 20).spawn(-24, 0, 24).spawn(21, 6, 11);
     p.pack(-20, 6, 10).pack(28, 0, 28);
   });
-  return b.build({ id: 'twin', accent: 0xff5ea8, name: 'Twin Bases', half, skyColor: 0x38c0d0, fogColor: 0xdaf6f0, tint: { ledge: 0xe86a4a, tower: 0x4a8ad8, floor: 0xd8e0c8, platform: 0xf2c14e } });
+  return b.build({
+    id: 'twin',
+    accent: 0xff5ea8,
+    name: 'Twin Bases',
+    half,
+    skyColor: 0x38c0d0,
+    fogColor: 0x2ea2b4,
+    tint: { ledge: 0xe86a4a, tower: 0x4a8ad8, floor: 0xd8e0c8, platform: 0xf2c14e, wall: 0x2a5a7a, crate: 0x6ab04a },
+  });
 }
 
-/** City blocks: streets at ground level, rooftops of every height, pads up to the tallest. */
+/**
+ * City blocks: streets at ground level, rooftops of every height joined by sky bridges, and an obelisk in the plaza
+ * that the tallest roofs pad onto.
+ */
 function downtown(): MapData {
   const half = 38;
   const b = new B().shell(half, 14);
-  b.pack(0, 0, 0);
+  b.block('platform', 0, 0, 3, 3, 1.5).block('pillar', 0, 0, 1.5, 1.5, 11).pack(0, 11, 0);
+  b.pair((p) => p.pack(0, 1.5, 2.25));
   b.quad((p) => {
+    p.stairs('z', -1, 0, 3 + B.run(0, 1.5), 2, 0, 1.5).block('crate', 4.5, 4.5, 0.8, 0.8, 1.6);
     p.block('tower', 9, 9, 4, 4, 4).stairs('x', 1, 5 - B.run(0, 4), 9, 3, 0, 4).pack(9, 4, 9);
     p.block('tower', 9, 25, 4, 4, 2.5).stairs('x', 1, 5 - B.run(0, 2.5), 25, 3, 0, 2.5);
+    // Sky bridge from the low roof up to the next one, high enough to walk under.
+    p.stairs('z', -1, 9, 21, 2, 2.5, 4).box('platform', 8, 3.5, 13, 10, 4, 21 - B.run(2.5, 4));
     p.box('tower', 20, 0, 5, 30, 7, 13).padTo(v3(15, 0, 9), v3(25, 7, 9), 2);
     p.block('tower', 25, 25, 5, 5, 10).padTo(v3(25, 7, 11.5), v3(25, 10, 25), 1.4, 1).pack(25, 10, 25);
-    p.block('crate', 16.5, 30, 1, 1, 2);
+    p.box('crate', 20, 10, 23.5, 20.6, 11.2, 30);
+    p.padTo(v3(22, 10, 22), v3(0, 11, 0), 1.4, 0.8);
+    p.block('crate', 16.5, 30, 1, 1, 2).block('crate', 16.5, -2, 1.1, 2.2, 1.4);
     p.spawn(16.5, 0, 16.5).spawn(33, 0, 17).spawn(17, 0, 34);
   });
-  return b.build({ id: 'downtown', accent: 0x3ee0b0, name: 'Downtown', half, skyColor: 0x3a4ea8, fogColor: 0xf0a0b8, tint: { tower: 0xd06ab8, floor: 0x7a7e92, stair: 0xf2c14e, crate: 0x5ec2e6, wall: 0x5a5e88 } });
+  return b.build({ id: 'downtown', accent: 0x3ee0b0, name: 'Downtown', half, skyColor: 0x5a62c8, fogColor: 0x4a4aa0, tint: { tower: 0xd06ab8, floor: 0x7a7e92, stair: 0xf2c14e, crate: 0x5ec2e6, wall: 0x3a3e88, pillar: 0xffb020, platform: 0xe8a040 } });
 }
 
-/** Rings of floating platforms over the void, linked only by jump pads. Rocket jumps welcome. */
+/**
+ * Platforms over the void. Ramps climb from the hub to a square ring of pods joined by narrow catwalks, pads throw
+ * players from the ring out to four high pods, and their pads send players back to the hub edge.
+ */
 function orbit(): MapData {
   const half = 40;
   const b = new B().shell(half, 0, false);
-  b.box('platform', -6, -1, -6, 6, 0, 6).block('pillar', 0, 0, 1.2, 1.2, 5);
+  const ring = 3;
+  const outer = 7;
+  b.box('platform', -7, -1, -7, 7, 0, 7).block('pillar', 0, 0, 1.2, 1.2, 6).pack(0, 6, 0);
   b.quad((p) => {
-    p.block('platform', 16, 0, 3, 3, 3, 2).block('platform', 11.3, 11.3, 3, 3, 3, 2);
-    p.block('platform', 28, 0, 3.5, 3.5, 6, 5).block('platform', 19.8, 19.8, 3.5, 3.5, 6, 5);
-    p.padTo(v3(4.5, 0, 0), v3(16, 3, 0)).padTo(v3(3.2, 0, 3.2), v3(11.3, 3, 11.3));
-    p.padTo(v3(17.5, 3, 0), v3(28, 6, 0), 1.4, 1).padTo(v3(12.4, 3, 12.4), v3(19.8, 6, 19.8), 1.4, 1);
-    p.padTo(v3(30.5, 6, 0), v3(-3, 0, -3), 2.5, 0.9).padTo(v3(22, 6, 22), v3(3, 0, -3), 2.5, 0.9);
-    p.spawn(14.5, 3, 0).spawn(18.5, 6, 18.5);
-    p.pack(27, 6, 2.5);
+    p.block('ledge', 6.3, 2.5, 0.4, 1.2, 1.6);
+    p.stairs('x', 1, 7, 0, 2.2, 0, ring).padTo(v3(4.5, 0, 4.5), v3(16, ring, 16));
+    // Inner ring: a pod at each side and corner, catwalks between them.
+    p.box('platform', 7 + B.run(0, ring), ring - 1, -3.5, 19.6, ring, 3.5).block('platform', 16, 16, 3.5, 3.5, ring, ring - 1);
+    p.box('platform', 14.4, ring - 0.5, 3.5, 16, ring, 12.5).box('platform', 3.5, ring - 0.5, 14.4, 12.5, ring, 16);
+    p.block('crate', 18, 18, 0.7, 0.7, ring + 1.3, ring);
+    // Outer pods: reached by pad, left by pad back to the hub edge.
+    p.block('platform', 30, 0, 4, 4, outer, outer - 1).block('crate', 32.5, -2, 0.9, 0.9, outer + 1.4, outer);
+    p.padTo(v3(18.5, ring, 0), v3(30, outer, 0), 1.4, 0.9).padTo(v3(30, outer, 2.8), v3(2.5, 0, 5), 2.5, 0.8);
+    p.spawn(28, outer, -2.5).spawn(14, ring, 14);
+    p.pack(32, outer, 2.2);
   });
-  return b.build({ id: 'orbit', accent: 0x3ee0b0, name: 'Orbit', half, skyColor: 0x4a2ab0, fogColor: 0xd0b8ff, tint: { platform: 0xf2c14e, pillar: 0xff6ab0 } });
+  return b.build({ id: 'orbit', accent: 0x3ee0b0, name: 'Orbit', half, skyColor: 0x4a2ab0, fogColor: 0x2c1878, tint: { platform: 0xf2c14e, pillar: 0xff6ab0, stair: 0xff7a3a, ledge: 0x3ec8ff, crate: 0x3ee0b0 } });
 }
 
 export const MAPS: MapData[] = [foundry(), skyway(), canyon(), ziggurat(), spires(), fortress(), pit(), twinBases(), downtown(), orbit()];
