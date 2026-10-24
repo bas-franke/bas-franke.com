@@ -75,6 +75,8 @@ export interface RoomSettings {
   maxPlayers: number;
   bots: number;
   botDifficulty: BotDifficulty;
+  /** Rockets map id, or 'random' for a different one every match. Other games ignore it. */
+  map: string;
 }
 
 /** What the lobby list shows. */
@@ -106,6 +108,7 @@ export interface RoomView {
   state: RoomState;
   maxPlayers: number;
   botDifficulty: BotDifficulty;
+  map: string;
   hostId: string | null;
   players: PlayerInfo[];
 }
@@ -115,6 +118,7 @@ export type GameServerMsg = RocketsServerMsg | RuckusServerMsg;
 
 export type ClientMsg =
   | { t: 'setBots'; count: number; difficulty?: BotDifficulty }
+  | { t: 'setMap'; map: string }
   | { t: 'start' }
   | { t: 'stop' }
   | { t: 'chat'; text: string }

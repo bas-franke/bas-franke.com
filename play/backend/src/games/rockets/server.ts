@@ -19,13 +19,14 @@ import {
   vsub,
 } from '../../shared/math.js';
 import { RK } from '../../shared/rockets/constants.js';
-import { ARENA } from '../../shared/rockets/map.js';
+import type { MapData } from '../../shared/rockets/map.js';
+import { MAPS, mapById } from '../../shared/rockets/maps.js';
 import { type Body, eyePosition, playerAABB, stepBody } from '../../shared/rockets/physics.js';
 import type { PlayerSnap, RocketSnap, RocketsEvent, RocketsInput, RocketsServerMsg, ScoreRow } from '../../shared/rockets/protocol.js';
 import type { GameClientMsg } from '../../shared/protocol.js';
 import type { GameHost, GamePlayer, GameServer } from '../types.js';
 import { BOT_PARAMS, RocketsBot, type BotEnemy } from './bots.js';
-import { navGraphFor } from './nav.js';
+import { type NavGraph, navGraphFor } from './nav.js';
 
 interface RPlayer extends GamePlayer {
   body: Body;
@@ -55,24 +56,40 @@ interface Rocket {
 
 const IDLE: Omit<RocketsInput, 'seq' | 'yaw' | 'pitch'> = { f: 0, s: 0, jump: false, fire: false };
 
+/** The last map each room played, so 'random' never repeats a map twice in a row. */
+const lastMap = new WeakMap<GameHost, string>();
+
+function pickMap(host: GameHost, rng: () => number): MapData {
+  const chosen = mapById(host.settings.map);
+  if (chosen) return chosen;
+  const pool = MAPS.filter((m) => m.id !== lastMap.get(host));
+  return pool[Math.floor(rng() * pool.length)];
+}
+
 class RocketsGame implements GameServer {
-  private readonly map = ARENA;
+  private readonly rng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
+  private readonly map: MapData;
   private readonly players = new Map<string, RPlayer>();
   private rockets: Rocket[] = [];
-  private readonly packs = this.map.packs.map(() => ({ available: true, respawnAt: 0 }));
+  private readonly packs: { available: boolean; respawnAt: number }[];
   private events: RocketsEvent[] = [];
   private now = 0;
   private tick = 0;
   private ended = false;
   private timer?: NodeJS.Timeout;
-  private readonly rng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
-  private readonly graph = navGraphFor(ARENA);
+  private readonly graph: NavGraph;
 
-  constructor(private readonly host: GameHost) {}
+  constructor(private readonly host: GameHost) {
+    this.map = pickMap(host, this.rng);
+    lastMap.set(host, this.map.id);
+    this.packs = this.map.packs.map(() => ({ available: true, respawnAt: 0 }));
+    this.graph = navGraphFor(this.map);
+  }
 
   // ---- lifecycle --------------------------------------------------------------------------------------------
 
   start() {
+    this.host.systemChat(`Map: ${this.map.name}`);
     for (const p of this.host.players()) this.addPlayer(p);
     this.timer = setInterval(() => this.loop(), 1000 / RK.loopHz);
   }

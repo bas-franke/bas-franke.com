@@ -316,6 +316,17 @@ code,
   background: rgba(255, 255, 255, 0.1);
   color: var(--ink);
 }
+.map-select {
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  cursor: pointer;
+}
+.map-select option {
+  background: #121a2b;
+}
 
 /* ---- modal ------------------------------------------------------------------------------------------------ */
 

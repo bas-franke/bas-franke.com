@@ -102,7 +102,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
         <div className="overlay-center" style={{ pointerEvents: s.ended ? 'auto' : 'none' }}>
           <div className="scoreboard">
             <h2>{s.ended ? (s.ended.winner ? `${nameOf(s.ended.winner)} wins` : 'Draw') : GAMES.rockets.name}</h2>
-            <p className="sub">{s.ended ? 'Back to the room in a moment.' : `${fmt(s.left)} left · first to ${RK.fragLimit} frags`}</p>
+            <p className="sub">{s.ended ? 'Back to the room in a moment.' : `${s.mapName} · ${fmt(s.left)} left · first to ${RK.fragLimit} frags`}</p>
             <ScoreTable scores={s.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
             {s.ended && (
               <div className="actions">
@@ -119,7 +119,9 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
         <div className="overlay-center">
           <div className="scoreboard">
             <h2>Paused (for you)</h2>
-            <p className="sub">The match keeps running. Room code {room.code}.</p>
+            <p className="sub">
+              The match keeps running on {s.mapName}. Room code {room.code}.
+            </p>
             <ScoreTable scores={s.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
             <div className="actions">
               {isHost && (

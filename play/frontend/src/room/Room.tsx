@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameServerMsg, type RoomView, colorHex } from '@shared/protocol';
+import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
 import { gameModules } from '../games/registry';
@@ -227,6 +228,8 @@ function WaitingRoom({
     }
   };
   const setBots = (count: number, difficulty?: BotDifficulty) => socket.send({ t: 'setBots', count, difficulty });
+  const hasMaps = room.game === 'rockets';
+  const mapName = MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random every match';
 
   return (
     <>
@@ -288,6 +291,16 @@ function WaitingRoom({
                     </button>
                   ))}
                 </div>
+                {hasMaps && (
+                  <select className="map-select" title="Map" value={room.map} onChange={(e) => socket.send({ t: 'setMap', map: e.target.value })}>
+                    <option value={RANDOM_MAP}>Random map</option>
+                    {MAP_LIST.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button className="btn primary" style={{ marginLeft: 'auto' }} disabled={!canStart || room.state === 'playing'} onClick={() => (sfx.unlock(), socket.send({ t: 'start' }))}>
                   {room.state === 'playing' ? 'Match running' : `Start ${meta.name}`}
                 </button>
@@ -296,6 +309,7 @@ function WaitingRoom({
             ) : (
               <span className="slots">
                 {room.state === 'playing' ? 'A match is running; you will drop in.' : `Waiting for ${host?.name ?? 'the host'} to start the game.`}
+                {hasMaps && ` Map: ${mapName}.`}
               </span>
             )}
           </div>

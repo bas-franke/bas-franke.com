@@ -26,9 +26,9 @@ export interface NavGraph {
 
 const SPACING = 2;
 const SAMPLE = 0.3;
-const MAX_DROP = 6;
+const MAX_DROP = 11;
 /** Boxes taller than this are walls, never a surface to stand on. */
-const MAX_SURFACE_Y = 7;
+const MAX_SURFACE_Y = 14;
 
 /** Height of the surface a player can stand on at (x, z), or null if nothing fits there. */
 export function groundAt(map: MapData, x: number, z: number): number | null {
@@ -46,15 +46,22 @@ export function groundAt(map: MapData, x: number, z: number): number | null {
   return best;
 }
 
-/** Can a player walk in a straight line from a to b (climbing at most a step per sample, never crossing a gap)? */
+/**
+ * Can a player walk in a straight line from a to b (climbing at most a step per sample)? Gaps only count when the
+ * link drops: stepping off a ledge carries a player past the strip right next to a tall box, where no point fits.
+ */
 function walkable(map: MapData, a: Vec3, b: Vec3): boolean {
   const d = hdist(a, b);
   const n = Math.max(1, Math.ceil(d / SAMPLE));
+  const dropping = a.y - b.y > RK.stepHeight + 1e-3;
   let prev = a.y;
   for (let i = 1; i <= n; i++) {
     const t = i / n;
     const g = groundAt(map, a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
-    if (g === null) return false;
+    if (g === null) {
+      if (dropping && i < n) continue;
+      return false;
+    }
     if (g - prev > RK.stepHeight + 1e-3) return false;
     if (prev - g > MAX_DROP) return false;
     prev = g;

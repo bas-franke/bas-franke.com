@@ -21,6 +21,7 @@ import {
   type ServerMsg,
   sanitizeName,
 } from './shared/protocol.js';
+import { mapById, RANDOM_MAP } from './shared/rockets/maps.js';
 
 export class RoomError extends Error {
   constructor(
@@ -112,6 +113,7 @@ export class Room implements GameHost {
       state: this.state,
       maxPlayers: this.settings.maxPlayers,
       botDifficulty: this.settings.botDifficulty,
+      map: this.settings.map,
       hostId: this.hostId,
       players,
     };
@@ -254,6 +256,11 @@ export class Room implements GameHost {
         this.requireHost(member);
         this.setBots(msg.count, msg.difficulty);
         return;
+      case 'setMap':
+        this.requireHost(member);
+        if (msg.map === RANDOM_MAP || mapById(String(msg.map))) this.settings.map = msg.map;
+        this.broadcastRoom();
+        return;
       case 'start':
         this.requireHost(member);
         this.startGame();
@@ -351,6 +358,7 @@ export class RoomManager {
       maxPlayers,
       bots,
       botDifficulty,
+      map: typeof raw.map === 'string' && mapById(raw.map) ? raw.map : RANDOM_MAP,
     };
     let code = randomCode();
     while (this.rooms.has(code)) code = randomCode();

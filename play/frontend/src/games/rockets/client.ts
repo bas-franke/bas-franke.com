@@ -25,6 +25,8 @@ export interface FeedLine {
 
 export interface RocketsHudState {
   ready: boolean;
+  /** Name of the map this match is on. */
+  mapName: string;
   hp: number;
   dead: boolean;
   respawnIn: number;
@@ -66,6 +68,7 @@ const ROCKET_COLOR = 0xffa14a;
 export class RocketsClient implements GameClient {
   readonly hud = createStore<RocketsHudState>({
     ready: false,
+    mapName: '',
     hp: 100,
     dead: false,
     respawnIn: 0,
@@ -181,7 +184,7 @@ export class RocketsClient implements GameClient {
         this.map = msg.map;
         this.serverLeft = msg.left;
         this.serverLeftAt = this.time;
-        this.hud.set({ scores: msg.scores, left: msg.left });
+        this.hud.set({ scores: msg.scores, left: msg.left, mapName: msg.map.name });
         if (this.engine && this.models) this.buildWorld();
         break;
       case 'snap':

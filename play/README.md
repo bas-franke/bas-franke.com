@@ -24,7 +24,7 @@ frontend/src/                          backend/src/
 └── games/                            └── shared/      ← imported by the frontend as @shared/*
     ├── rockets/ client.ts, arena.ts,     ├── protocol.ts   lobby/room messages, game metadata
     │            Hud.tsx                  ├── math.ts
-    └── ruckus/  client.ts, arena.ts,     ├── rockets/      constants, map (arena boxes), physics, protocol
+    └── ruckus/  client.ts, arena.ts,     ├── rockets/      constants, map(s), physics, protocol
                  Hud.tsx                  └── ruckus/       constants, world (layouts + pawn physics), protocol
 ```
 
@@ -44,10 +44,13 @@ frontend/src/                          backend/src/
 
 ### Rockets
 
-Arena "Foundry": a walled 44 m square built from axis-aligned boxes (`shared/rockets/map.ts`): a central platform with
-stairs, four corner towers reached by jump pads, pillars, crates and two wall ledges. Movement is Quake-style
-(ground friction/acceleration, air acceleration, CPM-ish air control, step-ups, bunny hopping). Rockets fly at 28 m/s;
-splash damage falls off over 3.8 m and knocks players back, with self-damage reduced so rocket jumping is worth it.
+Ten maps (`shared/rockets/maps.ts`), each 64 to 80 m across and built from axis-aligned boxes with rotational
+symmetry: Foundry, Skyway, Canyon, Ziggurat, Spires, Fortress, The Pit, Twin Bases, Downtown and Orbit. Skyway, The Pit
+and Orbit float over the void. The host picks one in the room, or leaves it on random (never the same map twice in a
+row). `MapBuilder` in `shared/rockets/map.ts` adds the walls plus invisible clip walls up to 60 m so rocket jumps stay
+inside. Movement is Quake-style (ground friction/acceleration, air acceleration, CPM-ish air control, step-ups, bunny
+hopping) with low gravity (18 m/s², a 2.3 m jump). Rockets fly at 30 m/s; splash damage falls off over 3.8 m and knocks
+players back, with self-damage reduced and self-knockback boosted so rocket jumps fly high.
 Bots navigate a grid-based nav graph generated from the map (`games/rockets/nav.ts`), strafe, lead their shots, chase
 health packs when low and rocket-jump after players on the high ground (normal and hard only).
 

@@ -1,4 +1,5 @@
-// Rockets tuning. Units are metres and seconds; the numbers are Quake 3 values converted at roughly 32 units per metre.
+// Rockets tuning. Units are metres and seconds. Started from Quake 3 values (roughly 32 units per metre), then gravity
+// was lowered and knockback raised so jumps and rocket jumps carry further across the larger maps.
 
 export const RK = {
   /** Simulation step. Every input command advances a player by exactly one step. */
@@ -6,8 +7,8 @@ export const RK = {
   /** The server loop runs at this rate and sends one snapshot per loop. */
   loopHz: 30,
 
-  gravity: 25,
-  jumpSpeed: 8.6,
+  gravity: 18,
+  jumpSpeed: 9.2,
   groundSpeed: 9.5,
   groundAccel: 10,
   friction: 6,
@@ -24,7 +25,7 @@ export const RK = {
   maxPitch: 1.5,
 
   maxHealth: 100,
-  rocketSpeed: 28,
+  rocketSpeed: 30,
   rocketRadius: 0.2,
   rocketLife: 6,
   fireInterval: 0.75,
@@ -35,9 +36,9 @@ export const RK = {
   directDamage: 100,
   selfDamageScale: 0.4,
   /** Velocity added at the centre of the blast for a full-damage hit. */
-  knockback: 14,
+  knockback: 16,
   /** Rocket jumps feel better with a little extra lift. */
-  selfKnockbackScale: 1.2,
+  selfKnockbackScale: 1.35,
   /** Minimum upward share of the knockback so ground hits lift players. */
   knockbackLift: 0.25,
 
@@ -50,8 +51,10 @@ export const RK = {
   healthPackRespawn: 20,
   pickupRadius: 1.0,
 
-  /** Falling below this height kills (the arena is walled, but rocket jumps are creative). */
-  killY: -12,
+  /** Falling below this height kills (some maps float over the void, and rocket jumps are creative). */
+  killY: -14,
+  /** Invisible clip walls around every map reach this high, so nobody rocket-jumps out of the arena. */
+  ceiling: 60,
   /** Upper bound on buffered input commands we process per player per loop (anti speed-hack). */
   maxCommandsPerLoop: 6,
 } as const;

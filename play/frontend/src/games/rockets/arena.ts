@@ -35,7 +35,7 @@ function gridTexture(base: string, line: string, cells = 4): THREE.CanvasTexture
   return tex;
 }
 
-const PALETTE: Record<BoxKind, { color: number; edge?: number; emissive?: number }> = {
+const PALETTE: Record<Exclude<BoxKind, 'clip'>, { color: number; edge?: number; emissive?: number }> = {
   floor: { color: 0x1a2236 },
   wall: { color: 0x151c2c },
   platform: { color: 0x27324a, edge: 0x7cf4c9 },
@@ -59,12 +59,12 @@ export function buildArena(map: MapData): ArenaView {
   const wallTex = gridTexture('#141b2b', 'rgba(255,255,255,0.05)', 2);
   disposables.push(floorTex, wallTex);
 
-  const materials = new Map<BoxKind, THREE.MeshStandardMaterial>();
-  const materialFor = (kind: BoxKind) => {
+  type Visible = Exclude<BoxKind, 'clip'>;
+  const materials = new Map<Visible, THREE.MeshStandardMaterial>();
+  const materialFor = (kind: Visible) => {
     let m = materials.get(kind);
     if (!m) {
-      const p = PALETTE[kind];
-      m = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.85, metalness: 0.05 });
+      m = new THREE.MeshStandardMaterial({ color: map.tint?.[kind] ?? PALETTE[kind].color, roughness: 0.85, metalness: 0.05 });
       if (kind === 'floor') m.map = floorTex;
       if (kind === 'wall') m.map = wallTex;
       materials.set(kind, m);
@@ -74,6 +74,7 @@ export function buildArena(map: MapData): ArenaView {
   };
 
   for (const b of map.boxes) {
+    if (b.kind === 'clip') continue;
     const sx = b.max.x - b.min.x;
     const sy = b.max.y - b.min.y;
     const sz = b.max.z - b.min.z;
@@ -83,7 +84,7 @@ export function buildArena(map: MapData): ArenaView {
     if (b.kind === 'floor' || b.kind === 'wall') {
       // Scale the texture by world size so cells stay square.
       const uv = geo.attributes.uv as THREE.BufferAttribute;
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (b.kind === 'floor' ? sx / 4 : 2), uv.getY(i) * (b.kind === 'floor' ? sz / 4 : sy / 4));
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (b.kind === 'floor' ? sx / 4 : Math.max(sx, sz) / 4), uv.getY(i) * (b.kind === 'floor' ? sz / 4 : sy / 4));
     }
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2);
@@ -157,20 +158,21 @@ export function buildArena(map: MapData): ArenaView {
 
 export function addArenaLights(scene: THREE.Scene, map: MapData) {
   scene.background = new THREE.Color(map.skyColor);
-  scene.fog = new THREE.Fog(map.fogColor, 30, 95);
+  // Fog scales with the map so the far side of the bigger arenas still reads.
+  scene.fog = new THREE.Fog(map.fogColor, map.half * 1.1, Math.max(95, map.half * 4));
   const hemi = new THREE.HemisphereLight(0x9fbfff, 0x2a2018, 1.4);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff1dc, 2.8);
   sun.position.set(18, 30, 12);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(2048, 2048);
   const half = map.half + 4;
   sun.shadow.camera.left = -half;
   sun.shadow.camera.right = half;
   sun.shadow.camera.top = half;
   sun.shadow.camera.bottom = -half;
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 80;
+  sun.shadow.camera.far = 40 + map.half * 3;
   sun.shadow.bias = -0.0005;
   sun.shadow.normalBias = 0.03;
   scene.add(sun);
