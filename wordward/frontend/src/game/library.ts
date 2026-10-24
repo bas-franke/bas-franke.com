@@ -45,7 +45,7 @@ const BOOK_COLORS = [
   0x723c2c, 0x26403a, 0x54303c, 0x334664,
 ];
 const CUSHION_COLORS = [0x84332e, 0x72302c, 0x4a6840, 0x3c5a3a, 0x34507a, 0x33605c];
-const LEAF_COLORS = [0x2e5424, 0x386028, 0x44702e, 0x2a4c20, 0x4e7a34, 0x325a26];
+const LEAF_COLORS = [0x1f4a1c, 0x28561f, 0x346326, 0x1c3f18, 0x3d6c2a, 0x24501e];
 const WOOD = 0x452b1a;
 const WOOD_DARK = 0x24160d;
 const BRASS = 0x9a6c34;
@@ -410,7 +410,7 @@ function boxUv(g: THREE.BufferGeometry, face: number, u0: number, v0: number, u1
 }
 
 /** A book standing on its bottom: thickness along x, height y, depth z, spine at +z. Origin bottom centre. */
-function bookGeometry() {
+function bookGeometry(onShelf = false) {
   const g = new THREE.BoxGeometry(1, 1, 1);
   const uv = g.attributes.uv as THREE.BufferAttribute;
   // Reset to 0..1 per face first (BoxGeometry already is), then map.
@@ -422,9 +422,10 @@ function bookGeometry() {
   boxUv(g, 5, 0.8, 0.5, 1.0, 1.0); // fore edge
   uv.needsUpdate = true;
   g.translate(0, 0.5, 0);
-  // Drop the bottom face (always on a shelf or a book): 10 triangles a book.
+  // Drop the bottom face (always on a shelf or a book): 10 triangles a book. Books on a shelf also never show their
+  // fore edge (against the back panel): 8 triangles.
   const idx = Array.from(g.index!.array);
-  g.setIndex(idx.slice(0, 18).concat(idx.slice(24)));
+  g.setIndex(idx.slice(0, 18).concat(idx.slice(24, onShelf ? 30 : 36)));
   g.clearGroups();
   return g;
 }
@@ -663,8 +664,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   // Primitives (unit sized).
   const box = new THREE.BoxGeometry(1, 1, 1);
   const cyl = new THREE.CylinderGeometry(1, 1, 1, 6);
-  const cyl12 = new THREE.CylinderGeometry(1, 1, 1, 12);
-  const cone = new THREE.ConeGeometry(1, 1, 8);
+  const cyl12 = new THREE.CylinderGeometry(1, 1, 1, 9);
+  const cone = new THREE.ConeGeometry(1, 1, 6);
   const hemi = new THREE.SphereGeometry(1, 8, 3, 0, Math.PI * 2, 0, Math.PI / 2);
   const ball = new THREE.SphereGeometry(1, 10, 7);
   const dot = new THREE.SphereGeometry(1, 4, 2);
@@ -674,6 +675,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   const glowBag = new Bag();
   const skyBag = new Bag(true);
   const books = new Inst();
+  const shelfBooks = new Inst();
   const openBooks = new Inst();
   const cushions = new Inst();
   const leaves = new Inst();
@@ -718,16 +720,16 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     piece(props, cone, local(x, y + 0.42 * s, z, 0, 0.4, 0, 0.18 * s, 0.16 * s, 0.18 * s), brass);
     piece(props, box, local(x, y + 0.54 * s, z, 0, 0.4, 0, 0.1 * s, 0.07 * s, 0.03 * s), dark);
     if (hanging) piece(props, box, local(x, y + 0.6 * s + 0.25, z, 0, 0, 0, 0.02, 0.5, 0.02), dark);
-    glow(x, y + 0.22 * s, z, 2.6 * s, 0.55, 0);
-    glow(x, y + 0.22 * s, z, 0.5 * s, 0.75, 1);
-    light(x, y + 0.25 * s, z, 0.75, 3.2 * Math.min(1.6, s));
-    if (y + 0.25 * s < 2) pool(x, z, 1.5 + s * 0.9, 0.42);
+    glow(x, y + 0.22 * s, z, 1.6 * Math.min(s, 1.2), 0.26, 0);
+    glow(x, y + 0.22 * s, z, 0.42 * s, 0.6, 1);
+    light(x, y + 0.25 * s, z, 0.45, 2.8 * Math.min(1.6, s));
+    if (y + 0.25 * s < 2 && z < 1.3) pool(x, z, Math.min(1.3 + s * 0.7, STRIP + 0.3 - z), 0.2);
   };
 
   const candle = (x: number, y: number, z: number, h: number) => {
     piece(props, cyl, local(x, y + h / 2, z, 0, 0, 0, 0.05, h, 0.05), jitter(0xeee0c0, 0.04));
     piece(glowBag, cone, local(x, y + h + 0.05, z, 0, 0, 0, 0.03, 0.1, 0.03), 0xffd27a);
-    glow(x, y + h + 0.06, z, 0.55, 0.65, 1);
+    glow(x, y + h + 0.06, z, 0.45, 0.55, 1);
     light(x, y + h + 0.05, z, 0.3, 1.6);
   };
 
@@ -735,8 +737,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     piece(props, cyl12, local(x, y + 0.02, z, 0, 0, 0, 0.24, 0.04, 0.24), jitter(BRASS));
     const n = 2 + Math.floor(R(0, 2));
     for (let k = 0; k < n; k++) candle(x + R(-0.12, 0.12), y + 0.04, z + R(-0.12, 0.12), R(0.12, 0.38));
-    glow(x, y + 0.3, z, 1.5, 0.35, 0);
-    if (y < 1) pool(x, z, 1.3, 0.38);
+    glow(x, y + 0.3, z, 1.1, 0.12, 0);
+    if (y < 1 && z < 1.6) pool(x, z, Math.min(1.1, STRIP + 0.3 - z), 0.16);
   };
 
   const mushrooms = (x: number, z: number) => {
@@ -747,7 +749,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const mz = z + R(-0.3, 0.3);
       const h = 0.2 * s;
       piece(props, cyl, local(mx, h / 2, mz, R(-0.1, 0.1), 0, R(-0.1, 0.1), 0.045 * s, h, 0.045 * s), jitter(0xeadcc0, 0.04));
-      piece(props, hemi, local(mx, h - 0.02, mz, 0, 0, 0, 0.15 * s, 0.075 * s, 0.15 * s), jitter(0xc8402e, 0.06));
+      piece(props, hemi, local(mx, h - 0.02, mz, 0, 0, 0, 0.15 * s, 0.075 * s, 0.15 * s), jitter(0xa83a2a, 0.06));
       for (let d = 0; d < 3; d++) {
         const a = R(0, Math.PI * 2);
         const rr = R(0.02, 0.1) * s;
@@ -797,9 +799,20 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   const flower = (x: number, y: number, z: number, s: number, tiltX = 0, tiltZ = 0) => {
     flowers.push(at(local(x, y, z, tiltX, R(0, 6.3), tiltZ, s, s, s)), jitter(0xfffaf0, 0.03, 0.01));
   };
+  /** A tight bunch of white stars (the reference groups them, it does not sprinkle them). */
+  const flowerCluster = (x: number, y: number, z: number, n: number, tiltX: number) => {
+    const wall = tiltX > 0.5;
+    for (let k = 0; k < n; k++) {
+      const a = R(0, Math.PI * 2);
+      const r = R(0.04, 0.17);
+      const dx = Math.cos(a) * r;
+      const dd = Math.sin(a) * r;
+      flower(x + dx, y + (wall ? dd : R(0, 0.05)), z + (wall ? R(0, 0.05) : dd), R(0.1, 0.15), tiltX + R(-0.3, 0.3), R(-0.3, 0.3));
+    }
+  };
 
-  const bush = (x: number, z: number, size: number, flowersN = 5) => {
-    const n = Math.round(22 * size * size + 8);
+  const bush = (x: number, z: number, size: number, flowersN = 2) => {
+    const n = Math.round(15 * size * size + 6);
     for (let k = 0; k < n; k++) {
       const yaw = R(0, Math.PI * 2);
       const tilt = R(0.5, 1.35);
@@ -809,7 +822,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     for (let k = 0; k < flowersN; k++) {
       const yaw = R(0, Math.PI * 2);
       const r = R(0.15, 0.5) * size;
-      flower(x + Math.sin(yaw) * r, R(0.3, 0.6) * size, z + Math.cos(yaw) * r, R(0.08, 0.12), R(-0.4, 0.4), R(-0.4, 0.4));
+      flowerCluster(x + Math.sin(yaw) * r, R(0.35, 0.55) * size, z + Math.cos(yaw) * r, 3 + Math.floor(R(0, 3)), 0);
     }
   };
 
@@ -825,13 +838,13 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
 
   /** Broad ivy spilling over a shelf edge at height y (a dense clump), with strands trailing down and white stars. */
   const ivyCascade = (x: number, y: number, width: number, drop: number, flowerP = 0.3) => {
-    const n = Math.round(8 + width * 12);
+    const n = Math.round(6 + width * 10);
     for (let k = 0; k < n; k++) {
       const lx = x + R(-0.5, 0.5) * width;
       const lz = R(-0.05, 0.3);
       leaf(lx, y + R(-0.08, 0.12), lz, R(-1.4, -0.4), R(-0.6, 0.6), Math.PI + R(-1.0, 1.0), R(0.3, 0.46));
-      if (rng() < flowerP) flower(lx + R(-0.1, 0.1), y + R(-0.15, 0.08), lz + 0.12, R(0.1, 0.15), Math.PI / 2 - R(0.2, 0.6), R(-0.3, 0.3));
     }
+    if (rng() < flowerP * 2) flowerCluster(x + R(-0.3, 0.3) * width, y - R(0, 0.25), 0.32, 3 + Math.floor(R(0, 2)), Math.PI / 2 - 0.4);
     const strands = 1 + Math.floor(R(0, 2.6));
     for (let k = 0; k < strands; k++) {
       let vx = x + R(-0.45, 0.45) * width;
@@ -839,14 +852,13 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       for (let yy = y - 0.12; yy > end; yy -= R(0.13, 0.2)) {
         vx += R(-0.06, 0.06);
         leaf(vx + R(-0.08, 0.08), yy, R(0.08, 0.26), R(-0.9, -0.2), R(-0.5, 0.5), Math.PI + R(-0.9, 0.9), R(0.24, 0.34));
-        if (rng() < flowerP * 0.35) flower(vx, yy - 0.05, 0.3, R(0.09, 0.13), Math.PI / 2 - 0.4, 0);
       }
     }
   };
 
   /** A few books dropped on the floor at odd angles, one maybe propped open. */
   const spill = (x: number, z: number, s = 1) => {
-    const n = 2 + Math.floor(R(0, 3));
+    const n = 2 + Math.floor(R(0, 2));
     for (let k = 0; k < n; k++) {
       const t = R(0.09, 0.15) * s;
       const h = R(0.5, 0.75) * s;
@@ -875,8 +887,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     piece(props, ring, local(x, cy, z, Math.PI / 2, Math.PI / 2, 0.4, rr * 0.92, rr * 0.92, rr * 0.92), brass);
     piece(props, ring, local(x, cy, z, Math.PI / 2, 0.8, 0, rr * 1.12, rr * 1.12, rr * 1.12), jitter(BRASS_DARK));
     piece(glowBag, ball, local(x, cy, z, 0, 0, 0, 0.12 * s, 0.12 * s, 0.12 * s), 0xffd890);
-    glow(x, cy, z, 1.6 * s, 0.6, 0);
-    light(x, cy, z, 0.8, 3.2);
+    glow(x, cy, z, 1.3 * s, 0.32, 0);
+    light(x, cy, z, 0.5, 2.8);
   };
 
   // -- walls --
@@ -921,7 +933,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const d = R(0.5, 0.78);
       const lean = rng() < 0.06 && !inRun ? R(-0.2, 0.2) : 0;
       const color = jitter(inRun ? runColor : pick(BOOK_COLORS), inRun ? 0.03 : 0.08);
-      books.push(at(local(x + t / 2, y0, -0.05 - d / 2 - R(0, 0.06), 0, 0, lean, t, h, d)), color, inRun ? runColor % 4 : Math.floor(R(0, 4)));
+      shelfBooks.push(at(local(x + t / 2, y0, -0.05 - d / 2 - R(0, 0.06), 0, 0, lean, t, h, d)), color, inRun ? runColor % 4 : Math.floor(R(0, 4)));
       x += t + (lean ? 0.06 : R(0, 0.012));
       run--;
     }
@@ -969,9 +981,9 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       vx += R(-0.07, 0.07);
       const z = R(0.08, 0.28);
       leaf(vx + R(-0.1, 0.1), y, z, R(-0.9, -0.2), R(-0.5, 0.5), Math.PI + R(-0.9, 0.9), R(0.2, 0.3));
-      if (rng() < 0.14) flower(vx + R(-0.1, 0.1), y, z + 0.08, R(0.1, 0.13), Math.PI / 2 - 0.4, 0);
       y -= R(0.12, 0.2);
     }
+    if (rng() < 0.4) flowerCluster(vx, R(end, HEIGHT), 0.3, 3, Math.PI / 2 - 0.4);
   };
 
   /**
@@ -997,12 +1009,12 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       piece(props, box, local(x, HEIGHT / 2, 0.04, 0, 0, 0, 0.26, HEIGHT, 0.06), jitter(0x553722, 0.04));
       // Ivy climbing the post from the floor, thick at the bottom.
       if (rng() < 0.85) {
-        const top = R(1.2, 3.8);
-        for (let y = 0.1; y < top; y += R(0.1, 0.17)) {
+        const top = R(1.0, 3.2);
+        for (let y = 0.1; y < top; y += R(0.12, 0.19)) {
           const w = y < 1 ? 0.3 : 0.2;
           leaf(x + R(-w, w), y, R(0.08, 0.32), R(-0.6, 0.2), R(-0.5, 0.5), R(-1.2, 1.2), R(0.28, 0.42));
-          if (rng() < 0.22) flower(x + R(-0.22, 0.22), y, R(0.28, 0.38), R(0.11, 0.15), Math.PI / 2 - 0.5, 0);
         }
+        if (rng() < 0.6) flowerCluster(x + R(-0.15, 0.15), R(0.3, top), 0.36, 3 + Math.floor(R(0, 2)), Math.PI / 2 - 0.4);
       }
       // Hanging lanterns on brackets in front of every inner post, at alternating heights.
       if (i > 0 && i < nb) {
@@ -1037,74 +1049,76 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       leaf(x, HEIGHT + 0.46, R(-0.2, 0.35), R(-1.6, -0.6), R(-0.4, 0.4), R(-2, 2), R(0.22, 0.34));
 
     // Floor strip props, densely packed like the reference: a back row against the shelves (book stacks with
-    // lanterns at regular intervals, deep-green bushes full of white stars, potted plants, cushions), a middle row
-    // (cushion piles, open books, spilled books, candles), and a front row at the field edge (ivy, flowers, candles,
-    // mushrooms) that is all a phone sees of the walls. The corners by the defenders get extra props.
+    // lanterns at regular intervals, deep-green bushes with clusters of white stars, potted plants, cushions), a
+    // middle row (cushion piles, open books, spilled books, candles), and a front row of ivy, flower clusters and
+    // the odd candle that stays just off the play field (|x| > halfW + 0.3) and is all a phone sees of the walls.
+    // The corners by the defenders get extra props and lanterns.
     const P = 1.35;
-    const ivyPatch = (cx: number, cz: number, n: number, spread: number, flowerP = 0.4) => {
-      for (let k = 0; k < n; k++) {
-        const lx = cx + R(-spread, spread);
-        const lz = cz + R(-spread, spread) * 0.6;
-        leaf(lx, R(0.01, 0.2), lz, -Math.PI / 2 + R(0.2, 1.0), R(0, 6.3), 0, R(0.32, 0.5));
-        if (rng() < flowerP) flower(lx + R(-0.1, 0.1), R(0.14, 0.28), lz + R(-0.1, 0.1), R(0.13, 0.19), R(-0.3, 0.3), R(-0.3, 0.3));
-      }
+    /** Keeps a prop of radius r inside the strip, off the play field. */
+    const inStrip = (z: number, r: number) => Math.min(z, strip - 0.3 - r);
+    const ivyPatch = (cx: number, cz: number, n: number, spread: number, clusterP = 0.3) => {
+      for (let k = 0; k < n; k++)
+        leaf(cx + R(-spread, spread), R(0.01, 0.2), cz + R(-spread, spread) * 0.6, -Math.PI / 2 + R(0.2, 1.0), R(0, 6.3), 0, R(0.32, 0.5));
+      if (rng() < clusterP) flowerCluster(cx + R(-0.3, 0.3) * spread, R(0.12, 0.22), cz, 3 + Math.floor(R(0, 3)), 0);
     };
     let x = R(0.2, 0.6);
     let nextLantern = R(0.5, 1.5);
     while (x < len - 0.3) {
-      const near = strip > 1.8 && toWorld(x, 0, 0).z > opts.lineZ - 7 && toWorld(x, 0, 0).z < zNear - 1.5;
-      const zb = R(0.4, 0.7);
+      const wz = toWorld(x, 0, 0).z;
+      const near = strip > 1.8 && wz > opts.lineZ - 8 && wz < zNear - 1;
+      const zb = R(0.4, 0.65);
       if (x >= nextLantern) {
-        const top = rng() < 0.75 ? bookStack(x, zb, 0, 7, P) : 0;
+        const top = rng() < 0.75 ? bookStack(x, zb, 0, 5, P) : 0;
         lantern(x + R(-0.1, 0.1), top, zb, top ? R(1.3, 1.5) : R(1.7, 2.0));
-        ivyPatch(x, zb + 0.35, 5, 0.45);
-        nextLantern = x + R(2.3, 2.9);
+        ivyPatch(x, zb + 0.35, 4, 0.45);
+        nextLantern = x + (near ? R(1.5, 1.9) : R(2.4, 3.0));
       } else {
         const back = rng();
-        if (back < 0.3) bush(x, zb + 0.15, R(1.2, 1.7), 8);
-        else if (back < 0.48) {
-          const top = bookStack(x, zb, 0, 6, P);
-          if (rng() < 0.5) candles(x, zb, top);
+        if (back < 0.38) bush(x, zb + 0.1, R(1.2, 1.6), 1);
+        else if (back < 0.54) {
+          const top = bookStack(x, zb, 0, 5, P);
+          if (rng() < 0.45) candles(x, zb, top);
           else if (rng() < 0.5) openBook(x, zb, top, 0.9);
-        } else if (back < 0.62) pottedPlant(x, zb, 0, R(1.2, 1.5));
-        else if (back < 0.8) cushionPile(x, zb + 0.15);
+        } else if (back < 0.64) pottedPlant(x, zb, 0, R(1.2, 1.5));
+        else if (back < 0.84) cushionPile(x, zb + 0.15);
         else if (back < 0.9) mushrooms(x, zb + 0.2);
-        else bush(x, zb + 0.15, R(0.9, 1.2), 5);
+        else bush(x, zb + 0.1, R(0.9, 1.2), 1);
       }
-      ivyPatch(x, R(0.1, 0.5), 3 + Math.floor(R(0, 4)), 0.55);
+      ivyPatch(x, R(0.1, 0.5), 2 + Math.floor(R(0, 3)), 0.55, 0.15);
 
-      if (strip > 1.8 && (near || rng() < 0.7)) {
+      if (strip > 1.8 && (near || rng() < 0.65)) {
         const xm = x + R(-0.35, 0.35);
-        const zm = R(1.25, 1.75);
+        const zm = R(1.1, 1.35);
         const mid = rng();
-        if (mid < 0.24) cushionPile(xm, zm);
-        else if (mid < 0.42) openBook(xm, zm, 0, R(1.05, 1.25));
-        else if (mid < 0.62) spill(xm, zm, P * 0.85);
+        if (mid < 0.24) cushionPile(xm, inStrip(zm, 0.7));
+        else if (mid < 0.42) openBook(xm, inStrip(zm, 0.45), 0, R(1.0, 1.15));
+        else if (mid < 0.62) spill(xm, inStrip(zm, 0.65), P * 0.8);
         else if (mid < 0.78) candles(xm, zm);
-        else if (mid < 0.9) bush(xm, zm, R(0.8, 1.1), 6);
-        else bookStack(xm, zm, 0, 4, P);
+        else if (mid < 0.9) bush(xm, inStrip(zm, 0.5), R(0.8, 1.0), 1);
+        else bookStack(xm, inStrip(zm, 0.5), 0, 4, P);
       }
-      // Front row at the field edge.
+      // Front row along the field edge: low ivy, star clusters, a candle tray now and then.
       {
-        const xf = x + R(-0.4, 0.4);
-        const zf = R(1.95, strip + 0.15);
+        const zf = R(1.75, strip - 0.45);
         const f = rng();
-        if (f < 0.25) candles(xf, zf);
-        else if (f < 0.4) mushrooms(xf, zf);
-        else if (f < 0.52 && strip > 1.8) openBook(xf, zf, 0, R(0.95, 1.15));
-        else if (f < 0.6 && strip > 1.8) spill(xf, zf, 1.1);
-        ivyPatch(x + R(-0.3, 0.3), zf + R(-0.2, 0.2), 4 + Math.floor(R(0, 4)), 0.5, 0.5);
+        if (f < 0.2) candles(x + R(-0.3, 0.3), zf);
+        else if (f < 0.27) mushrooms(x + R(-0.3, 0.3), Math.min(zf, strip - 0.6));
+        ivyPatch(x + R(-0.3, 0.3), Math.min(zf, strip - 0.55), 3 + Math.floor(R(0, 3)), 0.4, 0.45);
       }
       if (near) {
-        // A second layer of clutter in the corners by the defenders.
+        // A second layer of clutter in the corners by the defenders: cushions, stacks with lanterns, spilled books.
         const xn = x + R(-0.5, 0.5);
-        const zn = R(0.9, 2.2);
+        const zn = R(0.9, 1.4);
         const k = rng();
-        if (k < 0.35) cushionPile(xn, zn);
-        else if (k < 0.65) spill(xn, zn, 1.2);
-        else candles(xn, zn);
+        if (k < 0.3) cushionPile(xn, inStrip(zn, 0.7));
+        else if (k < 0.55) spill(xn, inStrip(zn, 0.7), 1.15);
+        else if (k < 0.8) {
+          const top = bookStack(xn, inStrip(zn, 0.5), 0, 5, P);
+          if (rng() < 0.5) lantern(xn, top, inStrip(zn, 0.5), 1.15);
+          else candles(xn, inStrip(zn, 0.5), top);
+        } else candles(xn, zn);
       }
-      x += near ? R(0.75, 1.0) : R(0.8, 1.15);
+      x += near ? R(0.75, 1.0) : R(0.85, 1.2);
     }
   };
 
@@ -1202,7 +1216,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
           b += L.i * f * f;
         }
       }
-    return Math.min(b, 1.2);
+    return Math.min(b, 0.95);
   };
   const bakeGeometry = (g: THREE.BufferGeometry, scale = 1) => {
     const p = g.attributes.position as THREE.BufferAttribute;
@@ -1245,12 +1259,13 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     mesh.computeBoundingSphere();
     group.add(mesh);
   };
-  console.error("LIBCOUNT", books.count, openBooks.count, cushions.count, leaves.count, flowers.count, propsGeo.attributes.position.count / 3, glowC.length / 3, poolD.length / 4);
   const atlas = bookAtlas();
-  instanced(books, bookGeometry(), libMaterial('books', { map: atlas, trim: true, atlas: true }), true);
+  const bookMat = libMaterial('books', { map: atlas, trim: true, atlas: true });
+  instanced(books, bookGeometry(), bookMat, true);
+  instanced(shelfBooks, bookGeometry(true), bookMat, true);
   instanced(openBooks, openBookGeometry(), libMaterial('openbooks', { map: atlas, trim: true, atlas: true }), true);
   instanced(cushions, cushionGeometry(), libMaterial('cushions', { map: cushionTexture(), trim: true }));
-  instanced(leaves, leafGeometry(), libMaterial('leaves', { sway: true, side: THREE.DoubleSide, selfLit: 0.22 }));
+  instanced(leaves, leafGeometry(), libMaterial('leaves', { sway: true, side: THREE.DoubleSide, selfLit: 0.12 }));
   instanced(flowers, flowerGeometry(), libMaterial('flowers', { sway: true, side: THREE.DoubleSide, selfLit: 0.3 }));
 
   group.add(glowMesh(glowC, glowD));

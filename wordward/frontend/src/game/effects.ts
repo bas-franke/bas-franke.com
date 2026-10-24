@@ -1,21 +1,29 @@
-// Short-lived magical effects for the dusk library: a green laser with a white-hot core, golden letter glyphs and
-// sparks flying off the hit point, teal ink splashes when a creature is defeated, a golden rune ring when a bubble
-// shield pops, and dust with a red flash when something reaches the defenders.
+// Short-lived magical effects for the dusk library: a slim green laser with a small white-hot impact, crisp golden
+// letter glyphs and sparks flying off the hit point, dark teal ink droplets (some landing as splats on the floor)
+// when a creature is defeated, a golden rune ring when a bubble shield pops, and dust with a red flash when something
+// reaches the defenders.
 //
-// Cost: every sprite-like particle (glows, sparkles, glyphs, droplets, dust) is drawn by one of two instanced
-// billboard batches over a single canvas atlas (one additive draw call, one alpha-blended draw call, whatever the
-// number of particles). Only the laser tubes (3 calls per live beam) and the ink splats on the floor (1 call each)
-// are separate meshes. Particle records and meshes are pooled; `update` allocates nothing. y is up, the floor is y = 0.
+// Cost: every sprite-like particle (glows, sparkles, glyphs, droplets, floor splats, dust) is drawn by one of two
+// instanced batches over a single canvas atlas, whatever the number of particles:
+//  - `glow`: premultiplied blending, no depth test, drawn last. Each particle is either additive light (glows,
+//    sparks, rings) or "solid" (glyph letters: an opaque crisp letter body inside an additive warm halo), so letters
+//    stay readable on bright floor without a third batch.
+//  - `soft`: alpha-blended, depth-tested: ink droplets, puffs, and floor-aligned quads (splats) for ink on the floor.
+// Only the laser tubes are separate meshes (3 calls per live beam). A defeat therefore adds at most 5 draw calls
+// (2 batches + 3 beam tubes), and empty batches draw nothing. Particle records and meshes are pooled; `update`
+// allocates nothing. y is up, the floor is y = 0.
 
 import * as THREE from 'three';
 
-type Kind = 'flash' | 'glyph' | 'spark' | 'twinkle' | 'drop' | 'ring' | 'puff';
+type Kind = 'flash' | 'glyph' | 'spark' | 'twinkle' | 'drop' | 'splat' | 'ring' | 'puff';
 
 interface Particle {
   kind: Kind;
   /** Atlas cell. */
   cell: number;
   additive: boolean;
+  /** In the glow batch: the texture's opaque part (alpha > ~0.5) covers what is behind (letter bodies). */
+  solid: boolean;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   color: THREE.Color;
@@ -27,20 +35,19 @@ interface Particle {
   drag: number;
   grav: number;
   alpha: number;
-  /** Stretch along the on-screen velocity (0 = round): sparks become streaks, droplets get a motion tail. */
+  /** Stretch along the on-screen velocity (0 = round): sparks become streaks, droplets get a motion tail. Negative:
+   * the quad lies flat on the floor (splats). */
   stretch: number;
 }
 
 interface MeshFx {
-  kind: 'beam' | 'splat';
+  kind: 'beam';
   obj: THREE.Object3D;
-  /** Beam fade uniform (shared by its three tubes) or the splat's material. */
-  fade?: { value: number };
-  mat?: THREE.MeshBasicMaterial;
+  /** Beam fade uniform (shared by its three tubes). */
+  fade: { value: number };
   color: number;
   age: number;
   life: number;
-  size: number;
 }
 
 /** The laser colour (a bright spring green). */
@@ -49,14 +56,15 @@ export const LASER = 0x9cff4c;
 export const BEAM = 0xff6fb5;
 /** The old shield-hit beam colour, also drawn as the laser (the reference has one green laser). */
 const SHIELD_BEAM = 0x5fd0ff;
-const GOLD = 0xffbf55;
-const INK_TEAL = 0x0f4a55;
+const GOLD = 0xffb43c;
+const GOLD_PALE = 0xffe2a0;
+const INK_TEAL = 0x0d3f48;
 const DUST = 0xcdb08a;
 const LETTERS = 'abcdefghijklmnopqrstuvwxyzăâîșț';
 
 const UP = new THREE.Vector3(0, 1, 0);
-const tubeGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true).translate(0, 0.5, 0);
-const splatGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+// Tapered: full radius at the muzzle (y = 0), slimmer at the target (y = 1).
+const tubeGeo = new THREE.CylinderGeometry(0.55, 1, 1, 10, 1, true).translate(0, 0.5, 0);
 
 // ---- atlas --------------------------------------------------------------------------------------------------------
 
@@ -69,6 +77,7 @@ const C_RUNE = 3;
 const C_DROP = 4;
 const C_PUFF = 5;
 const C_STREAK = 6;
+const C_SPLAT = 7;
 const C_LETTER = 8;
 
 /** Tiny deterministic random, so textures look the same every run. */
@@ -77,7 +86,6 @@ function seeded(seed: number) {
 }
 
 let atlas: THREE.CanvasTexture | null = null;
-let splatTex: THREE.CanvasTexture | null = null;
 
 /** Draws `draw` into atlas cell `i`, in a local frame where the cell is `CELL` px with its centre at the origin. */
 function inCell(g: CanvasRenderingContext2D, i: number, draw: (g: CanvasRenderingContext2D, h: number) => void) {
@@ -101,21 +109,21 @@ function buildAtlas() {
   const c = document.createElement('canvas');
   c.width = c.height = CELL * CELLS;
   const g = c.getContext('2d')!;
-  // Soft halo with a brighter core.
+  // Soft glow: a tight hot core in a faint halo (small and hot rather than a big blob).
   inCell(g, C_GLOW, (g, h) => {
     const stops: [number, string][] = [];
-    for (let i = 0; i <= 10; i++) {
-      const r = i / 10;
-      const a = Math.exp(-r * r * 5) * (1 - r) + 0.4 * Math.exp(-r * r * 50);
+    for (let i = 0; i <= 12; i++) {
+      const r = i / 12;
+      const a = 0.55 * Math.exp(-r * r * 7) * (1 - r) + 0.6 * Math.exp(-r * r * 60);
       stops.push([r, `rgba(255,255,255,${Math.min(1, a).toFixed(3)})`]);
     }
     radial(g, h, stops);
   });
-  // Four-pointed sparkle: crossed streaks over a small core.
+  // Four-pointed sparkle: thin crossed streaks over a small core.
   inCell(g, C_TWINKLE, (g, h) => {
-    radial(g, h * 0.5, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(255,255,255,0.45)'], [1, 'rgba(255,255,255,0)']]);
+    radial(g, h * 0.35, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(255,255,255,0.4)'], [1, 'rgba(255,255,255,0)']]);
     g.globalCompositeOperation = 'lighter';
-    for (const [len, w] of [[h, 5], [h * 0.5, 3]]) {
+    for (const [len, w] of [[h, 3.5], [h * 0.45, 2]]) {
       for (let k = 0; k < 2; k++) {
         g.save();
         g.rotate(k * Math.PI / 2 + (len < h ? Math.PI / 4 : 0));
@@ -173,19 +181,35 @@ function buildAtlas() {
       g.restore();
     }
   });
-  // A glossy teal ink droplet with a specular dot.
+  // A glossy dark teal ink droplet, drawn as a teardrop pointing along +x (the batch turns it along its velocity):
+  // a round head with a thin tail behind, a lighter rim and a crisp specular dot.
   inCell(g, C_DROP, (g, h) => {
-    const body = g.createRadialGradient(-h * 0.25, -h * 0.3, 1, 0, 0, h * 0.9);
-    body.addColorStop(0, '#4fc6c4');
-    body.addColorStop(0.4, '#17636e');
-    body.addColorStop(1, '#06252e');
+    const r = h * 0.4;
+    g.translate(h * 0.5, 0);
+    g.fillStyle = '#0a3840';
+    g.beginPath();
+    g.moveTo(-h * 1.45, 0);
+    g.quadraticCurveTo(-r * 1.2, -r * 0.95, 0, -r);
+    g.lineTo(0, r);
+    g.quadraticCurveTo(-r * 1.2, r * 0.95, -h * 1.45, 0);
+    g.fill();
+    const body = g.createRadialGradient(-r * 0.3, -r * 0.35, 1, 0, 0, r);
+    body.addColorStop(0, '#2f8c90');
+    body.addColorStop(0.45, '#0f4d57');
+    body.addColorStop(0.85, '#06262e');
+    body.addColorStop(1, '#0b3a42');
     g.fillStyle = body;
     g.beginPath();
-    g.arc(0, 0, h * 0.86, 0, Math.PI * 2);
+    g.arc(0, 0, r, 0, Math.PI * 2);
     g.fill();
-    g.fillStyle = 'rgba(255,255,255,0.9)';
+    g.strokeStyle = 'rgba(80,190,190,0.55)';
+    g.lineWidth = r * 0.08;
     g.beginPath();
-    g.ellipse(-h * 0.32, -h * 0.38, h * 0.2, h * 0.13, -0.6, 0, Math.PI * 2);
+    g.arc(0, 0, r * 0.9, Math.PI * 0.15, Math.PI * 0.85);
+    g.stroke();
+    g.fillStyle = 'rgba(255,255,255,0.95)';
+    g.beginPath();
+    g.ellipse(-r * 0.36, -r * 0.42, r * 0.22, r * 0.13, -0.6, 0, Math.PI * 2);
     g.fill();
   });
   // A soft cloudy puff.
@@ -201,67 +225,76 @@ function buildAtlas() {
   // A thin horizontal streak with a hot middle (stretched along the velocity for sparks).
   inCell(g, C_STREAK, (g, h) => {
     g.save();
-    g.scale(1, 0.16);
+    g.scale(1, 0.12);
     radial(g, h, [[0, 'rgba(255,255,255,1)'], [0.35, 'rgba(255,255,255,0.55)'], [1, 'rgba(255,255,255,0)']]);
     g.restore();
   });
-  // Golden glowing letters on transparent black (drawn additively).
+  // Ink splat (white, tinted per particle): a lumpy blob with satellite droplets and a wet highlight.
+  inCell(g, C_SPLAT, (g, h) => {
+    const rnd = seeded(31);
+    g.fillStyle = '#fff';
+    g.beginPath();
+    const n = 18;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const r = h * (0.34 + rnd() * 0.12 + (i % 3 === 0 ? 0.12 : 0));
+      if (i === 0) g.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else g.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    g.fill();
+    for (let i = 0; i < 16; i++) {
+      const a = rnd() * Math.PI * 2;
+      const d = h * (0.5 + rnd() * 0.44);
+      g.beginPath();
+      g.arc(Math.cos(a) * d, Math.sin(a) * d, 1.5 + rnd() * 5 * (1.3 - d / h), 0, Math.PI * 2);
+      g.fill();
+    }
+    g.globalCompositeOperation = 'source-atop';
+    const wet = g.createRadialGradient(-h * 0.15, -h * 0.2, 0, 0, 0, h * 0.5);
+    wet.addColorStop(0, 'rgba(190,255,250,1)');
+    wet.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = wet;
+    g.fillRect(-h, -h, h * 2, h * 2);
+  });
+  // Golden letters: a crisp serif letter (opaque: gold gradient over a thin amber outline) inside a warm translucent
+  // halo. The glow batch draws alpha > ~0.5 as solid and the halo as added light.
   [...LETTERS].forEach((ch, i) =>
     inCell(g, C_LETTER + i, (g, h) => {
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.font = `bold ${Math.round(h * 1.15)}px Georgia, 'Times New Roman', serif`;
-      g.shadowColor = '#ff7a00';
-      g.shadowBlur = 16;
-      g.fillStyle = '#ff9420';
-      g.fillText(ch, 0, h * 0.02);
-      g.fillText(ch, 0, h * 0.02);
-      g.shadowColor = '#ffb030';
-      g.shadowBlur = 3;
-      g.fillStyle = '#ffd25e';
-      g.fillText(ch, 0, h * 0.02);
+      g.font = `bold ${Math.round(h * 1.05)}px Georgia, 'Times New Roman', serif`;
+      const y = h * 0.04;
+      // Halo: two blurred passes kept translucent (alpha well under the solid threshold).
+      g.shadowColor = 'rgba(255,140,25,0.45)';
+      g.shadowBlur = 13;
+      g.fillStyle = 'rgba(255,160,40,0.32)';
+      g.fillText(ch, 0, y);
+      g.shadowBlur = 7;
+      g.fillText(ch, 0, y);
+      g.shadowColor = 'transparent';
+      g.shadowBlur = 0;
+      g.lineJoin = 'round';
+      g.lineWidth = 3;
+      g.strokeStyle = '#b8620e';
+      g.strokeText(ch, 0, y);
+      const fill = g.createLinearGradient(0, -h * 0.5, 0, h * 0.5);
+      fill.addColorStop(0, '#fff4b4');
+      fill.addColorStop(0.5, '#ffc63e');
+      fill.addColorStop(1, '#ff931c');
+      g.fillStyle = fill;
+      g.fillText(ch, 0, y);
     }),
   );
   atlas = new THREE.CanvasTexture(c);
   atlas.colorSpace = THREE.SRGBColorSpace;
   atlas.anisotropy = 2;
-
-  // Ink splat (white, tinted by its material): a lumpy blob with satellite droplets and a wet highlight.
-  const s = document.createElement('canvas');
-  s.width = s.height = 128;
-  const q = s.getContext('2d')!;
-  const rnd = seeded(31);
-  const h = 64;
-  q.fillStyle = '#fff';
-  q.beginPath();
-  const n = 18;
-  for (let i = 0; i <= n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    const r = h * (0.34 + rnd() * 0.12 + (i % 3 === 0 ? 0.12 : 0));
-    if (i === 0) q.moveTo(h + Math.cos(a) * r, h + Math.sin(a) * r);
-    else q.lineTo(h + Math.cos(a) * r, h + Math.sin(a) * r);
-  }
-  q.fill();
-  for (let i = 0; i < 16; i++) {
-    const a = rnd() * Math.PI * 2;
-    const d = h * (0.5 + rnd() * 0.44);
-    q.beginPath();
-    q.arc(h + Math.cos(a) * d, h + Math.sin(a) * d, 1.5 + rnd() * 5 * (1.3 - d / h), 0, Math.PI * 2);
-    q.fill();
-  }
-  q.globalCompositeOperation = 'source-atop';
-  const wet = q.createRadialGradient(h * 0.85, h * 0.8, 0, h, h, h * 0.5);
-  wet.addColorStop(0, 'rgba(150,255,245,0.5)');
-  wet.addColorStop(1, 'rgba(150,255,245,0)');
-  q.fillStyle = wet;
-  q.fillRect(0, 0, 128, 128);
-  splatTex = new THREE.CanvasTexture(s);
-  splatTex.colorSpace = THREE.SRGBColorSpace;
 }
 
 // ---- billboard batch ----------------------------------------------------------------------------------------------
 
-/** Instanced camera-facing quads over the atlas: one draw call for any number of particles. */
+const SOLID_FLAG = 64; // added to the atlas cell for solid particles (the atlas has 64 cells)
+
+/** Instanced camera-facing (or floor-flat) quads over the atlas: one draw call for any number of particles. */
 class Batch {
   readonly mesh: THREE.Mesh;
   readonly pos: Float32Array;
@@ -271,7 +304,7 @@ class Batch {
   private readonly attrs: THREE.InstancedBufferAttribute[];
   count = 0;
 
-  constructor(readonly capacity: number, additive: boolean) {
+  constructor(readonly capacity: number, glow: boolean) {
     const geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
     geo.setIndex([0, 1, 2, 0, 2, 3]);
@@ -295,34 +328,62 @@ class Batch {
       uniforms: { map: { value: atlas } },
       vertexShader: /* glsl */ `
         attribute vec3 iPos;
-        attribute vec4 iSrc; // size, rotation, atlas cell, stretch
+        attribute vec4 iSrc; // size, rotation, atlas cell (+64 = solid), stretch (< 0: flat on the floor)
         attribute vec4 iCol;
         attribute vec3 iVel;
         varying vec2 vUv;
         varying vec4 vCol;
+        varying float vSolid;
         void main() {
-          vec4 mv = modelViewMatrix * vec4( iPos, 1.0 );
           float rot = iSrc.y;
           vec2 p = position.xy * iSrc.x;
-          if ( iSrc.w > 0.0 ) {
-            // Align with the on-screen velocity and stretch along it.
-            vec2 v = ( modelViewMatrix * vec4( iVel, 0.0 ) ).xy;
-            float l = length( v );
-            if ( l > 1e-3 ) rot = atan( v.y, v.x );
-            p.x *= 1.0 + iSrc.w * l;
+          vec4 mv;
+          if ( iSrc.w < 0.0 ) {
+            // Lies on the floor (y up), turned by rot.
+            float c = cos( rot ), s = sin( rot );
+            mv = modelViewMatrix * vec4( iPos + vec3( c * p.x - s * p.y, 0.0, s * p.x + c * p.y ), 1.0 );
+          } else {
+            mv = modelViewMatrix * vec4( iPos, 1.0 );
+            if ( iSrc.w > 0.0 ) {
+              // Align with the on-screen velocity and stretch along it.
+              vec2 v = ( modelViewMatrix * vec4( iVel, 0.0 ) ).xy;
+              float l = length( v );
+              if ( l > 1e-3 ) rot = atan( v.y, v.x );
+              p.x *= 1.0 + iSrc.w * l;
+            }
+            float c = cos( rot ), s = sin( rot );
+            mv.xy += vec2( c * p.x - s * p.y, s * p.x + c * p.y );
           }
-          float c = cos( rot ), s = sin( rot );
-          mv.xy += vec2( c * p.x - s * p.y, s * p.x + c * p.y );
           gl_Position = projectionMatrix * mv;
-          float col = mod( iSrc.z, ${CELLS}.0 );
-          float row = floor( iSrc.z / ${CELLS}.0 + 0.001 );
+          float cell = iSrc.z;
+          vSolid = step( ${SOLID_FLAG}.0 - 0.5, cell );
+          cell -= vSolid * ${SOLID_FLAG}.0;
+          float col = mod( cell, ${CELLS}.0 );
+          float row = floor( cell / ${CELLS}.0 + 0.001 );
           vUv = vec2( ( col + position.x + 0.5 ) / ${CELLS}.0, 1.0 - ( row + 0.5 - position.y ) / ${CELLS}.0 );
           vCol = iCol;
         }`,
-      fragmentShader: /* glsl */ `
+      fragmentShader: glow
+        ? /* glsl */ `
         uniform sampler2D map;
         varying vec2 vUv;
         varying vec4 vCol;
+        varying float vSolid;
+        void main() {
+          vec4 t = texture2D( map, vUv );
+          float a = t.a * vCol.a;
+          // Premultiplied: light added in proportion to alpha; solid particles also cover what is behind.
+          float cover = vSolid * smoothstep( 0.45, 0.8, t.a ) * vCol.a;
+          if ( a < 0.004 ) discard;
+          vec3 c = vCol.rgb * t.rgb;
+          gl_FragColor = vec4( c * a, cover );
+          #include <colorspace_fragment>
+        }`
+        : /* glsl */ `
+        uniform sampler2D map;
+        varying vec2 vUv;
+        varying vec4 vCol;
+        varying float vSolid;
         void main() {
           vec4 t = texture2D( map, vUv );
           gl_FragColor = vec4( vCol.rgb * t.rgb, t.a * vCol.a );
@@ -332,12 +393,18 @@ class Batch {
         }`,
       transparent: true,
       depthWrite: false,
-      depthTest: !additive,
-      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      depthTest: !glow,
+      // The light batch skips the warm ACES grade: added light should stay coloured instead of rolling off to white.
+      toneMapped: !glow,
+      blending: glow ? THREE.CustomBlending : THREE.NormalBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
+      blendSrcAlpha: THREE.OneFactor,
+      blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
     });
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = additive ? 20 : 5;
+    this.mesh.renderOrder = glow ? 20 : 5;
     // Stays visible even when empty: three still binds the program (so it compiles with the first frame, not with
     // the first hit) but skips the zero-instance draw.
   }
@@ -350,7 +417,7 @@ class Batch {
     this.pos[i * 3 + 2] = p.pos.z;
     this.src[i * 4] = size;
     this.src[i * 4 + 1] = rot;
-    this.src[i * 4 + 2] = p.cell;
+    this.src[i * 4 + 2] = p.cell + (p.solid ? SOLID_FLAG : 0);
     this.src[i * 4 + 3] = p.stretch;
     this.vel[i * 3] = p.vel.x;
     this.vel[i * 3 + 1] = p.vel.y;
@@ -382,10 +449,12 @@ function tubeMaterial(color: number, intensity: number, power: number, fade: { v
     vertexShader: /* glsl */ `
       varying vec3 vN;
       varying vec3 vV;
+      varying float vAlong;
       void main() {
         vec4 mv = modelViewMatrix * vec4( position, 1.0 );
         vN = normalize( normalMatrix * normal );
         vV = -mv.xyz;
+        vAlong = position.y;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */ `
@@ -394,15 +463,18 @@ function tubeMaterial(color: number, intensity: number, power: number, fade: { v
       uniform float fade;
       varying vec3 vN;
       varying vec3 vV;
+      varying float vAlong;
       void main() {
         float f = pow( abs( dot( normalize( vN ), normalize( vV ) ) ), power );
-        gl_FragColor = vec4( color * ( f * fade ), 1.0 );
-        #include <tonemapping_fragment>
+        // A touch dimmer right out of the muzzle, full strength along the way to the target.
+        float k = 0.75 + 0.25 * smoothstep( 0.0, 0.3, vAlong );
+        gl_FragColor = vec4( color * ( f * fade * k ), 1.0 );
         #include <colorspace_fragment>
       }`,
     blending: THREE.AdditiveBlending,
     transparent: true,
     depthWrite: false,
+    toneMapped: false,
   });
 }
 
@@ -421,6 +493,7 @@ export class Effects {
   private meshes: MeshFx[] = [];
   private freeMeshes = new Map<string, MeshFx[]>();
   private readonly tmp = new THREE.Vector3();
+  private readonly tmp2 = new THREE.Vector3();
 
   constructor(private readonly scene: THREE.Scene) {
     if (!atlas) buildAtlas();
@@ -436,11 +509,12 @@ export class Effects {
   private particle(kind: Kind, cell: number, additive: boolean, at: THREE.Vector3, color: number): Particle {
     let p = this.freeParticles.pop();
     if (!p) {
-      p = { kind, cell, additive, pos: new THREE.Vector3(), vel: new THREE.Vector3(), color: new THREE.Color(), age: 0, life: 1, size: 1, rot: 0, spin: 0, drag: 0, grav: 0, alpha: 1, stretch: 0 };
+      p = { kind, cell, additive, solid: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), color: new THREE.Color(), age: 0, life: 1, size: 1, rot: 0, spin: 0, drag: 0, grav: 0, alpha: 1, stretch: 0 };
     }
     p.kind = kind;
     p.cell = cell;
     p.additive = additive;
+    p.solid = false;
     p.pos.copy(at);
     p.vel.set(0, 0, 0);
     p.color.setHex(color);
@@ -452,10 +526,10 @@ export class Effects {
     return p;
   }
 
-  private mesh(key: string, kind: MeshFx['kind'], color: number, make: () => Pick<MeshFx, 'obj' | 'fade' | 'mat'>): MeshFx {
+  private mesh(key: string, color: number, make: () => Pick<MeshFx, 'obj' | 'fade'>): MeshFx {
     let m = this.freeMeshes.get(key)?.pop();
     if (!m) {
-      m = { kind, color, age: 0, life: 1, size: 1, ...make() };
+      m = { kind: 'beam', color, age: 0, life: 1, ...make() };
       this.root.add(m.obj);
     }
     m.age = 0;
@@ -466,18 +540,19 @@ export class Effects {
 
   // ---- public effects ----
 
-  /** The laser from `from` to `to`: a white-hot core in a green glow, with a muzzle flash and a bright impact flash. */
+  /** The laser from `from` to `to`: a slim beam with a white core in a green glow, a muzzle flash and a small, hot
+   * impact (white core, green-gold halo, a few gold rays). */
   beam(from: THREE.Vector3, to: THREE.Vector3, color = LASER) {
     if (color === BEAM || color === SHIELD_BEAM) color = LASER;
-    const m = this.mesh(`beam${color}`, 'beam', color, () => {
+    const m = this.mesh(`beam${color}`, color, () => {
       const fade = { value: 1 };
       const g = new THREE.Group();
-      const outer = new THREE.Mesh(tubeGeo, tubeMaterial(color, 0.55, 2.6, fade));
-      outer.scale.set(0.32, 1, 0.32);
-      const mid = new THREE.Mesh(tubeGeo, tubeMaterial(color, 1.5, 0.9, fade));
-      mid.scale.set(0.09, 1, 0.09);
-      const core = new THREE.Mesh(tubeGeo, tubeMaterial(0xf8ffe0, 2.6, 0.35, fade));
-      core.scale.set(0.035, 1, 0.035);
+      const outer = new THREE.Mesh(tubeGeo, tubeMaterial(color, 0.4, 2.4, fade));
+      outer.scale.set(0.22, 1, 0.22);
+      const mid = new THREE.Mesh(tubeGeo, tubeMaterial(color, 1.1, 0.9, fade));
+      mid.scale.set(0.065, 1, 0.065);
+      const core = new THREE.Mesh(tubeGeo, tubeMaterial(0xf4ffd8, 1.6, 0.35, fade));
+      core.scale.set(0.024, 1, 0.024);
       for (const t of [outer, mid, core]) {
         t.renderOrder = 19;
         t.frustumCulled = false;
@@ -491,16 +566,20 @@ export class Effects {
     m.obj.quaternion.setFromUnitVectors(UP, dir.multiplyScalar(1 / Math.max(len, 1e-4)));
     m.obj.scale.set(1, len, 1);
     m.life = 0.17;
-    this.flash(from, 1.3, color, 0.16);
-    this.flash(to, 1.5, 0x9ac860, 0.2);
-    this.star(to, 1.8, 0xd8c890, 0.2);
+    this.flash(from, 0.8, color, 0.14, 0.7);
+    // Impact: a hot white pin-point, a modest green-gold halo, a small gold sparkle and short rays.
+    this.flash(to, 0.5, 0xfffbe8, 0.12, 1);
+    this.flash(to, 1.15, 0x9fd040, 0.18, 0.55);
+    this.star(to, 0.9, GOLD_PALE, 0.18);
+    for (let i = 0; i < 5; i++) this.spark(to, i % 2 ? GOLD : GOLD_PALE, 7, 0.16, 0.12, 0.22);
   }
 
   /** A soft additive glow that swells and fades in place. */
-  flash(at: THREE.Vector3, size: number, color: number, life = 0.25) {
+  flash(at: THREE.Vector3, size: number, color: number, life = 0.25, strength = 1) {
     const p = this.particle('flash', C_GLOW, true, at, color);
     p.size = size;
     p.life = life;
+    p.alpha = strength;
   }
 
   /** One four-pointed sparkle that grows, turns and fades in place. */
@@ -517,11 +596,11 @@ export class Effects {
    * just typed, or the word); random letters otherwise.
    */
   sparkles(at: THREE.Vector3, count = 5, speed = 5, size = 0.22, letters?: string) {
+    const src = letters || LETTERS;
     for (let i = 0; i < count; i++) {
-      const src = letters || LETTERS;
-      this.glyph(at, src[(Math.random() * src.length) | 0], speed, size * 6.5);
-      this.spark(at, GOLD, speed * 1.6, size * 1.4);
-      this.spark(at, 0xfff0b0, speed * 2, size * 1.1);
+      this.glyph(at, src[(Math.random() * src.length) | 0], speed * 0.9, size * 6.5);
+      this.spark(at, GOLD, speed * 1.6, size * 1.1);
+      this.spark(at, GOLD_PALE, speed * 2, size * 0.9);
     }
   }
 
@@ -530,17 +609,23 @@ export class Effects {
     let i = LETTERS.indexOf(ch.toLowerCase());
     if (i < 0) i = (Math.random() * 26) | 0;
     const p = this.particle('glyph', C_LETTER + i, true, at, 0xffffff);
+    p.solid = true;
     const a = Math.random() * Math.PI * 2;
     const h = speed * rand(0.6, 1.1);
-    p.vel.set(Math.cos(a) * h, speed * rand(0.4, 0.9), Math.sin(a) * h);
-    p.grav = 4;
-    p.drag = 1.8;
-    p.size = size * rand(0.8, 1.15);
-    p.life = rand(0.65, 0.95);
-    p.rot = rand(-0.4, 0.4);
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    // Start a little off the hit point so letters do not stack on the impact.
+    p.pos.x += ca * 0.25;
+    p.pos.z += sa * 0.25;
+    p.vel.set(ca * h, speed * rand(0.4, 0.9), sa * h);
+    p.grav = 3;
+    p.drag = 2.4;
+    p.size = size * rand(0.85, 1.15);
+    p.life = rand(0.7, 1);
+    p.rot = rand(-0.35, 0.35);
   }
 
-  private spark(at: THREE.Vector3, color: number, speed: number, size: number) {
+  private spark(at: THREE.Vector3, color: number, speed: number, size: number, lifeMin = 0.3, lifeMax = 0.55) {
     const p = this.particle('spark', C_STREAK, true, at, color);
     const a = Math.random() * Math.PI * 2;
     const h = speed * rand(0.4, 1);
@@ -548,8 +633,8 @@ export class Effects {
     p.grav = 12;
     p.drag = 1.5;
     p.size = size * rand(0.7, 1.3);
-    p.life = rand(0.3, 0.55);
-    p.stretch = 0.35;
+    p.life = rand(lifeMin, lifeMax);
+    p.stretch = 0.3;
   }
 
   /** A glowing ring that expands and fades, facing the camera. */
@@ -569,33 +654,26 @@ export class Effects {
   private drop(at: THREE.Vector3, speed: number, size: number) {
     const p = this.particle('drop', C_DROP, false, at, 0xffffff);
     const a = Math.random() * Math.PI * 2;
-    const h = speed * rand(0.3, 1);
-    p.vel.set(Math.cos(a) * h, speed * rand(0.4, 1.1), Math.sin(a) * h);
-    p.grav = 22;
-    p.size = size * rand(0.5, 1.2);
-    p.life = rand(0.8, 1.1);
-    p.stretch = 0.025;
+    const h = speed * rand(0.35, 1);
+    p.vel.set(Math.cos(a) * h, speed * rand(0.25, 0.9), Math.sin(a) * h);
+    p.grav = 18;
+    p.drag = 0.5;
+    // Mostly fine spray, a few fat drops.
+    const r = Math.random();
+    p.size = size * (0.3 + r * r * 0.9);
+    p.life = rand(0.9, 1.2);
+    p.stretch = 0.035;
   }
 
-  private splat(x: number, z: number, size: number) {
-    const m = this.mesh('splat', 'splat', INK_TEAL, () => {
-      const mat = new THREE.MeshBasicMaterial({
-        map: splatTex,
-        color: INK_TEAL,
-        transparent: true,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-      });
-      const obj = new THREE.Mesh(splatGeo, mat);
-      obj.renderOrder = 2;
-      return { obj, mat };
-    });
-    m.obj.position.set(x, 0.03, z);
-    m.obj.rotation.y = Math.random() * Math.PI * 2;
-    m.size = size;
-    m.life = 1.8;
+  /** An ink splat lying on the floor (a flat quad in the soft batch). */
+  private splat(x: number, z: number, size: number, life = 1.8) {
+    this.tmp2.set(x, 0.025, z);
+    const p = this.particle('splat', C_SPLAT, false, this.tmp2, INK_TEAL);
+    p.size = size;
+    p.life = life;
+    p.rot = Math.random() * Math.PI * 2;
+    p.stretch = -1;
+    p.alpha = 0.9;
   }
 
   private puff(at: THREE.Vector3, color: number, size: number, vx: number, vy: number, vz: number, life: number) {
@@ -609,28 +687,27 @@ export class Effects {
     p.spin = rand(-1, 1);
   }
 
-  /** A creature is defeated: it bursts into teal ink (droplets and a splat on the floor) with a soft golden sparkle. */
+  /** A creature is defeated: it bursts into dark teal ink droplets (some land as splats) with a soft gold sparkle. */
   poof(at: THREE.Vector3, size = 1.2, _color = 0xffffff) {
     const s = Math.max(0.6, size);
-    this.flash(at, s * 2.4, 0x3fa8a8, 0.28);
-    this.flash(at, s * 1.1, 0xfff0c0, 0.16);
-    this.splat(at.x, at.z, s * 2.4);
-    const drops = Math.round(10 + s * 3);
-    for (let i = 0; i < drops; i++) this.drop(at, 4 + s * 2.2, 0.36 * s);
-    for (let i = 0; i < 6; i++) {
-      this.tmp.set(at.x + rand(-1, 1) * s, at.y + rand(-0.4, 0.8) * s, at.z + rand(-1, 1) * s);
-      this.star(this.tmp, s * rand(0.8, 1.3), 0xffe2a0, rand(0.35, 0.6));
+    this.flash(at, s * 1.1, 0xffc870, 0.2, 0.45);
+    this.splat(at.x, at.z, s * 1.5, 1.6);
+    const drops = Math.round(14 + s * 5);
+    for (let i = 0; i < drops; i++) this.drop(at, 5 + s * 2.5, 0.5 * s);
+    for (let i = 0; i < 4; i++) {
+      this.tmp.set(at.x + rand(-0.9, 0.9) * s, at.y + rand(-0.3, 0.8) * s, at.z + rand(-0.6, 0.6) * s);
+      this.star(this.tmp, s * rand(0.4, 0.7), GOLD_PALE, rand(0.3, 0.55));
     }
-    for (let i = 0; i < 8; i++) this.spark(at, GOLD, 5 * s, 0.3 * s);
-    for (let i = 0; i < 3; i++) this.glyph(at, LETTERS[(Math.random() * 26) | 0], 3.5, 1.1);
+    for (let i = 0; i < 14; i++) this.spark(at, i % 3 ? GOLD : GOLD_PALE, 5.5 * s, 0.16 * s);
+    for (let i = 0; i < 3; i++) this.glyph(at, LETTERS[(Math.random() * 26) | 0], 4.5, 1.4);
   }
 
   /** A bubble shield pops: a spinning golden rune circle bursts outward with a ring of sparks. */
   pop(at: THREE.Vector3, size: number) {
     this.rune(at, size * 2.8, 0.55);
     this.ring(at, size * 2.1, GOLD, 0.3);
-    this.flash(at, size * 2.4, 0xffd98a, 0.25);
-    for (let i = 0; i < 14; i++) this.spark(at, i % 3 ? GOLD : 0xbff1ff, 6 + size, 0.32);
+    this.flash(at, size * 1.6, 0xffd98a, 0.22, 0.45);
+    for (let i = 0; i < 14; i++) this.spark(at, i % 3 ? GOLD : 0xbff1ff, 6 + size, 0.26);
   }
 
   /** Something reached the defenders: dust clouds rolling out sideways and a red flash. */
@@ -646,13 +723,12 @@ export class Effects {
   }
 
   /**
-   * Compiles the laser and ink-splat materials up front (the particle batches compile with the first frame anyway),
-   * so the first hit does not stutter. Uses parallel compile where the browser supports it. Call once after setup.
+   * Compiles the laser materials up front (the particle batches compile with the first frame anyway), so the first
+   * hit does not stutter. Uses parallel compile where the browser supports it. Call once after setup.
    */
   prewarm(renderer: THREE.WebGLRenderer, camera: THREE.Camera) {
     const o = new THREE.Vector3(0, -1000, 0);
     this.beam(o, new THREE.Vector3(0, -999, 0));
-    this.splat(0, 0, 1);
     void renderer.compileAsync(this.root, camera, this.scene).catch(() => {});
     this.clear();
   }
@@ -667,21 +743,15 @@ export class Effects {
         meshes[i] = meshes[meshes.length - 1];
         meshes.pop();
         m.obj.visible = false;
-        const key = m.kind === 'beam' ? `beam${m.color}` : 'splat';
+        const key = `beam${m.color}`;
         let pool = this.freeMeshes.get(key);
         if (!pool) this.freeMeshes.set(key, (pool = []));
         pool.push(m);
         continue;
       }
-      if (m.kind === 'beam') {
-        const w = 1 - k * k;
-        m.obj.scale.x = m.obj.scale.z = w * (0.9 + 0.1 * Math.sin(m.age * 90));
-        m.fade!.value = 1 - k;
-      } else {
-        const s = m.size * (k < 0.08 ? 0.4 + (k / 0.08) * 0.6 : 1);
-        m.obj.scale.set(s, 1, s);
-        m.mat!.opacity = 0.85 * (k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4);
-      }
+      const w = 1 - k * k;
+      m.obj.scale.x = m.obj.scale.z = w * (0.9 + 0.1 * Math.sin(m.age * 90));
+      m.fade.value = 1 - k;
     }
 
     this.glow.count = this.soft.count = 0;
@@ -690,7 +760,7 @@ export class Effects {
     for (let i = 0; i < ps.length; i++) {
       const p = ps[i];
       p.age += dt;
-      const k = p.age / p.life;
+      let k = p.age / p.life;
       if (k >= 1) {
         this.freeParticles.push(p);
         continue;
@@ -703,42 +773,59 @@ export class Effects {
       }
       p.rot += p.spin * dt;
       let s = p.size;
-      let a = 1;
+      let a = p.alpha;
       let rot = p.rot;
       switch (p.kind) {
         case 'flash':
-          s *= 0.55 + 0.45 * Math.sqrt(k);
-          a = (1 - k) * (1 - k);
+          s *= 0.6 + 0.4 * Math.sqrt(k);
+          a *= (1 - k) * (1 - k);
           break;
         case 'twinkle':
           s *= Math.sin(Math.min(1, k * 1.2) * Math.PI);
           break;
         case 'glyph':
-          s *= k < 0.12 ? 0.5 + (k / 0.12) * 0.5 : 1 - (k - 0.12) * 0.35;
-          rot += Math.sin(p.age * 3.5 + p.size * 7) * 0.3;
-          a = k < 0.55 ? 1 : 1 - (k - 0.55) / 0.45;
+          s *= k < 0.1 ? 0.55 + (k / 0.1) * 0.45 : 1 - (k - 0.1) * 0.3;
+          rot += Math.sin(p.age * 3.5 + p.size * 7) * 0.25;
+          a *= k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
           break;
         case 'spark':
           s *= 1 - k;
           break;
         case 'drop':
-          // Lands on the floor and soaks in.
-          if (p.pos.y < 0.06 && p.vel.y < 0) {
-            p.pos.y = 0.06;
-            p.vel.set(0, 0, 0);
-            p.grav = 0;
-            p.stretch = 0;
-          }
-          if (k > 0.7) s *= 1 - (k - 0.7) / 0.3;
+          // Lands on the floor: the bigger drops flatten into small splats that soak in, the rest just vanish.
+          if (p.pos.y < 0.05 && p.vel.y < 0) {
+            if (p.size > 0.35) {
+              p.kind = 'splat';
+              p.cell = C_SPLAT;
+              p.color.setHex(INK_TEAL);
+              p.pos.y = 0.025;
+              p.vel.set(0, 0, 0);
+              p.grav = p.drag = 0;
+              p.stretch = -1;
+              p.rot = Math.random() * Math.PI * 2;
+              p.size *= 0.9;
+              p.alpha = 0.9;
+              p.life = p.age + rand(0.9, 1.3);
+              k = p.age / p.life;
+            } else {
+              p.life = p.age + 1e-3;
+              a = 0;
+            }
+          } else if (k > 0.75) s *= 1 - (k - 0.75) / 0.25;
           break;
         case 'ring':
           s *= 0.35 + 0.75 * (1 - (1 - k) * (1 - k));
-          a = 1 - k * k;
+          a *= 1 - k * k;
           break;
         case 'puff':
           s *= 0.45 + 0.75 * Math.sqrt(k);
-          a = p.alpha * (1 - k) * Math.min(1, k * 8);
+          a *= (1 - k) * Math.min(1, k * 8);
           break;
+      }
+      if (p.kind === 'splat') {
+        // Grows out quickly, then soaks in.
+        s = p.size * (p.age < 0.08 ? 0.4 + (p.age / 0.08) * 0.6 : 1);
+        a = p.alpha * (k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4);
       }
       (p.additive ? this.glow : this.soft).push(p, s, rot, a);
     }
