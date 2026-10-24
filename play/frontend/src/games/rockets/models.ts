@@ -165,10 +165,10 @@ export const WARHEAD_REST_Z = 0;
 /** Height of the barrel axis above the grip origin. */
 const BORE_Y = 0.07;
 
-const ORANGE = 0xf07a1e;
+const ORANGE = 0xe8661a;
 const ORANGE_LIGHT = 0xff9a3c;
 const ORANGE_DARK = 0xc85a12;
-const SAND = 0xeadcbc;
+const SAND = 0xead7b0;
 const METAL = 0x2a2d33;
 const BLACK = 0x1c1e22;
 /** Saturated past the concept's #4ff0ff: tone mapping washes unlit colours toward white. */
