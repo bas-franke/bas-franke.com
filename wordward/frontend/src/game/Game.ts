@@ -246,6 +246,17 @@ const FOV = 28;
 /** Camera pitch below the horizon: a high view from in front; tall portrait screens look a little steeper. */
 const PITCH_LANDSCAPE = THREE.MathUtils.degToRad(58);
 const PITCH_PORTRAIT = THREE.MathUtils.degToRad(65);
+/**
+ * Short landscape screens (a phone on its side) look steeper and come closer: the camera is fitted to the field's
+ * width instead of its length, so the field fills about FIT_FILL of the screen width at mid-depth and the far end may
+ * crop a little (the spawn depth follows what is visible). Blended in between SHORT_FROM and SHORT_AT px of height.
+ */
+const PITCH_SHORT = THREE.MathUtils.degToRad(66);
+const FIT_FILL = 0.6;
+const SHORT_FROM = 620;
+const SHORT_AT = 440;
+/** Field length that always stays visible on a short landscape screen (world units, past the defence line). */
+const MIN_FIELD_SHORT = 13;
 /** Creatures are modelled at about 1 m radius and drawn bigger, so faces read on a phone. */
 const CREATURE_SCALE = 1.45;
 /** Extra creature scale on portrait screens. */
@@ -962,6 +973,33 @@ export class Game {
     return h * Math.hypot(m[4], m[5], m[6]);
   }
 
+  /**
+   * The world point that projects to the top of a slot's creature (or its bubble shield) on screen, a little above it.
+   * The creature is treated as a capsule of its height and girth: seen from above, its top on screen is the far side
+   * of the rounded top, so the point is the capsule's top centre plus its radius along the camera's up vector. Expects
+   * `out` to hold the anchor's world position and the anchor's world matrix to be fresh.
+   */
+  private screenTop(slot: Slot, out: THREE.Vector3) {
+    const model = slot.model!;
+    const e = slot.anchor.matrixWorld.elements;
+    const scale = Math.hypot(e[4], e[5], e[6]);
+    let top = (model as { height?: number }).height ?? model.radius * 2;
+    let girth = model.radius;
+    if (slot.bubble) {
+      // Same sizes as the spawn code: the dome reaches 1.54 r up and 0.88 r out from its root.
+      const r = Math.max(model.radius * 1.02, top * 0.56);
+      top = Math.max(top, slot.bubble.root.position.y + r * 1.54);
+      girth = Math.max(girth, r * 0.88);
+    }
+    girth = Math.min(girth, top);
+    const c = this.engine.camera.matrixWorld.elements;
+    const k = (girth + 0.2) * scale;
+    out.x += c[4] * k;
+    out.y += (top - girth) * scale + c[5] * k;
+    out.z += c[6] * k;
+    return out;
+  }
+
   /** Where beams hit a slot: the middle of its creature's body. */
   private slotPosition(slot: Slot, out: THREE.Vector3) {
     slot.anchor.updateWorldMatrix(true, false);
@@ -986,7 +1024,14 @@ export class Game {
     const W = vw || 1;
     const aspect = W / H;
     const tanF = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
-    const pitch = THREE.MathUtils.lerp(PITCH_PORTRAIT, PITCH_LANDSCAPE, THREE.MathUtils.clamp((aspect - 0.5) / 0.8, 0, 1));
+    // 0 on tall or portrait screens, 1 on a phone in landscape.
+    const fit =
+      THREE.MathUtils.smoothstep(SHORT_FROM - H, 0, SHORT_FROM - SHORT_AT) * THREE.MathUtils.clamp((aspect - 1.3) / 0.4, 0, 1);
+    const pitch = THREE.MathUtils.lerp(
+      THREE.MathUtils.lerp(PITCH_PORTRAIT, PITCH_LANDSCAPE, THREE.MathUtils.clamp((aspect - 0.5) / 0.8, 0, 1)),
+      PITCH_SHORT,
+      fit,
+    );
     // The bottom inset is the whole word panel (the hint strip above the typing box included); keep a little air.
     const bottomPx = Math.max(H * 0.45, H - this.insets.bottom - Math.min(14, H * 0.015 + 4));
     const topPx = Math.min(H * 0.3, this.insets.top * 0.55 + 4);
@@ -1001,7 +1046,15 @@ export class Game {
     const kD = Math.cos(pitch) / Math.tan(dipB) + Math.sin(pitch);
     const hLen = (MIN_FIELD + DEFENDER_FRONT) / kL;
     const hWide = (MIN_HALF_WIDTH / (tanF * aspect) - DEFENDER_FRONT * Math.cos(pitch)) / kD;
-    const h = Math.max(hLen, hWide, 6);
+    let h = Math.max(hLen, hWide, 6);
+    if (fit > 0) {
+      // Width fit: the floor row halfway up the visible field shows FIELD_HALF / FIT_FILL to either side. That row's ray
+      // is `a` above the view axis; the floor point lies h / sin(dip) along it, at view depth h cos(a) / sin(dip).
+      const a = Math.atan(((vb + vt) / 2) * tanF);
+      const hFit = FIELD_HALF / FIT_FILL / ((tanF * aspect * Math.cos(a)) / Math.sin(pitch - a));
+      const hShort = Math.max(hFit, hWide, (MIN_FIELD_SHORT + DEFENDER_FRONT) / kL, 6);
+      h = THREE.MathUtils.lerp(h, Math.min(h, hShort), fit);
+    }
     cam.position.set(0, h, zB + h / Math.tan(dipB));
     cam.rotation.set(-pitch, 0, 0);
     cam.updateMatrixWorld();
@@ -1194,9 +1247,16 @@ export class Game {
         if (s.done) continue;
         s.anchor.updateWorldMatrix(true, false);
         v.setFromMatrixPosition(s.anchor.matrixWorld);
-        if (s.model) v.y += Math.max(this.slotHeight(s), s.bubble ? s.radius * 2.6 : 0) + 0.25;
+        if (s.model) this.screenTop(s, v);
         else v.y += s.radius * 1.6;
-        const p = this.project(v);
+        let p = this.project(v);
+        // A tag that would reach under the HUD drops below its creature's feet instead of covering it.
+        if (s.model && p.y - (s.h ?? 40) < this.insets.top + 4) {
+          v.setFromMatrixPosition(s.anchor.matrixWorld);
+          const base = this.project(v).y;
+          p = this.projected;
+          p.y = Math.max(base + (s.h ?? 40) + 4, minY);
+        }
         // Keep the tag on screen and below the HUD (its bottom edge is at p.y).
         const half = Math.min(width / 2, Math.max(64, (s.w ?? 0) / 2 + 6));
         s.tx = Math.round(Math.min(width - half, Math.max(half, p.x)) * 2) / 2;
