@@ -551,7 +551,7 @@ input {
 .pause {
   pointer-events: auto;
   flex: none;
-  width: 40px;
+  width: 44px;
   height: 44px;
   margin: -6px -6px 0 0;
   padding: 0;
@@ -745,6 +745,10 @@ input {
 .dw .g {
   white-space: pre;
 }
+/* From memory: each hidden letter is its own blank, so the length can be counted. */
+.dw .g.hid {
+  margin: 0 0.07em;
+}
 /* In the input box: typed letters in dark ink, the rest of the word ghosted after the caret. */
 .dline.main .dw .g {
   color: #a88f6b;
@@ -877,11 +881,12 @@ input {
   }
 }
 
+/* Mid-screen, clear of the defenders and the input box (the game cannot go on until it is tapped anyway). */
 .tap-to-type {
   position: absolute;
   left: 50%;
-  bottom: 120px;
-  transform: translate(-50%, 0);
+  top: 46%;
+  transform: translate(-50%, -50%);
   z-index: 5;
   border: 1px solid rgba(120, 84, 46, 0.8);
   border-radius: 999px;
@@ -906,7 +911,7 @@ input {
 }
 @keyframes bob {
   50% {
-    transform: translate(-50%, -6px);
+    transform: translate(-50%, calc(-50% - 6px));
   }
 }
 
@@ -1046,6 +1051,7 @@ input {
   border: 0;
   padding: 4px 2px;
   min-height: 44px;
+  min-width: 44px;
   color: var(--berry);
   font-weight: 700;
   cursor: pointer;
@@ -1260,6 +1266,42 @@ input {
 .over-title {
   color: var(--berry-2) !important;
 }
+/* Game over: centred like the won card, with a quieter (dusk-coloured) medallion. */
+.card.over {
+  text-align: center;
+}
+.card.over .field-label {
+  justify-content: center;
+}
+.card.over .practice ul {
+  text-align: left;
+}
+.won-emoji.over-emoji {
+  margin-bottom: 6px;
+  color: var(--ink-soft);
+  --icon-fill: rgba(140, 120, 170, 0.25);
+  background: radial-gradient(circle at 35% 30%, #fbf3df, #e2d2b0);
+  box-shadow: inset 0 0 0 3px #fbf3df, inset 0 0 0 4.5px rgba(160, 125, 80, 0.7), 0 0 0 1.5px #6a4524, 0 4px 12px rgba(30, 15, 4, 0.35);
+  animation: none;
+}
+.fail-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px !important;
+  padding: 3px 14px 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(154, 58, 44, 0.55);
+  background: rgba(196, 66, 58, 0.1);
+  color: var(--berry-2);
+  font-weight: 700;
+  font-size: 15px;
+}
+.fail-reason .icon {
+  font-size: 1.15em;
+  color: var(--berry);
+  --icon-fill: rgba(196, 66, 58, 0.18);
+}
 .stats {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1362,9 +1404,9 @@ input {
     font-size: 12px;
   }
   .pause span {
-    width: 30px;
-    height: 30px;
-    font-size: 12px;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
   }
   .tag {
     font-size: 13px;
@@ -1396,14 +1438,22 @@ input {
   }
   .dialog-meta,
   .dialog-name {
-    font-size: 12.5px;
+    font-size: 13.5px;
+  }
+  .dialog-meta {
+    padding: 2px 16px 3px;
+    background: rgba(22, 13, 5, 0.6);
   }
   .dwords {
-    font-size: 13px;
+    font-size: 15px;
   }
   .toast {
     top: 84px;
     font-size: 16px;
+  }
+  .banner-sub {
+    font-size: 17px;
+    padding: 4px 22px 5px;
   }
 }
 
@@ -1427,6 +1477,17 @@ input {
   }
   .score-num {
     font-size: 21px;
+  }
+  /* The score goes under the two round buttons, so big scores and multipliers never run into the wave plate. */
+  .hud-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 0;
+  }
+  .hud-right .score {
+    order: 2;
+    flex-basis: 100%;
+    margin-top: -2px;
   }
 }
 
@@ -1459,7 +1520,7 @@ input {
     font-size: 18px;
   }
   .pause {
-    height: 40px;
+    margin-bottom: -4px;
   }
   .dialog {
     gap: 2px;
@@ -1498,7 +1559,7 @@ input {
     font-size: 14px;
   }
   .tap-to-type {
-    bottom: 70px;
+    top: 50%;
   }
 }
 
@@ -2345,6 +2406,11 @@ input {
 .btn.primary .icon {
   --icon-fill: rgba(255, 220, 150, 0.25);
 }
+/* Buttons line their text up on the baseline; an icon (or medallion) among it is centred instead. */
+.btn > .icon,
+.btn > .medallion {
+  align-self: center;
+}
 .hint-line .stars {
   font-size: 13px;
   vertical-align: -2px;
@@ -2449,6 +2515,114 @@ input {
 .pause span .icon {
   font-size: 1.25em;
 }
-.pause.sound span {
-  font-size: 11px;
+.pause span {
+  font-size: 12px;
+}
+/* Muted: the speaker fades so the state reads at a glance. */
+.pause.sound[aria-pressed='false'] span {
+  color: rgba(255, 244, 222, 0.5);
+  border-style: dashed;
+}
+
+/* Short screens (keyboard open, landscape): end-of-round cards stay compact so the buttons are in view. */
+@media (max-height: 560px) {
+  .card {
+    padding-top: 12px;
+    padding-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 24px;
+  }
+  .won-emoji {
+    width: 52px;
+    height: 52px;
+    font-size: 30px;
+  }
+  .won-stars .stars {
+    font-size: 38px;
+  }
+  .stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin: 8px 0;
+  }
+  .stats div {
+    padding: 4px 2px;
+  }
+  .stats b {
+    font-size: 19px;
+  }
+  .stats span {
+    font-size: 10px;
+  }
+  .practice ul {
+    max-height: 104px;
+  }
+  .practice li {
+    font-size: 14px;
+    padding: 2px 0;
+  }
+  .row {
+    margin-top: 10px;
+  }
+}
+
+/* Wide screens: the sound toggles sit above the account chip, so both fit beside the title plaque. */
+@media (min-width: 760px) {
+  .card-top {
+    flex-wrap: nowrap;
+  }
+  .top-actions {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+}
+
+/* Roomy screens: sheets float in the middle as a card instead of hugging the bottom edge. */
+@media (min-width: 640px) and (min-height: 600px) {
+  .sheet-backdrop {
+    align-items: center;
+    padding: 24px;
+  }
+  .sheet {
+    border-radius: 18px;
+    padding: 20px 22px 22px;
+    box-shadow: inset 0 0 0 3px #f9f1de, inset 0 0 0 4px rgba(190, 140, 64, 0.55), var(--card-shadow);
+  }
+}
+
+/* Short screens (keyboard open): sheets get tighter so the form's button stays close. */
+@media (max-height: 560px) {
+  .sheet {
+    max-height: 96%;
+    padding-top: 10px;
+  }
+  .sheet-emoji {
+    width: 44px;
+    height: 44px;
+    font-size: 26px;
+  }
+  .sheet-head h3 {
+    font-size: 20px;
+  }
+  .sheet-head .dim {
+    display: none;
+  }
+  .account-form {
+    gap: 6px;
+  }
+  .account-form .sheet-topics {
+    margin: 0;
+    font-size: 12px;
+  }
+  .input input {
+    min-height: 44px;
+    padding: 8px 12px;
+  }
+  .variants {
+    gap: 6px;
+  }
+  .variant {
+    padding: 6px 8px;
+  }
 }

@@ -5,16 +5,16 @@
 // while drifting upwards. A letter hitting the shield sends a quick ripple out from the circle and makes the sparks
 // flare. Both parts are additive but dim, so the creature stays the thing you look at.
 //
-// Two draw calls per shield (floor circle, sparks). Geometry, materials and the rune texture are shared by every
-// shield; the per-shield values (size, hit flash, phase) are pushed as uniforms just before each draw, and the
-// vertex shaders place everything from those, so nothing is allocated per frame. A wide sentence shield (`w` > `r`)
+// Two draw calls for all shields together: one InstancedMesh draws every floor circle, another every shield's sparks.
+// Each instance carries its shield root's world matrix and per-shield attributes (size, hit flash, phase, glyph
+// tiles); `tickBubbles` packs the live shields into them once per frame, and the vertex shaders place everything from
+// those, so nothing is allocated per frame. A wide sentence shield (`w` > `r`)
 // becomes a stadium: two half circles joined by straight runs, with the glyphs following the outline.
 
 import * as THREE from 'three';
 
 /** A 2×2 quad on the floor (xz); the vertex shader scales it to the shield's extent. */
 const floorGeo = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
-floorGeo.userData.shared = true;
 
 const SPARKS = 7;
 /** One camera-facing quad per spark; `seed` = (orbit phase, rise phase, orbit speed). */
@@ -41,7 +41,6 @@ const sparkGeo = (() => {
   g.setIndex(index);
   return g;
 })();
-sparkGeo.userData.shared = true;
 
 const time = { value: 0 };
 let ringMat: THREE.ShaderMaterial | null = null;
@@ -118,18 +117,21 @@ function materials() {
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      // size = (half length of the straight run, radius); look = (flash, phase, glyph tiles around the outline).
-      uniforms: { time, size: { value: new THREE.Vector2(0, 1) }, look: { value: new THREE.Vector3() }, runes: { value: runeTexture() } },
+      // Per shield (instance): iSize = (half length of the straight run, radius, floor height in the shield's frame);
+      // iLook = (flash, phase, glyph tiles around the outline). The instance matrix is the shield root's world matrix.
+      uniforms: { time, runes: { value: runeTexture() } },
       vertexShader: /* glsl */ `
-        uniform vec2 size;
-        varying vec2 vP;
+        attribute vec3 iSize; attribute vec3 iLook;
+        varying vec2 vP; varying vec2 size; varying vec3 look;
         void main() {
+          size = iSize.xy;
+          look = iLook;
           vP = position.xz * vec2(size.x + size.y * ${EXT.toFixed(2)}, size.y * ${EXT.toFixed(2)});
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(vP.x, position.y, vP.y, 1.0);
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(vP.x, position.y + iSize.z, vP.y, 1.0);
         }`,
       fragmentShader: /* glsl */ `
-        uniform float time; uniform vec2 size; uniform vec3 look; uniform sampler2D runes;
-        varying vec2 vP;
+        uniform float time; uniform sampler2D runes;
+        varying vec2 vP; varying vec2 size; varying vec3 look;
         const float PI = 3.14159265;
         // An antialiased line of half width w (in radii) at distance c, never thinner than about a pixel.
         float rule(float d, float c, float w, float aa) {
@@ -178,20 +180,21 @@ function materials() {
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      uniforms: { time, size: { value: new THREE.Vector2(0, 1) }, look: { value: new THREE.Vector3() } },
+      uniforms: { time },
       vertexShader: /* glsl */ `
-        uniform float time; uniform vec2 size; uniform vec3 look;
-        attribute vec2 corner; attribute vec3 seed;
+        uniform float time;
+        attribute vec2 corner; attribute vec3 seed; attribute vec3 iSize; attribute vec3 iLook;
         varying vec2 vC; varying float vA;
         void main() {
-          float L = size.x, R = size.y, flash = look.x;
+          vec3 look = iLook;
+          float L = iSize.x, R = iSize.y, flash = look.x;
           float a = seed.x + time * seed.z + look.y;
           // Each spark circles the creature just inside the rune circle while rising, then fades and starts again low.
           float rise = fract(time * 0.16 + seed.y + look.y * 0.13);
           float k = 0.9 + flash * 0.3;
           vec3 c = vec3(cos(a) * (L + R * k), R * (0.08 + rise * 1.25), sin(a) * R * k);
-          vec4 mv = modelViewMatrix * vec4(c, 1.0);
-          float sc = length(modelMatrix[0].xyz);
+          vec4 mv = modelViewMatrix * instanceMatrix * vec4(c, 1.0);
+          float sc = length((modelMatrix * instanceMatrix)[0].xyz);
           float tw = 0.75 + 0.25 * sin(time * 4.0 + seed.x * 7.0);
           mv.xy += corner * R * sc * 0.085 * tw * (1.0 + flash * 0.8);
           vC = corner;
@@ -213,9 +216,115 @@ function materials() {
   return { ring: ringMat, spark: sparkMat! };
 }
 
-/** Advances the turning glyphs, the breathing glow and the orbiting sparks on every shield. */
+/** Instances the batch meshes hold before they grow. */
+const START_CAPACITY = 16;
+
+interface Live {
+  root: THREE.Group;
+  /** Half length of the straight run and radius, in the shield root's frame. */
+  L: number;
+  R: number;
+  tiles: number;
+  phase: number;
+  flash: number;
+}
+
+/** Every live shield, drawn by one instanced mesh for the circles and one for the sparks. */
+const live: Live[] = [];
+let capacity = 0;
+let rings: THREE.InstancedMesh | null = null;
+let sparks: THREE.InstancedMesh | null = null;
+let sizeAttr: THREE.InstancedBufferAttribute;
+let lookAttr: THREE.InstancedBufferAttribute;
+
+/** (Re)builds the two batch meshes with room for `n` shields; the instance matrix and attributes are shared. */
+function grow(n: number) {
+  const { ring, spark } = materials();
+  const scene = rings?.parent ?? null;
+  rings?.removeFromParent();
+  sparks?.removeFromParent();
+  rings?.geometry.dispose();
+  sparks?.geometry.dispose();
+  rings?.dispose();
+  capacity = n;
+  sizeAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+  lookAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+  const rg = new THREE.BufferGeometry();
+  rg.index = floorGeo.index;
+  for (const k in floorGeo.attributes) rg.setAttribute(k, floorGeo.attributes[k]);
+  const sg = new THREE.BufferGeometry();
+  sg.index = sparkGeo.index;
+  for (const k in sparkGeo.attributes) sg.setAttribute(k, sparkGeo.attributes[k]);
+  for (const g of [rg, sg]) {
+    g.setAttribute('iSize', sizeAttr);
+    g.setAttribute('iLook', lookAttr);
+  }
+  rings = new THREE.InstancedMesh(rg, ring, n);
+  sparks = new THREE.InstancedMesh(sg, spark, n);
+  rings.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  sparks.instanceMatrix = rings.instanceMatrix;
+  rings.renderOrder = 2;
+  sparks.renderOrder = 6;
+  for (const m of [rings, sparks]) {
+    m.name = 'shields';
+    m.frustumCulled = false;
+    m.count = 0;
+    m.visible = false;
+    if (scene) scene.add(m);
+  }
+}
+
+/**
+ * Advances the turning glyphs, the breathing glow and the orbiting sparks on every shield, and packs the live shields
+ * into the batch meshes. Call it once per frame after the creatures have moved (it refreshes their world matrices).
+ * Shields whose root has left the scene (popped, or the creature removed) are dropped here.
+ */
 export function tickBubbles(t: number) {
   time.value = t;
+  if (live.length > capacity) grow(Math.max(START_CAPACITY, capacity * 2, live.length));
+  let n = 0;
+  let scene: THREE.Object3D | null = null;
+  for (let i = 0; i < live.length; i++) {
+    const b = live[i];
+    // Walk up to the scene: a shield is drawn while every ancestor is visible, and dropped once it is detached.
+    let o: THREE.Object3D = b.root;
+    let shown = o.visible;
+    while (o.parent) {
+      o = o.parent;
+      if (!o.visible) shown = false;
+    }
+    if (!(o as THREE.Scene).isScene) {
+      live[i] = live[live.length - 1];
+      live.pop();
+      i--;
+      continue;
+    }
+    scene = o;
+    if (!shown) continue;
+    b.root.updateWorldMatrix(true, false);
+    rings!.setMatrixAt(n, b.root.matrixWorld);
+    // Keep the circle on the creature's floor even when the shield is lifted around a hovering body.
+    sizeAttr.setXYZ(n, b.L, b.R, 0.03 - b.root.position.y);
+    lookAttr.setXYZ(n, b.flash, b.phase, b.tiles);
+    n++;
+  }
+  if (!rings || !sparks) return;
+  if (scene && rings.parent !== scene) {
+    scene.add(rings);
+    scene.add(sparks);
+  }
+  rings.count = sparks.count = n;
+  rings.visible = sparks.visible = n > 0;
+  if (n > 0) {
+    rings.instanceMatrix.clearUpdateRanges();
+    rings.instanceMatrix.addUpdateRange(0, n * 16);
+    rings.instanceMatrix.needsUpdate = true;
+    for (const a of [sizeAttr, lookAttr]) {
+      a.clearUpdateRanges();
+      a.addUpdateRange(0, n * 3);
+      a.needsUpdate = true;
+    }
+  }
 }
 
 export interface Bubble {
@@ -228,46 +337,31 @@ export interface Bubble {
 /**
  * A rune shield of radius `r` around a creature whose origin is on the floor (or a balaur head's chin), stretched to
  * half-width `w` for a sentence convoy. The rune circle lies at the creature's feet: if Game lifts `root` (a hovering
- * creature), the circle stays on the floor under it and the sparks rise around the lifted body.
+ * creature), the circle stays on the floor under it and the sparks rise around the lifted body. Add `root` to the
+ * creature; removing it from the scene (directly or with the creature) removes the shield.
  */
 export function makeBubble(r: number, w = r): Bubble {
-  const { ring, spark } = materials();
+  if (!rings) grow(START_CAPACITY);
   const root = new THREE.Group();
   const R = r * 0.95;
   const L = Math.max(0, w - r);
-  const floor = new THREE.Mesh(floorGeo, ring);
-  floor.frustumCulled = false;
-  floor.renderOrder = 2;
-  root.add(floor);
-  const sparks = new THREE.Mesh(sparkGeo, spark);
-  sparks.frustumCulled = false;
-  sparks.renderOrder = 6;
-  root.add(sparks);
-
-  let flash = 0;
-  const phase = Math.random() * 10;
-  // Glyph tiles (12 runes each) around the outline: about 24 on a single creature's circle.
-  const tiles = Math.max(1, Math.round((4 * L + 2 * Math.PI * R) / (R * 3.6)));
-  // Per-shield uniforms on shared materials: set just before this mesh draws, and force the upload.
-  floor.onBeforeRender = () => {
-    ring.uniforms.size.value.set(L, R);
-    ring.uniforms.look.value.set(flash, phase, tiles);
-    ring.uniformsNeedUpdate = true;
+  const b: Live = {
+    root,
+    L,
+    R,
+    // Glyph tiles (12 runes each) around the outline: about 24 on a single creature's circle.
+    tiles: Math.max(1, Math.round((4 * L + 2 * Math.PI * R) / (R * 3.6))),
+    phase: Math.random() * 10,
+    flash: 0,
   };
-  sparks.onBeforeRender = () => {
-    spark.uniforms.size.value.set(L, R);
-    spark.uniforms.look.value.set(flash, phase, tiles);
-    spark.uniformsNeedUpdate = true;
-  };
+  live.push(b);
   return {
     root,
     hit() {
-      flash = 1;
+      b.flash = 1;
     },
     update(dt) {
-      flash = Math.max(0, flash - dt * 3);
-      // Keep the circle on the creature's floor even when the shield is lifted around a hovering body.
-      floor.position.y = 0.03 - root.position.y;
+      b.flash = Math.max(0, b.flash - dt * 3);
     },
   };
 }

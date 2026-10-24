@@ -419,6 +419,12 @@ function Hud({ state, game, sound, onSound }: { state: GameState; game: Game; so
       {state.banner && (
         <div className="banner" key={state.banner.n}>
           <div className="banner-text">
+            {/* The boss banner has no emoji of its own: give it the Bookwyrm, like a mission intro gets its emblem. */}
+            {state.banner.text === 'The Bookwyrm!' && (
+              <>
+                <Icon name="dragon" />{' '}
+              </>
+            )}
             <IconText text={state.banner.text} />
           </div>
           <div className="banner-sub">
@@ -483,12 +489,15 @@ function Line({ line, main }: { line: LineView; main?: boolean }) {
 function Word({ word, live, done }: { word: WordView; live: boolean; done: boolean }) {
   return (
     <span className={`dw${done ? ' done' : ''}${live ? ' live' : ''}`}>
-      {word.glyphs.map((g, i) => (
-        <span key={i} className={i < word.pos ? 'g done' : live && i === word.pos ? 'g cur' : 'g'}>
-          {live && i === word.pos && <i className="caret" aria-hidden="true" />}
-          {word.hidden && i >= word.pos && i > (word.peek ?? -1) && g.typed ? '_' : g.ch}
-        </span>
-      ))}
+      {word.glyphs.map((g, i) => {
+        const hid = word.hidden && i >= word.pos && i > (word.peek ?? -1) && g.typed;
+        return (
+          <span key={i} className={`${i < word.pos ? 'g done' : live && i === word.pos ? 'g cur' : 'g'}${hid ? ' hid' : ''}`}>
+            {live && i === word.pos && <i className="caret" aria-hidden="true" />}
+            {hid ? '_' : g.ch}
+          </span>
+        );
+      })}
       {live && word.pos >= word.glyphs.length && <i className="caret" aria-hidden="true" />}
       {word.hint && <small className="hint">{word.hint}</small>}
     </span>
@@ -1243,17 +1252,24 @@ function Won({
             <Stars n={3} /> = 80%+ HP left and 90%+ accuracy
           </p>}
         <div className="row">
-          {next && (
+          {next ? (
             <button className="btn primary" onClick={onNext}>
               <MissionEmblem mission={next} /> {next.en} <small>Next · Enter</small>
+            </button>
+          ) : (
+            // With nothing left to unlock, Enter goes to the map: it is the main button then.
+            <button className="btn primary" onClick={onMap}>
+              Map <small>Enter</small>
             </button>
           )}
           <button className="btn" onClick={onAgain}>
             Replay
           </button>
-          <button className="btn" onClick={onMap}>
-            Map
-          </button>
+          {next && (
+            <button className="btn" onClick={onMap}>
+              Map
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1278,13 +1294,20 @@ function GameOver({
   const [src, dst] = settings.direction === 'en-ro' ? (['en', 'ro'] as const) : (['ro', 'en'] as const);
   return (
     <div className="overlay">
-      <div className="card">
+      <div className="card over">
+        <div className="won-emoji over-emoji">
+          {state.run ? <MissionEmblem mission={{ id: state.run.missionId, kind: 'mission', n: state.run.n }} /> : <Icon name="owl" />}
+        </div>
         <h2 className="over-title">The library needs a nap!</h2>
+        {state.failReason && (
+          <p className="fail-reason">
+            <Icon name="perfect" /> <IconText text={state.failReason} />
+          </p>
+        )}
         <p className="dim">
-          {state.failReason ? <IconText text={`${state.failReason}. `} /> : ''}
           {state.run ? (
             <>
-              <MissionEmblem mission={{ id: state.run.missionId, kind: 'mission', n: state.run.n }} /> {state.run.en}.{' '}
+              {state.run.en} · <Icon name={VARIANT_ICON[state.run.variant as Variant]} /> {VARIANTS[state.run.variant as Variant].en}.{' '}
             </>
           ) : (
             ''

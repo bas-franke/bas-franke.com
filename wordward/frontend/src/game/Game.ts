@@ -149,6 +149,10 @@ interface Slot {
   sx: number;
   sy: number;
   done: boolean;
+  /** Last tag transform written (rounded px) and its markup, so frames only touch the DOM on a change. */
+  px?: number;
+  py?: number;
+  html?: string;
 }
 
 interface WordPart {
@@ -265,7 +269,10 @@ export class Game {
   private listeners = new Set<(s: GameState) => void>();
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
-  private tmpScale = new THREE.Vector3();
+  /** Canvas size in CSS pixels, read once per frame from the renderer (never from the DOM, which forces layout). */
+  private view = new THREE.Vector2(1, 1);
+  private projected = { x: 0, y: 0 };
+  private hurtCss = '';
 
   state: GameState = {
     phase: 'idle',
@@ -599,8 +606,8 @@ export class Game {
 
     // Scale the group up, but never wider than the screen (long sentences on a narrow phone).
     // Portrait phones look from higher up, so creatures are drawn a little bigger there.
-    const el = this.engine.renderer.domElement;
-    const portrait = el.clientWidth < el.clientHeight * 0.8 ? PORTRAIT_BOOST : 1;
+    const { x: vw, y: vh } = this.engine.renderer.getSize(this.view);
+    const portrait = vw < vh * 0.8 ? PORTRAIT_BOOST : 1;
     const scale = Math.min(CREATURE_SCALE * portrait, (this.halfWidth * 2 - 1.5) / Math.max(1, total));
     root.scale.setScalar(scale);
     for (const s of slots) s.radius *= scale;
@@ -664,7 +671,7 @@ export class Game {
   }
 
   private clearEnemies() {
-    for (const e of [...this.enemies]) this.remove(e);
+    while (this.enemies.length) this.remove(this.enemies[this.enemies.length - 1]);
     this.tags.querySelectorAll('.pop, .letter').forEach((p) => p.remove());
   }
 
@@ -686,20 +693,25 @@ export class Game {
   private pickTarget(): Enemy | undefined {
     let best: Enemy | undefined;
     for (const e of this.enemies) if (!best || e.y < best.y) best = e;
-    const current = this.enemies.find((e) => e.id === this.targetId);
+    const current = this.byId(this.targetId);
     if (current && best && current !== best) {
       const part = current.parts[current.partIdx];
       const started = current.partIdx > 0 || part.pos > firstTyped(part.glyphs);
       if (started && current.y - best.y < 1.2) best = current;
     }
     if (best && best.id !== this.targetId) {
-      const old = this.enemies.find((e) => e.id === this.targetId);
+      const old = this.byId(this.targetId);
       this.targetId = best.id;
       if (old) for (const s of old.slots) this.renderTag(old, s);
       for (const s of best.slots) this.renderTag(best, s);
       this.emit();
     }
     return best;
+  }
+
+  private byId(id: number): Enemy | undefined {
+    for (const e of this.enemies) if (e.id === id) return e;
+    return undefined;
   }
 
   type(ch: string) {
@@ -876,7 +888,7 @@ export class Game {
     const isTarget = e.id === this.targetId;
     slot.tag.classList.toggle('target', isTarget);
     slot.tag.classList.toggle('shielded', !!slot.bubble);
-    slot.tag.innerHTML = this.lines(e, slot.parts, slot.info)
+    const html = this.lines(e, slot.parts, slot.info)
       .map((line) => {
         const words = line.words.map((w, wi) => {
           const live = line.state === 'active' && wi === line.current;
@@ -892,24 +904,36 @@ export class Game {
         return `<div class="line ${line.state}${line.shield ? ' shield' : ''}"><b>${line.lang.toUpperCase()}</b>${words.join(' ')}</div>`;
       })
       .join('');
+    if (html !== slot.html) {
+      slot.html = html;
+      slot.tag.innerHTML = html;
+    }
   }
 
+  /** Screen position (CSS px) of a world point; the returned object is reused by the next call. */
   private project(v: THREE.Vector3) {
     const p = this.tmp2.copy(v).project(this.engine.camera);
-    const el = this.engine.renderer.domElement;
-    return { x: (p.x * 0.5 + 0.5) * el.clientWidth, y: (-p.y * 0.5 + 0.5) * el.clientHeight };
+    const { x: w, y: h } = this.engine.renderer.getSize(this.view);
+    const out = this.projected;
+    out.x = (p.x * 0.5 + 0.5) * w;
+    out.y = (-p.y * 0.5 + 0.5) * h;
+    return out;
   }
 
   /** Height of a slot's creature above its origin, in world units (falls back to its diameter). */
   private slotHeight(slot: Slot) {
     if (!slot.model) return slot.radius;
     const h = (slot.model as { height?: number }).height;
-    return h !== undefined ? h * slot.anchor.getWorldScale(this.tmpScale).y : slot.radius * 2;
+    if (h === undefined) return slot.radius * 2;
+    // World scale (y) straight from the world matrix; callers refresh it first (see slotPosition, positionTags).
+    const m = slot.anchor.matrixWorld.elements;
+    return h * Math.hypot(m[4], m[5], m[6]);
   }
 
   /** Where beams hit a slot: the middle of its creature's body. */
   private slotPosition(slot: Slot, out: THREE.Vector3) {
-    slot.anchor.getWorldPosition(out);
+    slot.anchor.updateWorldMatrix(true, false);
+    out.setFromMatrixPosition(slot.anchor.matrixWorld);
     out.y += slot.model ? this.slotHeight(slot) * 0.5 : 0.5;
     return out;
   }
@@ -925,9 +949,9 @@ export class Game {
    */
   private placeCamera() {
     const cam = this.engine.camera;
-    const el = this.engine.renderer.domElement;
-    const H = el.clientHeight || 1;
-    const W = el.clientWidth || 1;
+    const { x: vw, y: vh } = this.engine.renderer.getSize(this.view);
+    const H = vh || 1;
+    const W = vw || 1;
     const aspect = W / H;
     const tanF = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const pitch = THREE.MathUtils.lerp(PITCH_PORTRAIT, PITCH_LANDSCAPE, THREE.MathUtils.clamp((aspect - 0.5) / 0.8, 0, 1));
@@ -988,7 +1012,9 @@ export class Game {
       this.zapPitch = Math.max(1, this.zapPitch - dt * 0.6);
     }
 
-    for (const e of [...this.enemies]) {
+    // Index loop (no copy): an impact removes the creature (or, at game over, all of them).
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
       e.y -= e.speed * step;
       let x = this.laneX(e);
       if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 0.7;
@@ -1000,14 +1026,17 @@ export class Game {
         s.bubble?.update(dt, t);
       }
       e.body?.animate(step, t);
-      if (playing && e.y <= IMPACT_Y) this.impact(e);
+      if (playing && e.y <= IMPACT_Y) {
+        this.impact(e);
+        if (this.enemies[i] !== e) i--;
+      }
     }
     tickBubbles(t);
     this.effects.update(this.state.phase === 'paused' ? 0 : dt);
     if (playing) this.pickTarget();
 
     // The robot cannon follows the current target.
-    const target = this.enemies.find((e) => e.id === this.targetId);
+    const target = this.byId(this.targetId);
     if (target) {
       const part = target.parts[target.partIdx] ?? target.parts[0];
       this.aim.copy(this.slotPosition(part.slot, this.tmp));
@@ -1024,7 +1053,11 @@ export class Game {
       this.engine.camera.updateMatrixWorld();
     }
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt);
-    this.engine.container.parentElement?.style.setProperty('--hurt', this.hurtFlash.toFixed(3));
+    const hurt = this.hurtFlash.toFixed(3);
+    if (hurt !== this.hurtCss) {
+      this.hurtCss = hurt;
+      this.engine.container.parentElement?.style.setProperty('--hurt', hurt);
+    }
 
     this.positionTags();
   }
@@ -1057,23 +1090,27 @@ export class Game {
   }
 
   /** Word tags float above their creatures like speech bubbles; a convoy's sentence banner floats above the pebbles' tags. */
+  // Only writes a tag's transform when its position (rounded to half pixels) moved, and never reads layout.
   private positionTags() {
     const v = this.tmp;
+    const width = this.engine.renderer.getSize(this.view).x;
     for (const e of this.enemies) {
       for (const s of e.slots) {
         if (s.done) continue;
-        s.anchor.getWorldPosition(v);
+        s.anchor.updateWorldMatrix(true, false);
+        v.setFromMatrixPosition(s.anchor.matrixWorld);
         if (s.model) v.y += Math.max(this.slotHeight(s), s.bubble ? s.radius * 2.6 : 0) + 0.25;
         else v.y += s.radius * 1.6;
         const p = this.project(v);
         // Keep the tag on screen and below the HUD (its bottom edge is at p.y).
-        const el = this.engine.renderer.domElement;
-        p.x = Math.min(el.clientWidth - 64, Math.max(64, p.x));
-        p.y = Math.max(this.insets.top + 40, p.y);
-        s.sx = p.x;
-        s.sy = p.y - 18;
-        const shift = s.model ? '-100%' : 'calc(-100% - 2.6em)';
-        s.tag.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, ${shift})`;
+        const x = Math.round(Math.min(width - 64, Math.max(64, p.x)) * 2) / 2;
+        const y = Math.round(Math.max(this.insets.top + 40, p.y) * 2) / 2;
+        s.sx = x;
+        s.sy = y - 18;
+        if (x === s.px && y === s.py) continue;
+        s.px = x;
+        s.py = y;
+        s.tag.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${s.model ? '-100%' : 'calc(-100% - 2.6em)'})`;
       }
     }
   }

@@ -14,6 +14,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { makeHead } from './boss';
+import { detectQuality } from './engine';
+import { flatVertexColorMaterial, vertexColorMaterial } from './toon';
 
 export { makeBalaurBody, makeHead } from './boss';
 export { makeBubble, tickBubbles, type Bubble } from './shield';
@@ -47,36 +49,69 @@ const _s = new THREE.Vector3();
 const _c = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
 
+/**
+ * What a part is, for morph targets: animated pieces of a merged mesh move by morph targets (one draw call) rather
+ * than by transforms of separate meshes. `eye` is the centre an eye blinks about (in the bake's final space).
+ */
+interface Tag {
+  foot?: number;
+  load?: boolean;
+  crawl?: boolean;
+  stalk?: boolean;
+  shell?: boolean;
+  eye?: THREE.Vector3;
+}
+/** A morph target as a function moving one vertex (final space) of a part with the given tag. */
+type Morph = (tag: Tag, v: THREE.Vector3) => void;
+
 /** Collects primitives with a colour and a transform, and merges them into one vertex-coloured geometry. */
 class Bake {
-  private parts: THREE.BufferGeometry[] = [];
+  private parts: { g: THREE.BufferGeometry; tag: Tag }[] = [];
+  /** Tag for the parts added from now on. */
+  tag: Tag = {};
+  /** An extra transform applied after each part's own (a sub-assembly's place in the whole). */
+  frame: THREE.Matrix4 | null = null;
+  /** Bakes lighting into the colours of the parts added from now on (`c` linear, `n` final normal), for unlit meshes. */
+  light: ((c: THREE.Color, n: THREE.Vector3) => void) | null = null;
 
-  /** `rot` is Euler angles or a quaternion; `scale` a number or per-axis. */
-  add(geo: THREE.BufferGeometry, paint: Paint, pos: Vec = [0, 0, 0], rot: Vec | THREE.Quaternion = [0, 0, 0], scale: number | Vec = 1) {
+  /** `rot` is Euler angles or a quaternion; `scale` a number or per-axis; `paint` null keeps the geometry's colours. */
+  add(geo: THREE.BufferGeometry, paint: Paint | null, pos: Vec = [0, 0, 0], rot: Vec | THREE.Quaternion = [0, 0, 0], scale: number | Vec = 1) {
     const g = geo.index ? geo.toNonIndexed() : geo.clone();
     geo.dispose();
-    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal' && (paint !== null || name !== 'color')) g.deleteAttribute(name);
     const p = g.attributes.position;
-    const col = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) {
-      _c.setHex(typeof paint === 'number' ? paint : paint(p.getX(i), p.getY(i), p.getZ(i)));
-      col[i * 3] = _c.r;
-      col[i * 3 + 1] = _c.g;
-      col[i * 3 + 2] = _c.b;
+    if (paint !== null) {
+      const col = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i++) {
+        _c.setHex(typeof paint === 'number' ? paint : paint(p.getX(i), p.getY(i), p.getZ(i)));
+        col[i * 3] = _c.r;
+        col[i * 3 + 1] = _c.g;
+        col[i * 3 + 2] = _c.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     }
-    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     if (Array.isArray(rot)) _q.setFromEuler(_e.set(rot[0], rot[1], rot[2]));
     else _q.copy(rot);
     if (typeof scale === 'number') _s.setScalar(scale);
     else _s.set(scale[0], scale[1], scale[2]);
     g.applyMatrix4(_m.compose(_v.set(pos[0], pos[1], pos[2]), _q, _s));
-    this.parts.push(g);
+    if (this.frame) g.applyMatrix4(this.frame);
+    if (this.light) {
+      const n = g.attributes.normal;
+      const col = g.attributes.color;
+      for (let i = 0; i < n.count; i++) {
+        _c.fromBufferAttribute(col as THREE.BufferAttribute, i);
+        this.light(_c, _v.fromBufferAttribute(n, i));
+        col.setXYZ(i, _c.r, _c.g, _c.b);
+      }
+    }
+    this.parts.push({ g, tag: this.tag });
     return this;
   }
 
   /** Bends the normals of the last part towards `dir` by `k`, so a spiky tuft shades like part of a soft ball. */
   soften(dir: THREE.Vector3, k: number) {
-    const n = this.parts[this.parts.length - 1].attributes.normal;
+    const n = this.parts[this.parts.length - 1].g.attributes.normal;
     for (let i = 0; i < n.count; i++) {
       _v.set(n.getX(i), n.getY(i), n.getZ(i)).multiplyScalar(1 - k).addScaledVector(dir, k).normalize();
       n.setXYZ(i, _v.x, _v.y, _v.z);
@@ -84,14 +119,54 @@ class Bake {
     return this;
   }
 
-  build(): THREE.BufferGeometry {
-    const g = mergeGeometries(this.parts) as THREE.BufferGeometry;
-    for (const p of this.parts) p.dispose();
+  /** Merges the parts; each of `morphs` becomes a (relative) morph target, influence i moving the parts it touches. */
+  build(morphs: Morph[] = []): THREE.BufferGeometry {
+    const from = new THREE.Vector3();
+    if (morphs.length)
+      for (const { g, tag } of this.parts) {
+        const p = g.attributes.position;
+        g.morphAttributes.position = morphs.map((fn) => {
+          const d = new Float32Array(p.count * 3);
+          for (let i = 0; i < p.count; i++) {
+            from.fromBufferAttribute(p, i);
+            fn(tag, _v.copy(from));
+            d[i * 3] = _v.x - from.x;
+            d[i * 3 + 1] = _v.y - from.y;
+            d[i * 3 + 2] = _v.z - from.z;
+          }
+          return new THREE.BufferAttribute(d, 3);
+        });
+        g.morphTargetsRelative = true;
+      }
+    const g = mergeGeometries(this.parts.map((p) => p.g)) as THREE.BufferGeometry;
+    for (const p of this.parts) p.g.dispose();
+    // mergeGeometries keeps the morph attributes but not this flag: without it the deltas read as absolute positions.
+    g.morphTargetsRelative = morphs.length > 0;
     g.computeBoundingSphere();
+    if (morphs.length) g.boundingSphere!.radius += 0.2;
     g.userData.shared = true;
     return g;
   }
 }
+
+/** Rotates `v` about `pivot` by `q` (in place). */
+function rotAbout(v: THREE.Vector3, pivot: THREE.Vector3, q: THREE.Quaternion) {
+  return v.sub(pivot).applyQuaternion(q).add(pivot);
+}
+
+/** Flattens an eye to 12 % of its height about its own centre: the blink morph target. */
+const blinkMorph: Morph = (tag, v) => {
+  if (tag.eye) v.y = tag.eye.y + (v.y - tag.eye.y) * 0.12;
+};
+
+/**
+ * A morph target that moves nothing. three compiles one shader program per morph target count, so meshes pad their
+ * targets to share programs: lit meshes have 5 targets, unlit faces 4.
+ */
+const still: Morph = () => {};
+
+/** Fewer, chunkier fur clumps on weak devices. */
+const LOW = detectQuality() === 'low';
 
 /** Lazily built, module-wide shared value. */
 function once<T>(make: () => T): () => T {
@@ -126,28 +201,15 @@ function canvasTexture(w: number, h: number, draw: (g: CanvasRenderingContext2D)
 
 // ---- shared materials ----------------------------------------------------------------------------------------------
 
+// Every creature is at most three draw calls: its contact shadow, one soft lit mesh (`vertexColorMaterial`, shared
+// with the library props) and one unlit mesh for eyes, mouths and highlights (`flatVertexColorMaterial`).
+
 /** Soft, matte, lit by the scene's warm lamps: fur, paper, books, snail skin. */
-const matSoft = once(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 }));
+const matSoft = () => vertexColorMaterial(true);
 /** Wet and glossy: the ink slime. */
 const matGloss = once(() => new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 120, specular: 0x4f7f88, emissive: 0x06222a }));
 /** Unlit: eyes, highlights, little mouths, so faces stay crisp in any light. */
-const matFace = once(() => new THREE.MeshBasicMaterial({ vertexColors: true }));
-/** The moth glows from within. */
-const matGlow = once(
-  () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, emissive: 0xc07a18, emissiveIntensity: 0.75 }),
-);
-
-const glowTex = once(() =>
-  canvasTexture(64, 64, (g) => {
-    const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-    r.addColorStop(0, 'rgba(255,255,255,1)');
-    r.addColorStop(0.25, 'rgba(255,255,255,0.55)');
-    r.addColorStop(0.6, 'rgba(255,255,255,0.14)');
-    r.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = r;
-    g.fillRect(0, 0, 64, 64);
-  }),
-);
+const matFace = () => flatVertexColorMaterial();
 
 // A soft contact shadow under every creature: one quad, much cheaper than shadow maps.
 const shadowGeo = once(() => {
@@ -190,13 +252,20 @@ function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Obje
  */
 function eye(bake: Bake, at: Vec, dir: THREE.Vector3, r: number) {
   const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
-  bake.add(new THREE.SphereGeometry(1, 12, 8), 0x110c10, at, q, [r * 0.86, r, r * 0.55]);
-  const glint = (lx: number, ly: number, gr: number) => {
+  const outer = bake.tag;
+  const centre = new THREE.Vector3(at[0], at[1], at[2]);
+  if (bake.frame) centre.applyMatrix4(bake.frame);
+  bake.tag = { ...outer, eye: centre };
+  // Small eyes need fewer segments; they are a few pixels across on a phone.
+  const big = r > 0.09;
+  bake.add(new THREE.SphereGeometry(1, big ? 12 : 9, big ? 8 : 6), 0x110c10, at, q, [r * 0.86, r, r * 0.55]);
+  const glint = (lx: number, ly: number, gr: number, seg: number) => {
     const p = new THREE.Vector3(lx * r, ly * r, r * 0.5).applyQuaternion(q);
-    bake.add(new THREE.SphereGeometry(gr, 6, 4), 0xffffff, [at[0] + p.x, at[1] + p.y, at[2] + p.z], q, [1, 1, 0.5]);
+    bake.add(new THREE.SphereGeometry(gr, seg, 3), 0xffffff, [at[0] + p.x, at[1] + p.y, at[2] + p.z], q, [1, 1, 0.5]);
   };
-  glint(-0.3, 0.38, r * 0.3);
-  glint(0.28, -0.3, r * 0.14);
+  glint(-0.3, 0.38, r * 0.3, 6);
+  glint(0.28, -0.3, r * 0.14, 5);
+  bake.tag = outer;
 }
 
 /** A little arc of a smile in the xy plane, facing +z before `rot`. */
@@ -220,8 +289,8 @@ function squash(body: THREE.Object3D, base = 1) {
   };
 }
 
-/** Eyes that close for a moment every few seconds (scaled flat on y around their own centre). */
-function blinker(eyes: THREE.Object3D) {
+/** Eyes that close for a moment every few seconds: the step returns whether they are closed now. */
+function blinker() {
   let next = 1 + Math.random() * 4;
   let closed = 0;
   return (dt: number) => {
@@ -231,16 +300,20 @@ function blinker(eyes: THREE.Object3D) {
       next = 2.5 + Math.random() * 3.5;
     }
     closed = Math.max(0, closed - dt);
-    eyes.scale.y = closed > 0 ? 0.12 : 1;
+    return closed > 0;
   };
 }
 
 // ---- moth fairy (bat) ---------------------------------------------------------------------------------------------
+// Three draw calls: the shadow, the glowing body and face (unlit, light baked into the vertex colours, blinking by a
+// morph target), and one alpha-blended mesh for the wings, the halo and the banner, textured from a single atlas and
+// animated by morph targets (flap, halo pulse, banner sway).
 
 const MOTH_Y = 1.2;
 
-const wingMat = once(() => {
-  const tex = canvasTexture(256, 256, (g) => {
+/** Atlas (512×256): the right-hand wing pair in x 0–256, the banner in x 288–352 (top half), the halo in x 384–512. */
+const mothTex = once(() =>
+  canvasTexture(512, 256, (g) => {
     // The right-hand wing pair, root at the left middle: a big rounded-pointed fore wing and a round hind wing.
     const fore = new Path2D();
     fore.moveTo(6, 124);
@@ -301,45 +374,10 @@ const wingMat = once(() => {
     star(168, 52, 16);
     star(108, 80, 11);
     star(104, 194, 13);
-  });
-  const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.05 });
-  // One pass, not the back-then-front pair three uses for double-sided transparency (flat wings don't need it).
-  m.forceSinglePass = true;
-  return m;
-});
 
-const WING = 0.95;
-/**
- * Both wings in one geometry (one draw call): the base pose has them swept down, the morph target swept up, and
- * `morphTargetInfluences[0]` flaps them. The straight-line blend shortens the wings a little mid-flap, which reads as
- * the wing turning edge-on.
- */
-const wingGeo = once(() => {
-  const pose = (flap: number) => {
-    const parts: THREE.BufferGeometry[] = [];
-    for (const s of [-1, 1]) {
-      const g = new THREE.PlaneGeometry(WING, WING).translate(WING * 0.48, 0, 0);
-      // Mirror the left wing (the material is double-sided, so the flipped winding doesn't matter).
-      g.applyMatrix4(_m.makeScale(s, 1, 1));
-      // Tilted back to face the camera above, flapping about the root, set at the shoulder.
-      g.applyMatrix4(_m.makeRotationFromEuler(_e.set(-0.55, s * flap, s * 0.12)));
-      g.translate(s * 0.15, 0.08, -0.08);
-      parts.push(g);
-    }
-    return mergeGeometries(parts) as THREE.BufferGeometry;
-  };
-  const g = pose(-0.4);
-  const up = pose(0.6);
-  g.morphAttributes.position = [up.attributes.position];
-  g.morphTargetsRelative = false;
-  g.computeBoundingSphere();
-  g.boundingSphere!.radius += 0.3;
-  g.userData.shared = true;
-  return g;
-});
-
-const bannerMat = once(() => {
-  const tex = canvasTexture(64, 128, (g) => {
+    // The banner, 64×128 at x 288.
+    g.save();
+    g.translate(288, 0);
     const flag = new Path2D();
     flag.moveTo(6, 8);
     flag.lineTo(58, 8);
@@ -368,52 +406,127 @@ const bannerMat = once(() => {
     g.lineTo(36, 66);
     g.lineTo(32, 80);
     g.fill();
-  });
-  return new THREE.MeshStandardMaterial({
-    map: tex,
-    alphaTest: 0.5,
-    side: THREE.DoubleSide,
-    roughness: 0.8,
-    emissive: 0x3a0a04,
-  });
+    g.restore();
+
+    // The halo, 128×128 at x 384.
+    const r = g.createRadialGradient(448, 64, 0, 448, 64, 64);
+    r.addColorStop(0, 'rgba(255,255,255,1)');
+    r.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+    r.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+    r.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = r;
+    g.fillRect(384, 0, 128, 128);
+  }),
+);
+
+const mothFxMat = once(() => {
+  const m = new THREE.MeshBasicMaterial({ map: mothTex(), vertexColors: true, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+  // One pass, not the back-then-front pair three uses for double-sided transparency (flat cards don't need it).
+  m.forceSinglePass = true;
+  return m;
 });
-const bannerGeo = once(() => {
-  const g = new THREE.PlaneGeometry(0.4, 0.8).translate(0, -0.4, 0);
+
+const WING = 0.95;
+/** Camera pitch the halo card faces (it hangs at the moth's centre, like the sprite it replaces). */
+const HALO_TILT = -0.98;
+
+/**
+ * Wings, halo and banner in one geometry, drawn in that order (the halo brightens the wings behind the body, the
+ * banner hangs in front). Morph targets: 0 flaps the wings (base swept down, target swept up; the straight-line
+ * blend shortens them a little mid-flap, which reads as the wing turning edge-on), 1 swells the halo, 2 and 3 swing
+ * the banner about its rod (x and z).
+ */
+const mothFxGeo = once(() => {
+  const parts: THREE.BufferGeometry[] = [];
+  /** `make(target)` builds the part's pose for morph target `target` (-1 = the base); uv is remapped into `rect`. */
+  const part = (make: (target: number) => THREE.BufferGeometry, rect: [number, number, number, number], rgba: [number, number, number, number]) => {
+    const g = make(-1);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, rect[0] + uv.getX(i) * (rect[2] - rect[0]), rect[1] + uv.getY(i) * (rect[3] - rect[1]));
+    const n = g.attributes.position.count;
+    const col = new Float32Array(n * 4);
+    _c.setRGB(rgba[0], rgba[1], rgba[2]);
+    for (let i = 0; i < n; i++) col.set([_c.r, _c.g, _c.b, rgba[3]], i * 4);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 4));
+    const base = g.attributes.position;
+    g.morphAttributes.position = [0, 1, 2, 3].map((t) => {
+      const pose = make(t).attributes.position;
+      const d = new Float32Array(n * 3);
+      for (let i = 0; i < n * 3; i++) d[i] = pose.array[i] - base.array[i];
+      return new THREE.BufferAttribute(d, 3);
+    });
+    g.morphTargetsRelative = true;
+    parts.push(g);
+  };
+  const wings = (t: number) => {
+    const flap = t === 0 ? 0.6 : -0.4;
+    const both: THREE.BufferGeometry[] = [];
+    for (const s of [-1, 1]) {
+      const g = new THREE.PlaneGeometry(WING, WING).translate(WING * 0.48, 0, 0);
+      // Mirror the left wing (the material is double-sided, so the flipped winding doesn't matter).
+      g.applyMatrix4(_m.makeScale(s, 1, 1));
+      // Tilted back to face the camera above, flapping about the root, set at the shoulder.
+      g.applyMatrix4(_m.makeRotationFromEuler(_e.set(-0.55, s * flap, s * 0.12)));
+      g.translate(s * 0.15, 0.08, -0.08);
+      both.push(g);
+    }
+    return mergeGeometries(both) as THREE.BufferGeometry;
+  };
+  part(wings, [0, 0, 0.5, 1], [1, 1, 1, 1]);
+  part(
+    (t) => new THREE.PlaneGeometry(1.35, 1.35).scale(t === 1 ? 1.14 : 1, t === 1 ? 1.14 : 1, 1).rotateX(HALO_TILT),
+    [0.75, 0.5, 1, 1],
+    // The halo is alpha-blended now (it shares the wings' draw call), so a little stronger than the additive sprite.
+    [1, 0.66, 0.22, 0.46],
+  );
+  part(
+    (t) =>
+      new THREE.PlaneGeometry(0.4, 0.8)
+        .translate(0, -0.4, 0)
+        .applyMatrix4(_m.makeRotationFromEuler(_e.set(-0.35 + (t === 2 ? 0.12 : 0), 0, t === 3 ? 0.16 : 0)))
+        .translate(0, -0.2, 0.12),
+    [0.5625, 0.5, 0.6875, 1],
+    // Unlit now: a touch darker than the texture, as the lamps left the lit banner.
+    [0.86, 0.84, 0.84, 1],
+  );
+  const g = mergeGeometries(parts) as THREE.BufferGeometry;
+  for (const p of parts) p.dispose();
+  g.morphTargetsRelative = true;
+  g.computeBoundingSphere();
+  g.boundingSphere!.radius += 0.3;
   g.userData.shared = true;
   return g;
 });
 
-const glowMat = once(
-  () =>
-    new THREE.SpriteMaterial({
-      map: glowTex(),
-      color: 0xffa838,
-      transparent: true,
-      opacity: 0.35,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-);
+/** The body glows from within: lamp light from the front left baked in, plus a warm inner glow. */
+const MOTH_LIGHT = new THREE.Vector3(-0.35, 0.8, 0.5).normalize();
+const MOTH_EMIT = new THREE.Color(0xc07a18).multiplyScalar(0.75);
 
 const mothGeo = once(() => {
   const gold = 0xf2b443;
-  const body = new Bake()
+  const body = new Bake();
+  body.light = (c, n) => {
+    const d = Math.max(0, n.dot(MOTH_LIGHT));
+    c.multiplyScalar(0.5 + 0.62 * d).add(MOTH_EMIT);
+  };
+  body
     .add(new THREE.SphereGeometry(0.3, 16, 12), (_x, y) => lerpHex(0xc8761a, 0xffcc58, (y + 0.3) / 0.6), [0, 0, 0], [0, 0, 0], [1, 0.96, 0.94])
     // Fuzzy collar and a little tail.
     .add(new THREE.SphereGeometry(0.17, 10, 8), 0xe9a53a, [0, -0.2, -0.12], [0.5, 0, 0], [1, 1.3, 1]);
   for (const s of [-1, 1]) {
     const stalk = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.35, 0, -s * 0.38));
     const top = new THREE.Vector3(0, 0.36, 0).applyQuaternion(stalk);
-    body.add(new THREE.CylinderGeometry(0.014, 0.018, 0.36, 5).translate(0, 0.18, 0), 0xb57a2a, [s * 0.09, 0.24, -0.02], stalk);
+    body.add(new THREE.CylinderGeometry(0.014, 0.018, 0.36, 5, 1, true).translate(0, 0.18, 0), 0xb57a2a, [s * 0.09, 0.24, -0.02], stalk);
     // Feathery leaf tips.
     body.add(new THREE.SphereGeometry(1, 8, 6), gold, [s * 0.09 + top.x, 0.24 + top.y + 0.07, -0.02 + top.z], stalk, [0.05, 0.12, 0.025]);
   }
-  const face = new Bake();
+  // The face stays crisp: no baked light.
+  body.light = null;
   const look = new THREE.Vector3(0, 0.35, 1).normalize();
-  for (const s of [-1, 1]) eye(face, [s * 0.125, 0.11, 0.22], new THREE.Vector3(s * 0.3, 0.45, 1).normalize(), 0.105);
-  smile(face, [0, -0.03, 0.28], 0.04, new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), look));
-  for (const s of [-1, 1]) face.add(new THREE.SphereGeometry(0.04, 6, 4), 0xff8f6a, [s * 0.2, 0.0, 0.215], [0, 0, 0], [1, 0.7, 0.4]);
-  return { body: body.build(), face: face.build() };
+  for (const s of [-1, 1]) eye(body, [s * 0.125, 0.11, 0.22], new THREE.Vector3(s * 0.3, 0.45, 1).normalize(), 0.105);
+  smile(body, [0, -0.03, 0.28], 0.04, new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), look));
+  for (const s of [-1, 1]) body.add(new THREE.SphereGeometry(0.04, 6, 4), 0xff8f6a, [s * 0.2, 0.0, 0.215], [0, 0, 0], [1, 0.7, 0.4]);
+  return body.build([blinkMorph, still, still, still]);
 });
 
 export function makeBat(): Model {
@@ -424,21 +537,13 @@ export function makeBat(): Model {
   const fly = new THREE.Group();
   fly.position.y = MOTH_Y;
   body.add(fly);
-  const g = mothGeo();
-  mesh(g.body, matGlow(), fly);
-  const face = mesh(g.face, matFace(), fly);
-  const glow = new THREE.Sprite(glowMat());
-  glow.geometry.userData.shared = true;
-  glow.scale.setScalar(1.35);
-  glow.renderOrder = 4;
-  fly.add(glow);
-  const wings = mesh(wingGeo(), wingMat(), fly);
-  wings.renderOrder = 3;
-  wings.morphTargetInfluences = [0];
-  const banner = mesh(bannerGeo(), bannerMat(), fly, [0, -0.2, 0.12]);
+  const face = mesh(mothGeo(), matFace(), fly);
+  const fx = mesh(mothFxGeo(), mothFxMat(), fly);
+  fx.renderOrder = 3;
+  const fxm = fx.morphTargetInfluences!;
   const phase = Math.random() * 10;
   const sq = squash(fly);
-  const blink = blinker(face);
+  const blink = blinker();
   return {
     root,
     radius: 0.9,
@@ -447,15 +552,16 @@ export function makeBat(): Model {
     hit: sq.hit,
     animate(dt, t) {
       const tt = t + phase;
-      wings.morphTargetInfluences![0] = 0.5 + Math.sin(tt * 14) * 0.5;
+      fxm[0] = 0.5 + Math.sin(tt * 14) * 0.5;
+      fxm[1] = 0.5 + Math.sin(tt * 5) * 0.5;
+      fxm[2] = Math.sin(tt * 3 + 0.8);
+      fxm[3] = Math.sin(tt * 2.3);
       const bob = Math.sin(tt * 3) * 0.12 + Math.sin(tt * 14 + 1.2) * 0.03;
       fly.position.y = MOTH_Y + bob;
       fly.rotation.z = Math.sin(tt * 1.7) * 0.08;
-      banner.rotation.set(-0.35 + Math.sin(tt * 3 + 0.8) * 0.12, 0, Math.sin(tt * 2.3) * 0.16);
-      glow.material.opacity = 0.32 + Math.sin(tt * 5) * 0.05;
       const k = 1 - bob * 0.8;
       shadow.scale.set(1.1 * k, 1, 0.8 * k);
-      blink(dt);
+      face.morphTargetInfluences![0] = blink(dt) ? 1 : 0;
       sq.step(dt);
     },
   };
@@ -473,7 +579,9 @@ function sootFur(bake: Bake, r: number, c: number, seed: number) {
   const rand = rng(seed);
   bake.add(new THREE.SphereGeometry(r * 0.86, 12, 9), SOOT_DARK, [0, c, 0], [0, 0, 0], [1, 1.06, 1]);
   // Chunky clumps rather than fine hair: fewer, wider, five-sided tufts read as fluffy from far away.
-  const n = 84;
+  const n = LOW ? 56 : 84;
+  // Fewer clumps on 'low' are wider, so the ball stays covered.
+  const fat = Math.sqrt(84 / n);
   const dir = new THREE.Vector3();
   const tilt = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
@@ -485,7 +593,7 @@ function sootFur(bake: Bake, r: number, c: number, seed: number) {
     const facing = dir.dot(FACE_DIR);
     if (facing > 0.78 || y < -0.75) continue;
     const len = r * (0.3 + rand() * 0.16) * (facing > 0.5 ? 0.75 : 1);
-    const wide = r * (0.3 + rand() * 0.08);
+    const wide = r * (0.3 + rand() * 0.08) * fat;
     // Tufts droop a little under their own weight and splay at random.
     tilt.copy(dir).addScaledVector(UP, -0.3).add(_v.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(0.5)).normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(UP, tilt);
@@ -565,18 +673,32 @@ function book(bake: Bake, w: number, h: number, d: number, cover: number, pos: V
   }
 }
 
-/** Shared parts of a soot sprite of core radius `r`; `kind` picks its load. */
+/**
+ * Shared parts of a soot sprite of core radius `r`; `kind` picks its load. Fur, feet and load are one lit mesh whose
+ * morph targets step the feet (0, 1), keep them planted through the hop (2) and let the load lag (3 tilt, 4 lift).
+ */
 function sootGeo(r: number, load: 'stack2' | 'stack3' | 'tome') {
   const c = r + 0.18;
   const fur = new Bake();
   sootFur(fur, r, c, load === 'tome' ? 11 : 7);
   const face = sootFace(r, c);
-  const foot = new Bake().add(new THREE.SphereGeometry(r * 0.2, 10, 6), SOOT_DARK, [0, r * 0.1, 0], [0, 0, 0], [1, 0.75, 1.35]).build();
-  const books = new Bake();
+  for (const s of [-1, 1]) {
+    fur.tag = { foot: s };
+    fur.add(new THREE.SphereGeometry(r * 0.2, 10, 6), SOOT_DARK, [s * r * 0.42, r * 0.1, r * 0.3], [0, 0, 0], [1, 0.75, 1.35]);
+  }
   const top = c + r * 0.98;
+  // The load's place: held up behind the head for the tome (tipped back so its cover faces the camera and turned so
+  // the page edges show), balanced on the head for a stack.
+  const frame = new THREE.Matrix4().compose(
+    load === 'tome' ? new THREE.Vector3(0, top - r * 0.3, -r * 0.62) : new THREE.Vector3(0, top - 0.08, -0.04),
+    new THREE.Quaternion().setFromEuler(load === 'tome' ? new THREE.Euler(0.42, -0.42, 0) : new THREE.Euler()),
+    new THREE.Vector3(1, 1, 1),
+  );
+  fur.tag = { load: true };
+  fur.frame = frame;
   if (load === 'tome') {
     // A big red book carried like a backpack, cover facing up and front.
-    book(books, r * 1.6, r * 0.62, r * 1.35, 0x9a2722, [0, 0, 0], [0, 0, 0], true, true);
+    book(fur, r * 1.6, r * 0.62, r * 1.35, 0x9a2722, [0, 0, 0], [0, 0, 0], true, true);
   } else {
     const rand = rng(load === 'stack3' ? 5 : 3);
     // A neat stack: earthy blue and brown below, the red one with the gold emblem on top.
@@ -587,11 +709,22 @@ function sootGeo(r: number, load: 'stack2' | 'stack3' | 'tome') {
       const h = 0.15 + rand() * 0.05;
       const w = r * (1.08 - i * 0.07) + rand() * 0.06;
       // Turned so the cream page edges face the camera and the spine shows at the side.
-      book(books, w, h, w * 0.74, covers[i], [(rand() - 0.5) * 0.06, y + h / 2, (rand() - 0.5) * 0.05], [0, Math.PI * 0.8 + (rand() - 0.5) * 0.35, 0], i === n - 1);
+      book(fur, w, h, w * 0.74, covers[i], [(rand() - 0.5) * 0.06, y + h / 2, (rand() - 0.5) * 0.05], [0, Math.PI * 0.8 + (rand() - 0.5) * 0.35, 0], i === n - 1);
       y += h;
     }
   }
-  return { fur: fur.build(), face, foot, books: books.build(), top };
+  fur.frame = null;
+  const inv = frame.clone().invert();
+  const tilt = new THREE.Matrix4().makeRotationZ(0.07);
+  const lag = frame.clone().multiply(tilt).multiply(inv);
+  const geo = fur.build([
+    (t, v) => void (t.foot === -1 && (v.y += 0.1)),
+    (t, v) => void (t.foot === 1 && (v.y += 0.1)),
+    (t, v) => void (t.foot && (v.y -= 0.06)),
+    (t, v) => void (t.load && v.applyMatrix4(lag)),
+    (t, v) => void (t.load && (v.y += 0.03)),
+  ]);
+  return { fur: geo, face, top };
 }
 
 const sootMeteor2 = once(() => sootGeo(0.62, 'stack2'));
@@ -607,19 +740,12 @@ function makeSoot(zmeu: boolean): Model {
   root.add(body);
   const waddle = new THREE.Group();
   body.add(waddle);
-  mesh(g.fur, matSoft(), waddle);
+  const fur = mesh(g.fur, matSoft(), waddle);
+  const m = fur.morphTargetInfluences!;
   const eyes = mesh(g.face.geo, matFace(), waddle, g.face.at);
-  const feet = [-1, 1].map((s) => mesh(g.foot, matSoft(), body, [s * r * 0.42, 0, r * 0.3]));
-  const load = mesh(g.books, matSoft(), waddle);
-  if (zmeu) {
-    // Held up behind the head, tipped back so its cover faces the camera and turned so the page edges show.
-    load.position.set(0, g.top - r * 0.3, -r * 0.62);
-    load.rotation.set(0.42, -0.42, 0);
-  } else load.position.set(0, g.top - 0.08, -0.04);
-  const loadY = load.position.y;
   const phase = Math.random() * 10;
   const sq = squash(body);
-  const blink = blinker(eyes);
+  const blink = blinker();
   const speed = zmeu ? 5 : 7;
   return {
     root,
@@ -630,13 +756,15 @@ function makeSoot(zmeu: boolean): Model {
     animate(dt, t) {
       const w = (t + phase) * speed;
       // A side-to-side waddle with little hops, feet stepping in turn, the load lagging behind.
+      const hop = Math.abs(Math.cos(w));
       waddle.rotation.z = Math.sin(w) * 0.09;
-      waddle.position.y = Math.abs(Math.cos(w)) * 0.06;
-      feet[0].position.y = Math.max(0, Math.sin(w)) * 0.1;
-      feet[1].position.y = Math.max(0, -Math.sin(w)) * 0.1;
-      load.rotation.z = -Math.sin(w - 0.6) * 0.07;
-      load.position.y = loadY + Math.abs(Math.cos(w - 0.5)) * 0.03;
-      blink(dt);
+      waddle.position.y = hop * 0.06;
+      m[0] = Math.max(0, Math.sin(w));
+      m[1] = Math.max(0, -Math.sin(w));
+      m[2] = hop;
+      m[3] = -Math.sin(w - 0.6);
+      m[4] = Math.abs(Math.cos(w - 0.5));
+      eyes.scale.y = blink(dt) ? 0.12 : 1;
       sq.step(dt);
     },
   };
@@ -651,45 +779,18 @@ export function makeZmeu(): Model {
 }
 
 // ---- scroll snail (ghost) -------------------------------------------------------------------------------------------
+// Three draw calls: the shadow, one lit mesh (foot, head, eye stalks, the scroll shell and the writing on it) and one
+// unlit mesh (face, stalk eyes). Morph targets do the animation: 0 stretches the foot (inchworm), 1 and 2 wobble the
+// stalks, and 3 rocks the shell (lit mesh) or closes the eyes (unlit mesh).
 
-const scrollMat = once(() => {
-  const tex = canvasTexture(
-    256,
-    256,
-    (g) => {
-      g.fillStyle = '#fbf2dc';
-      g.fillRect(0, 0, 256, 256);
-      // Faint paper fibres.
-      const rand = rng(17);
-      for (let i = 0; i < 300; i++) {
-        g.fillStyle = `rgba(150,110,60,${0.03 + rand() * 0.05})`;
-        g.fillRect(rand() * 256, rand() * 256, 2 + rand() * 6, 1);
-      }
-      // Rows of handwriting (only between u 0.12 and 0.88; the rest stays plain for the sheet's edges).
-      g.strokeStyle = 'rgba(78,46,22,0.9)';
-      g.lineWidth = 3.2;
-      g.lineCap = 'round';
-      for (let row = 0; row < 9; row++) {
-        const y = 16 + row * 28;
-        let x = 34 + rand() * 10;
-        while (x < 222) {
-          const len = 10 + rand() * 26;
-          g.beginPath();
-          g.moveTo(x, y);
-          for (let k = 0; k <= len; k += 3) g.lineTo(x + k, y + Math.sin(k * 0.9 + row) * 3 - (rand() < 0.1 ? 5 : 0));
-          g.stroke();
-          x += len + 6 + rand() * 6;
-        }
-      }
-    },
-    true,
-  );
-  return new THREE.MeshStandardMaterial({ map: tex, vertexColors: true, side: THREE.DoubleSide, roughness: 0.92 });
-});
+/** Paper tint (the old scroll texture's ground colour), multiplied into the shell's vertex colours. */
+const PAPER = 0xfbf2dc;
+const INK_LINE = 0x5a381e;
 
 /**
  * A rolled-up sheet of parchment: a thick spiral strip around the x axis (seen from the side it is a spiral), with
- * its free end unrolled down to the ground at the back. Vertex colours shade the inner turns, uv carries the writing.
+ * its free end unrolled down to the ground at the back. Vertex colours shade the inner turns; rows of handwriting
+ * are thin wavy ink strips lying just above the visible part of the outer turn.
  */
 function scrollGeometry(width: number, outerR: number) {
   const turns = 2.6;
@@ -698,7 +799,7 @@ function scrollGeometry(width: number, outerR: number) {
   const tMax = turns * Math.PI * 2;
   const alpha = tMax - Math.PI / 2;
   const pts: { p: THREE.Vector2; n: THREE.Vector2; s: number }[] = [];
-  const steps = Math.round(turns * 36);
+  const steps = Math.round(turns * 30);
   let arc = 0;
   for (let i = 0; i <= steps; i++) {
     const th = (i / steps) * tMax;
@@ -719,23 +820,21 @@ function scrollGeometry(width: number, outerR: number) {
   const pos: number[] = [];
   const nor: number[] = [];
   const col: number[] = [];
-  const uv: number[] = [];
-  const outerCol = new THREE.Color(0xfff8ea);
-  const innerCol = new THREE.Color(0xc8b08c);
-  const edgeCol = new THREE.Color(0xf2e4c4);
-  const quad = (
-    a: Vec, b: Vec, c: Vec, d: Vec, n1: Vec, n2: Vec, color: THREE.Color, uvs: [number, number][],
-  ) => {
-    // a-b at sample i, c-d at sample i+1; two triangles a b c, b d c.
-    for (const [v, n, t] of [[a, n1, uvs[0]], [b, n1, uvs[1]], [c, n2, uvs[2]], [b, n1, uvs[1]], [d, n2, uvs[3]], [c, n2, uvs[2]]] as [Vec, Vec, [number, number]][]) {
+  const paper = new THREE.Color(PAPER);
+  const outerCol = new THREE.Color(0xfff8ea).multiply(paper);
+  const innerCol = new THREE.Color(0xc8b08c).multiply(paper);
+  const edgeCol = new THREE.Color(0xf2e4c4).multiply(paper);
+  const ink = new THREE.Color(INK_LINE);
+  /** Two triangles a b c, b d c (a-b at sample i, c-d at sample i+1), front side along the normal. */
+  const quad = (a: Vec, b: Vec, c: Vec, d: Vec, n1: Vec, n2: Vec, color: THREE.Color) => {
+    for (const [v, n] of [[a, n1], [b, n1], [c, n2], [b, n1], [d, n2], [c, n2]] as [Vec, Vec][]) {
       pos.push(...v);
       nor.push(...n);
       col.push(color.r, color.g, color.b);
-      uv.push(...t);
     }
   };
   const w = width / 2;
-  const plain: [number, number][] = [[0.02, 0.02], [0.02, 0.02], [0.02, 0.02], [0.02, 0.02]];
+  const sOuter = pts[steps].s;
   for (let i = 0; i < pts.length - 1; i++) {
     const A = pts[i];
     const B = pts[i + 1];
@@ -746,46 +845,113 @@ function scrollGeometry(width: number, outerR: number) {
     const at = (v: Vec, x: number): Vec => [x, v[1], v[2]];
     const nA: Vec = [0, A.n.x, A.n.y];
     const nB: Vec = [0, B.n.x, B.n.y];
-    const last = B.s > pts[steps].s - 4.2;
-    // Inner turns are shaded darker (they sit in the roll's shadow); the outer turn is bright and written on.
-    const shade = innerCol.clone().lerp(outerCol, Math.min(1, (A.s / pts[steps].s) ** 2.2));
-    const vA = A.s / 1.2;
-    const vB = B.s / 1.2;
-    quad(at(oA, -w), at(oA, w), at(oB, -w), at(oB, w), nA, nB, last ? outerCol : shade, [[0.06, vA], [0.94, vA], [0.06, vB], [0.94, vB]]);
-    quad(at(iA, w), at(iA, -w), at(iB, w), at(iB, -w), [0, -A.n.x, -A.n.y], [0, -B.n.x, -B.n.y], innerCol, plain);
+    const last = B.s > sOuter - 4.2;
+    // Inner turns are shaded darker (they sit in the roll's shadow); the outer turn is bright.
+    const shade = innerCol.clone().lerp(outerCol, Math.min(1, (A.s / sOuter) ** 2.2));
+    quad(at(oA, -w), at(oA, w), at(oB, -w), at(oB, w), nA, nB, last ? outerCol : shade);
+    quad(at(iA, w), at(iA, -w), at(iB, w), at(iB, -w), [0, -A.n.x, -A.n.y], [0, -B.n.x, -B.n.y], innerCol);
     for (const s of [-1, 1]) {
       const x = s * w;
-      const ec = edgeCol.clone().lerp(innerCol, 0.6 * (1 - A.s / B.s) + (1 - Math.min(1, A.s / pts[steps].s)) * 0.35);
-      quad(at(oA, x), at(iA, x), at(oB, x), at(iB, x), [s, 0, 0], [s, 0, 0], ec, plain);
+      const ec = edgeCol.clone().lerp(innerCol, 0.6 * (1 - A.s / B.s) + (1 - Math.min(1, A.s / sOuter)) * 0.35);
+      // Winding flipped on the -x edge so both edges face outwards.
+      if (s > 0) quad(at(oA, x), at(iA, x), at(oB, x), at(iB, x), [s, 0, 0], [s, 0, 0], ec);
+      else quad(at(iA, x), at(oA, x), at(iB, x), at(oB, x), [s, 0, 0], [s, 0, 0], ec);
     }
   }
+
+  // Handwriting on the outer turn, where the camera (above, in front, the snail turned three-quarters) sees it.
+  const sample = (s: number) => {
+    let i = 0;
+    while (i < steps - 1 && pts[i + 1].s < s) i++;
+    const k = (s - pts[i].s) / (pts[i + 1].s - pts[i].s);
+    return {
+      p: pts[i].p.clone().lerp(pts[i + 1].p, k),
+      n: pts[i].n.clone().lerp(pts[i + 1].n, k).normalize(),
+    };
+  };
+  const rand = rng(17);
+  // The old texture's layout: 256 px tiles repeating every 1.2 along the arc, writing between u 0.12 and 0.88.
+  const xOf = (px: number) => -w + ((px / 256 - 0.06) / 0.88) * width;
+  const sOf = (k: number, py: number) => 1.2 * (k + 1 - py / 256);
+  const hw = 0.0085;
+  const lift = 0.004;
+  const sStart = pts[Math.round(steps * (1 - 1 / turns))].s;
+  for (let k = Math.floor(sStart / 1.2); 1.2 * k < sOuter; k++)
+    for (let row = 0; row < 9; row++) {
+      const py = 16 + row * 28;
+      const s0 = sOf(k, py);
+      if (s0 < sStart || s0 > sOuter - 0.05) continue;
+      const nn = sample(s0).n;
+      if (0.82 * nn.x + 0.42 * nn.y < -0.12) continue;
+      let x = 34 + rand() * 10;
+      while (x < 222) {
+        const len = 10 + rand() * 26;
+        const segs = len > 22 ? 3 : 2;
+        let prev: { x: number; a: THREE.Vector2; b: THREE.Vector2; n: THREE.Vector2 } | null = null;
+        for (let j = 0; j <= segs; j++) {
+          const kx = (len * j) / segs;
+          const s = sOf(k, py + Math.sin(kx * 0.9 + row) * 3);
+          const lo = sample(s - hw);
+          const hi = sample(s + hw);
+          const cur = {
+            x: xOf(x + kx),
+            a: lo.p.addScaledVector(lo.n, lift),
+            b: hi.p.addScaledVector(hi.n, lift),
+            n: lo.n.add(hi.n).normalize(),
+          };
+          if (prev) {
+            const n1: Vec = [0, prev.n.x, prev.n.y];
+            const n2: Vec = [0, cur.n.x, cur.n.y];
+            // a = (x0, s - hw), b = (x1, s - hw), c = (x0, s + hw), d = (x1, s + hw): faces outwards like the paper.
+            pos.push(prev.x, prev.a.x, prev.a.y, cur.x, cur.a.x, cur.a.y, prev.x, prev.b.x, prev.b.y);
+            pos.push(cur.x, cur.a.x, cur.a.y, cur.x, cur.b.x, cur.b.y, prev.x, prev.b.x, prev.b.y);
+            nor.push(...n1, ...n2, ...n1, ...n2, ...n2, ...n1);
+            for (let v = 0; v < 6; v++) col.push(ink.r, ink.g, ink.b);
+          }
+          prev = cur;
+        }
+        x += len + 6 + rand() * 6;
+      }
+    }
+
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.computeBoundingSphere();
-  g.userData.shared = true;
   return g;
 }
 
 const SNAIL_SKIN = 0xf1dcbc;
 const HEAD = new THREE.Vector3(0, 0.62, 0.8);
 const SHELL_Y = 0.86;
+/** Where the eye stalks sit on the head (they wobble about it). */
+const STALKS = new THREE.Vector3(0, 0.9, 0.82);
+const SHELL_AT = new THREE.Vector3(0, SHELL_Y, -0.22);
+
+const qStalkZ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.12);
+const qStalkX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.1);
+const qShell = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.04);
+const snailStretch: Morph = (t, v) => void (t.crawl && (v.z *= 1.05));
+const snailStalkZ: Morph = (t, v) => void (t.stalk && rotAbout(v, STALKS, qStalkZ));
+const snailStalkX: Morph = (t, v) => void (t.stalk && rotAbout(v, STALKS, qStalkX));
+const snailShell: Morph = (t, v) => void (t.shell && rotAbout(v, SHELL_AT, qShell).setY(v.y + 0.015));
 
 const snailGeo = once(() => {
   const skin = (_x: number, y: number) => lerpHex(0x9a7552, SNAIL_SKIN, (y + 0.4) * 1.6);
-  const body = new Bake()
+  const soft = new Bake();
+  soft.tag = { crawl: true };
+  soft
     // A long low foot, a neck rising to a round head at the front.
-    .add(new THREE.SphereGeometry(1, 16, 10), skin, [0, 0.2, 0.05], [0, 0, 0], [0.42, 0.24, 1.0])
-    .add(new THREE.SphereGeometry(1, 14, 10), skin, [0, 0.38, 0.58], [0.5, 0, 0], [0.34, 0.38, 0.36])
-    .add(new THREE.SphereGeometry(0.36, 16, 12), SNAIL_SKIN, [0, 0.62, 0.8], [0, 0, 0], [1.05, 0.95, 0.95]);
+    .add(new THREE.SphereGeometry(1, 14, 9), skin, [0, 0.2, 0.05], [0, 0, 0], [0.42, 0.24, 1.0])
+    .add(new THREE.SphereGeometry(1, 12, 8), skin, [0, 0.38, 0.58], [0.5, 0, 0], [0.34, 0.38, 0.36])
+    .add(new THREE.SphereGeometry(0.36, 14, 10), SNAIL_SKIN, [0, 0.62, 0.8], [0, 0, 0], [1.05, 0.95, 0.95]);
   // A row of soft brown knobs along the foot's rim, like the reference's chunky little feet.
   for (const s of [-1, 1])
     for (const z of [-0.6, -0.15, 0.3, 0.68])
-      body.add(new THREE.SphereGeometry(0.1, 7, 5), 0x6e5038, [s * 0.34, 0.05, z], [0, 0, 0], [1.2, 0.6, 1.3]);
+      soft.add(new THREE.SphereGeometry(0.1, 6, 4), 0x6e5038, [s * 0.34, 0.05, z], [0, 0, 0], [1.2, 0.6, 1.3]);
   // The face sits high on the front of the head, turned up towards the camera.
   const face = new Bake();
+  face.tag = { crawl: true };
   const onHead = (x: number, y: number, z: number, out = 0): [Vec, THREE.Quaternion] => {
     const d = new THREE.Vector3(x, y, z).normalize();
     const p = d.clone().multiplyScalar(0.355 + out).add(HEAD);
@@ -795,28 +961,29 @@ const snailGeo = once(() => {
     const [ep, eq] = onHead(s * 0.36, 0.55, 0.78);
     eye(face, ep, new THREE.Vector3(0, 0, 1).applyQuaternion(eq), 0.05);
     const [cp, cq] = onHead(s * 0.62, 0.36, 0.72);
-    face.add(new THREE.SphereGeometry(0.055, 8, 6), 0xf09a88, cp, cq, [1, 0.62, 0.3]);
+    face.add(new THREE.SphereGeometry(0.055, 6, 4), 0xf09a88, cp, cq, [1, 0.62, 0.3]);
   }
   const [mp, mq] = onHead(0, 0.36, 1, 0.005);
   smile(face, mp, 0.045, mq);
-  // Stalk eyes: built upright at the origin, the group sits on top of the head.
-  const stalks = new Bake();
-  const pupils = new Bake();
+  // Stalk eyes: built upright at the origin, placed on top of the head.
+  const frame = new THREE.Matrix4().makeTranslation(STALKS.x, STALKS.y, STALKS.z);
+  soft.tag = face.tag = { crawl: true, stalk: true };
+  soft.frame = face.frame = frame;
   const look = new THREE.Vector3(0, 0.5, 1).normalize();
   for (const s of [-1, 1]) {
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.05, 0, -s * 0.38));
     const tip = new THREE.Vector3(0, 0.42, 0).applyQuaternion(q).add(new THREE.Vector3(s * 0.1, 0, 0));
-    stalks.add(new THREE.CylinderGeometry(0.035, 0.055, 0.42, 7).translate(0, 0.21, 0), SNAIL_SKIN, [s * 0.1, 0, 0], q);
-    stalks.add(new THREE.SphereGeometry(0.11, 10, 8), 0xfaf3e6, [tip.x, tip.y, tip.z]);
+    soft.add(new THREE.CylinderGeometry(0.035, 0.055, 0.42, 7, 1, true).translate(0, 0.21, 0), SNAIL_SKIN, [s * 0.1, 0, 0], q);
+    soft.add(new THREE.SphereGeometry(0.11, 9, 6), 0xfaf3e6, [tip.x, tip.y, tip.z]);
     const p = look.clone().multiplyScalar(0.085).add(tip);
-    eye(pupils, [p.x, p.y, p.z], look, 0.07);
+    eye(face, [p.x, p.y, p.z], look, 0.07);
   }
+  soft.frame = face.frame = null;
+  soft.tag = { shell: true };
+  soft.add(scrollGeometry(0.8, 0.64), null, [SHELL_AT.x, SHELL_AT.y, SHELL_AT.z]);
   return {
-    body: body.build(),
-    face: face.build(),
-    stalks: stalks.build(),
-    pupils: pupils.build(),
-    shell: scrollGeometry(0.8, 0.64),
+    soft: soft.build([snailStretch, snailStalkZ, snailStalkX, snailShell, still]),
+    face: face.build([snailStretch, snailStalkZ, snailStalkX, blinkMorph]),
   };
 });
 
@@ -826,26 +993,13 @@ export function makeGhost(): Model {
   const body = new THREE.Group();
   root.add(body);
   const g = snailGeo();
-  const crawl = new THREE.Group();
-  body.add(crawl);
   // Seen three-quarters on, like the reference, so the scroll's spiral end shows.
   body.rotation.y = 0.75;
-  mesh(g.body, matSoft(), crawl);
-  const head = new THREE.Group();
-  crawl.add(head);
-  mesh(g.face, matFace(), head);
-  const stalks = new THREE.Group();
-  stalks.position.set(0, 0.9, 0.82);
-  head.add(stalks);
-  mesh(g.stalks, matSoft(), stalks);
-  const pupils = new THREE.Group();
-  pupils.position.y = 0.4;
-  stalks.add(pupils);
-  mesh(g.pupils, matFace(), pupils).position.y = -0.4;
-  const shell = mesh(g.shell, scrollMat(), body, [0, SHELL_Y, -0.22]);
+  const soft = mesh(g.soft, matSoft(), body).morphTargetInfluences!;
+  const face = mesh(g.face, matFace(), body).morphTargetInfluences!;
   const phase = Math.random() * 10;
   const sq = squash(body);
-  const blink = blinker(pupils);
+  const blink = blinker();
   return {
     root,
     radius: 1.1,
@@ -855,12 +1009,11 @@ export function makeGhost(): Model {
     animate(dt, t) {
       const tt = t + phase;
       // A slow inchworm stretch of the foot, the head nodding along and the stalks wobbling a beat behind.
-      crawl.scale.z = 1 + Math.sin(tt * 2.4) * 0.05;
-      stalks.rotation.z = Math.sin(tt * 1.9) * 0.12;
-      stalks.rotation.x = Math.sin(tt * 2.4 - 1.2) * 0.1;
-      shell.rotation.z = Math.sin(tt * 2.4 + 0.5) * 0.04;
-      shell.position.y = SHELL_Y + Math.sin(tt * 2.4 + 0.3) * 0.015;
-      blink(dt);
+      soft[0] = face[0] = Math.sin(tt * 2.4);
+      soft[1] = face[1] = Math.sin(tt * 1.9);
+      soft[2] = face[2] = Math.sin(tt * 2.4 - 1.2);
+      soft[3] = Math.sin(tt * 2.4 + 0.4);
+      face[3] = blink(dt) ? 1 : 0;
       sq.step(dt);
     },
   };
@@ -942,7 +1095,7 @@ export function makeRock(): Model {
   const phase = Math.random() * 10;
   const sq = squash(body, 0.95);
   body.scale.setScalar(0.95);
-  const blink = blinker(eyes);
+  const blink = blinker();
   return {
     root,
     radius: 0.75,
@@ -956,7 +1109,7 @@ export function makeRock(): Model {
       jiggle.scale.set(1 + k, 1 - k * 1.4, 1 + k);
       jiggle.rotation.z = Math.sin(tt * 2.2) * 0.06;
       jiggle.rotation.x = Math.sin(tt * 2.9) * 0.04;
-      blink(dt);
+      eyes.scale.y = blink(dt) ? 0.12 : 1;
       sq.step(dt);
     },
   };
