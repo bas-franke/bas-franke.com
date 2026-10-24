@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type GameServerMsg, type PlayerInfo, type RoomView, type Team, colorHex } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
@@ -6,6 +6,7 @@ import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
 import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
+import { loadLook } from '../games/rockets/look';
 import { gameModules } from '../games/registry';
 import type { ClientContext, GameClient } from '../games/types';
 import { RoomSocket } from '../net/socket';
@@ -13,6 +14,9 @@ import { GameCover } from '../ui/GameCover';
 import { GameDetails } from '../ui/GameDetails';
 import { Header } from '../ui/Header';
 import { MapPicker } from './MapPicker';
+
+/** The robot customiser brings three.js along, so it loads on first open. */
+const CustomizeDialog = lazy(() => import('../games/rockets/CustomizeDialog').then((m) => ({ default: m.CustomizeDialog })));
 
 interface ChatLine {
   id: number;
@@ -83,6 +87,8 @@ export function RoomPage() {
           setYou(msg.you);
           roomRef.current = msg.room;
           setRoom(msg.room);
+          // Everyone sees our robot as we customised it.
+          if (msg.room.game === 'rockets') s.send({ t: 'setLook', look: loadLook() });
           break;
         case 'room': {
           const was = roomRef.current?.state;
@@ -290,6 +296,7 @@ function WaitingRoom({
   const playing = room.state === 'playing';
   const [copied, setCopied] = useState(false);
   const [details, setDetails] = useState(false);
+  const [customize, setCustomize] = useState(false);
   const shots = SCREENSHOTS[room.game];
 
   const share = async () => {
@@ -408,7 +415,18 @@ function WaitingRoom({
               </ul>
             )}
             {/* Room for per-player actions next to the line-up (the robot customiser button goes here). */}
-            <div className="player-actions" />
+            <div className="player-actions">
+              {room.game === 'rockets' && (
+                <button type="button" className="btn small" data-testid="customize" onClick={() => setCustomize(true)}>
+                  Customize robot
+                </button>
+              )}
+            </div>
+            {customize && (
+              <Suspense fallback={null}>
+                <CustomizeDialog onChange={(look) => socket.send({ t: 'setLook', look })} onClose={() => setCustomize(false)} />
+              </Suspense>
+            )}
 
             <div className="host-controls">
               {isHost ? (

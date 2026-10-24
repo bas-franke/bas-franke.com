@@ -7,6 +7,7 @@ import type { GameMode, GameServerMsg, PlayerInfo, RoomView, Team } from '@share
 import { RK } from '@shared/rockets/constants';
 import type { ItemKind, ItemSpawn } from '@shared/rockets/items';
 import type { MapData } from '@shared/rockets/map';
+import { DEFAULT_LOOK, type Look } from '@shared/rockets/cosmetics';
 import { CTF, ELIM, MODES, TEAMS, teamBases } from '@shared/rockets/modes';
 import { type Body, eyePosition, splashKnock, stepBody } from '@shared/rockets/physics';
 import type { FlagSnap, PlayerSnap, RocketsEvent, RocketsInput, RocketsServerMsg, RocketsSnapshot, RoundSnap, ScoreRow } from '@shared/rockets/protocol';
@@ -20,7 +21,9 @@ import { TouchInput } from '../../engine/touch';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { type ArenaView, addArenaLights, buildArena } from './arena';
 import { buildFlag, buildFlagStand, buildReturnRing, updateFlagTime } from './flags';
-import { type DroidPiece, WARHEAD_REST_Z, buildDroid, buildDroidPieces, buildLauncher, buildPickup, buildRocket, updateDroidPieces, warmupModels } from './models';
+import { type CharacterPiece, type CharacterState, animateCharacter, buildCharacter, buildCharacterPieces, characterKey, updateCharacterPieces, warmupCharacters } from './character';
+import { loadLook } from './look';
+import { WARHEAD_REST_Z, buildLauncher, buildPickup, buildRocket, warmupModels } from './models';
 import { QUALITY, type Quality, applyInput, applyQuality, settings, verticalFov } from './settings';
 
 export interface FeedLine {
@@ -83,12 +86,12 @@ export interface RocketsHudState {
 
 interface Remote {
   group: THREE.Group;
-  bobNode: THREE.Object3D | null;
-  torso: THREE.Object3D | null;
-  head: THREE.Object3D | null;
-  aim: THREE.Object3D | null;
-  recoil: THREE.Object3D | null;
-  thrust: THREE.Object3D | null;
+  /** The robot's look, the team colour that replaces its body colour (team modes), and characterKey of both. */
+  look: Look;
+  tint: number | undefined;
+  lookKey: string;
+  /** Reused every frame for animateCharacter. */
+  pose: CharacterState;
   /** Fire kick, 1 at a shot and decaying. */
   kick: number;
   /** Ground flag and vertical speed from the latest snapshot, for landing dust. */
@@ -107,7 +110,6 @@ interface Remote {
   labelH: number;
   color: number;
   name: string;
-  bob: number;
   /** Frame number this remote was last in a snapshot sample. */
   seen: number;
 }
@@ -147,7 +149,7 @@ interface PredictedKick {
 
 /** A destroyed droid's pieces, flying for a couple of seconds. */
 interface Wreck {
-  pieces: DroidPiece[];
+  pieces: CharacterPiece[];
   floorY: number;
   life: number;
 }
@@ -482,8 +484,11 @@ export class RocketsClient implements GameClient {
   onRoom(room: RoomView) {
     for (const [id, r] of this.remotes) {
       const p = room.players.find((q) => q.id === id);
-      // A team switch repaints the droid and its label: rebuild it.
-      if (!p || r.name !== p.name || r.color !== p.color || r.team !== this.teamOfInfo(p)) this.removeRemote(id);
+      // A team switch repaints the robot and its label, a new look reshapes it: rebuild it.
+      const team = this.teamOfInfo(p);
+      if (!p || r.name !== p.name || r.color !== p.color || r.team !== team || r.lookKey !== characterKey(p.look ?? DEFAULT_LOOK, team !== undefined ? TEAMS[team].color : undefined)) {
+        this.removeRemote(id);
+      }
     }
     const myTeam = this.teamOf(this.ctx.you);
     if (myTeam !== this.hud.get().myTeam) this.hud.set({ myTeam });
@@ -929,7 +934,7 @@ export class RocketsClient implements GameClient {
     }
     this.buildFlags();
     this.applyQualityNow(settings.get().quality);
-    engine.warmup(warmupModels());
+    engine.warmup([...warmupModels(), ...warmupCharacters(loadLook())]);
   }
 
   /** CTF: a stand and a flag at each base (built once the map and mode are known; removed in other modes). */
@@ -1030,7 +1035,9 @@ export class RocketsClient implements GameClient {
     if (!info || !this.engine) return null;
     const team = this.teamOfInfo(info);
     const paint = team !== undefined ? TEAMS[team].color : info.color;
-    const group = this.makeRemoteModel(info, paint);
+    const look = info.look ?? DEFAULT_LOOK;
+    const tint = team !== undefined ? TEAMS[team].color : undefined;
+    const group = this.makeRemoteModel(look, tint);
     const label = makeLabel(info.name, colorHex(paint));
     label.position.y = RK.height + 0.2;
     group.add(label);
@@ -1048,12 +1055,10 @@ export class RocketsClient implements GameClient {
     this.engine.scene.add(group);
     r = {
       group,
-      bobNode: group.getObjectByName('bob') ?? null,
-      torso: group.getObjectByName('torso') ?? null,
-      head: group.getObjectByName('head') ?? null,
-      aim: group.getObjectByName('aim') ?? null,
-      recoil: group.getObjectByName('recoil') ?? null,
-      thrust: group.getObjectByName('thrust') ?? null,
+      look,
+      tint,
+      lookKey: characterKey(look, tint),
+      pose: { speed: 0, vx: 0, vz: 0, yaw: 0, onGround: true, vy: 0, pitch: 0, t: 0, dt: 0, firing: 0 },
       kick: 0,
       ground: true,
       vy: 0,
@@ -1066,7 +1071,6 @@ export class RocketsClient implements GameClient {
       labelH: label.scale.y,
       color: info.color,
       name: info.name,
-      bob: Math.random() * 6,
       seen: 0,
     };
     this.remotes.set(id, r);
@@ -1085,16 +1089,12 @@ export class RocketsClient implements GameClient {
     this.remotes.delete(id);
   }
 
-  /**
-   * The 3D model for another player, painted `paint` (team colour in team modes). The seam for other character
-   * models: whatever this returns is driven by animateRemote through the named hooks it finds (see remote()).
-   */
-  private makeRemoteModel(info: PlayerInfo, paint: number): THREE.Group {
-    void info;
-    return buildDroid(paint);
+  /** The robot for another player in their look; in team modes `tint` (the team colour) replaces the body colour. */
+  private makeRemoteModel(look: Look, tint: number | undefined): THREE.Group {
+    return buildCharacter(look, tint);
   }
 
-  /** Blows a remote droid apart where it stands; the pieces fly away from the killer. */
+  /** Blows a remote robot apart where it stands; the pieces fly away from the killer. */
   private wreck(r: Remote, by?: string) {
     const engine = this.engine;
     if (!engine) return;
@@ -1106,7 +1106,7 @@ export class RocketsClient implements GameClient {
       const len = push.length();
       if (len > 0.01) push.multiplyScalar(4 / len);
     }
-    const pieces = buildDroidPieces(r.paint, r.group, push);
+    const pieces = buildCharacterPieces(r.look, r.tint, r.group, push);
     for (const p of pieces) engine.scene.add(p.object);
     this.wrecks.push({ pieces, floorY: at.y, life: 2.5 });
   }
@@ -1263,7 +1263,7 @@ export class RocketsClient implements GameClient {
       const w = this.wrecks[i];
       w.life -= dt;
       if (w.life > 0) {
-        updateDroidPieces(w.pieces, dt, w.floorY);
+        updateCharacterPieces(w.pieces, dt, w.floorY);
         continue;
       }
       for (const piece of w.pieces) this.engine?.scene.remove(piece.object);
@@ -1759,29 +1759,21 @@ export class RocketsClient implements GameClient {
     }
   }
 
-  /** Poses a remote model between two snapshots: hover bob, lean, aim, recoil and thruster (the droid's hooks). */
+  /** Poses a remote robot between two snapshots: walk cycle, air pose, landing, aim pitch and the shot kick. */
   private animateRemote(r: Remote, pa: PlayerSnap, pb: PlayerSnap, alpha: number, yaw: number, dt: number) {
-    r.bob += dt * 3;
-    if (r.bobNode) r.bobNode.position.y = Math.sin(r.bob) * 0.04;
-    // Lean the torso into the movement direction a little; the gun arm and head still aim where they look.
-    const vx = pb.v[0];
-    const vz = pb.v[2];
-    const fwd = -Math.sin(yaw) * vx - Math.cos(yaw) * vz;
-    const side = Math.cos(yaw) * vx - Math.sin(yaw) * vz;
-    const leanX = clamp(-fwd * 0.02, -0.25, 0.25);
-    if (r.torso) {
-      r.torso.rotation.x = leanX;
-      r.torso.rotation.z = clamp(-side * 0.02, -0.25, 0.25);
-    }
-    const pitch = pa.pt + (pb.pt - pa.pt) * alpha;
-    if (r.aim) r.aim.rotation.x = pitch - (r.torso ? leanX : 0);
-    if (r.head) r.head.rotation.x = pitch * 0.5;
     r.kick = Math.max(0, r.kick - dt * 4);
-    if (r.recoil) {
-      r.recoil.position.z = r.kick * 0.12;
-      r.recoil.rotation.x = r.kick * 0.3;
-    }
-    if (r.thrust) r.thrust.scale.set(1, (pb.g ? 0.7 : 1.3) + Math.sin(r.bob * 9) * 0.12, 1);
+    const s = r.pose;
+    s.vx = pa.v[0] + (pb.v[0] - pa.v[0]) * alpha;
+    s.vz = pa.v[2] + (pb.v[2] - pa.v[2]) * alpha;
+    s.vy = pb.v[1];
+    s.speed = Math.hypot(s.vx, s.vz);
+    s.yaw = yaw;
+    s.onGround = pb.g === 1;
+    s.pitch = pa.pt + (pb.pt - pa.pt) * alpha;
+    s.t += dt;
+    s.dt = dt;
+    s.firing = r.kick;
+    animateCharacter(r.group, s);
   }
 
   private updateRockets(dt: number, now: number) {

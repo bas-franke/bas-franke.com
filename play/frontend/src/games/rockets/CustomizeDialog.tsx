@@ -106,13 +106,22 @@ export function CustomizeDialog({ onChange, onClose }: { onChange: (look: Look) 
 
 /** A small three.js view of the robot turning on a plinth; drag to spin it. Its renderer is disposed on unmount. */
 function RobotPreview({ look }: { look: Look }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const view = useRef<{ setLook: (look: Look) => void } | null>(null);
 
   useEffect(() => {
-    const el = canvas.current;
-    if (!el) return;
-    const renderer = new THREE.WebGLRenderer({ canvas: el, antialias: true, alpha: true });
+    const holder = box.current;
+    if (!holder) return;
+    // A fresh canvas per mount: the old one's context is released on unmount and cannot be reused.
+    const el = document.createElement('canvas');
+    holder.appendChild(el);
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas: el, antialias: true, alpha: true });
+    } catch {
+      el.remove();
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -123,8 +132,8 @@ function RobotPreview({ look }: { look: Look }) {
     sun.position.set(-2, 4, -3);
     scene.add(sun);
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 30);
-    camera.position.set(0, 1.2, -4.6);
-    camera.lookAt(0, 0.95, 0);
+    camera.position.set(0, 1.3, -5.8);
+    camera.lookAt(0, 0.92, -0.2);
     const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.8, 0.06, 32), new THREE.MeshBasicMaterial({ color: 0x1a2236 }));
     plinth.position.y = -0.03;
     scene.add(plinth);
@@ -190,6 +199,7 @@ function RobotPreview({ look }: { look: Look }) {
       (plinth.material as THREE.Material).dispose();
       renderer.dispose();
       renderer.forceContextLoss();
+      el.remove();
       view.current = null;
     };
     // The renderer lives as long as the dialog; look changes go through view.current.
@@ -200,5 +210,5 @@ function RobotPreview({ look }: { look: Look }) {
     view.current?.setLook(look);
   }, [look]);
 
-  return <canvas ref={canvas} className="rk-preview" aria-label="Robot preview (drag to turn)" />;
+  return <div ref={box} className="rk-preview" role="img" aria-label="Robot preview (drag to turn)" />;
 }

@@ -303,7 +303,7 @@ const HAND_L: V3 = [-0.38, 0.71, -0.01];
 const TWIST = -0.5;
 /** The launcher's size in the robot's hands, its grip origin in the hold (model space), and where the left hand goes (gun space). */
 const GUN_SCALE = 0.8;
-const GUN_AT: V3 = [0.22, 1.27, -0.47];
+const GUN_AT: V3 = [0.24, 1.18, -0.47];
 const LEFT_GRIP: V3 = [0, -0.15, -0.2];
 /** How far the left shoulder reaches forward while holding the gun. */
 const REACH = 0.09;
@@ -350,8 +350,8 @@ function hipParts(k: Kit) {
 function thighParts(k: Kit, s: number) {
   const x = s * LEG_X;
   k.add(cyl(0.095, 0.08, 0.42, 8), SUIT, [x, 0.68, 0.01]);
-  k.add(block(0.24, 0.3, 0.27, 0.06, [1.05, 1], [0.85, 0.9]), BODY, [x + s * 0.01, 0.69, -0.01]);
-  k.add(block(0.03, 0.2, 0.15, 0.012), TRIM, [x + s * 0.137, 0.7, -0.01]);
+  k.add(block(0.26, 0.3, 0.28, 0.06, [1.05, 1], [0.85, 0.9]), BODY, [x + s * 0.01, 0.69, -0.01]);
+  k.add(block(0.03, 0.2, 0.15, 0.012), TRIM, [x + s * 0.147, 0.7, -0.01]);
   k.add(box(0.07, 0.09, 0.012), JOINT, [x + s * 0.01, 0.63, -0.143], undefined, undefined, false);
 }
 
@@ -359,9 +359,9 @@ function thighParts(k: Kit, s: number) {
 function shinParts(k: Kit, s: number) {
   const x = s * LEG_X;
   k.add(cyl(0.075, 0.065, 0.36, 8), SUIT, [x, 0.3, 0.02]);
-  k.add(block(0.21, 0.28, 0.22, 0.05, [1.05, 1.1], [0.85, 0.85]), BODY, [x, 0.33, -0.01]);
-  slit(k, vec([x, 0.33, -0.128]), new THREE.Quaternion(), [0.024, 0.12, 0.01], [0, 0, -1]);
-  k.add(block(0.025, 0.2, 0.13, 0.01), TRIM, [x + s * 0.106, 0.32, 0]);
+  k.add(block(0.23, 0.28, 0.24, 0.05, [1.05, 1.1], [0.85, 0.85]), BODY, [x, 0.33, -0.01]);
+  slit(k, vec([x, 0.33, -0.138]), new THREE.Quaternion(), [0.024, 0.12, 0.01], [0, 0, -1]);
+  k.add(block(0.025, 0.2, 0.13, 0.01), TRIM, [x + s * 0.116, 0.32, 0]);
   k.add(cyl(0.075, 0.075, 0.17, 10), JOINT, [x, 0.49, 0.02], ALONG_X);
   k.add(block(0.17, 0.15, 0.09, 0.035, [0.85, 1]), BODY, [x, 0.51, -0.1], [0.15, 0, 0]);
 }
@@ -369,13 +369,13 @@ function shinParts(k: Kit, s: number) {
 /** Boot: orange upper on a black sole, cream toe cap, an ankle disc with a cyan ring. */
 function bootParts(k: Kit, s: number) {
   const x = s * LEG_X;
-  k.add(block(0.24, 0.05, 0.42, 0.015), JOINT, [x, 0.025, -0.05]);
-  k.add(block(0.23, 0.13, 0.38, 0.045, [0.9, 0.75]), BODY, [x, 0.11, -0.04]);
-  k.add(block(0.2, 0.09, 0.14, 0.035, [0.8, 0.65]), TRIM, [x, 0.1, -0.18], [-0.12, 0, 0]);
-  k.add(block(0.2, 0.09, 0.08, 0.02), JOINT, [x, 0.07, 0.14]);
-  k.add(block(0.21, 0.07, 0.24, 0.025), BODY, [x, 0.2, 0]);
-  k.add(cyl(0.06, 0.06, 0.03, 12), JOINT, [x + s * 0.12, 0.15, 0], ALONG_X);
-  k.glow(new THREE.TorusGeometry(0.04, 0.009, 4, 12), VISOR, [x + s * 0.137, 0.15, 0], FACE_X);
+  k.add(block(0.27, 0.05, 0.46, 0.015), JOINT, [x, 0.025, -0.06]);
+  k.add(block(0.26, 0.15, 0.42, 0.05, [0.9, 0.75]), BODY, [x, 0.12, -0.05]);
+  k.add(block(0.23, 0.1, 0.15, 0.04, [0.8, 0.65]), TRIM, [x, 0.11, -0.2], [-0.12, 0, 0]);
+  k.add(block(0.22, 0.1, 0.08, 0.02), JOINT, [x, 0.075, 0.15]);
+  k.add(block(0.23, 0.07, 0.25, 0.025), BODY, [x, 0.21, 0]);
+  k.add(cyl(0.065, 0.065, 0.03, 12), JOINT, [x + s * 0.13, 0.16, 0], ALONG_X);
+  k.glow(new THREE.TorusGeometry(0.044, 0.01, 4, 12), VISOR, [x + s * 0.147, 0.16, 0], FACE_X);
 }
 
 /** Torso: segmented dark abdomen, the big orange chest with a cream centre plate and cyan lights, a backpack. */
@@ -408,14 +408,14 @@ function padParts(k: Kit, kind: Shoulders) {
       continue;
     }
     // Round (the concept) and spike: a big bevelled pad with a cream cap, a second layer and a cyan slit.
-    const at = vec([s * 0.41, 1.41, 0]);
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * 0.2));
-    k.add(block(0.27, 0.2, 0.34, 0.08, [0.72, 0.8]), BODY, tuple(at), q);
-    k.add(block(0.17, 0.05, 0.25, 0.022), TRIM, local(at, q, [0, 0.105, 0]), q);
-    k.add(block(0.22, 0.1, 0.3, 0.04, 1, 0.85), BODY, [s * 0.47, 1.28, 0], [0, 0, -s * 0.35]);
-    slit(k, vec(local(at, q, [s * 0.134, -0.01, -0.03])), q, [0.01, 0.085, 0.022], [s, 0, 0]);
+    const at = vec([s * 0.4, 1.42, 0]);
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * 0.14));
+    k.add(block(0.27, 0.22, 0.34, 0.045, [0.85, 0.9]), BODY, tuple(at), q);
+    k.add(block(0.15, 0.04, 0.24, 0.014), TRIM, local(at, q, [s * 0.005, 0.104, 0]), q);
+    k.add(block(0.23, 0.1, 0.3, 0.035, 1, 0.85), BODY, [s * 0.43, 1.28, 0], [0, 0, -s * 0.22]);
+    slit(k, vec(local(at, q, [s * 0.136, -0.015, -0.03])), q, [0.01, 0.09, 0.022], [s, 0, 0]);
     if (kind === 'spike') {
-      for (const z of [-0.1, 0, 0.1]) k.add(new THREE.ConeGeometry(0.035, 0.17, 6), TRIM, local(at, q, [s * 0.02, 0.19, z]), [0, 0, -s * 0.45]);
+      for (const z of [-0.075, 0.075]) k.add(new THREE.ConeGeometry(0.055, 0.16, 6), TRIM, local(at, q, [s * 0.03, 0.18, z]), [0, 0, -s * 0.35]);
     }
   }
 }
@@ -793,7 +793,7 @@ export function animateCharacter(obj: THREE.Object3D, s: CharacterState) {
     const lift = Math.max(0, i === 0 ? cp * dir : -cp * dir);
     const thigh = k * (1 - r.air) + ph * swing + tuck * (i === 0 ? 1.05 : 0.45);
     const knee = -2 * k * (1 - r.air) - lift * (0.5 + 0.7 * run) * amp - tuck * (i === 0 ? 1.5 : 0.9) - r.air * 0.15;
-    leg.rotation.set(thigh, 0, (i === 0 ? -1 : 1) * (0.04 + r.air * 0.08));
+    leg.rotation.set(thigh, 0, (i === 0 ? -1 : 1) * (0.06 + r.air * 0.08));
     shin.rotation.set(knee, 0, 0);
     foot.rotation.set(-(thigh + knee) * (1 - r.air) + r.air * 0.35, 0, 0);
   }
@@ -802,7 +802,8 @@ export function animateCharacter(obj: THREE.Object3D, s: CharacterState) {
   b.hips.rotation.set(0, r.legYaw, -sp * 0.04 * amp);
 
   // Upper body: the hold twist, turned back from the legs so it faces ahead, a run lean and a little sway.
-  const lean = -0.18 * run * amp * dir - 0.08 * r.air + breathe * 0.015 - squash * 0.15;
+  // Looking up or down bends the chest along a little, so the long launcher does not swing across the face.
+  const lean = -0.18 * run * amp * dir - 0.08 * r.air + breathe * 0.015 - squash * 0.15 + clamp(s.pitch, -1, 1) * 0.3;
   b.torso.rotation.set(lean, TWIST - r.legYaw - (s.firing ?? 0) * 0.06, sp * 0.03 * amp);
   b.head.rotation.set(clamp(s.pitch * 0.6, -0.55, 0.55) - lean, -TWIST, 0);
   b.aim.rotation.set(s.pitch - lean + cp * 0.03 * amp, -TWIST, 0);
