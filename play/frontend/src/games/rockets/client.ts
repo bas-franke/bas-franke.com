@@ -7,7 +7,7 @@ import type { GameServerMsg, RoomView } from '@shared/protocol';
 import { RK } from '@shared/rockets/constants';
 import type { ItemKind, ItemSpawn } from '@shared/rockets/items';
 import type { MapData } from '@shared/rockets/map';
-import { type Body, eyePosition, stepBody } from '@shared/rockets/physics';
+import { type Body, eyePosition, splashKnock, stepBody } from '@shared/rockets/physics';
 import type { PlayerSnap, RocketsEvent, RocketsInput, RocketsServerMsg, RocketsSnapshot, ScoreRow } from '@shared/rockets/protocol';
 import { sfx } from '../../engine/audio';
 import { Effects, LightPool, TRAIL_STEP, nearestSurface } from '../../engine/effects';
@@ -105,6 +105,19 @@ interface RocketView {
   trail: number;
   /** Own rocket that reached a wall on our side: parked and hidden until the server's boom arrives. */
   stopped: boolean;
+  /** Our own shot's position stepped once per command (the server's timeline), for predicting its hit. */
+  sim?: Vec3;
+  /** The per-command simulation hit the map (its knockback, if any, is predicted). */
+  hit?: boolean;
+  /** Set once removed, so a predicted knockback knows the server has resolved this rocket. */
+  gone?: boolean;
+}
+
+/** A self-knockback we predicted from our own rocket, applied before command `seq` until the server's boom arrives. */
+interface PredictedKick {
+  view: RocketView;
+  seq: number;
+  v: Vec3;
 }
 
 /** A destroyed droid's pieces, flying for a couple of seconds. */
@@ -188,6 +201,9 @@ function markerTexture() {
 const scratchV = new THREE.Vector3();
 const scratchEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const forward = new THREE.Vector3();
+const scratchTo = v3();
+/** Reload in commands; the server counts the same for humans. */
+const FIRE_STEPS = Math.round(RK.fireInterval / RK.dt);
 
 export class RocketsClient implements GameClient {
   readonly hud = createStore<RocketsHudState>({
@@ -241,10 +257,12 @@ export class RocketsClient implements GameClient {
     seq: 0,
     pending: [] as RocketsInput[],
     dead: true,
-    nextFire: 0,
+    /** First command seq we may fire on again. */
+    fireSeq: 0,
     smooth: v3(),
     deathPos: null as Vec3 | null,
     respawnAt: 0,
+    kicks: [] as PredictedKick[],
   };
   private acc = 0;
   private outbox: RocketsInput[] = [];
@@ -427,9 +445,11 @@ export class RocketsClient implements GameClient {
       const h = this.hud.get();
       if (hp !== h.hp || armor !== h.armor) this.hud.set({ hp, armor });
     }
-    for (let i = 0; i < this.packs.length; i++) this.packs[i].visible = s.pk.includes(i);
-    const it = s.it ?? [];
-    for (let i = 0; i < this.items.length; i++) this.items[i].visible = it.includes(i);
+    // Both lists are only sent when they changed.
+    const pk = s.pk;
+    if (pk) for (let i = 0; i < this.packs.length; i++) this.packs[i].visible = pk.includes(i);
+    const it = s.it;
+    if (it) for (let i = 0; i < this.items.length; i++) this.items[i].visible = it.includes(i);
     const now = performance.now() / 1000;
     // Where on our clock this snapshot's moment falls, so remote rockets extrapolate from the right time.
     const at = this.snaps.toLocal(s.tick * RK.dt);
@@ -477,6 +497,7 @@ export class RocketsClient implements GameClient {
     if (me.dead) {
       me.deathPos ??= { ...me.body.pos };
       me.pending = [];
+      me.kicks = [];
       return;
     }
     if (wasDead) {
@@ -490,18 +511,30 @@ export class RocketsClient implements GameClient {
       me.smooth = v3();
       me.deathPos = null;
       me.pending = [];
+      me.kicks = [];
+      // The server allows the first shot 0.3 s after spawning (counted from about this command).
+      me.fireSeq = (own.seq ?? me.seq) + Math.round(0.3 / RK.dt);
       return;
     }
     const before = { ...me.body.pos };
     me.body.pos = fromTuple(own.p);
     me.body.vel = fromTuple(own.v);
     me.body.onGround = own.g === 1;
-    if (own.seq !== undefined) me.pending = me.pending.filter((i) => i.seq > own.seq!);
-    for (const i of me.pending) stepBody(me.body, i, this.map);
+    const acked = own.seq ?? 0;
+    if (own.seq !== undefined) me.pending = me.pending.filter((i) => i.seq > acked);
+    // Predicted rocket jumps: once the server's explosion has arrived (the boom event comes just before this
+    // snapshot) its state includes the real kick. Until then, replay ours just before the command it happened on
+    // (rockets step before the body), or up front if the server is already past that command without a boom.
+    me.kicks = me.kicks.filter((k) => !k.view.gone);
+    for (const k of me.kicks) if (k.seq <= acked) this.addKick(k.v);
+    for (const i of me.pending) {
+      for (const k of me.kicks) if (k.seq === i.seq) this.addKick(k.v);
+      stepBody(me.body, i, this.map);
+    }
     const err = vsub(before, me.body.pos);
     const len = Math.hypot(err.x, err.y, err.z);
-    // Corrections are eased in visually (the in-between-ticks position shifts with the body, the eased offset takes up
-    // the difference). Knockback is not predicted, so a rocket jump at high ping is metres off; only teleports snap.
+    // Corrections are eased in visually over about 150 ms (the in-between-ticks position shifts with the body, the
+    // eased offset takes up the difference), including knockback we could not predict; only teleports snap.
     if (len < 8) {
       me.smooth = vadd(me.smooth, err);
       me.prevPos = vsub(me.prevPos, err);
@@ -824,7 +857,35 @@ export class RocketsClient implements GameClient {
     this.engine?.scene.remove(view.group);
     if (view.light) this.rocketLights?.give(view.light);
     sfx.rocketEnd(view.group.id);
+    view.gone = true;
     this.rockets.delete(id);
+  }
+
+  private addKick(v: Vec3) {
+    const b = this.me.body;
+    b.vel.x += v.x;
+    b.vel.y += v.y;
+    b.vel.z += v.z;
+    if (v.y > 0) b.onGround = false;
+  }
+
+  /**
+   * Our rocket hit the map: hide it until the server's explosion and, if we are in the blast, take the knockback now
+   * instead of a round trip later. Same formula as the server (shared splashKnock).
+   */
+  private localHit(view: RocketView, at: Vec3, seq: number) {
+    view.hit = true;
+    view.stopped = true;
+    view.group.visible = false;
+    if (view.light) view.light.intensity = 0;
+    const { map, me } = this;
+    if (!map || me.dead) return;
+    const k = splashKnock(at, me.body.pos, map.boxes, false);
+    if (!k) return;
+    const s = RK.selfKnockbackScale;
+    const v = v3(k.x * s, k.y * s, k.z * s);
+    this.addKick(v);
+    me.kicks.push({ view, seq, v });
   }
 
   // ---- per frame -----------------------------------------------------------------------------------------------
@@ -935,9 +996,30 @@ export class RocketsClient implements GameClient {
       s: hold ? 0 : clamp(input.actionAxis('left', 'right') + touch.s, -1, 1),
       jump: !hold && (input.held('jump') || touch.down('Space')),
       fire: !hold && (input.fire() || touch.fire()) && !this.hud.get().ended,
-      yaw: me.yaw,
-      pitch: me.pitch,
+      // Quantised before prediction so the server steps with exactly these numbers, and the upload stays short.
+      yaw: Math.round(me.yaw * 1e4) / 1e4,
+      pitch: Math.round(me.pitch * 1e4) / 1e4,
     };
+    // Our rockets fly one step per command, before the body moves, exactly like on the server (applyInput), so a
+    // hit and its knockback land on the same command there and here.
+    for (const view of this.rockets.values()) {
+      const p = view.sim;
+      if (!p || view.hit) continue;
+      const v = view.vel;
+      scratchTo.x = p.x + v.x * RK.dt;
+      scratchTo.y = p.y + v.y * RK.dt;
+      scratchTo.z = p.z + v.z * RK.dt;
+      const hit = segmentBoxes(p, scratchTo, map.boxes);
+      if (hit) {
+        // Like the server: the blast sits just off the surface.
+        const t = hit.t * RK.dt;
+        this.localHit(view, v3(p.x + v.x * t + hit.normal.x * 0.05, p.y + v.y * t + hit.normal.y * 0.05, p.z + v.z * t + hit.normal.z * 0.05), inp.seq);
+      } else {
+        p.x = scratchTo.x;
+        p.y = scratchTo.y;
+        p.z = scratchTo.z;
+      }
+    }
     if (!me.dead) {
       const wasGround = me.body.onGround;
       const fallSpeed = -me.body.vel.y;
@@ -954,11 +1036,15 @@ export class RocketsClient implements GameClient {
       if (!wasGround && me.body.onGround && fallSpeed > 3) this.land.v -= 0.25 + Math.min(1, (fallSpeed - 3) / 16) * 1.1;
       if (!wasGround && me.body.onGround && fallSpeed > 4) sfx.play('land', 0, clamp((fallSpeed - 4) / 14, 0, 1));
       if (!wasGround && me.body.onGround && fallSpeed > 7) this.effects?.dust(me.body.pos, (fallSpeed - 7) / 15);
-      if (inp.fire && now >= me.nextFire) {
-        me.nextFire = now + RK.fireInterval;
-        const dir = lookDir(me.yaw, me.pitch);
-        const origin = vadd(eyePosition(me.body.pos), vscale(dir, RK.muzzleOffset));
+      // Reload counted in commands, as the server does for humans, so we fire on the same command it does.
+      if (inp.fire && inp.seq >= me.fireSeq) {
+        me.fireSeq = inp.seq + FIRE_STEPS;
+        const dir = lookDir(inp.yaw, inp.pitch);
+        const eye = eyePosition(me.body.pos);
+        let origin = vadd(eye, vscale(dir, RK.muzzleOffset));
+        if (segmentBoxes(eye, origin, map.boxes)) origin = vadd(eye, vscale(dir, 0.05));
         const view = this.spawnRocket(`${this.ctx.you}:${inp.seq}`, origin, vscale(dir, RK.rocketSpeed), false, true);
+        view.sim = { ...origin };
         this.fireFeel(view, dir);
         sfx.play('fire');
       }
@@ -999,9 +1085,9 @@ export class RocketsClient implements GameClient {
     // Hit-stop: camera and viewmodel motion crawl for a few frames.
     this.freeze = Math.max(0, this.freeze - dt);
     const fdt = this.freeze > 0 ? dt * 0.12 : dt;
-    me.smooth.x = damp(me.smooth.x, 0, 14, dt);
-    me.smooth.y = damp(me.smooth.y, 0, 14, dt);
-    me.smooth.z = damp(me.smooth.z, 0, 14, dt);
+    me.smooth.x = damp(me.smooth.x, 0, 20, dt);
+    me.smooth.y = damp(me.smooth.y, 0, 20, dt);
+    me.smooth.z = damp(me.smooth.z, 0, 20, dt);
 
     if (me.dead && !this.wasDead) {
       this.deathT = 0;

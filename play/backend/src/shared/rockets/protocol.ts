@@ -51,10 +51,10 @@ export interface RocketsSnapshot {
   left: number;
   pl: PlayerSnap[];
   rk: RocketSnap[];
-  /** Indices of health packs currently available. */
-  pk: number[];
-  /** Indices into the init message's `items` currently available. */
-  it: number[];
+  /** Indices of health packs currently available. Only sent when it changed since this player's last snapshot. */
+  pk?: number[];
+  /** Indices into the init message's `items` currently available. Only sent when it changed. */
+  it?: number[];
   /** Seconds of start countdown left (only while > 0). */
   cd?: number;
   /** 1 during overtime. */
