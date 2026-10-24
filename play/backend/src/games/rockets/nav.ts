@@ -4,7 +4,7 @@
 // when the real movement code (stepBody) lands a simulated bot on the target, so bots never trust a link they cannot
 // fly. findPath runs A* on a binary heap and pulls the path straight where a player can walk the shortcut.
 
-import { type AABB, hdist, type Vec3, v3 } from '../../shared/math.js';
+import { type AABB, hdist, type Vec3, v3, wrapAngle, yawForward, yawRight } from '../../shared/math.js';
 import { RK } from '../../shared/rockets/constants.js';
 import type { MapBox, MapData } from '../../shared/rockets/map.js';
 import { type Body, playerAABB, stepBody } from '../../shared/rockets/physics.js';
@@ -59,6 +59,8 @@ const SMOOTH_SIDE = 0.3;
 const H_WEIGHT = 0.6;
 /** Walks keep this far outside a pad's radius (the physics fires it when the feet centre is inside). */
 const PAD_MARGIN = 0.8;
+/** Turn rate (rad/s) of the bot the flight checks simulate; a normal bot turns 5, an easy one 2.5. */
+const SIM_TURN = 4;
 
 // ---- box lookup ------------------------------------------------------------------------------------------------
 
@@ -185,6 +187,22 @@ function awayFromEdge(w: World, x: number, y: number, z: number): Vec3 {
   return v3(x, y, z);
 }
 
+/** Can a running jump cover d metres while climbing `rise` (negative: dropping) at all? A cheap pre-check. */
+function jumpReaches(rise: number, d: number): boolean {
+  const disc = RK.jumpSpeed * RK.jumpSpeed - 2 * RK.gravity * rise;
+  if (disc < 0) return false;
+  const t = (RK.jumpSpeed + Math.sqrt(disc)) / RK.gravity;
+  return t * RK.groundSpeed >= d - 0.8;
+}
+
+/** Is there flat ground half a metre around pos on all four sides? Jumps only aim at landings that forgive a miss. */
+function roomy(w: World, pos: Vec3): boolean {
+  for (const [ox, oz] of [[0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]]) {
+    if (groundAt(w.map, pos.x + ox, pos.z + oz, pos.y + RK.stepHeight) !== pos.y) return false;
+  }
+  return true;
+}
+
 /** Is pos within `margin` of the rim of a pad at its height? Jumps keep clear: a landing that drifts would fire it. */
 function nearPad(map: MapData, pos: Vec3, margin: number): boolean {
   return map.pads.some((p) => Math.abs(pos.y - p.pos.y) < 0.35 && hdist(pos, p.pos) <= p.radius + RK.halfWidth + margin);
@@ -253,6 +271,22 @@ function overVoid(w: World, a: Vec3, b: Vec3): boolean {
   return false;
 }
 
+/** Does the ground continue at the target's level as far as a full-speed drop could carry a player past it? */
+function overshootRisk(w: World, a: Vec3, b: Vec3): boolean {
+  const d = hdist(a, b) || 1;
+  const dx = (b.x - a.x) / d;
+  const dz = (b.z - a.z) / d;
+  const carry = RK.groundSpeed * Math.sqrt((2 * (a.y - b.y)) / RK.gravity) + 1;
+  // Along the line and a little to either side of it: a drain right beside the line counts too.
+  for (const side of [0, -0.7, 0.7]) {
+    for (let t = 0.5; t <= carry; t += 0.5) {
+      const g = topBelow(w, b.x + dx * t - dz * side, b.z + dz * t + dx * side, b.y + RK.stepHeight + 1e-3);
+      if (g === null || b.y - g > RK.stepHeight + 1e-3) return true;
+    }
+  }
+  return false;
+}
+
 /** The last point on the flat run from a toward b before the ground ends, drops or rises past a step. */
 function takeoffPoint(w: World, a: Vec3, b: Vec3): Vec3 {
   const d = hdist(a, b);
@@ -297,28 +331,61 @@ interface Flight {
 
 /**
  * Plays a bot heading for `target` exactly like a bot would (forward held, facing the target) with the real movement
- * code: it runs, jumps by the shouldJump rule when `takeoff` is given (else it starts on the pad `pad`), steers in
+ * code: it runs, jumps by the shouldJump rule when `takeoff` is given (else it starts on the pad `pad`, or with `drop`
+ * it just walks off a ledge), steers in
  * the air and stops at the first landing. Null when it never takes off, fires another pad or falls out of the map.
  */
-function fly(sub: MapData, start: Vec3, vel: Vec3, target: Vec3 | null, takeoff: Vec3 | null, pad: number): Flight | null {
+function fly(sub: MapData, start: Vec3, vel: Vec3, target: Vec3 | null, takeoff: Vec3 | null, pad: number, drop = false): Flight | null {
   const body: Body = { pos: v3(start.x, start.y, start.z), vel: v3(vel.x, vel.y, vel.z), onGround: true };
   if (!target) return coast(sub, body, pad);
-  const input = { f: 1, s: 0, jump: false, yaw: yawTo(start, target) };
+  // Facing the way it already moves (or the target, from a standstill).
+  const input = { f: 1, s: 0, jump: false, yaw: Math.hypot(vel.x, vel.z) > 0.5 ? Math.atan2(-vel.x, -vel.z) : yawTo(start, target) };
   const reach = takeoff ? hdist(takeoff, target) + 0.1 : 0;
   let launched = takeoff === null;
   let airborne = false;
-  for (let k = 0; k < 60 * 4; k++) {
+  let landed: Flight | null = null;
+  let settleUntil = 0;
+  for (let k = 0; k < 60 * 5; k++) {
     // On the ground run at the target; in the air steer out the error of the predicted landing, like airSteer says.
+    // Bots turn at a limited rate and press digital keys relative to where they look, so the flight does too.
     const dir = body.onGround ? v3(target.x - body.pos.x, 0, target.z - body.pos.z) : airSteer(body.pos, body.vel, target);
-    input.f = dir && Math.hypot(dir.x, dir.z) > 0.05 ? 1 : 0;
-    if (input.f) input.yaw = Math.atan2(-dir!.x, -dir!.z);
+    input.f = 0;
+    input.s = 0;
+    const l = dir ? Math.hypot(dir.x, dir.z) : 0;
+    if (l > 0.05) {
+      const want = Math.atan2(-dir!.x, -dir!.z);
+      const turn = wrapAngle(want - input.yaw);
+      input.yaw += Math.abs(turn) <= SIM_TURN * RK.dt ? turn : Math.sign(turn) * SIM_TURN * RK.dt;
+      const fwd = yawForward(input.yaw);
+      const right = yawRight(input.yaw);
+      const f = (dir!.x * fwd.x + dir!.z * fwd.z) / l;
+      const sd = (dir!.x * right.x + dir!.z * right.z) / l;
+      input.f = Math.abs(f) < 0.3 ? 0 : Math.sign(f);
+      input.s = Math.abs(sd) < 0.3 ? 0 : Math.sign(sd);
+    }
     input.jump = !launched && body.onGround && hdist(body.pos, target) <= reach;
     const r = stepBody(body, input, sub);
     if (input.jump) launched = true;
     if (r.pad >= 0 && r.pad !== pad) return null;
-    if (!body.onGround) airborne = true;
-    else if (launched && airborne) return { pos: v3(body.pos.x, body.pos.y, body.pos.z), time: (k + 1) * RK.dt, pad: -1 };
-    if (!launched && k > 90) return null;
+    if (landed) {
+      // After touching down the bot still slides on its flight speed: it must come to rest on that level.
+      if (k >= settleUntil) return body.pos.y > landed.pos.y - 0.3 ? landed : null;
+      continue;
+    }
+    // A walk off a ledge only counts as in the air once it has fallen (the physics flickers at an edge).
+    if (!body.onGround && (!drop || body.pos.y < start.y - RK.stepHeight)) airborne = true;
+    else if (
+      (launched && airborne && body.onGround) ||
+      // Walking off a ledge: the drop may also be a staircase down, which ends on the target without any flight.
+      (drop && body.onGround && hdist(body.pos, target) < 0.5 && Math.abs(body.pos.y - target.y) < 0.3)
+    ) {
+      landed = { pos: v3(body.pos.x, body.pos.y, body.pos.z), time: (k + 1) * RK.dt, pad: -1 };
+      settleUntil = k + 30;
+      continue;
+    }
+    if ((!launched || drop) && !airborne && k > 90) return null;
+    // Falling past the target's level: it can only come down somewhere lower.
+    if (airborne && body.vel.y < 0 && body.pos.y < target.y - 0.5) return null;
     if (body.pos.y < sub.killY) return null;
   }
   return null;
@@ -534,8 +601,10 @@ export function buildNavGraph(map: MapData): NavGraph {
   const padOf = new Map<number, number>();
   padNode.forEach((id, i) => padOf.set(id, i));
   const padReach = Math.max(0, ...map.pads.map((p) => p.radius + PAD_MARGIN));
+  const landings: [NavNode, Flight][] = [];
   for (const a of nodes) {
     if (padOf.has(a.id)) continue; // standing there fires the pad
+    let near: MapData | null = null;
     // Pad nodes sit in a hole in the grid (no nodes on the rim), so links into them reach further.
     forNear(index, a.pos.x, a.pos.z, SPACING * 1.5 + padReach, (id) => {
       const b = nodes[id];
@@ -545,9 +614,41 @@ export function buildNavGraph(map: MapData): NavGraph {
       if (d > SPACING * 1.5 + (pad === undefined ? 0 : map.pads[pad].radius + PAD_MARGIN) || b.pos.y - a.pos.y > SPACING * 1.5) return;
       const rules = pad === undefined ? LINK : { ...LINK, pad };
       if (!walkable(w, a.pos.x, a.pos.y, a.pos.z, b.pos.x, b.pos.y, b.pos.z, rules)) return;
-      const fall = a.pos.y - b.pos.y > RK.stepHeight + 1e-3 && overVoid(w, a.pos, b.pos);
+      const drops = a.pos.y - b.pos.y > RK.stepHeight + 1e-3;
+      // Walking off at full speed carries a player well past the foot of the ledge: fly it to be sure it lands.
+      // Only drops with something worse than the target's level just past it need that.
+      if (drops && overshootRisk(w, a.pos, b.pos)) {
+        near ??= localMap(w, a.pos.x, a.pos.z, SPACING * 1.5 + RK.groundSpeed * Math.sqrt((2 * MAX_DROP) / RK.gravity) + 1);
+        // Bots arrive at full speed, often still moving along the previous link: try straight on and 45 degrees off.
+        const heading = Math.atan2(b.pos.x - a.pos.x, b.pos.z - a.pos.z);
+        let first: Flight | null = null;
+        let ok = true;
+        for (const off of [0, -Math.PI / 4, Math.PI / 4]) {
+          const run = v3(Math.sin(heading + off) * RK.groundSpeed, 0, Math.cos(heading + off) * RK.groundSpeed);
+          const f = fly(near, a.pos, run, b.pos, null, pad ?? -1, true);
+          if (off === 0) first = f;
+          if (!f || Math.abs(f.pos.y - b.pos.y) > 0.3 || (hdist(f.pos, b.pos) > 1.2 && !walkable(w, f.pos.x, f.pos.y, f.pos.z, b.pos.x, b.pos.y, b.pos.z, SHORTCUT))) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok) {
+          // Lands somewhere else but safely: remember where, the link may still go there (see below).
+          if (first) landings.push([a, first]);
+          return;
+        }
+      }
+      const fall = drops && overVoid(w, a.pos, b.pos);
       a.links.push({ to: b.id, cost: d + Math.max(0, b.pos.y - a.pos.y) * 2 + (fall ? VOID_COST : 0) });
     });
+  }
+
+  // Drops that came down somewhere other than their target link to where they really land, unless the node
+  // already has a way down there.
+  for (const [a, f] of landings) {
+    const n = nearestNode(graph, f.pos, 0.3);
+    if (!n || n === a || hdist(n.pos, f.pos) > 1.2 || a.links.some((l) => l.to === n.id) || padOf.has(n.id)) continue;
+    a.links.push({ to: n.id, cost: hdist(a.pos, n.pos) + (overVoid(w, a.pos, n.pos) ? VOID_COST : 0) });
   }
 
   // Pads: try the natural landing and, for pads that throw straight up, any higher ground a steering bot reaches.
@@ -612,21 +713,29 @@ export function buildNavGraph(map: MapData): NavGraph {
 function addJumpLinks(graph: NavGraph, w: World) {
   const { nodes, index } = graph;
   const s = scratchFor(graph);
+  // Where a jump may come down: off pads and with room around it. Worked out once per node.
+  const landable = nodes.map((b) => b.reach === undefined && !nearPad(w.map, b.pos, 1.2) && roomy(w, b.pos));
   for (const a of nodes) {
     if (a.reach !== undefined || a.links.length >= 8 || nearPad(w.map, a.pos, 0.8)) continue;
-    // Walking costs from a, so jumps that only save a couple of steps are skipped.
-    search(graph, a.id, -1, JUMP_RANGE * 2 + 8);
-    const run = s.run;
-    const candidates: NavNode[] = [];
+    let candidates: NavNode[] = [];
     forNear(index!, a.pos.x, a.pos.z, JUMP_RANGE, (id) => {
       const b = nodes[id];
       const d = hdist(a.pos, b.pos);
-      if (b === a || b.reach !== undefined || d < 1 || d > JUMP_RANGE || nearPad(w.map, b.pos, 1.2)) return;
       const rise = b.pos.y - a.pos.y;
-      if (rise > JUMP_RISE || -rise > MAX_DROP) return;
-      if (s.closed[id] === run && s.g[id] <= d * 2 + 4) return;
-      candidates.push(b);
+      if (b !== a && landable[id] && d >= 1 && d <= JUMP_RANGE && rise <= JUMP_RISE && -rise <= MAX_DROP) candidates.push(b);
     });
+    if (!candidates.length) continue;
+    // Walking costs from a, so jumps that only save a couple of steps are skipped.
+    let far = 0;
+    for (const b of candidates) far = Math.max(far, hdist(a.pos, b.pos));
+    search(graph, a.id, -1, far * 2 + 4);
+    const run = s.run;
+    candidates = candidates.filter((b) => !(s.closed[b.id] === run && s.g[b.id] <= hdist(a.pos, b.pos) * 2 + 4));
+    if (!candidates.length) continue;
+    // A neighbour already jumping across to the same spot makes another jump redundant.
+    const covered = (b: NavNode) =>
+      a.links.some((l) => !l.jump && nodes[l.to].links.some((j) => j.jump && hdist(nodes[j.to].pos, b.pos) < 2.2 && Math.abs(nodes[j.to].pos.y - b.pos.y) < 0.6));
+    candidates = candidates.filter((b) => !covered(b) && jumpReaches(b.pos.y - a.pos.y, hdist(a.pos, b.pos)));
     if (!candidates.length) continue;
     candidates.sort((p, q) => hdist(a.pos, p.pos) - hdist(a.pos, q.pos));
     const sub = localMap(w, a.pos.x, a.pos.z, JUMP_RANGE + 3);
@@ -644,6 +753,18 @@ function addJumpLinks(graph: NavGraph, w: World) {
       if (!landedOn(slow, b.pos, 1.2)) continue;
       const fast = fly(sub, a.pos, v3(dx * RK.groundSpeed, 0, dz * RK.groundSpeed), b.pos, takeoff, -1);
       if (!landedOn(fast, b.pos, 1.2)) continue;
+      // Bots reach the node from the side as often as not: half a metre off the line, running in at 35 degrees.
+      let sideways = true;
+      for (const side of [-1, 1]) {
+        const sx = a.pos.x - dz * 0.5 * side;
+        const sz = a.pos.z + dx * 0.5 * side;
+        if (groundAt(w.map, sx, sz, a.pos.y + 0.1) !== a.pos.y) continue;
+        const c = Math.cos(0.6);
+        const sn = Math.sin(0.6) * side;
+        const run = v3((dx * c - dz * sn) * RK.groundSpeed, 0, (dz * c + dx * sn) * RK.groundSpeed);
+        if (!landedOn(fly(sub, v3(sx, a.pos.y, sz), run, b.pos, takeoff, -1), b.pos, 1.2)) sideways = false;
+      }
+      if (!sideways) continue;
       chosen.push(b);
       const risky = overVoid(w, a.pos, b.pos);
       a.links.push({ to: b.id, cost: d + Math.max(0, b.pos.y - a.pos.y) * 2 + JUMP_COST + (risky ? VOID_COST : 0), jump: true, takeoff });
@@ -696,9 +817,13 @@ export function linkBetween(graph: NavGraph, from: number, to: number): NavLink 
   return graph.nodes[from]?.links.find((l) => l.to === to);
 }
 
-/** On a jump link: jump now? True once a grounded bot is at least as close to the target as the takeoff point. */
+/**
+ * On a jump link: jump now? True once a bot standing on the takeoff level is at least as close to the target as the
+ * takeoff point (never again after it landed on another level).
+ */
 export function shouldJump(link: NavLink, target: Vec3, pos: Vec3, onGround: boolean): boolean {
-  return !!link.jump && !!link.takeoff && onGround && hdist(pos, target) <= hdist(link.takeoff, target) + 0.1;
+  const t = link.takeoff;
+  return !!link.jump && !!t && onGround && Math.abs(pos.y - t.y) < 0.6 && hdist(pos, target) <= hdist(t, target) + 0.1;
 }
 
 export interface PathOptions {
@@ -734,7 +859,9 @@ function smoothPath(graph: NavGraph, full: number[], via: (NavLink | null)[]): n
   let i = 0;
   while (i < full.length - 1) {
     let j = i + 1;
-    if (plain(j)) {
+    // Right after a pad, jump or drop the bot still carries its flight speed: let it settle on the next node first.
+    const landing = i > 0 && (!plain(i) || nodes[full[i - 1]].pos.y - nodes[full[i]].pos.y > RK.stepHeight + 1e-3);
+    if (plain(j) && !landing) {
       const a = nodes[full[i]].pos;
       while (j + 1 < full.length && plain(j + 1) && hdist(a, nodes[full[j + 1]].pos) <= SMOOTH_RANGE && straight(w, a, nodes[full[j + 1]].pos)) j++;
     }
@@ -765,9 +892,10 @@ export class StuckWatch {
 
   constructor(private readonly after = 1.2) {}
 
-  update(now: number, pos: Vec3, node: NavNode): boolean {
+  /** Pass onGround: time in the air (a long drop, a pad flight) never counts as stuck. */
+  update(now: number, pos: Vec3, node: NavNode, onGround = true): boolean {
     const d = hdist(pos, node.pos) + Math.abs(pos.y - node.pos.y) * 0.5;
-    if (node.id !== this.node || d < this.best - 0.4) {
+    if (node.id !== this.node || d < this.best - 0.4 || !onGround) {
       this.node = node.id;
       this.best = d;
       this.since = now;
