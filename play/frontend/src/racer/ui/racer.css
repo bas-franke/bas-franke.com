@@ -1,0 +1,5 @@
+/* Shared racer layout. Owned by the integrator; HUD and menu styles live in their own files. */
+body.racer-body { overflow: hidden; background: #120c0a; }
+.racer-screen { position: fixed; inset: 0; overflow: hidden; background: #120c0a; user-select: none; -webkit-user-select: none; }
+.racer-host { position: absolute; inset: 0; }
+.racer-canvas { display: block; width: 100%; height: 100%; }

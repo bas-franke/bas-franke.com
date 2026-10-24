@@ -65,6 +65,17 @@ a 5 s results screen. Pawns move on a disc, a tile grid or a walled square (`sha
 that shoves whoever it hits. Placement points: 10, 7, 5, 4, 3, 2, 1, 1. Players who join mid-match watch until the
 next round starts. Each minigame is one small class in `games/ruckus/minigames/`.
 
+### Dustrunners (work in progress)
+
+A single-player podracer at `/race`, in the painted canyon style of a concept art piece: career mode (four cups, prize
+money, a garage with pods and upgrades), quick race and time trial against AI pilots. Client-only (no backend, career
+saved in localStorage), so it lives outside the room system and is not in `GAMES` yet. Code in
+`frontend/src/racer/`: `core/` (track splines, flight model in track space, AI racing line, race rules, career),
+`world/` (one module per part of the scenery; `zones.ts` decides where things go), `vehicle/` (procedural pods),
+`fx/` (camera, controls, speed particles, post-processing), `audio/` (synthesized), `ui/` (HUD and menus).
+Debug: `/race?go=<track>&autopilot&skipintro&at=0.4`, module labs at `/race/lab/<name>` (world, pod, hud, track,
+stands, water, skyCity, audio, ...). `node tools/racer/shot.mjs <url> <out.png>` screenshots a page in headless Chrome.
+
 ### 3D models
 
 Every model (droid, launcher, rocket, health pack, pawn, bomb, coin, crown) is built procedurally in Blender by
