@@ -1378,6 +1378,28 @@ code,
   }
 }
 
+/* The in-game reduced motion setting does the same. */
+.rk.calm .rk-tag,
+.rk.calm .rk-lowvig,
+.rk.calm .timer.hurry,
+.rk.calm .rk-line,
+.rk.calm .burst,
+.rk.calm .rk-respawn p b,
+.rk.calm .rk-health.low .rk-bar.hp .fill {
+  animation: none;
+}
+.rk.calm .rk-lowvig {
+  opacity: 0.8;
+}
+/* The hit X keeps its shape and colour change, it just fades instead of spinning in. */
+.rk.calm .rk-hitmark {
+  animation: rk-fade 0.32s linear forwards;
+}
+.rk.calm .rk-xhair,
+.rk.calm .rk-bar .ghost {
+  transition: none;
+}
+
 @media (max-width: 640px) {
   .rk .rk-health {
     width: 200px;

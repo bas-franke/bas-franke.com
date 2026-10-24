@@ -4,6 +4,8 @@ import { RK } from '@shared/rockets/constants';
 import type { ScoreRow } from '@shared/rockets/protocol';
 import { type ClientContext, useStore } from '../types';
 import type { FeedLine, RocketsClient, RocketsHudState } from './client';
+import { SettingsPanel } from './SettingsPanel';
+import { settings } from './settings';
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -28,7 +30,6 @@ const LOW_HP = 30;
 /** Comic sound words for the kill feed, picked per line so a line keeps its word. */
 const BLAMS = ['BLAM!', 'KA-BOOM!', 'WHAM!', 'POW!', 'KRAK!', 'BOOM!', 'SPLAT!'];
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
-const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const sortScores = (scores: ScoreRow[]) => [...scores].sort((a, b) => b.frags - a.frags || a.deaths - b.deaths);
 
 export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: ClientContext }) {
@@ -36,6 +37,10 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
   const [board, setBoard] = useState(false);
   const [menu, setMenu] = useState(false);
   const [now, setNow] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsOpen = useRef(false);
+  settingsOpen.current = showSettings;
+  const cfg = useStore(settings);
   const hpPanel = useRef<HTMLDivElement>(null);
   const room = ctx.room();
   const me = s.scores.find((r) => r.id === ctx.you);
@@ -46,7 +51,10 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
         e.preventDefault();
         setBoard(true);
       }
-      if (e.code === 'Escape') setMenu((m) => !m);
+      if (e.code === 'Escape') {
+        if (settingsOpen.current) setShowSettings(false);
+        else setMenu((m) => !m);
+      }
     };
     const up = (e: KeyboardEvent) => e.code === 'Tab' && setBoard(false);
     window.addEventListener('keydown', down);
@@ -66,12 +74,12 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
     return () => clearInterval(t);
   }, []);
 
-  // Getting hurt jolts the health panel. Web Animations keep this off React's render path; reduced motion gets a
-  // brightness pulse instead of a shake.
+  // Getting hurt jolts the health panel. Web Animations keep this off React's render path; reduced motion (the
+  // setting, which defaults to the OS preference) gets a brightness pulse instead of a shake.
   useEffect(() => {
     const el = hpPanel.current;
     if (!el || !s.hurtAt) return;
-    const frames = reducedMotion()
+    const frames = settings.get().reducedMotion
       ? [{ filter: 'brightness(1.8)' }, { filter: 'none' }]
       : [
           { transform: 'translate(0, 0)' },
@@ -103,7 +111,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
   const killer = s.dead ? [...(s.feed as RichFeedLine[])].reverse().find((l) => l.v === ctx.you) : undefined;
 
   return (
-    <div className={`hud rk ${low ? 'low' : ''}`}>
+    <div className={`hud rk ${low ? 'low' : ''} ${cfg.reducedMotion ? 'calm' : ''}`}>
       <div className={`flash ${hurtFlash ? 'on' : ''}`} />
       {low && <div className="rk-lowvig" />}
 
@@ -220,7 +228,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
         )}
       </div>
       <div className="menu-hint">
-        {s.fps > 0 && <span className="fps">{s.fps} fps · </span>}
+        {cfg.showFps && s.fps > 0 && <span className="fps">{s.fps} fps · </span>}
         Esc: menu · Tab: scores
       </div>
 
@@ -269,12 +277,18 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
               <button className="btn ghost" onClick={ctx.leave}>
                 Leave room
               </button>
+              <button className="btn ghost" onClick={() => setShowSettings(true)}>
+                Settings
+              </button>
               <button className="btn primary" onClick={() => setMenu(false)}>
                 Resume
               </button>
             </div>
           </div>
         </div>
+      )}
+      {menu && showSettings && (
+        <SettingsPanel onClose={() => setShowSettings(false)} rawSupported={(client as { rawSupported?: boolean | null }).rawSupported ?? null} />
       )}
     </div>
   );
