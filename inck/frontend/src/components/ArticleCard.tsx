@@ -11,7 +11,14 @@ export default function ArticleCard({ article, featured = false }: { article: Ca
       </div>
       <div className="card-body">
         <p className="card-meta">
-          {article.topic_name && <span className="topic">{article.topic_name}</span>}
+          {article.kind === 'trending' ? (
+            <span className="topic topic-now">
+              <span className="now-dot" />
+              Right now
+            </span>
+          ) : (
+            article.topic_name && <span className="topic">{article.topic_name}</span>
+          )}
           <span>{formatDate(article.published_at)}</span>
           <span>{article.read_minutes} min read</span>
         </p>

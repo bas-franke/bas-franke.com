@@ -111,10 +111,104 @@ export interface Usage {
 
 const isReasoningModel = (model: string) => /^(gpt-5|o\d)/.test(model);
 
+export const SCOUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['candidates', 'pick'],
+  properties: {
+    candidates: {
+      type: 'array',
+      description: '5 to 8 subjects people are curious about right now that pass the lightweight filter.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['subject', 'why_now', 'buzz'],
+        properties: {
+          subject: { type: 'string' },
+          why_now: { type: 'string', description: 'One sentence: what happened / why it is being searched.' },
+          buzz: { type: 'integer', description: '1 (niche) to 5 (everyone is talking about it).' },
+        },
+      },
+    },
+    pick: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['subject', 'angle', 'why_now', 'topic_hint'],
+      properties: {
+        subject: { type: 'string', description: 'The chosen subject.' },
+        angle: { type: 'string', description: 'The specific, surprising angle the article should take.' },
+        why_now: { type: 'string', description: 'One sentence for readers: why this is interesting today.' },
+        topic_hint: { type: 'string', description: 'Which of the given evergreen topics it belongs to, or empty.' },
+      },
+    },
+  },
+} as const;
+
+export interface TrendPick {
+  subject: string;
+  angle: string;
+  why_now: string;
+  topic_hint: string;
+}
+
+/**
+ * Finds what is interesting today: combines live signals (trending searches, most-read Wikipedia pages,
+ * Hacker News) with web search and picks one lightweight subject.
+ */
+export async function scoutTrends(opts: {
+  settings: Settings;
+  signals: string;
+  recentTitles: string[];
+  topicNames: string[];
+}): Promise<{ pick: TrendPick; candidates: { subject: string; why_now: string; buzz: number }[]; usage: Usage }> {
+  const { settings } = opts;
+  const instructions = [
+    `You are the trend scout for ${settings.site_name}, a magazine of genuinely interesting articles. Today is ${new Date().toISOString().slice(0, 10)}.`,
+    'Find what people are curious about RIGHT NOW and pick ONE subject worth a thoughtful, enjoyable article.',
+    'Use the live signals below as your primary evidence of attention, and use web search to understand each candidate and to find things the signals miss (a discovery, a launch, a record, an odd market move, a viral puzzle).',
+    'Lightweight only: science and discoveries, space, technology and gadgets, culture and sports moments, markets and economics explained calmly, nature, records, internet phenomena, anniversaries, how-things-work behind a headline.',
+    'Hard exclusions: war and armed conflict, terrorism, crime and violence, deaths and accidents, disasters with casualties, elections and party politics, divisive social issues, celebrity gossip and scandals, anything that reads as breaking hard news.',
+    settings.trending_guidance,
+    'Prefer subjects with strong, broad attention (high buzz) that still allow a lasting, explanatory piece. Avoid anything already covered recently.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const input =
+    `LIVE SIGNALS\n\n${opts.signals}\n\n` +
+    `Evergreen topics on the site (for topic_hint): ${opts.topicNames.join(', ')}\n\n` +
+    `Already published recently (avoid):\n${opts.recentTitles.map((t) => `- ${t}`).join('\n') || '- (nothing yet)'}`;
+
+  const request = {
+    model: settings.text_model,
+    instructions,
+    input,
+    text: { format: { type: 'json_schema' as const, name: 'scout', schema: SCOUT_SCHEMA as unknown as Record<string, unknown>, strict: true } },
+    ...(isReasoningModel(settings.text_model) ? { reasoning: { effort: 'low' as const } } : {}),
+  };
+  let response;
+  try {
+    response = await openai().responses.create({ ...request, tools: [{ type: 'web_search' as const }] });
+  } catch (err) {
+    console.warn('scout web search failed, retrying without tools:', (err as Error).message);
+    response = await openai().responses.create(request);
+  }
+  if (!response.output_text) throw new Error('The scout returned nothing.');
+  const parsed = JSON.parse(response.output_text) as { candidates: { subject: string; why_now: string; buzz: number }[]; pick: TrendPick };
+  if (!parsed.pick?.subject) throw new Error('The scout picked no subject.');
+  return {
+    pick: parsed.pick,
+    candidates: parsed.candidates ?? [],
+    usage: { input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, images: 0, image_tokens: 0 },
+  };
+}
+
 export async function writeArticle(opts: {
   settings: Settings;
   topic: { name: string; description: string };
   recentTitles: string[];
+  /** Set for "right now" pieces: the article explains why the subject is in the air today. */
+  trend?: TrendPick;
 }): Promise<{ draft: ArticleDraft; usage: Usage; model: string }> {
   const { settings, topic } = opts;
   const imagesWanted = settings.images_enabled
@@ -126,7 +220,10 @@ export async function writeArticle(opts: {
     `You write for ${settings.site_name}, a site that publishes one genuinely interesting article at a time.`,
     `Audience: ${settings.audience}. Tone: ${settings.tone}. Language: ${settings.language}.`,
     `Length: ${settings.target_words} words or more (count only body_markdown). Do not stop early; develop each section properly.`,
-    'Pick ONE specific, surprising angle inside the topic, not an overview. Open with the most interesting fact.',
+    opts.trend
+      ? `This is a "right now" piece. Subject: ${opts.trend.subject}. Angle: ${opts.trend.angle}. Why it is in the air today: ${opts.trend.why_now}. ` +
+        'Use web search to get the current facts right, say early on why people are talking about it, then go deeper than the news: explain the mechanism, history or science behind it so the piece still reads well next month. Keep it light and curious, not breaking-news.'
+      : 'Pick ONE specific, surprising angle inside the topic, not an overview. Open with the most interesting fact.',
     'Formatting rules for body_markdown: start directly with the opening paragraph (no title, no labels such as "lead" or "intro"); ' +
       'split the article into 3 to 6 sections, each introduced by a Markdown heading line starting with "## "; ' +
       'short paragraphs; **bold** only for a handful of key facts; no bullet lists longer than five items.',
@@ -144,7 +241,7 @@ export async function writeArticle(opts: {
     .join('\n');
 
   const input =
-    `Topic: ${topic.name}\nTopic notes: ${topic.description || '(none)'}\n\n` +
+    (opts.trend ? `Subject: ${opts.trend.subject}\nAngle: ${opts.trend.angle}\n\n` : `Topic: ${topic.name}\nTopic notes: ${topic.description || '(none)'}\n\n`) +
     `Already published recently (do not repeat these subjects):\n${opts.recentTitles.map((t) => `- ${t}`).join('\n') || '- (nothing yet)'}`;
 
   const request = {

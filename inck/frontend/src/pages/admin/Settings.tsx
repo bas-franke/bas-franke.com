@@ -127,6 +127,25 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
         </fieldset>
 
         <fieldset className="panel">
+          <legend>Right now</legend>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Part of the articles follow what people are curious about today instead of an evergreen topic. The scout reads Google Trends,
+            Wikipedia's most-read pages and Hacker News, searches the web, and picks one lightweight subject (no war, crime, politics or
+            disasters).
+          </p>
+          <label className="slider">
+            Share of "right now" articles: <strong>{s.trending_share}%</strong>
+            <input type="range" min={0} max={100} step={5} value={s.trending_share} onChange={(e) => set('trending_share', Number(e.target.value))} />
+          </label>
+          <div className="fields">
+            <label className="wide">
+              Guidance for the scout
+              <textarea rows={3} value={s.trending_guidance} onChange={(e) => set('trending_guidance', e.target.value)} />
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset className="panel">
           <legend>Models</legend>
           <div className="fields">
             <label>

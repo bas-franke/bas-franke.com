@@ -89,11 +89,15 @@ function TopicRow({ topic, onChange, onDelete }: { topic: Topic; onChange: (p: P
         <input className="topic-name" value={name} onChange={(e) => setName(e.target.value)} />
         <input className="topic-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Notes for the writer" />
       </div>
+      {topic.is_trending ? (
+        <span className="muted small">share set in Settings</span>
+      ) : (
       <label className="topic-weight" title="Relative chance of being picked">
         Weight
         <input type="range" min={0} max={10} value={topic.weight} onChange={(e) => onChange({ weight: Number(e.target.value) })} />
         <span className="mono">{topic.weight}</span>
       </label>
+      )}
       <span className="muted small topic-count">{topic.articles} articles</span>
       <div className="topic-actions">
         {dirty && (
@@ -101,9 +105,11 @@ function TopicRow({ topic, onChange, onDelete }: { topic: Topic; onChange: (p: P
             Save
           </button>
         )}
-        <button className="btn btn-ghost danger" onClick={onDelete} aria-label={`Delete ${topic.name}`}>
-          Delete
-        </button>
+        {!topic.is_trending && (
+          <button className="btn btn-ghost danger" onClick={onDelete} aria-label={`Delete ${topic.name}`}>
+            Delete
+          </button>
+        )}
       </div>
     </div>
   );

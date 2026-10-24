@@ -1,8 +1,12 @@
+export type ArticleKind = 'evergreen' | 'trending';
+
 export interface ArticleCard {
   id: number;
   slug: string;
   title: string;
   dek: string;
+  kind: ArticleKind;
+  why_now: string | null;
   tags: string[];
   hero_image: string | null;
   hero_alt: string | null;
@@ -43,6 +47,7 @@ export interface Topic {
   description: string;
   weight: number;
   enabled: boolean;
+  is_trending: boolean;
   articles: number;
 }
 
@@ -75,6 +80,8 @@ export interface Settings {
   audience: string;
   target_words: number;
   extra_instructions: string;
+  trending_share: number;
+  trending_guidance: string;
   site_name: string;
   tagline: string;
   last_run_at: string | null;
@@ -85,6 +92,8 @@ export interface Run {
   trigger: 'schedule' | 'manual';
   status: 'running' | 'succeeded' | 'failed';
   step: string;
+  kind: ArticleKind;
+  detail: string | null;
   topic_name: string | null;
   article_title: string | null;
   article_slug: string | null;
@@ -121,5 +130,7 @@ export interface AdminArticle {
   usage: { input_tokens?: number; output_tokens?: number; images?: number };
   charts: number;
   images: number;
+  kind: ArticleKind;
+  why_now: string | null;
   topic_name: string | null;
 }

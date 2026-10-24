@@ -73,7 +73,7 @@ export default function Articles({ onLoggedOut }: { onLoggedOut: () => void }) {
                   {a.title}
                 </Link>
                 <p className="muted small">
-                  {a.topic_name ?? 'No topic'} · {formatDate(a.published_at, true)} · {a.read_minutes} min · {compact(a.views)} views · {a.charts}{' '}
+                  {a.kind === 'trending' ? 'Right now' : (a.topic_name ?? 'No topic')} · {formatDate(a.published_at, true)} · {a.read_minutes} min · {compact(a.views)} views · {a.charts}{' '}
                   {a.charts === 1 ? 'chart' : 'charts'} · {a.images} {a.images === 1 ? 'image' : 'images'}
                   {a.usage.input_tokens ? ` · ${compact((a.usage.input_tokens ?? 0) + (a.usage.output_tokens ?? 0))} tokens` : ''}
                 </p>

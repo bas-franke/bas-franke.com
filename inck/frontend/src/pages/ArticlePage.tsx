@@ -49,8 +49,8 @@ export default function ArticlePage() {
         <header className="article-head">
           <p className="card-meta">
             {article.topic_name && (
-              <Link to={`/?topic=${article.topic_id}`} className="topic">
-                {article.topic_name}
+              <Link to={`/?topic=${article.topic_id}`} className={`topic ${article.kind === 'trending' ? 'topic-now' : ''}`}>
+                {article.kind === 'trending' ? 'Right now' : article.topic_name}
               </Link>
             )}
             <span>{formatDate(article.published_at)}</span>
@@ -58,6 +58,12 @@ export default function ArticlePage() {
           </p>
           <h1 className="article-title">{article.title}</h1>
           <p className="article-dek">{article.dek}</p>
+          {article.kind === 'trending' && article.why_now && (
+            <p className="why-now">
+              <span className="now-dot" />
+              <strong>Why now:</strong> {article.why_now}
+            </p>
+          )}
         </header>
 
         {img && (

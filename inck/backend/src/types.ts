@@ -22,6 +22,10 @@ export interface Settings {
   audience: string;
   target_words: number;
   extra_instructions: string;
+  /** Percentage of articles that should be "right now" pieces about what is interesting today. */
+  trending_share: number;
+  /** Extra rules for the trend scout (what counts as lightweight). */
+  trending_guidance: string;
   site_name: string;
   tagline: string;
   last_run_at: Date | null;
@@ -34,8 +38,12 @@ export interface Topic {
   description: string;
   weight: number;
   enabled: boolean;
+  /** The one system topic that holds "right now" pieces; never picked for evergreen articles. */
+  is_trending: boolean;
   created_at: Date;
 }
+
+export type ArticleKind = 'evergreen' | 'trending';
 
 export interface ArticleImage {
   file: string;
@@ -51,6 +59,9 @@ export interface Article {
   dek: string;
   body_md: string;
   topic_id: number | null;
+  kind: ArticleKind;
+  /** For trending pieces: one sentence on why the subject is in the air today. */
+  why_now: string | null;
   tags: string[];
   hero_image: string | null;
   hero_alt: string | null;
@@ -73,6 +84,9 @@ export interface Run {
   trigger: 'schedule' | 'manual';
   status: 'running' | 'succeeded' | 'failed';
   step: string;
+  kind: ArticleKind;
+  /** Trending runs: the subject the scout picked. */
+  detail: string | null;
   topic_id: number | null;
   article_id: number | null;
   error: string | null;

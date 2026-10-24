@@ -5,7 +5,7 @@ import type { Article, Settings } from '../types.js';
 
 export const publicRouter = Router();
 
-const LIST_COLUMNS = `a.id, a.slug, a.title, a.dek, a.tags, a.hero_image, a.hero_alt, a.read_minutes, a.views, a.published_at,
+const LIST_COLUMNS = `a.id, a.slug, a.title, a.dek, a.kind, a.why_now, a.tags, a.hero_image, a.hero_alt, a.read_minutes, a.views, a.published_at,
   t.name AS topic_name, t.id AS topic_id`;
 
 publicRouter.get('/site', async (_req, res) => {

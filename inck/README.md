@@ -14,7 +14,11 @@ backend on port **3003**.
 
 1. The scheduler ticks every 30 s. When `enabled`, the last run is ≥ `interval_minutes` ago, the time is inside the
    active hours and fewer than `max_per_day` articles were made in the last 24 h, it starts a run.
-2. A topic is picked at random, weighted by its `weight` and favouring topics with fewer articles this week.
+2. The run decides between an evergreen topic and a **"right now" piece** so that, over time, `trending_share` (default 50%)
+   of articles follow what is interesting today. Evergreen: a topic is picked at random, weighted by its `weight` and favouring
+   topics with fewer articles this week. Right now: the backend fetches live signals for free (Google Trends daily trending
+   searches, Wikipedia's most-read pages, the Hacker News front page) and a quick scout step with web search picks one
+   lightweight subject, skipping war, crime, politics, disasters and gossip.
 3. The text model (default `gpt-5.4-mini`, with web search on) returns a strict JSON article: title, dek, Markdown body,
    tags, 0–3 charts with real figures, sources, and 2–6 image prompts. `[[chart:N]]` and `[[image:N]]` markers in the body say where they go.
 4. The image model (default `gpt-image-2`) renders the illustrations, two at a time (WebP, stored in `/srv/apps/inck/data/images`).

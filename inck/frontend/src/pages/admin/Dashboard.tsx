@@ -32,7 +32,12 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
   async function generateNow() {
     setError(undefined);
     try {
-      await call(() => api('/api/admin/generate', { method: 'POST', json: { topic_id: topicId || undefined } }));
+      await call(() =>
+        api('/api/admin/generate', {
+          method: 'POST',
+          json: topicId === 'trending' ? { mode: 'trending' } : { topic_id: topicId || undefined, mode: topicId ? 'evergreen' : 'auto' },
+        }),
+      );
       setTimeout(load, 500);
     } catch (e) {
       setError((e as Error).message);
@@ -54,7 +59,8 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
         </div>
         <div className="generate">
           <select value={topicId} onChange={(e) => setTopicId(e.target.value)} aria-label="Topic for the next article">
-            <option value="">Random topic</option>
+            <option value="">Auto (evergreen or right now)</option>
+            <option value="trending">Right now (what is interesting today)</option>
             {topics
               .filter((t) => t.enabled)
               .map((t) => (
@@ -190,7 +196,15 @@ function RunRow({ run }: { run: Run }) {
     <tr>
       <td title={formatDate(run.started_at, true)}>{timeAgo(run.started_at)}</td>
       <td>{run.trigger}</td>
-      <td>{run.topic_name ?? '—'}</td>
+      <td>
+        {run.kind === 'trending' ? (
+          <span title={run.detail ?? ''}>
+            <span className="now-dot" /> Right now{run.detail ? `: ${run.detail.split(' — ')[0]}` : ''}
+          </span>
+        ) : (
+          (run.topic_name ?? '—')
+        )}
+      </td>
       <td>
         {run.status === 'running' && (
           <span className="status status-running">

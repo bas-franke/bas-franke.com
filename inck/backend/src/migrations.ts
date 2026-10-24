@@ -128,4 +128,24 @@ export const migrations: { name: string; sql: string }[] = [
       ALTER TABLE settings ADD COLUMN figure_quality text NOT NULL DEFAULT 'low' CHECK (figure_quality IN ('low','medium','high'));
     `,
   },
+  {
+    // "Right now" pieces: half the articles follow what is interesting today instead of an evergreen topic.
+    name: '006_trending',
+    sql: `
+      ALTER TABLE topics ADD COLUMN is_trending boolean NOT NULL DEFAULT false;
+      INSERT INTO topics (name, description, weight, enabled, is_trending)
+        VALUES ('Right now', 'What people are curious about today: discoveries, launches, records, odd market moves, internet moments. Lightweight only.', 0, true, true);
+
+      ALTER TABLE articles
+        ADD COLUMN kind text NOT NULL DEFAULT 'evergreen' CHECK (kind IN ('evergreen','trending')),
+        ADD COLUMN why_now text;
+      ALTER TABLE runs
+        ADD COLUMN kind text NOT NULL DEFAULT 'evergreen' CHECK (kind IN ('evergreen','trending')),
+        ADD COLUMN detail text;
+
+      ALTER TABLE settings
+        ADD COLUMN trending_share int NOT NULL DEFAULT 50 CHECK (trending_share BETWEEN 0 AND 100),
+        ADD COLUMN trending_guidance text NOT NULL DEFAULT 'Think "what would a curious friend send me today?": a new discovery, a space launch, a record, a surprising market move, a viral maths puzzle, a product everyone is suddenly talking about. If in doubt whether something is too heavy, skip it.';
+    `,
+  },
 ];

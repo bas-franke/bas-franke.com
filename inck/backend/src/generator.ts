@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { illustrate, writeArticle, type ImageSpec, type Usage } from './ai.js';
+import { illustrate, scoutTrends, writeArticle, type ImageSpec, type TrendPick, type Usage } from './ai.js';
 import { imagesDir } from './config.js';
 import { one, query } from './db.js';
-import type { Article, ArticleImage, Run, Settings, Topic } from './types.js';
+import { collectSignals, formatSignals } from './signals.js';
+import type { Article, ArticleImage, ArticleKind, Run, Settings, Topic } from './types.js';
 
 let current: Promise<Run> | undefined;
 
@@ -37,7 +38,7 @@ export async function pickTopic(topicId?: number): Promise<Topic> {
     if (!topic) throw new Error(`Topic ${topicId} does not exist.`);
     return topic;
   }
-  const { rows } = await query<Topic>('SELECT * FROM topics WHERE enabled AND weight > 0');
+  const { rows } = await query<Topic>('SELECT * FROM topics WHERE enabled AND weight > 0 AND NOT is_trending');
   if (!rows.length) throw new Error('No enabled topics. Add or enable a topic in the admin.');
   // Weighted random, slightly favouring topics with fewer recent articles.
   const { rows: counts } = await query<{ topic_id: number; n: string }>(
@@ -150,25 +151,66 @@ function placeUnusedImages(body: string, imageCount: number) {
  * Generates one article: pick topic → write (JSON) → illustrate → store. Only one generation runs at a time;
  * a second call while busy returns the in-flight run.
  */
-export function generate(trigger: Run['trigger'], topicId?: number): Promise<Run> {
+export type GenerateMode = 'auto' | ArticleKind;
+
+/**
+ * Decides between an evergreen topic and a "right now" piece so that, over the last ten articles, the share
+ * of trending pieces tracks settings.trending_share. A little randomness keeps the rhythm from being predictable.
+ */
+export async function chooseKind(settings: Settings): Promise<ArticleKind> {
+  const target = settings.trending_share / 100;
+  if (target <= 0) return 'evergreen';
+  if (target >= 1) return 'trending';
+  const { rows } = await query<{ kind: ArticleKind }>('SELECT kind FROM articles ORDER BY published_at DESC LIMIT 10');
+  const actual = rows.length ? rows.filter((r) => r.kind === 'trending').length / rows.length : target;
+  const p = Math.min(0.95, Math.max(0.05, target + (target - actual)));
+  return Math.random() < p ? 'trending' : 'evergreen';
+}
+
+const addUsage = (total: Usage, part: Usage) => {
+  total.input_tokens += part.input_tokens;
+  total.output_tokens += part.output_tokens;
+};
+
+export function generate(trigger: Run['trigger'], opts: { topicId?: number; mode?: GenerateMode } = {}): Promise<Run> {
   if (current) return current;
-  current = runGeneration(trigger, topicId).finally(() => (current = undefined));
+  current = runGeneration(trigger, opts).finally(() => (current = undefined));
   return current;
 }
 
-async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise<Run> {
+async function runGeneration(trigger: Run['trigger'], opts: { topicId?: number; mode?: GenerateMode }): Promise<Run> {
   const run = await one<Run>('INSERT INTO runs (trigger) VALUES ($1) RETURNING *', [trigger]);
   const usage: Usage = { input_tokens: 0, output_tokens: 0, images: 0, image_tokens: 0 };
   try {
     const settings = await one<Settings>('SELECT * FROM settings WHERE id = 1');
-    await setStep(run.id, 'choosing topic');
-    const topic = await pickTopic(topicId);
-    await query('UPDATE runs SET topic_id = $2 WHERE id = $1', [run.id, topic.id]);
+    const { rows: recent } = await query<{ title: string }>('SELECT title FROM articles ORDER BY published_at DESC LIMIT 30');
+    const recentTitles = recent.map((r) => r.title);
+
+    const kind: ArticleKind = opts.topicId ? 'evergreen' : opts.mode && opts.mode !== 'auto' ? opts.mode : await chooseKind(settings);
+    await query('UPDATE runs SET kind = $2 WHERE id = $1', [run.id, kind]);
+
+    let topic: Topic;
+    let trend: TrendPick | undefined;
+    if (kind === 'trending') {
+      await setStep(run.id, 'scouting trends');
+      const trendingTopic = await one<Topic>('SELECT * FROM topics WHERE is_trending LIMIT 1');
+      if (!trendingTopic) throw new Error('The "Right now" topic is missing.');
+      const { rows: names } = await query<{ name: string }>('SELECT name FROM topics WHERE enabled AND NOT is_trending');
+      const signals = formatSignals(await collectSignals());
+      const scouted = await scoutTrends({ settings, signals, recentTitles, topicNames: names.map((n) => n.name) });
+      addUsage(usage, scouted.usage);
+      trend = scouted.pick;
+      topic = trendingTopic;
+      await query('UPDATE runs SET topic_id = $2, detail = $3 WHERE id = $1', [run.id, topic.id, `${trend.subject} — ${trend.why_now}`]);
+    } else {
+      await setStep(run.id, 'choosing topic');
+      topic = await pickTopic(opts.topicId);
+      await query('UPDATE runs SET topic_id = $2 WHERE id = $1', [run.id, topic.id]);
+    }
 
     await setStep(run.id, 'writing');
-    const { rows: recent } = await query<{ title: string }>('SELECT title FROM articles ORDER BY published_at DESC LIMIT 30');
-    const written = await writeArticle({ settings, topic, recentTitles: recent.map((r) => r.title) });
-    Object.assign(usage, written.usage);
+    const written = await writeArticle({ settings, topic, recentTitles, trend });
+    addUsage(usage, written.usage);
     const draft = written.draft;
     if (!settings.charts_enabled) draft.charts = [];
 
@@ -190,8 +232,8 @@ async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise
 
     await setStep(run.id, 'saving');
     const article = await one<Article>(
-      `INSERT INTO articles (slug, title, dek, body_md, topic_id, tags, hero_image, hero_alt, image_prompt, images, charts, sources, model, usage, read_minutes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
+      `INSERT INTO articles (slug, title, dek, body_md, topic_id, tags, hero_image, hero_alt, image_prompt, images, charts, sources, model, usage, read_minutes, kind, why_now)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
       [
         await uniqueSlug(draft.title),
         draft.title,
@@ -208,6 +250,8 @@ async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise
         written.model,
         JSON.stringify(usage),
         readMinutes(body),
+        kind,
+        trend?.why_now ?? null,
       ],
     );
     await query('UPDATE settings SET last_run_at = now() WHERE id = 1');
