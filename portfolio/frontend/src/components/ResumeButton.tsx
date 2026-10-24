@@ -14,7 +14,7 @@ export default function ResumeButton({ variant = 'primary' }: Props) {
   async function onClick() {
     setState('busy');
     try {
-      const { downloadResume } = await import('../resume');
+      const { downloadResume } = await import('../resumeDownload');
       await downloadResume();
       setState('idle');
     } catch (err) {

@@ -43,7 +43,7 @@ export const about = {
   heading: 'Who I am',
   paragraphs: [
     'I’m a full-stack software engineer with more than twenty years of experience, and I still love the craft. Understanding a problem properly, shaping a solution no bigger than it needs to be, and then looking after it in production: that is the work, and I enjoy every part of it.',
-    'I’m at home across the whole stack: C#, Java and Python on the server, JavaScript and TypeScript in the browser, SQL underneath, and the infrastructure in between. Four years leading tech at an online broker taught me that correctness and uptime are not negotiable; the proptech and loyalty platforms since then taught me how to move fast without losing that.',
+    'I’m at home across the whole stack: C#, Java and Python on the server, JavaScript and TypeScript in the browser, SQL underneath, and the infrastructure in between. Four years as tech lead at online brokers taught me that correctness and uptime are not negotiable; the proptech and loyalty platforms since then taught me how to move fast without losing that.',
     'Lately the way I work has changed as much as the tools. I build with AI at my side: Claude and Claude Code, GitHub Copilot in Visual Studio, Cursor, and agentic workflows that take on whole tasks while I focus on design, review and the decisions that matter.',
   ],
   facts: [
@@ -96,15 +96,26 @@ export const experience: Experience[] = [
     motif: 'drop',
   },
   {
-    slug: 'binck',
-    company: 'BinckBank (Saxo Bank)',
+    slug: 'saxo',
+    company: 'Saxo Bank',
     role: 'Tech Lead',
-    period: 'Nov 2016 – Oct 2020',
+    period: 'Aug 2019 – Oct 2020',
     location: 'Amsterdam',
     summary:
-      'Dutch online broker, part of Saxo Bank since 2019. As tech lead I was responsible for the engineering behind a trading platform where correctness, speed and uptime are the whole job, through the integration into Saxo.',
-    tags: ['C#', 'SQL', 'AngularJS', 'Trading', 'Tech lead'],
+      'Danish investment bank and specialist in online trading and investing, with a large platform for private investors in the Netherlands. As tech lead in Amsterdam I was responsible for the engineering of the Dutch trading platform, from architecture and releases to incidents, keeping a high-volume system correct, fast and available.',
+    tags: ['C#', 'SQL', 'Trading', 'Architecture', 'Tech lead'],
     href: 'https://www.home.saxo',
+    motif: 'pulse',
+  },
+  {
+    slug: 'binck',
+    company: 'BinckBank',
+    role: 'Tech Lead',
+    period: 'Nov 2016 – Aug 2019',
+    location: 'Amsterdam',
+    summary:
+      'Dutch online broker for private investors. As tech lead I was responsible for the engineering behind its trading platform: the C# and SQL systems underneath, the AngularJS front end on top, and the engineers who built and ran them, in a business where correctness, speed and uptime are the whole job.',
+    tags: ['C#', 'SQL', 'AngularJS', 'Trading', 'Tech lead'],
     motif: 'rise',
   },
   {
@@ -119,15 +130,18 @@ export const experience: Experience[] = [
 
 export const skills = {
   heading: 'Tools of the trade, old and new.',
+  /** `level` runs from 1 (working knowledge) to 4 (every day); the résumé draws it as a meter. */
   tiers: [
     {
       name: 'Every day',
       note: 'My core tools',
+      level: 4,
       items: ['C#', 'Java', 'TypeScript', 'JavaScript', 'HTML & CSS', 'SQL'],
     },
     {
       name: 'AI-assisted',
       note: 'How I build now',
+      level: 4,
       items: [
         'Claude & Claude Code',
         'GitHub Copilot in Visual Studio',
@@ -142,11 +156,13 @@ export const skills = {
     {
       name: 'Comfortable',
       note: 'Used in production',
+      level: 3,
       items: ['Python', 'PHP', 'Node.js', 'React', 'Angular', 'Vue', 'C++'],
     },
     {
       name: 'Working knowledge',
       note: 'Enough to be useful',
+      level: 2,
       items: ['DevOps', 'AWS', 'Design'],
     },
   ],
@@ -184,7 +200,7 @@ export const resume = {
   fileName: 'Bas-Franke-Resume.pdf',
   title: 'Head of Development · Full-stack software engineer',
   summary:
-    'Full-stack software engineer and engineering lead with more than twenty years of experience designing, building and running web platforms: an online broker’s trading systems, a loyalty platform used by thousands of businesses, procure-to-pay analytics, and today the rental platform GoHome.io as Head of Development. Comfortable owning the whole stack, from database and API to interface and infrastructure, and working with AI-assisted, agentic development to deliver more with the same care.',
+    'Full-stack software engineer and engineering lead with more than twenty years of experience designing, building and running web platforms: the trading platforms of two online brokers, a loyalty platform used by thousands of businesses, procure-to-pay analytics, and today the rental platform GoHome.io as Head of Development. Comfortable owning the whole stack, from database and API to interface and infrastructure, and working with AI-assisted, agentic development to deliver more with the same care.',
   sections: {
     profile: 'Profile',
     experience: 'Experience',

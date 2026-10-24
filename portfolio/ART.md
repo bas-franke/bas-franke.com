@@ -1,6 +1,6 @@
 # Portfolio artwork
 
-The site has eight optional image slots. Each one shows a procedural line drawing in the site's own ink until the
+The site has nine optional image slots. Each one shows a procedural line drawing in the site's own ink until the
 file exists, so the page is complete without any of them and you can add them one at a time.
 
 **Where files go:** `frontend/src/art/` (picked up at build time, hashed and cached forever), except the link
@@ -16,7 +16,7 @@ Paste this into ChatGPT as a single message. It asks for the six images one afte
 each one, download it and save it with the filename it names (see the table below for where it goes and how to resize).
 
 ```text
-I need a set of 8 illustrations for my portfolio website, all in exactly the same style. Please generate them one at a time, in the order below, each as a separate image, and keep the style identical across all of them: same paper, same ink, same blue. Do not add any text, letters, numbers, logos, watermarks, signatures, frames or borders to any image.
+I need a set of 9 illustrations for my portfolio website, all in exactly the same style. Please generate them one at a time, in the order below, each as a separate image, and keep the style identical across all of them: same paper, same ink, same blue. Do not add any text, letters, numbers, logos, watermarks, signatures, frames or borders to any image.
 
 STYLE FOR ALL IMAGES
 Minimal ink-wash illustration on warm off-white paper (#f5f2ec). Thin, confident charcoal-ink lines (#1b1d1c), soft diluted ink washes in warm grey, and one accent colour of dusty lake blue (#4f6b7c) used sparingly. Calm, quiet and precise, with a lot of empty paper. The restraint of Japanese sumi-e, but no clichés: no lotus, no bamboo, no stacked stones, no enso brush circle, no people, no mountains. Subtle paper grain and a very slight ink bleed at the edge of each stroke.
@@ -44,6 +44,9 @@ Three thin-lined rectangles with the proportions of a loyalty card, fanned sligh
 
 IMAGE 8, "og" (landscape, 1536x1024)
 The same dawn scene as image 1, but very wide: still water, a low horizon, faint mist, a handful of thin horizontal lines for the surface, one small pale sun on the right. The left two thirds of the image is empty pale sky. No text.
+
+IMAGE 9, "work-saxo" (landscape, 1536x1024)
+One thin horizontal ink line runs across the page like a calm pulse trace, flat for most of its length, with a single small, sharp peak a little right of centre drawn in lake blue. Wide empty margins above and below. Nothing else.
 
 After each image, tell me its name from this list so I can save it with the right filename, then continue with the next one.
 ```
@@ -75,16 +78,18 @@ Minimal ink-wash illustration on warm off-white paper (#f5f2ec). Thin, confident
 |---|------|----------------|-------|-------------|-----------|
 | 1 | `src/art/hero.webp` | Hero, right of the headline | 4:5 | 1024×1536, crop | 1200×1500 |
 | 2 | `src/art/hero-dark.webp` | Hero in dark mode (optional) | 4:5 | 1024×1536, crop | 1200×1500 |
-| 3 | `src/art/work-binck.webp` | Experience: BinckBank (Saxo Bank) | 4:3 | 1536×1024, crop | 960×720 |
+| 3 | `src/art/work-binck.webp` | Experience: BinckBank | 4:3 | 1536×1024, crop | 960×720 |
 | 4 | `src/art/work-transparent.webp` | Experience: Transparent | 4:3 | 1536×1024, crop | 960×720 |
 | 5 | `src/art/work-irp.webp` | Experience: IRP | 4:3 | 1536×1024, crop | 960×720 |
 | 6 | `src/art/work-gohome.webp` | Experience: GoHome.io | 4:3 | 1536×1024, crop | 960×720 |
 | 7 | `src/art/work-piggy.webp` | Experience: Piggy | 4:3 | 1536×1024, crop | 960×720 |
 | 8 | `public/og.jpg` | Link preview in chat apps and social media | 1.91:1 | 1536×1024, crop | 1200×630 (JPEG) |
+| 9 | `src/art/work-saxo.webp` | Experience: Saxo Bank | 4:3 | 1536×1024, crop | 960×720 |
 
 Images 1 to 5 and 8 are done (the first ChatGPT batch; its "work-saxo" became `work-binck.webp` and its "work-binck"
-became `work-transparent.webp`). Images 6 and 7 are still to generate. Company marks for the rows live in
-`src/art/logos/<slug>.png` (gohome, transparent, piggy, binck), 128×128.
+became `work-transparent.webp`). Images 6, 7 and 9 are still to generate. Company marks for the rows live in
+`src/art/logos/<slug>.png` (gohome, transparent, piggy, saxo), 128×128; `binck.png` is still to add. The marks are
+also printed in the PDF résumé, which draws a monogram tile for any company without one.
 
 The export sizes are roughly 3× the display size, so they stay crisp on high-DPI screens.
 
@@ -142,6 +147,13 @@ Landscape composition. Three thin-lined rectangles with the proportions of a loy
 ```text
 [STYLE BLOCK]
 Very wide landscape composition. The same dawn scene as the hero: a perfectly still body of water, a low horizon, faint mist, a handful of thin horizontal lines for the surface, one small pale sun on the right. The left two thirds of the image is empty pale sky, so that a name could be placed there later. No text.
+```
+
+### 9. `work-saxo.webp`
+
+```text
+[STYLE BLOCK]
+Landscape composition. One thin horizontal ink line runs across the page like a calm pulse trace, flat for most of its length, with a single small, sharp peak a little right of centre drawn in lake blue. Wide empty margins above and below. Nothing else.
 ```
 
 ### Optional: a calmer portrait

@@ -13,8 +13,10 @@ Personal portfolio on the root domain. Vite + React frontend, Node.js + Express 
   exists. The ChatGPT prompts, sizes and filenames are in [ART.md](ART.md); finished files go in `frontend/src/art/`.
 - **Portrait:** `frontend/src/art/profile.jpg`. Company marks for the experience rows go in `frontend/src/art/logos/<slug>.png`.
 - **Résumé:** the *Download résumé* button in the hero builds a white A4 PDF in the browser from the same
-  `content.ts` (see [frontend/src/resume.ts](frontend/src/resume.ts)); pdf-lib is loaded only when clicked.
-  Dates and locations come from the `experience` list.
+  `content.ts`: the portrait and company marks from `frontend/src/art/`, the jobs on a timeline, the skill tiers
+  as chips behind a level meter (`level` in `content.ts`). The layout is [frontend/src/resume.ts](frontend/src/resume.ts),
+  which only takes bytes and so also runs under Node; [frontend/src/resumeDownload.ts](frontend/src/resumeDownload.ts)
+  fetches the images and triggers the download. pdf-lib is loaded only when clicked.
 
 ## Contact form (optional)
 
