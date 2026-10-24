@@ -3,9 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Bas Franke, software developer." />
+    <title>Bas Franke · Software engineer</title>
+    <meta
+      name="description"
+      content="Bas Franke is a full-stack software engineer in the Netherlands with more than twenty years of experience building and maintaining web platforms."
+    />
+    <meta name="theme-color" content="#f5f2ec" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141516" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Bas Franke</title>
+    <link rel="canonical" href="https://bas-franke.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Bas Franke" />
+    <meta property="og:title" content="Bas Franke · Software engineer" />
+    <meta
+      property="og:description"
+      content="Full-stack software engineer with more than twenty years of experience. Software that works, and keeps working."
+    />
+    <meta property="og:url" content="https://bas-franke.com/" />
+    <meta property="og:image" content="https://bas-franke.com/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=Geist:wght@300..600&family=Geist+Mono:wght@400..500&display=swap"
+    />
+    <script>
+      // Pick the theme before the first paint so there is no flash of the wrong colours.
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem('theme');
+        } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

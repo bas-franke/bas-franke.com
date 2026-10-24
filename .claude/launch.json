@@ -4,8 +4,43 @@
     {
       "name": "status-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "status/frontend", "run", "dev", "--", "--strictPort", "--port", "5173"],
+      "runtimeArgs": [
+        "--prefix",
+        "status/frontend",
+        "run",
+        "dev",
+        "--",
+        "--strictPort",
+        "--port",
+        "5173"
+      ],
       "port": 5173
+    },
+    {
+      "name": "portfolio-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "portfolio/frontend",
+        "run",
+        "dev",
+        "--",
+        "--strictPort",
+        "--port",
+        "5174"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "portfolio-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "portfolio/backend",
+        "run",
+        "dev"
+      ],
+      "port": 3001
     }
   ]
 }

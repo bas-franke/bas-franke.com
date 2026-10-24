@@ -1,0 +1,38 @@
+import type { CSSProperties } from 'react';
+import { skills } from '../content';
+
+export default function Skills() {
+  return (
+    <section id="skills" className="section container">
+      <div className="section__head" data-reveal>
+        <p className="eyebrow">03 — Skills</p>
+        <h2>What I work with, and how.</h2>
+      </div>
+      <div className="skills">
+        <div className="tiers" data-reveal>
+          {skills.tiers.map((tier) => (
+            <div className="tier" key={tier.name}>
+              <div>
+                <p className="tier__name">{tier.name}</p>
+                <p className="tier__note">{tier.note}</p>
+              </div>
+              <ul className="tier__list">
+                {tier.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <ol className="principles" data-reveal style={{ '--d': '140ms' } as CSSProperties}>
+          {skills.principles.map((p) => (
+            <li className="principle" key={p.title}>
+              <h3>{p.title}</h3>
+              <p>{p.text}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}

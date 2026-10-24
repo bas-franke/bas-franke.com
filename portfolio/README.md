@@ -1,6 +1,36 @@
 # portfolio: bas-franke.com
 
-Personal portfolio on the root domain. Vite + React frontend, Node.js + Express backend on port **3001**. No database (yet).
+Personal portfolio on the root domain. Vite + React frontend, Node.js + Express backend on port **3001**. No database.
+
+## Content, design and artwork
+
+- **Words:** everything on the page is in [frontend/src/content.ts](frontend/src/content.ts) (intro, about, projects,
+  skills, contact). Edit that file; the components only decide how it looks.
+- **Look:** warm paper, soft ink, one lake-blue accent, hairlines instead of boxes, slow reveals. Colours and type live
+  at the top of [frontend/src/styles.css](frontend/src/styles.css). Light and dark mode follow the system setting
+  and can be switched with the toggle in the header.
+- **Artwork:** the hero and every project have an image slot that shows a procedural line drawing until an image
+  exists. The ChatGPT prompts, sizes and filenames are in [ART.md](ART.md); finished files go in `frontend/src/art/`.
+- **Portrait:** `frontend/src/art/profile.jpg`.
+
+## Contact form (optional)
+
+The contact section always shows the e-mail address and phone number. The form only appears once the backend can
+send mail, which it does over SMTP using these variables in `/srv/apps/portfolio/.env`:
+
+| Variable       | Required | Purpose                                                             |
+|----------------|----------|---------------------------------------------------------------------|
+| `SMTP_HOST`    | yes      | e.g. `smtp.gmail.com`                                               |
+| `SMTP_USER`    | yes      | Login, usually the full mailbox address                             |
+| `SMTP_PASS`    | yes      | Password. For Gmail, create an *App password* (2-step verification required) |
+| `SMTP_PORT`    | no       | Default `587` (STARTTLS); use `465` with `SMTP_SECURE=true`         |
+| `SMTP_SECURE`  | no       | `true` for implicit TLS on port 465                                 |
+| `CONTACT_TO`   | no       | Where messages go; defaults to `SMTP_USER`                          |
+| `CONTACT_FROM` | no       | Sender address; defaults to `SMTP_USER`                             |
+
+After editing `.env`: `pm2 restart portfolio --update-env`. `GET /api/health` reports `"mail": "configured"` when
+all three required variables are set, and `GET /api/contact` returns `{ "enabled": true }`, which makes the form appear.
+Messages are rate-limited to 5 per IP per hour and a hidden honeypot field drops most bots.
 
 ## Run locally
 
@@ -11,7 +41,7 @@ npm run install:all
 npm run dev
 ```
 
-- Frontend: <http://localhost:5173> (Vite proxies `/api` to the backend)
+- Frontend: <http://localhost:5173> (Vite proxies `/api` to the backend on `127.0.0.1:3001`)
 - Backend: <http://localhost:3001/api/health>
 
 ## Setup checklist
