@@ -104,3 +104,50 @@ export function publicApiCheck(project: Project): CheckDef {
     },
   };
 }
+
+interface WsLike {
+  onopen: (() => void) | null;
+  onerror: ((err: unknown) => void) | null;
+  close(): void;
+}
+
+/** Real-time projects: the public domain must upgrade WebSocket connections, which needs extra Nginx headers. */
+export function websocketCheck(project: Project): CheckDef {
+  const path = project.websocket ?? '/api/ws';
+  const url = `wss://${project.domains[0]}${path}`;
+  return {
+    id: `ws:${project.name}`,
+    title: `WebSocket upgrade on ${path}`,
+    provider: 'Server',
+    fix: {
+      summary: `Nginx is not forwarding WebSocket upgrades on ${path} to the backend on port ${project.port}.`,
+      steps: [
+        {
+          text: `${project.name}/deploy/nginx.conf must have a "location = ${path}" block with these headers; reinstall the site if it changed (see the Nginx site check):`,
+          code: 'proxy_http_version 1.1;\nproxy_set_header Upgrade $http_upgrade;\nproxy_set_header Connection "upgrade";\nproxy_read_timeout 3600s;',
+        },
+        { text: 'Then reload Nginx:', code: 'sudo nginx -t && sudo systemctl reload nginx' },
+      ],
+      doc: repoDoc(`${project.name}/deploy/nginx.conf`),
+    },
+    run: () =>
+      new Promise<Outcome>((resolve) => {
+        const Ws = (globalThis as { WebSocket?: new (url: string) => WsLike }).WebSocket;
+        if (!Ws) return resolve(warn('Cannot test: this Node.js has no built-in WebSocket client (needs Node 22+).'));
+        const ws = new Ws(url);
+        const timer = setTimeout(() => {
+          ws.close();
+          resolve(fail(`No WebSocket handshake on ${url} within 5 s.`));
+        }, 5000);
+        ws.onopen = () => {
+          clearTimeout(timer);
+          ws.close();
+          resolve(ok(`${url} accepted the upgrade.`));
+        };
+        ws.onerror = () => {
+          clearTimeout(timer);
+          resolve(fail(`Handshake failed for ${url}; Nginx probably lacks the Upgrade/Connection headers for ${path}.`));
+        };
+      }),
+  };
+}

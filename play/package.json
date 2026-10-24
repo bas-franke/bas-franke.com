@@ -1,0 +1,14 @@
+{
+  "name": "play",
+  "private": true,
+  "description": "Convenience scripts. frontend/ and backend/ each have their own package.json and lockfile.",
+  "scripts": {
+    "install:all": "npm install && npm --prefix frontend install && npm --prefix backend install",
+    "dev": "concurrently -n api,web -c blue,green \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "models": "node tools/blender/run.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}

@@ -7,6 +7,8 @@ databases in one shared RDS PostgreSQL instance.
 |----------------------------|----------------------------------|
 | [portfolio](portfolio/)    | <https://bas-franke.com>         |
 | [status](status/)          | <https://status.bas-franke.com>  |
+| [inck](inck/)              | <https://inck.ai>                |
+| [play](play/)              | <https://play.bas-franke.com>    |
 
 - **Starting from nothing?** Follow [status/README.md → Setup from zero](status/README.md#setup-from-zero).
 - Shared infrastructure reference: [infra/README.md](infra/README.md)

@@ -16,7 +16,7 @@ import {
   pm2Check,
   pm2ProcessCheck,
 } from './server.js';
-import { publicApiCheck, siteCheck, tlsCheck } from './web.js';
+import { publicApiCheck, siteCheck, tlsCheck, websocketCheck } from './web.js';
 
 const accessCheck: CheckDef = {
   id: 'status:auth',
@@ -64,6 +64,7 @@ export function projectChecks(project: Project): CheckDef[] {
     nginxSiteCheck(project),
     siteCheck(project),
     publicApiCheck(project),
+    ...(project.websocket ? [websocketCheck(project)] : []),
     ...(project.database ? [databaseCheck(project)] : []),
   ];
 }

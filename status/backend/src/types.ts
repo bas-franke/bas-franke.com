@@ -62,6 +62,8 @@ export interface Project {
   database: boolean;
   /** Where the domain's DNS is managed; used in fix instructions. Defaults to name.com. */
   registrar?: string;
+  /** Path of a WebSocket endpoint Nginx must upgrade (e.g. '/api/ws'); checked through the public domain. */
+  websocket?: string;
 }
 
 export const ok = (detail: string): Outcome => ({ status: 'ok', detail });

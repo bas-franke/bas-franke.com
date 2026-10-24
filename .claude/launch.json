@@ -41,6 +41,32 @@
         "dev"
       ],
       "port": 3001
+    },
+    {
+      "name": "play-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "play/backend",
+        "run",
+        "dev"
+      ],
+      "port": 3004
+    },
+    {
+      "name": "play-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "play/frontend",
+        "run",
+        "dev",
+        "--",
+        "--strictPort",
+        "--port",
+        "5175"
+      ],
+      "port": 5175
     }
   ]
 }
