@@ -1,14 +1,19 @@
-// The game: spawns waves of word-carrying enemies, routes every typed character to the closest one, fires the laser,
-// and keeps score. three.js draws the world; the word tags above enemies are plain DOM elements positioned each frame
-// (crisp text in any script, cheap to restyle). React only renders menus and the HUD from `GameState` snapshots.
+// The game: spawns waves of creatures carrying words, routes every typed character to the closest one, fires the
+// owl's star beam, and keeps score. three.js draws the world; the word tags above creatures are plain DOM elements
+// positioned each frame (crisp text in any script, cheap to restyle). React only renders menus and the HUD from
+// `GameState` snapshots.
+//
+// Every creature first wears a bubble shield with the word in the language you read (English in EN → RO). Typing it
+// pops the bubble; then you type the translation to send the creature home. A sentence convoy has one big bubble
+// with the whole source sentence; the balaur has one bubble per head.
 
 import * as THREE from 'three';
 import { Engine } from './engine';
 import { Effects } from './effects';
-import { makeBalaurBody, makeModel, type Kind, type Model } from './enemies';
-import { flush as flushProgress, isMastered, record } from './progress';
+import { makeBalaurBody, makeBubble, makeModel, tickBubbles, type Bubble, type Kind, type Model } from './enemies';
 import { buildWorld, IMPACT_Y, type World } from './world';
 import { sfx } from './audio';
+import { flush as flushProgress, isMastered, record } from './progress';
 import {
   ENTRIES,
   glyphs,
@@ -19,10 +24,14 @@ import {
   type Direction,
   type Entry,
   type Glyph,
+  type Lang,
 } from '../vocab';
 
 export type Mix = 'words' | 'mixed' | 'sentences';
 export type Difficulty = 'easy' | 'normal' | 'hard';
+/** Every kind of enemy: a single creature, a sentence convoy, or the boss. */
+export type EnemyKind = Kind | 'convoy' | 'balaur';
+type Layer = 'shield' | 'core';
 
 export interface Settings {
   direction: Direction;
@@ -31,20 +40,30 @@ export interface Settings {
   difficulty: Difficulty;
   /** Accept plain letters for Romanian diacritics (a for ă/â, s for ș, ...). */
   lenient: boolean;
+  /** Type the word you read first, to pop the creature's bubble shield. */
+  shields: boolean;
 }
 
-/** Every kind of enemy: a single-word model, a sentence convoy, or the boss. */
-export type EnemyKind = Kind | 'convoy' | 'balaur';
-
-export interface TargetView {
-  source: string;
-  /** The text being typed, as glyphs, and how many have been typed. For sentences: the current word. */
+export interface WordView {
   glyphs: Glyph[];
   pos: number;
-  /** Sentence progress: all words of the typed sentence and the index of the current one. */
-  words?: string[];
-  wordIdx?: number;
+  hint?: string;
+}
+
+export interface LineView {
+  lang: Lang;
+  words: WordView[];
+  /** `info`: shown for reading only (shields off). `waiting`: the other line has to be typed first. */
+  state: 'active' | 'waiting' | 'done' | 'info';
+  /** Index of the word being typed, when this line belongs to the current target. */
+  current: number;
+  shield: boolean;
+}
+
+export interface TargetView {
   kind: EnemyKind;
+  name: [ro: string, en: string];
+  lines: LineView[];
 }
 
 export interface Missed {
@@ -64,25 +83,38 @@ export interface GameState {
   errors: number;
   destroyed: number;
   target: TargetView | null;
-  /** Short message in the middle of the screen ("Valul 3"), with a counter so React can restart its animation. */
+  /** Big message in the middle of the screen ("Valul 3"), with a counter so React can restart its animation. */
   banner: { text: string; sub: string; n: number } | null;
+  /** "A wild bat appeared!", the first time each creature shows up in a game. */
+  toast: { ro: string; en: string; n: number } | null;
   missed: Missed[];
 }
 
-interface WordPart {
-  /** The entry this word belongs to (each boss head has its own; convoy rocks share the sentence). */
-  entry: Entry;
-  source: string;
-  glyphs: Glyph[];
-  mistakes: number;
-  /** Last on-screen position of its tag, for letter pops. */
+/** One creature (or a sentence banner) with its tag; it carries the words typed at it. */
+interface Slot {
+  anchor: THREE.Object3D;
+  model?: Model;
+  bubble?: Bubble;
+  radius: number;
+  tag: HTMLElement;
+  /** Reading line shown when there is no shield to type. */
+  info?: { lang: Lang; text: string };
+  parts: WordPart[];
+  /** Last on-screen position of the tag, for letter pops. */
   sx: number;
   sy: number;
+  done: boolean;
+}
+
+interface WordPart {
+  layer: Layer;
+  lang: Lang;
+  entry: Entry;
+  glyphs: Glyph[];
+  hint?: string;
   pos: number;
-  model: Model;
-  /** Offset from the enemy centre (sentences are a row of rocks). */
-  offset: number;
-  tag: HTMLElement;
+  mistakes: number;
+  slot: Slot;
   done: boolean;
 }
 
@@ -90,23 +122,43 @@ interface Enemy {
   id: number;
   kind: EnemyKind;
   entry: Entry;
-  source: string;
-  target: string;
+  slots: Slot[];
+  /** Words in typing order. */
   parts: WordPart[];
   partIdx: number;
   root: THREE.Group;
+  body?: Model;
   x: number;
   y: number;
   /** Where on the wall it is heading. */
   aimX: number;
   speed: number;
   phase: number;
-  /** A tag under a sentence convoy showing the whole source sentence. */
-  banner?: HTMLElement;
-  /** The boss's body, which the heads sit on. */
-  body?: Model;
   mistakes: number;
 }
+
+/** "A wild … appeared!" per kind; Romanian needs the article and adjective to agree with the creature's gender. */
+const APPEARS: Record<EnemyKind, string> = {
+  bat: 'Un liliac sălbatic a apărut!',
+  meteor: 'Un pietroi sălbatic a apărut!',
+  ghost: 'O fantomiță sălbatică a apărut!',
+  zmeu: 'Un zmeuț sălbatic a apărut!',
+  rock: 'O pietricică sălbatică a apărut!',
+  head: 'Balaurul a apărut!',
+  convoy: 'Un șir de pietricele a apărut!',
+  balaur: 'Balaurul a apărut!',
+};
+
+export const NAMES: Record<EnemyKind, [ro: string, en: string]> = {
+  bat: ['liliac', 'bat'],
+  meteor: ['pietroi', 'rock buddy'],
+  ghost: ['fantomiță', 'little ghost'],
+  zmeu: ['zmeuț', 'baby dragon'],
+  rock: ['pietricică', 'pebble'],
+  head: ['cap de balaur', 'dragon head'],
+  convoy: ['șir de pietricele', 'pebble parade'],
+  balaur: ['Balaurul', 'the dragon'],
+};
 
 const MAX_HP = 10;
 const DIFF = {
@@ -114,9 +166,15 @@ const DIFF = {
   normal: { time: 1, cps: 2.2 },
   hard: { time: 0.75, cps: 3.2 },
 };
-/** Seconds an enemy of each kind takes to fall the whole screen at wave 1 on normal. */
-const FALL_TIME: Record<EnemyKind, number> = { bat: 13, meteor: 16, ghost: 18, zmeu: 22, rock: 16, head: 22, convoy: 30, balaur: 55 };
-const POPS = ['BUM!', 'PAC!', 'POC!', 'ZBANG!', 'BAM!', 'TRANC!', 'PUF!'];
+/** Seconds a creature of each kind takes to fall the whole field at wave 1 on normal. */
+const FALL_TIME: Record<EnemyKind, number> = { bat: 15, meteor: 19, ghost: 21, zmeu: 25, rock: 19, head: 25, convoy: 36, balaur: 65 };
+const POOFS = ['POF!', 'PUF!', 'BRAVO!', 'SUPER!', 'YUPI!', 'TOP!'];
+
+/** The field spans this many world units from the ground to the spawn line when the screen is tall enough. */
+const FIELD_HEIGHT = 24;
+/** Creatures are modelled at about 1 m radius and drawn bigger, so faces read on a phone. */
+const CREATURE_SCALE = 1.45;
+const MIN_HALF_WIDTH = 10.5;
 
 export class Game {
   readonly engine: Engine;
@@ -130,6 +188,7 @@ export class Game {
   private sentenceDeck: Entry[] = [];
   /** Entries the player got wrong, shown again a few spawns later. */
   private review: { entry: Entry; due: number }[] = [];
+  private seen = new Set<EnemyKind>();
   private spawned = 0;
   private waveLeft = 0;
   private spawnTimer = 0;
@@ -142,6 +201,8 @@ export class Game {
   private zapPitch = 1;
   private halfWidth = 14;
   private top = 26;
+  /** Screen pixels covered by the HUD at the top and the word panel at the bottom; the castle sits above the latter. */
+  private insets = { top: 0, bottom: 0 };
   private missed = new Map<string, Missed>();
   private listeners = new Set<(s: GameState) => void>();
   private tmp = new THREE.Vector3();
@@ -160,11 +221,12 @@ export class Game {
     destroyed: 0,
     target: null,
     banner: null,
+    toast: null,
     missed: [],
   };
 
   constructor(container: HTMLElement, tags: HTMLElement) {
-    this.engine = new Engine(container, { fov: 45, shadows: false });
+    this.engine = new Engine(container, { fov: 40, shadows: false, near: 1, far: 1200 });
     this.tags = tags;
     this.world = buildWorld(this.engine.scene);
     this.effects = new Effects(this.engine.scene);
@@ -180,6 +242,11 @@ export class Game {
   private emit() {
     this.state = { ...this.state, target: this.targetView(), missed: [...this.missed.values()].sort((a, b) => b.count - a.count) };
     for (const fn of this.listeners) fn(this.state);
+  }
+
+  /** Pixels hidden behind HUD panels; the camera frames the castle just above the bottom one. */
+  setInsets(top: number, bottom: number) {
+    this.insets = { top, bottom };
   }
 
   dispose() {
@@ -206,9 +273,23 @@ export class Game {
     if (settings.mix !== 'sentences' && !this.deck.length) this.deck = shuffle(ENTRIES.filter((e) => !e.sentence));
     this.review = [];
     this.missed.clear();
+    this.seen.clear();
     this.spawned = 0;
     this.targetId = 0;
-    this.state = { ...this.state, phase: 'playing', hp: MAX_HP, score: 0, wave: 0, combo: 0, multiplier: 1, typed: 0, errors: 0, destroyed: 0, banner: null };
+    this.state = {
+      ...this.state,
+      phase: 'playing',
+      hp: MAX_HP,
+      score: 0,
+      wave: 0,
+      combo: 0,
+      multiplier: 1,
+      typed: 0,
+      errors: 0,
+      destroyed: 0,
+      banner: null,
+      toast: null,
+    };
     this.world.setDamage(1);
     this.nextWave();
   }
@@ -223,18 +304,18 @@ export class Game {
   quit() {
     flushProgress();
     this.clearEnemies();
-    this.state = { ...this.state, phase: 'idle', banner: null };
+    this.state = { ...this.state, phase: 'idle', banner: null, toast: null };
     this.emit();
   }
 
   private nextWave() {
     const wave = this.state.wave + 1;
+    if (wave > 1) flushProgress();
     const boss = wave % 5 === 0 && this.settings.mix !== 'sentences';
     this.bossPending = boss;
-    this.waveLeft = Math.min(32, 5 + wave * 2) - (boss ? 6 : 0);
+    this.waveLeft = Math.min(30, 4 + wave * 2) - (boss ? 6 : 0);
     this.waveBreak = 2.6;
     this.spawnTimer = 0;
-    if (wave > 1) flushProgress();
     const heal = wave > 1 && this.state.hp < MAX_HP;
     if (heal) sfx.play('heal');
     this.state = {
@@ -242,8 +323,8 @@ export class Game {
       wave,
       hp: heal ? this.state.hp + 1 : this.state.hp,
       banner: boss
-        ? { text: 'Balaurul!', sub: `Wave ${wave} · the many-headed dragon${heal ? ' · +1 ♥' : ''}`, n: wave }
-        : { text: `Valul ${wave}`, sub: wave === 1 ? 'Wave 1 — apără cetatea!' : `Wave ${wave}${heal ? ' · +1 ♥' : ''}`, n: wave },
+        ? { text: 'Balaurul!', sub: `Valul ${wave} · Wave ${wave} · boss${heal ? ' · +1 ♥' : ''}`, n: wave }
+        : { text: `Valul ${wave}`, sub: wave === 1 ? 'Apără cetatea! · Defend the castle!' : `Wave ${wave}${heal ? ' · +1 ♥' : ''}`, n: wave },
     };
     this.world.setDamage(this.state.hp / MAX_HP);
     if (wave > 1) sfx.play('wave');
@@ -253,12 +334,12 @@ export class Game {
   private gameOver() {
     flushProgress();
     sfx.play('lose');
-    // Everything still in the air goes up in flames with the citadel.
+    // Everything still in the air poofs away with the game.
     for (const e of [...this.enemies]) {
-      this.effects.explode(e.root.position, 1.2);
+      this.effects.poof(e.root.position, 1.2, 0xffffff);
       this.remove(e);
     }
-    this.state = { ...this.state, phase: 'over', hp: 0, banner: null };
+    this.state = { ...this.state, phase: 'over', hp: 0, banner: null, toast: null };
     this.world.setDamage(0);
     this.emit();
   }
@@ -283,6 +364,7 @@ export class Game {
     const { mix } = this.settings;
     if (mix === 'words' || !this.sentenceDeck.length) return false;
     if (mix === 'sentences' || !this.deck.length) return true;
+    if (this.enemies.some((e) => e.kind === 'balaur')) return false;
     const convoys = this.enemies.filter((e) => e.kind === 'convoy').length;
     return this.state.wave >= 2 && convoys < (this.state.wave >= 6 ? 2 : 1) && Math.random() < 0.28;
   }
@@ -306,116 +388,158 @@ export class Game {
     for (let tries = 0; entries.length < heads && tries < 40; tries++) {
       const e = this.draw(false);
       const len = countTyped(stripHints(e[targetLang(this.settings.direction)]));
-      if ((len <= 9 || tries > 30) && !entries.includes(e)) entries.push(e);
+      if ((len <= 8 || tries > 30) && !entries.includes(e)) entries.push(e);
     }
     this.create('balaur', entries);
   }
 
+  private makeTag(kind: string) {
+    const tag = document.createElement('div');
+    tag.className = `tag ${kind}`;
+    this.tags.appendChild(tag);
+    return tag;
+  }
+
   private create(kind: EnemyKind, entries: Entry[]) {
     this.spawned++;
-    const { direction } = this.settings;
+    const { direction, shields } = this.settings;
+    const src = sourceLang(direction);
+    const dst = targetLang(direction);
     const first = entries[0];
-    const source = first[sourceLang(direction)];
-    const target = stripHints(first[targetLang(direction)]);
-    // A sentence is one rock per word; the boss is one head per entry; anything else is a single word.
-    const words =
-      kind === 'convoy'
-        ? target.split(' ').map((text) => ({ entry: first, source, text }))
-        : entries.map((e) => ({ entry: e, source: e[sourceLang(direction)], text: stripHints(e[targetLang(direction)]) }));
-
     const root = new THREE.Group();
     this.engine.scene.add(root);
-    // Lay the words out left to right, spaced by word length so their tags do not overlap.
-    const widths = words.map((w) => {
-      const chars = kind === 'balaur' ? Math.max(w.text.length, w.source.length * 0.8) : w.text.length;
-      return Math.max(kind === 'balaur' ? 4.2 : 3, chars * 0.78 + 1.8);
-    });
-    const total = widths.reduce((a, b) => a + b, 0);
-    let cursor = -total / 2;
-    const offsets = widths.map((w) => {
-      const o = cursor + w / 2;
-      cursor += w;
-      return o;
-    });
-    // Boss heads rise in an arch over the body.
-    const headY = (x: number) => 3.4 - ((x * x) / (total * total)) * 3;
-    let body: Model | undefined;
-    if (kind === 'balaur') {
-      body = makeBalaurBody(offsets.map((x) => ({ x, y: headY(x) })));
-      root.add(body.root);
-    }
-    const parts: WordPart[] = words.map((w, i) => {
-      const model = makeModel(kind === 'convoy' ? 'rock' : kind === 'balaur' ? 'head' : kind);
-      model.root.position.set(offsets[i], kind === 'balaur' ? headY(offsets[i]) : 0, kind === 'balaur' ? 0.4 : 0);
-      root.add(model.root);
-      const tag = document.createElement('div');
-      tag.className = `tag ${kind}`;
-      this.tags.appendChild(tag);
+    const word = (layer: Layer, entry: Entry, text: string, slot: Slot): WordPart => {
       const part: WordPart = {
-        entry: w.entry,
-        source: w.source,
-        glyphs: glyphs(w.text),
+        layer,
+        lang: layer === 'shield' ? src : dst,
+        entry,
+        glyphs: glyphs(stripHints(text)),
+        hint: hintOf(text),
         pos: 0,
         mistakes: 0,
-        sx: 0,
-        sy: 0,
-        model,
-        offset: offsets[i],
-        tag,
+        slot,
         done: false,
       };
       skipUntyped(part);
+      slot.parts.push(part);
       return part;
-    });
+    };
+    const slots: Slot[] = [];
+    const parts: WordPart[] = [];
+    let body: Model | undefined;
+    let total = 0;
 
+    if (kind === 'convoy') {
+      // A row of pebbles, one per word of the translation, inside one long bubble carrying the source sentence.
+      const words = stripHints(first[dst]).split(' ');
+      const widths = words.map((w) => Math.max(2.8, w.length * 0.72 + 1.6));
+      total = widths.reduce((a, b) => a + b, 0);
+      let cursor = -total / 2;
+      const banner: Slot = { anchor: root, radius: 1.9, tag: this.makeTag('sentence-banner'), parts: [], sx: 0, sy: 0, done: false };
+      if (shields) {
+        banner.bubble = makeBubble(1.9, total / 2 + 0.9);
+        root.add(banner.bubble.root);
+        for (const w of stripHints(first[src]).split(' ')) parts.push(word('shield', first, w, banner));
+      } else banner.info = { lang: src, text: first[src] };
+      slots.push(banner);
+      for (let i = 0; i < words.length; i++) {
+        const model = makeModel('rock');
+        model.root.position.x = cursor + widths[i] / 2;
+        cursor += widths[i];
+        root.add(model.root);
+        const slot: Slot = { anchor: model.root, model, radius: model.radius, tag: this.makeTag('rock'), parts: [], sx: 0, sy: 0, done: false };
+        slots.push(slot);
+        parts.push(word('core', first, words[i], slot));
+      }
+    } else {
+      // One creature per entry (the balaur has several heads), each with its own bubble and its own pair of words.
+      const widths = entries.map((e) => {
+        const chars = Math.max(stripHints(e[dst]).length, stripHints(e[src]).length);
+        return Math.max(kind === 'balaur' ? 4.4 : 3, chars * 0.72 + 2);
+      });
+      total = widths.reduce((a, b) => a + b, 0);
+      let cursor = -total / 2;
+      const headY = (x: number) => 3.6 - ((x * x) / (total * total)) * 3;
+      const offsets = widths.map((w) => {
+        const o = cursor + w / 2;
+        cursor += w;
+        return o;
+      });
+      if (kind === 'balaur') {
+        body = makeBalaurBody(offsets.map((x) => ({ x, y: headY(x) })));
+        root.add(body.root);
+      }
+      entries.forEach((e, i) => {
+        const model = makeModel(kind === 'balaur' ? 'head' : (kind as Kind));
+        if (kind === 'balaur') model.root.position.set(offsets[i], headY(offsets[i]), 0.4);
+        root.add(model.root);
+        const slot: Slot = { anchor: model.root, model, radius: model.radius, tag: this.makeTag(kind), parts: [], sx: 0, sy: 0, done: false };
+        if (shields) {
+          slot.bubble = makeBubble(model.radius * 1.45);
+          model.root.add(slot.bubble.root);
+          parts.push(word('shield', e, e[src], slot));
+        } else slot.info = { lang: src, text: e[src] };
+        parts.push(word('core', e, e[dst], slot));
+        slots.push(slot);
+      });
+    }
+
+    // Scale the group up, but never wider than the screen (long sentences on a narrow phone).
+    const scale = Math.min(CREATURE_SCALE, (this.halfWidth * 2 - 1.5) / Math.max(1, total));
+    root.scale.setScalar(scale);
+    for (const s of slots) s.radius *= scale;
+    total *= scale;
     const letters = parts.reduce((n, p) => n + p.glyphs.filter((g) => g.typed).length, 0);
-    const margin = Math.min(this.halfWidth - 1, total / 2 + 2.5);
+    const margin = Math.min(this.halfWidth - 1, total / 2 + 2);
     const x = kind === 'balaur' ? 0 : (Math.random() * 2 - 1) * Math.max(0, this.halfWidth - margin);
-    const aimX = kind === 'convoy' || kind === 'balaur' ? x * 0.6 : (Math.random() * 2 - 1) * Math.min(this.halfWidth * 0.8, 14);
+    const aimX = kind === 'convoy' || kind === 'balaur' ? x * 0.6 : (Math.random() * 2 - 1) * Math.min(this.halfWidth * 0.75, 13);
     const diff = DIFF[this.settings.difficulty];
     const waveFactor = Math.min(2.3, 1 + (this.state.wave - 1) * 0.08);
     // Never faster than a learner at this difficulty can type it, plus a few seconds to read.
-    const typeTime = letters / diff.cps + (parts.length > 1 ? 6 : 3);
+    const typeTime = letters / diff.cps + (parts.length > 2 ? 6 : 3);
     const time = Math.max((FALL_TIME[kind] * diff.time) / (kind === 'balaur' ? 1 : waveFactor), typeTime);
     const startY = this.top + (kind === 'balaur' ? 5 : 2);
     const enemy: Enemy = {
       id: this.nextId++,
       kind,
       entry: first,
-      source,
-      target,
+      slots,
       parts,
       partIdx: 0,
       root,
+      body,
       x,
       y: startY,
       aimX,
       speed: (startY - IMPACT_Y) / time,
       phase: Math.random() * 10,
       mistakes: 0,
-      body,
     };
-    if (kind === 'convoy') {
-      enemy.banner = document.createElement('div');
-      enemy.banner.className = 'tag sentence-banner';
-      enemy.banner.textContent = source;
-      this.tags.appendChild(enemy.banner);
-    }
     this.enemies.push(enemy);
-    for (const p of parts) this.renderTag(enemy, p);
+    for (const s of slots) this.renderTag(enemy, s);
+    if (!this.seen.has(kind)) {
+      this.seen.add(kind);
+      const en = kind === 'balaur' ? 'The dragon appeared!' : kind === 'convoy' ? 'A pebble parade appeared!' : `A wild ${NAMES[kind][1]} appeared!`;
+      this.state = { ...this.state, toast: { ro: APPEARS[kind], en, n: this.spawned } };
+      sfx.play('appear');
+      this.emit();
+    }
   }
 
   private clearEnemies() {
     for (const e of [...this.enemies]) this.remove(e);
-    this.tags.querySelectorAll('.pop').forEach((p) => p.remove());
+    this.tags.querySelectorAll('.pop, .letter').forEach((p) => p.remove());
   }
 
   private remove(e: Enemy) {
     this.enemies.splice(this.enemies.indexOf(e), 1);
-    for (const p of e.parts) p.tag.remove();
-    e.banner?.remove();
+    for (const s of e.slots) s.tag.remove();
     this.engine.scene.remove(e.root);
-    e.root.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    e.root.traverse((o) => {
+      const geo = (o as THREE.Mesh).geometry;
+      // Bubble geometry is shared by every bubble; everything else belongs to this creature.
+      if (geo && !geo.userData.shared) geo.dispose();
+    });
     if (this.targetId === e.id) this.targetId = 0;
   }
 
@@ -428,14 +552,14 @@ export class Game {
     const current = this.enemies.find((e) => e.id === this.targetId);
     if (current && best && current !== best) {
       const part = current.parts[current.partIdx];
-      const started = part.pos > firstTyped(part.glyphs) || current.partIdx > 0;
+      const started = current.partIdx > 0 || part.pos > firstTyped(part.glyphs);
       if (started && current.y - best.y < 1.2) best = current;
     }
     if (best && best.id !== this.targetId) {
       const old = this.enemies.find((e) => e.id === this.targetId);
       this.targetId = best.id;
-      if (old) for (const p of old.parts) this.renderTag(old, p);
-      for (const p of best.parts) this.renderTag(best, p);
+      if (old) for (const s of old.slots) this.renderTag(old, s);
+      for (const s of best.slots) this.renderTag(best, s);
       this.emit();
     }
     return best;
@@ -448,55 +572,81 @@ export class Game {
     const enemy = this.pickTarget();
     if (!enemy) return;
     const part = enemy.parts[enemy.partIdx];
-    const want = part.glyphs[part.pos];
+    const want = part?.glyphs[part.pos];
     if (!want) return;
     let { score, combo, typed, errors, destroyed } = this.state;
     typed++;
-    if (matches(want.ch, ch, this.settings.lenient)) {
-      part.pos++;
-      skipUntyped(part);
-      combo++;
-      const multiplier = Math.min(5, 1 + Math.floor(combo / 12));
-      score += 10 * multiplier;
-      this.zapPitch = Math.min(2, this.zapPitch + 0.04);
-      sfx.play('zap', this.zapPitch);
-      const at = this.partPosition(enemy, part, this.tmp);
-      this.fire(at);
-      this.effects.sparks(at, 4, 5);
-      this.letterPop(part, want.ch);
-      if (part.pos >= part.glyphs.length) {
-        part.done = true;
-        if (enemy.kind !== 'convoy') record(part.entry.id, this.settings.direction, part.mistakes === 0);
-        part.tag.remove();
-        part.model.root.visible = false;
-        this.effects.explode(at, enemy.kind === 'convoy' ? 0.9 : part.model.radius, DEBRIS[enemy.kind]);
-        this.pop(at, enemy.kind === 'zmeu' ? 'ZDRANG!' : POPS[(Math.random() * POPS.length) | 0]);
-        enemy.partIdx++;
-        if (enemy.partIdx >= enemy.parts.length) {
-          if (enemy.kind === 'convoy') record(enemy.entry.id, this.settings.direction, enemy.mistakes === 0);
-          if (enemy.body) {
-            this.effects.explode(enemy.root.position, 3.2, 0x3fae6b);
-            this.pop(enemy.root.position, 'VICTORIE!');
-          }
-          sfx.play(enemy.kind === 'zmeu' || enemy.kind === 'convoy' || enemy.kind === 'balaur' ? 'bigboom' : 'boom');
-          score += this.killBonus(enemy) * multiplier;
-          destroyed++;
-          this.remove(enemy);
-        } else sfx.play('boom');
-      } else this.renderTag(enemy, part);
-      this.state = { ...this.state, score, combo, multiplier, typed, destroyed };
-    } else {
+    if (!matches(want.ch, ch, this.settings.lenient)) {
       errors++;
       enemy.mistakes++;
       part.mistakes++;
       this.zapPitch = 1;
       sfx.play('miss');
+      this.world.oops();
       this.noteMissed(part.entry, 5);
-      part.tag.classList.remove('wrong');
-      void part.tag.offsetWidth;
-      part.tag.classList.add('wrong');
+      part.slot.tag.classList.remove('wrong');
+      void part.slot.tag.offsetWidth;
+      part.slot.tag.classList.add('wrong');
       this.state = { ...this.state, combo: 0, multiplier: 1, typed, errors };
+      this.emit();
+      return;
     }
+
+    part.pos++;
+    skipUntyped(part);
+    combo++;
+    const multiplier = Math.min(5, 1 + Math.floor(combo / 12));
+    score += 10 * multiplier;
+    this.zapPitch = Math.min(2, this.zapPitch + 0.04);
+    const slot = part.slot;
+    const at = this.slotPosition(slot, this.tmp);
+    this.world.cast();
+    this.effects.beam(this.world.muzzle(this.tmp2), at, part.layer === 'shield' ? 0x5fd0ff : 0xff6fb5);
+    this.effects.sparkles(at, 3, 4, 0.18);
+    this.letterPop(slot, want.ch, part.layer);
+    if (part.layer === 'shield') {
+      sfx.play('tink', this.zapPitch);
+      slot.bubble?.hit();
+    } else {
+      sfx.play('zap', this.zapPitch);
+      slot.model?.hit();
+    }
+
+    if (part.pos >= part.glyphs.length) {
+      part.done = true;
+      enemy.partIdx++;
+      if (part.layer === 'shield' && slot.parts.every((p) => p.layer !== 'shield' || p.done) && slot.bubble) {
+        // Last shield word of this bubble: pop it.
+        this.effects.pop(at, slot.radius * (slot.model ? 1.45 : 1));
+        slot.bubble.root.removeFromParent();
+        slot.bubble = undefined;
+        sfx.play('pop');
+        this.pop(at, 'POC!', 'pop-shield');
+      }
+      if (part.layer === 'core') {
+        if (enemy.kind !== 'convoy') record(part.entry.id, this.settings.direction, part.mistakes === 0);
+        slot.done = true;
+        slot.tag.remove();
+        if (slot.model) {
+          slot.model.root.visible = false;
+          this.effects.poof(at, slot.radius, slot.model.color);
+        }
+        this.pop(at, POOFS[(Math.random() * POOFS.length) | 0]);
+        if (enemy.partIdx < enemy.parts.length) sfx.play('poof');
+      }
+      if (enemy.partIdx >= enemy.parts.length) {
+        if (enemy.kind === 'convoy') record(enemy.entry.id, this.settings.direction, enemy.mistakes === 0);
+        if (enemy.body) {
+          this.effects.poof(enemy.root.position, 3.2, 0x5fd68a);
+          this.pop(enemy.root.position, 'VICTORIE!', 'pop-big');
+        }
+        sfx.play(enemy.kind === 'zmeu' || enemy.kind === 'convoy' || enemy.kind === 'balaur' ? 'bigpoof' : 'poof');
+        score += this.killBonus(enemy) * multiplier;
+        destroyed++;
+        this.remove(enemy);
+      } else for (const s of enemy.slots) if (!s.done) this.renderTag(enemy, s);
+    } else this.renderTag(enemy, slot);
+    this.state = { ...this.state, score, combo, multiplier, typed, destroyed };
     this.emit();
   }
 
@@ -509,12 +659,12 @@ export class Game {
   }
 
   /** The letter just shot flies off its tag. */
-  private letterPop(part: WordPart, ch: string) {
+  private letterPop(slot: Slot, ch: string, layer: Layer) {
     const el = document.createElement('div');
-    el.className = 'letter';
+    el.className = `letter ${layer}`;
     el.textContent = ch;
-    el.style.left = `${part.sx}px`;
-    el.style.top = `${part.sy}px`;
+    el.style.left = `${slot.sx}px`;
+    el.style.top = `${slot.sy}px`;
     el.style.setProperty('--dx', `${((Math.random() - 0.5) * 120).toFixed(0)}px`);
     el.style.setProperty('--rot', `${((Math.random() - 0.5) * 540).toFixed(0)}deg`);
     this.tags.appendChild(el);
@@ -526,14 +676,9 @@ export class Game {
     return letters * 5 + (e.mistakes === 0 ? 50 : 0) + (e.kind === 'balaur' ? 500 : 0);
   }
 
-  private fire(at: THREE.Vector3) {
-    const from = this.world.muzzle(this.tmp2);
-    this.effects.laser(from, at);
-  }
-
-  private pop(at: THREE.Vector3, text: string) {
+  private pop(at: THREE.Vector3, text: string, cls = '') {
     const el = document.createElement('div');
-    el.className = 'pop';
+    el.className = `pop ${cls}`;
     el.textContent = text;
     const p = this.project(at);
     el.style.left = `${p.x}px`;
@@ -543,34 +688,61 @@ export class Game {
     setTimeout(() => el.remove(), 900);
   }
 
-  private targetView(): TargetView | null {
-    const e = this.enemies.find((x) => x.id === this.targetId);
-    if (!e) return null;
-    const part = e.parts[e.partIdx];
-    if (!part) return null;
-    return {
-      source: part.source,
-      glyphs: part.glyphs,
-      pos: part.pos,
-      kind: e.kind,
-      words: e.kind === 'convoy' ? e.parts.map((p) => p.glyphs.map((g) => g.ch).join('')) : undefined,
-      wordIdx: e.kind === 'convoy' ? e.partIdx : undefined,
-    };
+  // ---- views ---------------------------------------------------------------------------------------------------
+
+  /** The shield line and the word line for a group of parts; the first unfinished one is active. */
+  private lines(e: Enemy, group: WordPart[], info?: { lang: Lang; text: string }): LineView[] {
+    const current = e.id === this.targetId ? e.parts[e.partIdx] : undefined;
+    const out: LineView[] = [];
+    if (info) {
+      out.push({ lang: info.lang, words: [{ glyphs: glyphs(stripHints(info.text)), pos: 0, hint: hintOf(info.text) }], state: 'info', current: -1, shield: false });
+    }
+    let open = false;
+    for (const layer of ['shield', 'core'] as const) {
+      const ps = group.filter((p) => p.layer === layer);
+      if (!ps.length) continue;
+      const done = ps.every((p) => p.done);
+      // Convoy pebbles only hold core words, but they still wait for the sentence bubble to pop.
+      const blocked = layer === 'core' && e.parts.some((p) => p.layer === 'shield' && !p.done && p.slot !== ps[0].slot && e.kind === 'convoy');
+      const state = done ? 'done' : !open && !blocked ? 'active' : 'waiting';
+      if (state === 'active') open = true;
+      out.push({
+        lang: ps[0].lang,
+        words: ps.map((p) => ({ glyphs: p.glyphs, pos: p.pos, hint: p.hint })),
+        state,
+        current: current ? ps.indexOf(current) : -1,
+        shield: layer === 'shield',
+      });
+    }
+    return out;
   }
 
-  // ---- tags ----------------------------------------------------------------------------------------------------
+  private targetView(): TargetView | null {
+    const e = this.enemies.find((x) => x.id === this.targetId);
+    const part = e?.parts[e.partIdx];
+    if (!e || !part) return null;
+    const group = e.kind === 'convoy' ? e.parts : e.parts.filter((p) => p.slot === part.slot);
+    const info = e.kind === 'convoy' ? e.slots[0].info : part.slot.info;
+    return { kind: e.kind, name: NAMES[e.kind], lines: this.lines(e, group, info) };
+  }
 
-  private renderTag(e: Enemy, part: WordPart) {
+  private renderTag(e: Enemy, slot: Slot) {
     const isTarget = e.id === this.targetId;
-    const isNext = isTarget && e.parts[e.partIdx] === part;
-    part.tag.classList.toggle('target', isTarget);
-    part.tag.classList.toggle('next', isNext);
-    const typed = part.glyphs.map((g, i) => {
-      const cls = i < part.pos ? 'done' : i === part.pos && isNext ? 'cur' : '';
-      return `<span class="${cls}">${escape(g.ch)}</span>`;
-    });
-    const src = e.kind === 'convoy' ? '' : `<div class="src">${escape(part.source)}</div>`;
-    part.tag.innerHTML = `${src}<div class="dst">${typed.join('')}</div>`;
+    slot.tag.classList.toggle('target', isTarget);
+    slot.tag.classList.toggle('shielded', !!slot.bubble);
+    slot.tag.innerHTML = this.lines(e, slot.parts, slot.info)
+      .map((line) => {
+        const words = line.words.map((w, wi) => {
+          const live = line.state === 'active' && wi === line.current;
+          const chars = w.glyphs
+            .map((g, i) => `<span class="${i < w.pos ? 'done' : live && i === w.pos ? 'cur' : ''}">${escape(g.ch)}</span>`)
+            .join('');
+          const hint = w.hint ? `<small>${escape(w.hint)}</small>` : '';
+          return `<span class="w">${chars}${hint}</span>`;
+        });
+        return `<div class="line ${line.state}${line.shield ? ' shield' : ''}"><b>${line.lang.toUpperCase()}</b>${words.join(' ')}</div>`;
+      })
+      .join('');
   }
 
   private project(v: THREE.Vector3) {
@@ -579,24 +751,33 @@ export class Game {
     return { x: (p.x * 0.5 + 0.5) * el.clientWidth, y: (-p.y * 0.5 + 0.5) * el.clientHeight };
   }
 
-  private partPosition(e: Enemy, part: WordPart, out: THREE.Vector3) {
-    return part.model.root.getWorldPosition(out).setZ(e.root.position.z);
+  private slotPosition(slot: Slot, out: THREE.Vector3) {
+    return slot.anchor.getWorldPosition(out).setZ(0.5);
   }
 
   // ---- frame ---------------------------------------------------------------------------------------------------
 
-  /** Frame the play area: the wall at the bottom of the screen, at least ~22 m of width visible on narrow screens. */
+  /**
+   * Frame the play area between the HUD and the word panel: the ground sits right above the bottom panel, the field
+   * is at least FIELD_HEIGHT tall when the screen allows, and at least MIN_HALF_WIDTH wide on narrow phones (tall
+   * portrait screens then get a taller field). When the phone keyboard takes half the screen the field simply gets
+   * shorter (creatures spawn lower).
+   */
   private placeCamera() {
     const cam = this.engine.camera;
-    const tan = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
-    const minHalfW = 11.5;
-    const halfH = Math.max(15, minHalfW / cam.aspect);
-    const d = halfH / tan;
-    const bottom = -2.6;
+    const el = this.engine.renderer.domElement;
+    const H = el.clientHeight || 1;
+    const W = el.clientWidth || 1;
+    const usable = Math.max(120, H - this.insets.bottom - this.insets.top * 0.4);
+    const ppu = Math.min(usable / FIELD_HEIGHT, W / (2 * MIN_HALF_WIDTH));
+    const halfH = H / (2 * ppu);
+    const bottom = -1.2 - this.insets.bottom / ppu;
     const centerY = bottom + halfH;
-    cam.position.set(0, centerY + 2.5, d);
+    const d = halfH / Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+    cam.position.set(0, centerY + 2, d);
     cam.lookAt(0, centerY, 0);
-    this.top = bottom + halfH * 2 - 1.5;
+    // Creatures enter just under the HUD, so tall phone screens use their whole height.
+    this.top = Math.max(IMPACT_Y + 12, bottom + halfH * 2 - this.insets.top / ppu - 0.5);
     this.halfWidth = halfH * cam.aspect;
   }
 
@@ -618,11 +799,11 @@ export class Game {
         this.spawnTimer = 8;
       } else if (this.waveLeft > 0) {
         this.spawnTimer -= dt;
-        const maxAlive = Math.min(9, 3 + Math.floor(this.state.wave / 2));
+        const maxAlive = Math.min(8, 3 + Math.floor(this.state.wave / 2));
         if (this.spawnTimer <= 0 && this.enemies.length < maxAlive) {
           this.spawn();
           this.waveLeft--;
-          const gap = Math.max(1, 3.4 - this.state.wave * 0.17) * DIFF[this.settings.difficulty].time;
+          const gap = Math.max(1.2, 3.6 - this.state.wave * 0.17) * DIFF[this.settings.difficulty].time;
           this.spawnTimer = gap * (0.7 + Math.random() * 0.6) + (this.enemies.at(-1)?.kind === 'convoy' ? 3 : 0);
         }
       } else if (!this.enemies.length) this.nextWave();
@@ -633,33 +814,34 @@ export class Game {
       e.y -= e.speed * step;
       const progress = 1 - (e.y - IMPACT_Y) / (this.top + 2 - IMPACT_Y);
       let x = e.x + (e.aimX - e.x) * Math.max(0, progress);
-      if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 1.2;
-      if (e.kind === 'ghost') x += Math.sin(t * 1.2 + e.phase) * 1.6;
-      if (e.kind === 'balaur') x = Math.sin(t * 0.5 + e.phase) * Math.max(0, this.halfWidth - 12) * 0.5;
+      if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 1.0;
+      if (e.kind === 'ghost') x += Math.sin(t * 1.2 + e.phase) * 1.4;
+      if (e.kind === 'balaur') x = Math.sin(t * 0.5 + e.phase) * Math.max(0, this.halfWidth - 11) * 0.5;
       e.root.position.set(x, e.y, 0);
-      for (const p of e.parts) if (!p.done) p.model.animate(step, t);
+      for (const s of e.slots) {
+        if (s.model && !s.done) s.model.animate(step, t);
+        s.bubble?.update(dt, t);
+      }
       e.body?.animate(step, t);
       if (playing && e.y <= IMPACT_Y) this.impact(e);
     }
-    if (this.state.phase !== 'playing' && this.state.phase !== 'paused') this.effects.update(dt);
-    else this.effects.update(step);
+    tickBubbles(t);
+    this.effects.update(this.state.phase === 'paused' ? 0 : dt);
     if (playing) this.pickTarget();
 
-    // Turret follows the current target.
+    // The owl follows the current target.
     const target = this.enemies.find((e) => e.id === this.targetId);
     if (target) {
       const part = target.parts[target.partIdx] ?? target.parts[0];
-      this.aim.lerp(this.partPosition(target, part, this.tmp), Math.min(1, dt * 14));
+      this.aim.copy(this.slotPosition(part.slot, this.tmp));
     }
-    const head = this.world.head;
-    const dir = this.tmp.copy(this.aim).sub(head.getWorldPosition(this.tmp2)).normalize();
-    head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    this.world.aimAt(this.aim, dt);
     this.world.update(dt, t);
 
-    // Camera shake after a hit.
+    // Camera shake after a bonk.
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - dt * 2.5);
-      const s = this.shake * this.shake * 0.8;
+      const s = this.shake * this.shake * 0.6;
       this.engine.camera.position.x += (Math.random() - 0.5) * s;
       this.engine.camera.position.y += (Math.random() - 0.5) * s;
     }
@@ -670,15 +852,15 @@ export class Game {
   }
 
   private impact(e: Enemy) {
-    const remaining = e.parts.filter((p) => !p.done).length;
+    const remaining = e.slots.filter((s) => s.model && !s.done).length;
     const damage = e.kind === 'convoy' ? remaining : e.kind === 'balaur' ? remaining + 1 : e.kind === 'zmeu' ? 2 : 1;
     const at = this.tmp.set(e.root.position.x, IMPACT_Y, 0.5);
-    this.effects.explode(at, 1.8, 0xb99c74);
-    sfx.play('hurt');
+    this.effects.dust(at, 1.8);
+    this.pop(at, 'BONK!', 'pop-bonk');
+    sfx.play('bonk');
     this.shake = 1;
     this.hurtFlash = 0.5;
-    if (e.kind === 'convoy') this.noteMissed(e.entry, 4);
-    else for (const p of e.parts) if (!p.done) this.noteMissed(p.entry, 4);
+    for (const p of e.parts) if (!p.done) this.noteMissed(p.entry, 4);
     this.remove(e);
     const hp = Math.max(0, this.state.hp - damage);
     this.state = { ...this.state, hp, combo: 0, multiplier: 1 };
@@ -693,39 +875,28 @@ export class Game {
   private positionTags() {
     const v = this.tmp;
     for (const e of this.enemies) {
-      for (const p of e.parts) {
-        if (p.done) continue;
-        p.model.root.getWorldPosition(v);
-        v.y -= p.model.radius + 0.3;
-        const s = this.project(v);
-        p.sx = s.x;
-        p.sy = s.y + 18;
-        p.tag.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px) translate(-50%, 0)`;
-      }
-      if (e.banner) {
-        // Under the row of word tags, so it never hides behind the HUD while the convoy enters at the top.
-        v.copy(e.root.position);
-        v.y -= 1.2;
-        const s = this.project(v);
-        e.banner.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px) translate(-50%, 2.4em)`;
-        e.banner.classList.toggle('target', e.id === this.targetId);
+      for (const s of e.slots) {
+        if (s.done) continue;
+        s.anchor.getWorldPosition(v);
+        // Creature tags hang just under the creature (or its bubble); the sentence banner goes under the pebbles' tags.
+        v.y -= s.model ? s.radius * (s.bubble ? 1.45 : 1) + 0.2 : s.radius * 0.6;
+        const p = this.project(v);
+        s.sx = p.x;
+        s.sy = p.y + 18;
+        const shift = s.model ? '0' : '2.6em';
+        s.tag.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, ${shift})`;
       }
     }
   }
 }
 
-const DEBRIS: Record<EnemyKind, number> = {
-  bat: 0x4a3070,
-  ghost: 0xd8fff4,
-  zmeu: 0x3fae6b,
-  head: 0x3fae6b,
-  balaur: 0x3fae6b,
-  meteor: 0x8a5a9c,
-  rock: 0x8a5a9c,
-  convoy: 0x8a5a9c,
-};
-
 const countTyped = (text: string) => glyphs(text).filter((g) => g.typed).length;
+
+/** The "(hint)" parts of a text, shown small next to the word: "(to) eat" → "to". */
+function hintOf(text: string) {
+  const hints = [...text.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]);
+  return hints.length ? hints.join(', ') : undefined;
+}
 
 function firstTyped(g: Glyph[]) {
   const i = g.findIndex((x) => x.typed);

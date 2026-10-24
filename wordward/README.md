@@ -1,26 +1,41 @@
 # wordward: wordward.bas-franke.com
 
-A typing game for learning Romanian (or English). Monsters fall towards a Transylvanian citadel, each carrying a word.
-Type the translation and the laser on the citadel tower shoots them down letter by letter. The closest enemy is always
-the target, and both languages stay on screen the whole time, so you read, copy and remember as you play.
-Vite + React + three.js frontend (cel-shaded, everything procedural), tiny Node.js + Express backend on port **3005**.
-No database: settings and best scores live in the browser's `localStorage`.
+A cute typing game for learning Romanian (or English). Chubby creatures float down towards a candy-coloured castle,
+each inside a bubble shield. Type the word on the bubble (the language you read) to pop it, then type the translation
+to send the creature home with a star beam from Bufnița, the owl guardian. The closest creature is always the target,
+and both languages stay on screen the whole time, so you read, copy and remember as you play.
+Vite + React + three.js frontend (cel-shaded storybook look, everything procedural), tiny Node.js + Express backend on
+port **3005**. No database: settings, best scores and learning progress live in the browser's `localStorage`.
 
 ## How it plays
 
 - **Directions:** EN → RO (read English, type Romanian) or RO → EN.
-- **Modes:** words, sentences, or a mix (sentences join from wave 2). A sentence arrives as a convoy of rocks, one
-  word each, which you shoot from left to right.
-- **Enemies:** liliac (bat, short words, fast and fluttering), meteorit (burning rock), strigoi (ghost, long words,
-  sways), zmeu (dragon head, the longest words, 2 damage), convoi (sentences, damage = words left), and every 5th
-  wave the **balaur**, a winged dragon with one head per word (3 heads at wave 5, up to 5), typed left to right.
+- **Shields (on by default):** every creature first wears a bubble with the word in the language you read; typing it
+  pops the bubble (blue), then the translation defeats the creature (pink). Can be switched off in the menu, then the
+  word you read is shown above the one to type.
+- **Modes:** words, sentences, or a mix (sentences join from wave 2). A sentence arrives as a parade of pebbles, one
+  per word of the translation, inside one long bubble with the source sentence. Pop it, then shoot the pebbles from
+  left to right.
+- **Creatures:** liliac (bat fluffball, short words, fast), pietroi (rock buddy riding a comet tail), fantomiță (little
+  ghost, long words, sways), zmeuț (baby dragon, the longest words, 2 damage), pietricele (sentences, damage = pebbles
+  left), and every 5th wave **Balaurul**, a chubby winged dragon with one bubble and word pair per head (3 to 5 heads).
+  The first of each kind in a game gets a "A wild … appeared!" toast.
 - **Typing:** case-insensitive; spaces and punctuation are skipped for you. With *diacritice ușoare* on (default),
   `a` also matches `ă`/`â`, `i` → `î`, `s` → `ș`, `t` → `ț`. Real diacritics always work, including dead keys and
-  phone keyboards (input goes through a hidden text field).
-- **Learning:** a word you get wrong comes back a few enemies later; the game-over screen lists the words to practise.
-  Progress is kept per word and direction in `localStorage` (`game/progress.ts`): two typo-free kills = mastered, and
+  phone keyboards (input goes through a hidden text field that copes with Android word composition).
+- **Learning:** a word you get wrong comes back a few creatures later; the game-over screen lists the words to
+  practise. Progress is kept per word and direction (`game/progress.ts`): two typo-free wins = mastered, and
   unmastered words are served first. The menu shows how many words of the chosen topics you have mastered.
-- **Citadel:** 10 hearts, +1 at the start of every wave. Houses catch fire as it takes damage.
+- **Castle:** 10 HP (Pokémon-style bar), +1 at the start of every wave. Cottages puff smoke as it takes damage.
+
+## Mobile
+
+- The app is sized to `visualViewport`, so when the phone keyboard opens the whole game (HUD, castle, word panel)
+  stays above it. The game measures the HUD and the word panel and frames the camera so the castle sits right above
+  the panel; tall portrait screens get a taller field, short ones (keyboard open, landscape) a shorter one.
+- Creatures are scaled up 1.45× (and long sentences shrink to fit the width), the HUD compacts on short screens, all
+  buttons are at least 44–48 px, and a "Tap to type" button appears when the keyboard is closed mid-game.
+- Leaving the tab or app pauses the game.
 
 ## Code
 
@@ -28,12 +43,12 @@ No database: settings and best scores live in the browser's `localStorage`.
 frontend/src/
 ├── App.tsx          menu, HUD, pause and game-over screens (React)
 ├── game/
-│   ├── Game.ts      waves, spawning, targeting, typing, scoring; positions the DOM word tags each frame
-│   ├── world.ts     sky, Carpathian mountain ranges, the citadel and its laser tower
-│   ├── enemies.ts   procedural enemy models (bat, meteor, ghost, zmeu, convoy rock, balaur body)
+│   ├── Game.ts      waves, spawning, targeting, shields then words, scoring, camera framing, DOM word tags
+│   ├── world.ts     banded sky, smiling sun, clouds, pastel mountains, hills, the castle and the owl guardian
+│   ├── enemies.ts   procedural creatures (bat, rock buddy, ghost, baby dragon, pebble, balaur) and bubbles
 │   ├── progress.ts  per-word learning progress in localStorage
-│   ├── effects.ts   pooled lasers, sparks, inked fireballs, debris
-│   ├── toon.ts      toon ramp, cached materials, ink outlines (same technique as play/)
+│   ├── effects.ts   pooled star beams, sparkles, poof clouds, bubble pops, dust
+│   ├── toon.ts      toon shader look-dev patch, cached materials, ink outlines (copied from play/)
 │   ├── engine.ts    renderer wrapper with an adaptive-resolution governor
 │   └── audio.ts     synthesized sound effects
 └── vocab/

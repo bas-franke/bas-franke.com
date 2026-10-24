@@ -1,6 +1,6 @@
 // Tiny synthesized sound effects. No files to load, and it stays quiet until the first user gesture.
 
-type Sfx = 'zap' | 'miss' | 'boom' | 'bigboom' | 'hurt' | 'wave' | 'lose' | 'heal';
+type Sfx = 'zap' | 'tink' | 'pop' | 'miss' | 'poof' | 'bigpoof' | 'bonk' | 'wave' | 'lose' | 'heal' | 'appear';
 
 class Audio {
   private ctx?: AudioContext;
@@ -62,37 +62,53 @@ class Audio {
     src.start(t);
   }
 
-  /** `pitch` lets consecutive laser shots climb a little, so a fast word sounds like a run of notes. */
+  /** `pitch` lets consecutive shots climb a little, so a fast word sounds like a run of notes. */
   play(name: Sfx, pitch = 1) {
     switch (name) {
       case 'zap':
-        this.tone(1400 * pitch, 0.09, 'square', 0.07, 0.35);
-        this.tone(700 * pitch, 0.07, 'sawtooth', 0.05, 0.5);
+        this.tone(880 * pitch, 0.08, 'sine', 0.12, 1.6);
+        this.tone(1760 * pitch, 0.05, 'triangle', 0.05, 1.3);
+        break;
+      case 'tink':
+        this.tone(1568 * pitch, 0.07, 'triangle', 0.1, 1.1);
+        this.tone(2093 * pitch, 0.09, 'sine', 0.05, 1, 0.02);
+        break;
+      case 'pop':
+        this.tone(500, 0.06, 'sine', 0.25, 3);
+        this.noise(0.08, 0.15, 5000);
+        [1047, 1319, 1568].forEach((f, i) => this.tone(f, 0.12, 'triangle', 0.08, 1, 0.04 + i * 0.04));
         break;
       case 'miss':
-        this.tone(140, 0.16, 'square', 0.12, 0.7);
+        this.tone(220, 0.09, 'square', 0.06, 0.8);
+        this.tone(196, 0.12, 'square', 0.06, 0.8, 0.07);
         break;
-      case 'boom':
-        this.noise(0.45, 0.55, 1400);
-        this.tone(110, 0.35, 'sine', 0.4, 0.4);
+      case 'poof':
+        this.noise(0.3, 0.3, 2500);
+        this.tone(392, 0.12, 'triangle', 0.15, 2);
+        this.tone(784, 0.18, 'sine', 0.12, 1.5, 0.08);
         break;
-      case 'bigboom':
-        this.noise(1.1, 0.8, 900);
-        this.tone(70, 0.9, 'sine', 0.6, 0.3);
+      case 'bigpoof':
+        this.noise(0.6, 0.45, 1800);
+        [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 0.22, 'triangle', 0.14, 1, i * 0.07));
         break;
-      case 'hurt':
-        this.noise(0.6, 0.7, 700);
-        this.tone(180, 0.5, 'sawtooth', 0.3, 0.4);
+      case 'bonk':
+        this.tone(160, 0.25, 'sine', 0.5, 0.5);
+        this.tone(320, 0.15, 'square', 0.12, 0.6);
+        this.noise(0.25, 0.3, 900);
         break;
       case 'wave':
-        [392, 523, 659, 784].forEach((f, i) => this.tone(f, 0.25, 'triangle', 0.16, 1, i * 0.1));
+        [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, 'triangle', 0.16, 1, i * 0.1));
         break;
       case 'lose':
-        [392, 330, 262, 196].forEach((f, i) => this.tone(f, 0.45, 'sawtooth', 0.15, 0.9, i * 0.22));
+        [392, 370, 349, 262].forEach((f, i) => this.tone(f, i === 3 ? 0.7 : 0.3, 'triangle', 0.18, i === 3 ? 0.8 : 1, i * 0.28));
         break;
       case 'heal':
-        this.tone(660, 0.12, 'sine', 0.18);
-        this.tone(990, 0.25, 'sine', 0.18, 1, 0.1);
+        this.tone(784, 0.12, 'sine', 0.16);
+        this.tone(1175, 0.25, 'sine', 0.16, 1, 0.1);
+        break;
+      case 'appear':
+        this.tone(660, 0.1, 'triangle', 0.1, 1.5);
+        this.tone(990, 0.14, 'triangle', 0.1, 1.2, 0.09);
         break;
     }
   }
