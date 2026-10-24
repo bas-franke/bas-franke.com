@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { MapBox, MapData } from '@shared/rockets/map';
-import { INK, hullGeometry, inkMaterial, toonRamp } from '../../engine/toon';
+import { INK, hullGeometry, inkLineMaterial, inkMaterial, toonRamp } from '../../engine/toon';
 import { BASE_SURFACES, Bucket, type Surface, type Visible, at, buildProps, edgeHazards, themeOf } from './arenaDecor';
 import { SUN_DIR, buildSky } from './arenaSky';
 import { TEX_SIZE, type TexKey, arenaTexture, mulberry } from './arenaTextures';
@@ -95,6 +95,8 @@ export function buildArena(map: MapData): ArenaView {
     const uv = geo.attributes.uv as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
     const top = new Float32Array(pos.count);
+    // Small crates get one picture per face; big boxes painted as crates tile it every 2.5 m.
+    const crateTile = b.kind === 'crate' && Math.max(sx, sy, sz) > 3 ? 2.5 : 0;
     // A little brightness jitter per box so neighbouring blocks of one kind don't merge into a single slab.
     const jitter = 0.95 + rand() * 0.08;
     for (let i = 0; i < pos.count; i++) {
@@ -104,10 +106,11 @@ export function buildArena(map: MapData): ArenaView {
       const y = pos.getY(i);
       const z = pos.getZ(i);
       // World-metre uvs, so textures line up across neighbouring boxes; crates keep one picture per face.
-      if (b.kind !== 'crate') {
-        if (Math.abs(ny) > 0.5) uv.setXY(i, x, z);
-        else if (nx > 0.5) uv.setXY(i, z, y);
-        else uv.setXY(i, x, y);
+      if (b.kind !== 'crate' || crateTile) {
+        const k = crateTile ? 1 / crateTile : 1;
+        if (Math.abs(ny) > 0.5) uv.setXY(i, x * k, z * k);
+        else if (nx > 0.5) uv.setXY(i, z * k, y * k);
+        else uv.setXY(i, x * k, y * k);
       }
       // Undersides go dark and sides darken toward their foot: bridges and stairs read clearly from below.
       const k = ny > 0.5 ? 1 : ny < -0.5 ? 0.42 : y > b.min.y + 0.01 ? 1 : sy < 1.2 ? 0.7 : 0.8;
@@ -139,9 +142,8 @@ export function buildArena(map: MapData): ArenaView {
   const crease = mergeGeometries(creases, false);
   for (const g of creases) g.dispose();
   if (crease) {
-    const mat = new THREE.LineBasicMaterial({ color: INK });
-    group.add(new THREE.LineSegments(crease, mat));
-    disposables.push(crease, mat);
+    group.add(new THREE.LineSegments(crease, inkLineMaterial()));
+    disposables.push(crease);
   }
 
   // ---- decoration buckets: toon props, unlit glow, additive fades, ink decals ----

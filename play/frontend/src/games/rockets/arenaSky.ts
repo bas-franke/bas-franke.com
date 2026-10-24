@@ -32,6 +32,7 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       horizon: { value: horizon },
       haze: { value: horizon.clone().lerp(new THREE.Color(0xffffff), 0.45) },
       deep: { value: zenith.clone().multiplyScalar(0.45).lerp(horizon, 0.25) },
+      hazeAmount: { value: space ? 0.3 : 0.8 },
       sunDir: { value: SUN_DIR },
       sunColor: { value: new THREE.Color(map.id === 'canyon' ? 0xffe27a : 0xfff8dc) },
       sunSize: { value: Math.cos(map.id === 'canyon' ? 0.11 : space ? 0.035 : 0.07) },
@@ -47,6 +48,7 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       uniform vec3 zenith;
       uniform vec3 horizon;
       uniform vec3 haze;
+      uniform float hazeAmount;
       uniform vec3 deep;
       uniform vec3 sunDir;
       uniform vec3 sunColor;
@@ -62,7 +64,7 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
           col = mix(col, zenith * 0.62, smoothstep(0.55, 1.0, t));
           // A pale haze band just above the horizon, in three printed steps.
           float hz = floor((1.0 - smoothstep(0.012, 0.16, h)) * 3.0 + 0.5) / 3.0;
-          col = mix(col, haze, hz * 0.8);
+          col = mix(col, haze, hz * hazeAmount);
           // Exactly the fog colour at the horizon line, so fogged geometry melts into it.
           col = mix(horizon, col, smoothstep(0.0, 0.012, h));
         } else {
@@ -125,11 +127,13 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
 
   // ---- silhouettes: a pale far ring and a darker inked near ring ----
   if (theme.skyline !== 'none') {
-    const far = horizon.clone().lerp(zenith, 0.32);
-    const near = horizon.clone().lerp(zenith, 0.5).multiplyScalar(0.82);
+    // Atmospheric perspective: the far ring melts into the haze, the near one is a shade deeper than the horizon.
+    const hazeColor = horizon.clone().lerp(new THREE.Color(0xffffff), 0.45);
+    const far = horizon.clone().lerp(hazeColor, 0.35);
+    const near = horizon.clone().lerp(zenith, 0.3).multiplyScalar(0.9);
     const layers = [
-      { r: 185, n: 26, scale: 1.35, color: far, ink: false },
-      { r: 118, n: 18, scale: 1, color: near, ink: true },
+      { r: 205, n: 26, scale: 0.8, color: far, ink: false },
+      { r: 165, n: 18, scale: 0.55, color: near, ink: true },
     ];
     for (const layer of layers) {
       for (let i = 0; i < layer.n; i++) {
@@ -138,7 +142,7 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
         const color = layer.color.clone().multiplyScalar(0.93 + rand() * 0.12);
         for (const geo of silhouette(theme.skyline, rand, layer.scale)) {
           at(geo.g, Math.cos(a) * d + geo.dx, 0, Math.sin(a) * d + geo.dz, -a);
-          flat.add(layer.ink ? inked(geo.g) : geo.g, geo.glow ?? color);
+          flat.add(layer.ink ? inked(geo.g) : geo.g, geo.glow !== undefined ? new THREE.Color(geo.glow).lerp(color, geo.mix ?? 0) : color);
         }
       }
     }
@@ -214,11 +218,13 @@ interface Piece {
   dx: number;
   dz: number;
   glow?: number;
+  /** How far `glow` is blended into the layer colour. */
+  mix?: number;
 }
 
 /** One distant landmark in the given style, standing on y = 0 and reaching well below it so no gap shows. */
 function silhouette(kind: Theme['skyline'], rand: () => number, k: number): Piece[] {
-  const base = -30;
+  const base = -12;
   const column = (geo: THREE.BufferGeometry, h: number, dx = 0, dz = 0, glow?: number): Piece => {
     geo.translate(0, base + (h - base) / 2, 0);
     return { g: geo, dx, dz, glow };
@@ -241,8 +247,10 @@ function silhouette(kind: Theme['skyline'], rand: () => number, k: number): Piec
       if (rand() < 0.5) out.push(cone(6 * k, (16 + rand() * 6) * k, 12, -9 * k, 3, 6 * k));
       return out;
     }
-    case 'mesas':
-      return [cone((14 + rand() * 14) * k, (22 + rand() * 26) * k, 7, 0, 0, (9 + rand() * 8) * k)];
+    case 'mesas': {
+      const r = (20 + rand() * 16) * k;
+      return [cone(r, (14 + rand() * 18) * k, 7, 0, 0, r * 0.72)];
+    }
     case 'pyramids':
       return rand() < 0.6 ? [cone((22 + rand() * 12) * k, (30 + rand() * 24) * k, 4)] : [cone((40 + rand() * 20) * k, (10 + rand() * 6) * k, 9, 0, 0, 20 * k)];
     case 'spires':
@@ -262,14 +270,14 @@ function silhouette(kind: Theme['skyline'], rand: () => number, k: number): Piec
     }
     case 'islands': {
       // Floating islands: a flat top, a rock root, hanging at a random height.
-      const r = (10 + rand() * 12) * k;
-      const y = -10 + rand() * 50;
+      const r = (8 + rand() * 9) * k;
+      const y = -6 + rand() * 40;
       const rock = new THREE.ConeGeometry(r, r * 1.6, 7);
       rock.rotateX(Math.PI);
       rock.translate(0, y - r * 0.8, 0);
       const cap = new THREE.CylinderGeometry(r * 1.02, r, 2, 7);
       cap.translate(0, y + 1, 0);
-      return [{ g: rock, dx: 0, dz: 0 }, { g: cap, dx: 0, dz: 0, glow: 0x9ad06a }];
+      return [{ g: rock, dx: 0, dz: 0 }, { g: cap, dx: 0, dz: 0, glow: 0x9ad06a, mix: 0.55 }];
     }
     case 'hills':
     default: {

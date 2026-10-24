@@ -322,8 +322,8 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
       const d = half + 9 + rand() * 9;
       const x = Math.cos(a) * d;
       const z = Math.sin(a) * d;
-      const h = 26 + rand() * 14;
-      const r = 1.8 + rand() * 1.2;
+      const h = 20 + rand() * 10;
+      const r = 1.4 + rand() * 0.8;
       solid.add(at(new THREE.CylinderGeometry(r * 0.8, r, h, 10), x, h / 2, z), 0xb8603a);
       solid.add(at(cyl(r * 0.84, 1.2, 10), x, h * 0.78, z), 0xffffff);
       solid.add(at(cyl(r * 0.86, 0.8, 10), x, h - 0.4, z), dark);
