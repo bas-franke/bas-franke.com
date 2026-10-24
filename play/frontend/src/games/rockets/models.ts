@@ -1,7 +1,7 @@
-// Procedural low-poly models for Rockets in a cel-shaded comic style: the launcher (a chunky finned rocket with its
-// warhead loaded in the muzzle), the rocket projectile and the player droid. Every part gets an ink outline. Parts are
-// merged into one mesh per material plus one outline mesh, so a droid costs a handful of draw calls; finished models
-// are cached per colour and cloned, which shares geometry and materials between players.
+// Procedural low-poly models for Rockets in a cel-shaded comic style: the launcher (a chunky Quake-style gun with the
+// next rocket's nose peeking out of the muzzle), the rocket projectile and the player droid. Every part gets an ink
+// outline. Parts are merged into one mesh per material plus one outline mesh, so a droid costs a handful of draw
+// calls; finished models are cached per colour and cloned, which shares geometry and materials between players.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -12,7 +12,8 @@ type V3 = [number, number, number];
 const CREAM = 0xf3ecd9;
 const RED = 0xe8392e;
 const YELLOW = 0xffc83a;
-const STEEL = 0x59606e;
+const STEEL = 0x6a7282;
+const GUN = 0x464c5a;
 const DARK = 0x2c303a;
 const LENS = 0x9be7ff;
 const FIRE = 0xff9a1f;
@@ -81,39 +82,42 @@ function fins(kit: Kit, mat: THREE.Material, r: number, z: number, size: V3) {
 /** Where the loaded warhead sits; the client slides it back and forward again on every shot. */
 export const WARHEAD_REST_Z = 0;
 
+/** Height of the barrel axis above the grip origin. */
+const BORE_Y = 0.07;
+
 function buildLauncherFresh(accent: number): THREE.Group {
   const k = new Kit();
-  const cream = toon(CREAM);
-  const steel = toon(STEEL);
+  const gun = toon(GUN);
+  const barrel = toon(STEEL);
   const dark = toon(DARK);
   const team = toon(accent);
   const yellow = toon(YELLOW);
 
-  // A fat rocket-shaped tube: cream body, yellow bands, team stripe.
-  k.add(tube(0.1, 0.1, 0.72), cream, [0, 0, -0.28], ALONG_Z);
-  k.add(tube(0.104, 0.104, 0.05), yellow, [0, 0, -0.16], ALONG_Z, undefined, false);
-  k.add(tube(0.104, 0.104, 0.05), yellow, [0, 0, -0.5], ALONG_Z, undefined, false);
-  k.add(tube(0.103, 0.103, 0.14), team, [0, 0, -0.33], ALONG_Z, undefined, false);
-  // Tail: flared steel housing, dark nozzle with a fire-orange throat, big team fins.
-  k.add(tube(0.1, 0.13, 0.16), steel, [0, 0, 0.16], ALONG_Z);
-  k.add(tube(0.085, 0.085, 0.02), dark, [0, 0, 0.243], ALONG_Z, undefined, false);
-  k.add(tube(0.05, 0.05, 0.02), flat(FIRE), [0, 0, 0.247], ALONG_Z, undefined, false);
-  fins(k, team, 0.14, 0.14, [0.02, 0.1, 0.16]);
-  // Muzzle collar.
-  k.add(tube(0.118, 0.108, 0.09), steel, [0, 0, -0.66], ALONG_Z);
-  // Scope with a bright lens, grips.
-  k.add(box(0.055, 0.06, 0.26), dark, [0, 0.14, -0.22]);
-  k.add(tube(0.03, 0.03, 0.02, 8), flat(LENS), [0, 0.14, -0.355], ALONG_Z, undefined, false);
-  k.add(box(0.025, 0.04, 0.035), steel, [0, 0.105, -0.13]);
-  k.add(box(0.025, 0.04, 0.035), steel, [0, 0.105, -0.3]);
-  k.add(box(0.055, 0.17, 0.075), dark, [0, -0.13, 0], [0.3, 0, 0]);
-  k.add(box(0.06, 0.06, 0.13), steel, [0, -0.095, -0.06]);
-  k.add(box(0.05, 0.12, 0.06), dark, [0, -0.12, -0.4]);
+  // Quake-style: a boxy receiver with team armour plates, a heavy ribbed barrel on top and a wide muzzle.
+  k.add(box(0.18, 0.2, 0.46), gun, [0, -0.02, -0.02]);
+  k.add(box(0.02, 0.14, 0.34), team, [0.1, -0.01, -0.04]);
+  k.add(box(0.02, 0.14, 0.34), team, [-0.1, -0.01, -0.04]);
+  k.add(box(0.15, 0.16, 0.14), dark, [0, 0.0, 0.27]);
+  k.add(box(0.1, 0.035, 0.02), flat(FIRE), [0, 0.03, 0.345], undefined, undefined, false);
+  k.add(box(0.1, 0.035, 0.02), flat(FIRE), [0, -0.03, 0.345], undefined, undefined, false);
+  // Barrel, heat-sink ribs, muzzle shroud with a hazard band and a dark bore.
+  k.add(tube(0.075, 0.075, 0.62), barrel, [0, BORE_Y, -0.5], ALONG_Z);
+  for (const z of [-0.32, -0.42, -0.52]) k.add(tube(0.097, 0.097, 0.035), dark, [0, BORE_Y, z], ALONG_Z);
+  k.add(tube(0.118, 0.1, 0.16), gun, [0, BORE_Y, -0.83], ALONG_Z);
+  k.add(tube(0.121, 0.121, 0.035), yellow, [0, BORE_Y, -0.78], ALONG_Z, undefined, false);
+  k.add(tube(0.072, 0.072, 0.01), flat(0x0d0b12), [0, BORE_Y, -0.912], ALONG_Z, undefined, false);
+  // Carry handle with sight posts, grip, trigger guard and an under-barrel pump.
+  k.add(box(0.04, 0.03, 0.3), dark, [0, 0.2, -0.08]);
+  k.add(box(0.03, 0.06, 0.03), dark, [0, 0.165, 0.04]);
+  k.add(box(0.03, 0.06, 0.03), dark, [0, 0.165, -0.2]);
+  k.add(box(0.06, 0.18, 0.08), dark, [0, -0.17, 0.08], [0.25, 0, 0]);
+  k.add(box(0.02, 0.05, 0.09), gun, [0, -0.14, -0.03]);
+  k.add(box(0.07, 0.08, 0.2), dark, [0, -0.06, -0.38]);
   const body = k.build('launcher');
 
+  // The next rocket's nose, peeking out of the muzzle; the client hides it after a shot and slides a new one in.
   const w = new Kit();
-  w.add(new THREE.ConeGeometry(0.085, 0.24, 8), toon(RED), [0, 0, -0.82], ALONG_Z);
-  w.add(tube(0.087, 0.087, 0.03), yellow, [0, 0, -0.705], ALONG_Z);
+  w.add(new THREE.ConeGeometry(0.055, 0.14, 8), toon(RED), [0, BORE_Y, -0.88], ALONG_Z);
   const warhead = w.build('warhead');
   warhead.position.z = WARHEAD_REST_Z;
   body.add(warhead);
@@ -201,12 +205,13 @@ function buildDroidFresh(color: number): THREE.Group {
   thrust.add(new THREE.ConeGeometry(0.08, 0.2, 6), flat(FIRE_CORE), [0, 0.2, 0], [Math.PI, 0, 0], undefined, false);
   root.add(thrust.build('thrust', false));
 
-  // The launcher rides on the right shoulder and pitches with the player's aim.
+  // The launcher sits in the right hand at hip height and pitches with the player's aim.
   const aim = new THREE.Group();
   aim.name = 'aim';
   aim.position.set(0, 1.18, 0);
   const launcher = buildLauncherFresh(color);
-  launcher.position.set(0.46, 0.16, -0.08);
+  launcher.position.set(0.34, -0.22, -0.2);
+  launcher.scale.setScalar(0.9);
   aim.add(launcher);
   root.add(aim);
   return root;
