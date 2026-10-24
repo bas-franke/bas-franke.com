@@ -1,6 +1,6 @@
 # Status page artwork
 
-The status page has slots for 20 illustrations. Each one is optional: if a file is missing, the page simply leaves
+The status page has slots for 19 illustrations. Each one is optional: if a file is missing, the page simply leaves
 it out, so you can add them one at a time. Drop finished files into
 [`frontend/public/art/`](frontend/public/art/) with exactly the filename listed, commit and push. The status deploy
 picks them up.
@@ -69,9 +69,8 @@ The mascot "Bit": a small friendly robot shaped like a rounded-corner cube that 
 | 15 | `provider-server.png` | "Server" chip | 16 px | 1024×1024 | 64×64 |
 | 16 | `provider-tls.png` | "Let's Encrypt" chip | 16 px | 1024×1024 | 64×64 |
 | 17 | `provider-status.png` | "Status" chip | 16 px | 1024×1024 | 64×64 |
-| 18 | `pattern-doodles.png` | Faint tiled page background | 512 px tile | 1024×1024 | 512×512 |
-| 19 | `footer-cat.png` | Page footer | ~88 px | 1024×1024 | 264×264 |
-| 20 | `login-badge.png` | Small sticker on the login card | ~64 px | 1024×1024 | 192×192 |
+| 18 | `footer-cat.png` | Page footer | ~88 px | 1024×1024 | 264×264 |
+| 19 | `login-badge.png` | Small sticker on the login card | ~64 px | 1024×1024 | 192×192 |
 
 Export sizes are 3× the display size for crisp results on high-DPI screens.
 
@@ -167,24 +166,14 @@ Use this extra line for all six: *"Tiny UI icon, one single object, extremely si
 | `provider-tls.png` | A closed padlock on top of a shield with a check mark. |
 | `provider-status.png` | A semicircular speedometer gauge with the needle pointing to green. |
 
-### 18. `pattern-doodles.png`
-
-```text
-Seamless tileable pattern, edges must wrap perfectly on all four sides. Sparse, evenly scattered hand-drawn line-art doodles of developer things: curly braces, semicolons drawn as shapes, a tiny rocket, a cute bug, a coffee cup, a git branch, a mouse cursor, a floppy disk, a rubber duck, a small cloud, a terminal prompt chevron, a lightbulb. Single colour only: thin indigo (#6366f1) lines, consistent 2 px stroke, no fills, no shading. Lots of empty space between doodles. No text, no letters, no numbers. Fully transparent background (PNG with alpha).
-```
-
-The page shows this at 6% opacity, so it only needs to read as texture. If the edges don't line up, fix them in
-Photoshop (Filter → Other → Offset by half the size, then retouch the seams), or use a "seamless/tile" option in
-your generator.
-
-### 19. `footer-cat.png`
+### 18. `footer-cat.png`
 
 ```text
 [STYLE BLOCK]
 A chubby grey tabby cat curled up asleep on a warm open laptop keyboard, a small yellow rubber duck sitting next to the laptop, a couple of little "z" sleep bubbles drawn as simple round shapes (no letters). Cosy, funny developer vibe. Square composition.
 ```
 
-### 20. `login-badge.png` 🤖
+### 19. `login-badge.png` 🤖
 
 ```text
 [STYLE BLOCK] [MASCOT BLOCK]

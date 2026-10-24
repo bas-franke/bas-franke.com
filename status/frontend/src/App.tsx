@@ -138,14 +138,13 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
         )}
 
         {report && <Overview report={report} />}
+        {report && <h2 className="section-label">Infrastructure &amp; projects</h2>}
         {report && report.groups.map((g) => <Group key={g.id} group={g} />)}
       </main>
 
       <footer className="footer">
         <Art name="footer-cat" className="footer-cat" />
-        <p className="mono muted">
-          checks run every 60s · <span className="accent">200 OK</span> is a lifestyle
-        </p>
+        <p className="mono muted">checks run every 60s · 200 OK is a lifestyle</p>
       </footer>
     </div>
   );
