@@ -1,7 +1,8 @@
 // Builds the three.js scene for a Rockets arena from the server's box list, in a cel-shaded comic style: toon-lit
 // surfaces in bright colours with hand-drawn textures per kind (tiles, bricks, metal plates, strata...), an ink hull
 // around every box plus ink crease lines, hazard stripes on every drop, props on and behind the outer walls, and a
-// themed sky. Everything is merged per material, so even the busiest map draws the arena in under forty calls.
+// themed sky. Everything is merged per material, so even the busiest map draws the arena in under forty calls; the
+// biggest merged layers are then cut into a few spatial chunks so the camera can cull what it is not looking at.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -60,6 +61,81 @@ function surfaceMaterial(color: number, surface: Surface, tex: (k: TexKey) => TH
   };
   mat.customProgramCacheKey = () => 'arenaSurface';
   return mat;
+}
+
+/** Merged meshes under this many triangles stay whole: their draw call costs more than culling them would save. */
+const CHUNK_TRIS = 1500;
+const _p = new THREE.Vector3();
+
+/**
+ * Splits a big merged mesh into a grid of chunks over x and z (by triangle centre), so frustum culling can drop the
+ * parts outside the view: one merged mesh has one bounding sphere and is drawn whole from anywhere. Up to 3 x 3
+ * chunks, aiming at CHUNK_TRIS or more each. The chunks share the original vertex buffers (each has only its own
+ * index and bounding sphere), so memory and uploads stay the same. Returns the mesh itself when it is not worth it.
+ */
+function chunked(mesh: THREE.Mesh): THREE.Object3D {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const index = geo.index;
+  const tris = (index ? index.count : pos.count) / 3;
+  const cells = Math.min(3, Math.round(Math.sqrt(tris / CHUNK_TRIS)));
+  if (cells < 2 || geo.groups.length || Array.isArray(mesh.material)) return mesh;
+  geo.computeBoundingBox();
+  const { min, max } = geo.boundingBox!;
+  const sx = (max.x - min.x) / cells || 1;
+  const sz = (max.z - min.z) / cells || 1;
+  const lists: number[][] = Array.from({ length: cells * cells }, () => []);
+  for (let t = 0; t < tris; t++) {
+    const a = index ? index.getX(t * 3) : t * 3;
+    const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+    const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+    const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
+    const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+    const i = Math.min(cells - 1, Math.max(0, Math.floor((cx - min.x) / sx)));
+    const j = Math.min(cells - 1, Math.max(0, Math.floor((cz - min.z) / sz)));
+    lists[j * cells + i].push(a, b, c);
+  }
+  const group = new THREE.Group();
+  group.name = mesh.name;
+  group.position.copy(mesh.position);
+  group.quaternion.copy(mesh.quaternion);
+  group.scale.copy(mesh.scale);
+  for (const list of lists) {
+    if (!list.length) continue;
+    const g = new THREE.BufferGeometry();
+    for (const [name, attr] of Object.entries(geo.attributes)) g.setAttribute(name, attr);
+    g.setIndex(list);
+    // The shared position buffer covers the whole mesh, so the chunk's own bounds are set here, not computed.
+    const box = new THREE.Box3();
+    for (const v of list) box.expandByPoint(_p.fromBufferAttribute(pos, v));
+    const centre = box.getCenter(new THREE.Vector3());
+    let r2 = 0;
+    for (const v of list) r2 = Math.max(r2, centre.distanceToSquared(_p.fromBufferAttribute(pos, v)));
+    g.boundingBox = box;
+    g.boundingSphere = new THREE.Sphere(centre, Math.sqrt(r2));
+    const part = new THREE.Mesh(g, mesh.material);
+    part.castShadow = mesh.castShadow;
+    part.receiveShadow = mesh.receiveShadow;
+    part.renderOrder = mesh.renderOrder;
+    part.onBeforeRender = mesh.onBeforeRender;
+    group.add(part);
+  }
+  return group;
+}
+
+/** Replaces every big merged mesh under `root` with chunks (see chunked). */
+function chunkAll(root: THREE.Object3D) {
+  const big: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && !(m as THREE.InstancedMesh).isInstancedMesh && m.frustumCulled) big.push(m);
+  });
+  for (const m of big) {
+    const c = chunked(m);
+    if (c === m || !m.parent) continue;
+    m.parent.add(c);
+    m.parent.remove(m);
+  }
 }
 
 /** True for the one floor box that covers the whole map; it needs no outline. */
@@ -263,6 +339,7 @@ export function buildArena(map: MapData): ArenaView {
 
   group.add(buildSky(map, theme, disposables));
   for (const t of textures.values()) disposables.push(t);
+  chunkAll(group);
 
   return {
     group,
@@ -291,9 +368,31 @@ export function addArenaLights(scene: THREE.Scene, map: MapData) {
   sun.shadow.camera.right = half;
   sun.shadow.camera.top = half;
   sun.shadow.camera.bottom = -half;
-  sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 40 + map.half * 3;
-  sun.shadow.bias = -0.0005;
+  // Depth range fitted to the map's boxes (plus room for players and rockets above the top), for depth precision.
+  // The bias is a fraction of that range, so it is scaled to keep the same distance in metres as the old fixed fit.
+  const dist = sun.position.length();
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const b of map.boxes) {
+    if (b.kind === 'clip') continue;
+    lo = Math.min(lo, b.min.y);
+    hi = Math.max(hi, b.max.y);
+  }
+  if (lo > hi) lo = hi = 0;
+  let nearest = Infinity;
+  let farthest = -Infinity;
+  for (const x of [-half, half])
+    for (const y of [lo - 1, hi + 4])
+      for (const z of [-half, half]) {
+        const depth = dist - (x * SUN_DIR.x + y * SUN_DIR.y + z * SUN_DIR.z);
+        nearest = Math.min(nearest, depth);
+        farthest = Math.max(farthest, depth);
+      }
+  // May be negative on big maps (corners closer to the sun than the light sits): fine for an orthographic camera.
+  sun.shadow.camera.near = nearest - 1;
+  sun.shadow.camera.far = farthest + 1;
+  const range = sun.shadow.camera.far - sun.shadow.camera.near;
+  sun.shadow.bias = -0.0005 * ((40 + map.half * 3 - 1) / range);
   sun.shadow.normalBias = 0.03;
   scene.add(sun);
   scene.add(sun.target);

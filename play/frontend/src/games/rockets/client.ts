@@ -18,7 +18,7 @@ import { INK } from '../../engine/toon';
 import { TouchInput } from '../../engine/touch';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { type ArenaView, addArenaLights, buildArena } from './arena';
-import { type DroidPiece, WARHEAD_REST_Z, buildDroid, buildDroidPieces, buildLauncher, buildPickup, buildRocket, updateDroidPieces } from './models';
+import { type DroidPiece, WARHEAD_REST_Z, buildDroid, buildDroidPieces, buildLauncher, buildPickup, buildRocket, updateDroidPieces, warmupModels } from './models';
 import { QUALITY, type Quality, applyInput, applyQuality, settings, verticalFov } from './settings';
 
 export interface FeedLine {
@@ -674,6 +674,7 @@ export class RocketsClient implements GameClient {
       this.itemBase.push(spawn.p.y + look.lift);
     }
     this.applyQualityNow(settings.get().quality);
+    engine.warmup(warmupModels());
   }
 
   private buildViewmodel() {

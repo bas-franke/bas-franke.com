@@ -4,7 +4,9 @@
 //
 // Draw calls are the budget: parts carry their colour as a vertex colour, so a whole sub-model merges into ONE lit
 // mesh, at most one unlit "glow" mesh and one ink hull, all sharing two module-wide materials. Only parts that must
-// move on their own get a sub-model. Finished models are cached per colour and cloned, which shares geometry.
+// move on their own get a sub-model. Finished models are cached and cloned, which shares geometry. Droids and their
+// wrecks paint team parts with the TEAM stand-in colour and take the real one from a per-colour material, so every
+// team shares one set of geometry: a new player colour costs two materials, not twenty geometries and a hitch.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -25,6 +27,8 @@ const BORE = 0x0d0b12;
 const FIRE = 0xff9a1f;
 const FIRE_CORE = 0xfff0a0;
 const PINK = 0xff4fa3;
+/** Stand-in for the team colour: those vertices take their colour from the material (see teamMaterials). */
+const TEAM = -1;
 
 // ---- geometry kit ------------------------------------------------------------------------------------------------
 
@@ -36,6 +40,44 @@ const litMaterial = () => (litMat ??= new THREE.MeshToonMaterial({ color: 0xffff
 const glowMaterial = () => (glowMat ??= new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true }));
 /** Droids get a slightly thinner line so their team colour still wins when they are a few pixels tall. */
 const droidInk = () => inkMaterial(0.003, 0.006);
+
+/** TEAM vertices carry a negative vertex colour; those fragments take the material's team colour instead. */
+const TEAM_COLOR_FRAGMENT = /* glsl */ `
+#if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
+	diffuseColor *= vColor.r < 0.0 ? vec4( teamColor, 1.0 ) : vColor;
+#endif`;
+
+/** A copy of `base` that paints TEAM vertices in `color`. Every team shares one shader program. */
+function teamPainted<M extends THREE.Material>(base: M, color: number, key: string): M {
+  const m = base.clone() as M;
+  const team = { value: new THREE.Color(color) };
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.teamColor = team;
+    shader.fragmentShader = 'uniform vec3 teamColor;\n' + shader.fragmentShader.replace('#include <color_fragment>', TEAM_COLOR_FRAGMENT);
+  };
+  m.customProgramCacheKey = () => key;
+  return m;
+}
+
+const teams = new Map<number, { lit: THREE.MeshToonMaterial; glow: THREE.MeshBasicMaterial }>();
+/** The lit and glow materials for one team colour, cached. */
+function teamMaterials(color: number) {
+  let t = teams.get(color);
+  if (!t) teams.set(color, (t = { lit: teamPainted(litMaterial(), color, 'team-lit'), glow: teamPainted(glowMaterial(), color, 'team-glow') }));
+  return t;
+}
+
+/** Swaps the shared lit and glow materials under `root` for `color`'s team copies. */
+function paintTeam<O extends THREE.Object3D>(root: O, color: number): O {
+  const t = teamMaterials(color);
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    if (mesh.material === litMat) mesh.material = t.lit;
+    else if (mesh.material === glowMat) mesh.material = t.glow;
+  });
+  return root;
+}
 
 /** Collects transformed, vertex-coloured primitives and merges them into one lit mesh, one glow mesh and one hull. */
 class Kit {
@@ -69,7 +111,7 @@ class Kit {
     geo.dispose();
     if (g.getAttribute('uv')) g.deleteAttribute('uv');
     g.applyMatrix4(m);
-    const c = new THREE.Color(color);
+    const c = color === TEAM ? new THREE.Color(-1, -1, -1) : new THREE.Color(color);
     const n = g.getAttribute('position').count;
     const rgb = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) rgb.set([c.r, c.g, c.b], i * 3);
@@ -267,7 +309,7 @@ function gunArmParts(k: Kit, team: number) {
 
 const translate = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
 
-const droids = new Map<number, THREE.Group>();
+let droidTemplate: THREE.Group | null = null;
 function buildDroidFresh(color: number): THREE.Group {
   const ink = droidInk();
 
@@ -320,9 +362,8 @@ function buildDroidFresh(color: number): THREE.Group {
  * kick) and "thrust" (scale.y flicker, hangs from the nozzle).
  */
 export function buildDroid(color: number): THREE.Group {
-  let t = droids.get(color);
-  if (!t) droids.set(color, (t = buildDroidFresh(color)));
-  return t.clone(true);
+  droidTemplate ??= buildDroidFresh(TEAM);
+  return paintTeam(droidTemplate.clone(true), color);
 }
 
 // ---- droid death breakup -----------------------------------------------------------------------------------------
@@ -334,11 +375,11 @@ export interface DroidPiece {
   spin: THREE.Vector3;
 }
 
-/** Piece templates per colour, each centred on its own pivot and placed in droid space. */
-const wrecks = new Map<number, THREE.Group[]>();
-function wreckTemplates(color: number): THREE.Group[] {
-  let list = wrecks.get(color);
-  if (list) return list;
+/** Piece templates (painted TEAM), each centred on its own pivot and placed in droid space. */
+let wrecks: THREE.Group[] | null = null;
+function wreckTemplates(): THREE.Group[] {
+  if (wrecks) return wrecks;
+  const color = TEAM;
   const ink = droidInk();
   const piece = (name: string, centre: V3, parts: (k: Kit) => void, shift: V3 = [0, 0, 0]) => {
     const k = new Kit(true);
@@ -348,15 +389,14 @@ function wreckTemplates(color: number): THREE.Group[] {
     g.position.set(...centre);
     return g;
   };
-  list = [
+  wrecks = [
     piece('hover', [0, 0.45, 0], (k) => hoverParts(k, color)),
     piece('chest', [0, 1.0, 0], (k) => chestParts(k, color)),
     piece('arm', [-0.47, 0.82, -0.05], (k) => leftArmParts(k, color)),
     piece('head', [0, 1.4, 0], (k) => headParts(k, color)),
     piece('gun', [0.38, 0.92, -0.3], (k) => gunArmParts(k, color), SHOULDER),
   ];
-  wrecks.set(color, list);
-  return list;
+  return wrecks;
 }
 
 /**
@@ -367,8 +407,8 @@ function wreckTemplates(color: number): THREE.Group[] {
 export function buildDroidPieces(color: number, droid: THREE.Object3D, push?: THREE.Vector3): DroidPiece[] {
   droid.updateWorldMatrix(true, false);
   const q = droid.getWorldQuaternion(new THREE.Quaternion());
-  return wreckTemplates(color).map((t) => {
-    const object = t.clone(true);
+  return wreckTemplates().map((t) => {
+    const object = paintTeam(t.clone(true), color);
     object.position.copy(t.position).applyMatrix4(droid.matrixWorld);
     object.quaternion.copy(q);
     const out = new THREE.Vector3(t.position.x, t.position.y - 0.8, t.position.z).applyQuaternion(q);
@@ -456,4 +496,16 @@ export function buildPickup(kind: PickupKind): THREE.Group {
     pickups.set(kind, t);
   }
   return t.clone(true);
+}
+
+// ---- warmup ------------------------------------------------------------------------------------------------------
+
+/**
+ * One of every model a match spawns after the world is built (a droid, its wreck pieces, a rocket, the pickups), for
+ * Engine.warmup: their shaders compile and their geometry uploads up front, so the first rocket or the first death
+ * does not hitch. All team colours share the same programs and geometry, so one colour covers them all.
+ */
+export function warmupModels(): THREE.Object3D[] {
+  const droid = buildDroid(RED);
+  return [droid, ...buildDroidPieces(RED, droid).map((p) => p.object), buildRocket(), buildPickup('health'), buildPickup('armor'), buildPickup('mega')];
 }

@@ -128,6 +128,50 @@ export class Engine {
     this.shadowDirty = true;
   }
 
+  /**
+   * Compiles every shader the scene can need and uploads its geometry and textures now, so nothing hitches the first
+   * time an effect, model or late pass shows up mid-match. Pooled objects that are hidden right now are shown for the
+   * duration (lights excepted: they set the shader light count), `extra` objects (one of each model the game spawns
+   * later) are added, and everything is drawn once into a single pixel, shadow pass included. Call after building the
+   * world, before play starts; the next frame repaints the whole canvas.
+   */
+  warmup(extra: THREE.Object3D[] = []) {
+    const { scene, camera, renderer } = this;
+    for (const o of extra) scene.add(o);
+    const shown: THREE.Object3D[] = [];
+    const culled: THREE.Object3D[] = [];
+    const empty: THREE.InstancedMesh[] = [];
+    scene.traverse((o) => {
+      if (!o.visible && !(o as THREE.Light).isLight) {
+        o.visible = true;
+        shown.push(o);
+      }
+      if (o.frustumCulled) {
+        o.frustumCulled = false;
+        culled.push(o);
+      }
+      const inst = o as THREE.InstancedMesh;
+      if (inst.isInstancedMesh && inst.count === 0) {
+        inst.count = 1;
+        empty.push(inst);
+      }
+    });
+    renderer.compile(scene, camera);
+    const scissor = renderer.getScissor(new THREE.Vector4());
+    const scissorTest = renderer.getScissorTest();
+    renderer.setScissorTest(true);
+    renderer.setScissor(0, 0, 1, 1);
+    if (renderer.shadowMap.enabled) renderer.shadowMap.needsUpdate = true;
+    renderer.render(scene, camera);
+    renderer.setScissor(scissor);
+    renderer.setScissorTest(scissorTest);
+    for (const o of shown) o.visible = false;
+    for (const o of culled) o.frustumCulled = true;
+    for (const o of empty) o.count = 0;
+    for (const o of extra) scene.remove(o);
+    this.invalidateShadows();
+  }
+
   /** Best level whose pixel ratio fits under `ratio`. */
   private levelFor(ratio: number) {
     const level = QUALITY_STEPS.findIndex((q) => q.ratio <= ratio + 1e-3);
