@@ -1,7 +1,7 @@
 // Wordward look-and-perf compare: renders a staged, repeatable scene in headless Chromium and puts it next to
 // tools/compare/reference.webp, then times a run of frames.
 //
-//   node tools/compare/compare.mjs [--scene play|menu|map] [--size 1536x1024] [--port 5201] [--frames 120]
+//   node tools/compare/compare.mjs [--scene play|defeat|sentence|boss|bonk|menu|map] [--size 1536x1024] [--port 5201] [--frames 120]
 //        [--seed 7] [--creatures 6] [--letters 3] [--chrome C:/path/chrome.exe] [--headed] [--keep]
 //
 // Starts its own Vite dev server for wordward/frontend (no backend: the game must run as a guest, so failed /api
@@ -28,17 +28,25 @@ const HELP = `Wordward compare: screenshot a staged scene next to the reference 
 
 Usage: node tools/compare/compare.mjs [options]
 
-  --scene play|menu|map  what to stage (default play)
-                           play: free play, ~6 creatures at different depths, a few letters typed at the target
-                           menu: the home screen;  map: the campaign map
+  --scene NAME           what to stage (default play):
+                           play:     free play, ~6 creatures at different depths, a few letters typed at the target
+                           defeat:   play, but the target's every letter typed (shield word, then its word), the
+                                     last one --settle frames before the shot: the defeat poof and ink mid-flight
+                           sentence: a sentence convoy of ink slimes in its wide shield leads, --creatures escort it,
+                                     --letters typed into the shield
+                           boss:     the Bookwyrm (three heads, a shield each, spawned with the private spawnBoss())
+                                     leads, --creatures escort it, --letters typed at the closest head
+                           bonk:     play, but the closest creature reaches the defenders: dust and red flash
+                           menu:     the home screen;  map: the campaign map
   --size WxH             viewport (default 1536x1024, the reference size; try 390x844 for a phone)
   --port N               port for the Vite dev server this script starts (default 5201; pick a unique one)
   --frames N             frames to time with __ww.engine.step(1/60) after the screenshot (default 120), after
                          10 warm-up frames reported apart as warmupMsMax (shader compiles land there)
   --seed N               seed for the Math.random replacement, so runs are repeatable (default 7)
-  --creatures N          creatures to spawn in the play scene (default 6)
-  --letters N            correct letters typed at the target before the shot (default 3)
-  --settle N             frames stepped after typing, before the shot (default 4; more = effects further along)
+  --creatures N          small creatures to spawn (default 6; 3 with sentence, 2 with boss)
+  --letters N            correct letters typed at the target before the shot (default 3; play/sentence/boss)
+  --settle N             frames stepped after the last letter (or the bonk) before the shot (default 4; 6 for
+                         defeat and bonk; more = effects further along)
   --chrome PATH          Chromium executable (default: Playwright's chromium-1208 under %LOCALAPPDATA%)
   --headed               show the browser window
   --keep                 leave the browser and server running until Ctrl+C (to poke at it)
@@ -66,15 +74,16 @@ if (args.help || args.h) {
   process.exit(0);
 }
 const scene = String(args.scene ?? 'play');
-if (!['play', 'menu', 'map'].includes(scene)) fail(`unknown --scene ${scene} (play|menu|map)`);
+const SCENES = ['play', 'defeat', 'sentence', 'boss', 'bonk', 'menu', 'map'];
+if (!SCENES.includes(scene)) fail(`unknown --scene ${scene} (${SCENES.join('|')})`);
 const [W, H] = String(args.size ?? '1536x1024').split('x').map(Number);
 if (!(W > 0 && H > 0)) fail(`bad --size ${args.size} (want WxH)`);
 const port = Number(args.port ?? 5201);
 const frames = Number(args.frames ?? 120);
 const seed = Number(args.seed ?? 7);
-const creatures = Number(args.creatures ?? 6);
+const creatures = Number(args.creatures ?? (scene === 'boss' ? 2 : scene === 'sentence' ? 3 : 6));
 const letters = Number(args.letters ?? 3);
-const settle = Number(args.settle ?? 4);
+const settle = Number(args.settle ?? (scene === 'defeat' || scene === 'bonk' ? 6 : 4));
 const name = W === 1536 && H === 1024 ? scene : `${scene}-${W}x${H}`;
 
 function fail(msg) {
@@ -173,7 +182,9 @@ const seedScript = (s) => {
   } catch {}
 };
 
-async function stagePlay(page) {
+const GAME_SCENES = ['play', 'defeat', 'sentence', 'boss', 'bonk'];
+
+async function stageGame(page) {
   // Prefer the real UI (so React's HUD state follows), fall back to the API.
   let viaUi = false;
   try {
@@ -182,15 +193,18 @@ async function stagePlay(page) {
     viaUi = true;
   } catch {}
   return page.evaluate(
-    ({ viaUi, creatures, letters, settle }) => {
+    ({ scene, viaUi, creatures, letters, settle }) => {
       const g = window.__ww;
       const notes = [];
       g.engine.stop(); // only our own fixed-dt steps from here on
       window.__freezeClock();
+      const fallback = { direction: 'en-ro', categories: [] /* empty pool falls back to every entry */, mix: 'mixed', difficulty: 'normal', lenient: true, shields: true };
       if (!viaUi || g.state?.phase !== 'playing') {
         notes.push('UI start failed, used __ww.start()');
-        g.start({ direction: 'en-ro', categories: [] /* empty pool falls back to every entry */, mix: 'mixed', difficulty: 'normal', lenient: true, shields: true });
+        g.start(fallback);
       }
+      // The sentence scene restarts the round with sentences only, so the deck surely holds some.
+      if (scene === 'sentence') g.start({ ...(g.settings ?? fallback), mix: 'sentences' });
       const step = (n) => {
         for (let i = 0; i < n; i++) g.engine.step(1 / 60);
       };
@@ -198,7 +212,27 @@ async function stagePlay(page) {
       g.waveBreak = 0;
       g.spawnTimer = 1e9;
       step(2);
+      g.bossPending = false;
       g.waveLeft = Math.max(g.waveLeft ?? 0, 1);
+      const impact = 3.4;
+      const top = g.top ?? 26;
+      // The big one first, so it is the closest (the target) once spread.
+      if (scene === 'boss') {
+        g.state = { ...g.state, wave: 5 }; // three heads, as in free play's first boss wave
+        try {
+          g.spawnBoss();
+        } catch (err) {
+          notes.push(`spawnBoss failed: ${err.message}`);
+        }
+      } else if (scene === 'sentence') {
+        try {
+          g.spawn();
+        } catch (err) {
+          notes.push(`spawn failed: ${err.message}`);
+        }
+        g.settings = { ...g.settings, mix: 'words' }; // the escort are single creatures
+      }
+      const lead = g.enemies?.length ?? 0;
       for (let i = 0; i < creatures; i++) {
         try {
           g.spawn();
@@ -207,30 +241,79 @@ async function stagePlay(page) {
           break;
         }
       }
-      // Spread them over the field: closest about a quarter of the way up, farthest near the top.
+      // Spread them over the field: closest about a quarter of the way up, farthest near the top. A boss or convoy
+      // leads, a little further up so its tags and heads stay clear of the defenders.
       const list = g.enemies ?? [];
-      const impact = 3.4;
-      const top = g.top ?? 26;
       list.forEach((e, i) => {
         const f = list.length > 1 ? i / (list.length - 1) : 0.5;
-        e.y = impact + (top - impact) * (0.22 + 0.7 * f);
+        e.y = impact + (top - impact) * (lead && i === 0 ? 0.3 : 0.22 + 0.7 * f);
+        if (lead && i > 0) e.y = impact + (top - impact) * (0.45 + 0.5 * ((i - 1) / Math.max(1, list.length - 2)));
       });
       step(30);
-      // Type correct letters into the current target.
-      let typed = '';
-      for (let i = 0; i < letters; i++) {
+      const spawned = list.length;
+      const want = () => {
         const t = g.pickTarget?.();
         const part = t?.parts?.[t.partIdx];
-        const want = part?.glyphs?.[part.pos];
-        if (!want) break;
-        g.type(want.ch);
-        typed += want.ch;
-        step(1);
+        return { t, ch: part?.glyphs?.[part.pos]?.ch };
+      };
+      let typed = '';
+      const calls = () => g.engine.renderer.info.render.calls;
+      let callsBefore;
+      const hit = (ch) => {
+        g.type(ch);
+        typed += ch;
+      };
+      if (scene === 'defeat') {
+        // Every letter of the target (shield word, then the word itself) but the last, a pause so those effects
+        // fade, then the last letter: the shot shows the defeat poof `settle` frames in.
+        const { t } = want();
+        let guard = 200;
+        for (; guard > 0; guard--) {
+          const { t: cur, ch } = want();
+          if (!ch || cur !== t) break;
+          const part = cur.parts[cur.partIdx];
+          const last = cur.partIdx === cur.parts.length - 1 && part.glyphs.slice(part.pos + 1).every((x) => !x.typed);
+          if (last) {
+            step(40);
+            callsBefore = calls();
+            hit(ch);
+            break;
+          }
+          hit(ch);
+          step(2);
+        }
+        if (g.enemies.includes(t)) notes.push('defeat: the target survived');
+      } else if (scene === 'bonk') {
+        // The closest creature reaches the defenders.
+        const { t } = want();
+        if (t) {
+          callsBefore = calls();
+          t.y = impact + 0.02;
+          for (let i = 0; i < 120 && g.enemies.includes(t); i++) step(1);
+          if (g.enemies.includes(t)) notes.push('bonk: the creature never reached the line');
+        }
+      } else {
+        // Type correct letters into the current target.
+        for (let i = 0; i < letters; i++) {
+          const { ch } = want();
+          if (!ch) break;
+          hit(ch);
+          step(1);
+        }
       }
       step(settle);
-      return { enemies: list.length, kinds: list.map((e) => e.kind), typed, phase: g.state?.phase, notes };
+      // Draw calls of the shot frame, and of the frame before the defeat/bonk (their difference is what the effect
+      // adds, minus the creature that left).
+      const fx = g.effects?.root;
+      let fxVisible = 0;
+      fx?.traverse((o) => {
+        let shown = o.isMesh && (o.geometry?.instanceCount ?? 1) > 0;
+        for (let p = o; shown && p; p = p.parent) shown = p.visible;
+        if (shown) fxVisible++;
+      });
+      return { enemies: spawned, kinds: g.enemies.map((e) => e.kind), typed, phase: g.state?.phase, callsBefore, callsAtShot: calls(), effectMeshesAtShot: fxVisible, notes };
     },
-    { viaUi, creatures, letters, settle },
+    { scene, viaUi, creatures, letters, settle },
   );
 }
 
@@ -289,10 +372,10 @@ try {
   // Wait for web fonts so the HUD text renders the same every run.
   await page.evaluate(() => document.fonts?.ready);
 
-  const staged = scene === 'play' ? await stagePlay(page) : scene === 'map' ? await stageMap(page) : await stageMenu(page);
+  const staged = GAME_SCENES.includes(scene) ? await stageGame(page) : scene === 'map' ? await stageMap(page) : await stageMenu(page);
 
   const currentPath = join(OUT, `${name}-current.png`);
-  const shot = await page.screenshot({ path: currentPath, animations: 'disabled' });
+  const shot = await page.screenshot({ path: currentPath, animations: 'disabled', timeout: 120_000 }); // SwiftShader is slow under load
 
   // Side-by-side composite on a canvas in a blank page (no image libraries needed).
   const ref = 'data:image/webp;base64,' + readFileSync(REFERENCE).toString('base64');
