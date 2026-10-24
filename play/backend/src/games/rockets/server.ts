@@ -19,6 +19,7 @@ import {
   vsub,
 } from '../../shared/math.js';
 import { RK } from '../../shared/rockets/constants.js';
+import { ITEM, type ItemSpawn, itemRespawn, itemsFor } from '../../shared/rockets/items.js';
 import type { MapData } from '../../shared/rockets/map.js';
 import { MAPS, mapById } from '../../shared/rockets/maps.js';
 import { type Body, eyePosition, playerAABB, stepBody } from '../../shared/rockets/physics.js';
@@ -33,6 +34,8 @@ interface RPlayer extends GamePlayer {
   yaw: number;
   pitch: number;
   hp: number;
+  /** Soaks part of every hit; see absorb(). Cleared on death. */
+  armor: number;
   dead: boolean;
   respawnAt: number;
   protectedUntil: number;
@@ -72,6 +75,10 @@ class RocketsGame implements GameServer {
   private readonly players = new Map<string, RPlayer>();
   private rockets: Rocket[] = [];
   private readonly packs: { available: boolean; respawnAt: number }[];
+  private readonly items: ItemSpawn[];
+  private readonly itemState: { available: boolean; respawnAt: number }[];
+  /** When overheal (health or armor above ITEM.overhealFloor) next ticks down a point. */
+  private nextDecay = 1;
   private events: RocketsEvent[] = [];
   private now = 0;
   private tick = 0;
@@ -83,6 +90,9 @@ class RocketsGame implements GameServer {
     this.map = pickMap(host, this.rng);
     lastMap.set(host, this.map.id);
     this.packs = this.map.packs.map(() => ({ available: true, respawnAt: 0 }));
+    this.items = itemsFor(this.map.id);
+    // Quake rule: the big items are not there at the start, so nobody spawns next to a free mega health.
+    this.itemState = this.items.map((it) => ({ available: it.k === 'shard', respawnAt: it.k === 'shard' ? 0 : itemRespawn(it.k) / 2 }));
     this.graph = navGraphFor(this.map);
   }
 
@@ -110,6 +120,7 @@ class RocketsGame implements GameServer {
       yaw: 0,
       pitch: 0,
       hp: 0,
+      armor: 0,
       dead: true,
       respawnAt: this.now + 0.3,
       protectedUntil: 0,
@@ -123,7 +134,7 @@ class RocketsGame implements GameServer {
     };
     if (p.bot) player.brain = new RocketsBot(BOT_PARAMS[this.host.botDifficulty()], this.graph, makeRng(Math.floor(this.rng() * 1e9)));
     this.players.set(p.id, player);
-    this.host.send(p.id, { k: 'init', map: this.map, scores: this.scores(), left: this.timeLeft() });
+    this.host.send(p.id, { k: 'init', map: this.map, items: this.items, scores: this.scores(), left: this.timeLeft() });
     this.host.broadcast({ k: 'score', scores: this.scores() });
   }
 
@@ -358,9 +369,10 @@ class RocketsGame implements GameServer {
   // ---- pickups --------------------------------------------------------------------------------------------
 
   private tryPickup(p: RPlayer) {
+    if (p.dead) return;
     for (let i = 0; i < this.packs.length; i++) {
       const pack = this.packs[i];
-      if (!pack.available) continue;
+      if (!pack.available || p.hp >= RK.maxHealth) continue;
       const pos = this.map.packs[i];
       if (hdist(p.body.pos, pos) <= RK.pickupRadius && Math.abs(p.body.pos.y - pos.y) < 1) {
         pack.available = false;
@@ -370,10 +382,53 @@ class RocketsGame implements GameServer {
         return;
       }
     }
+    for (let i = 0; i < this.items.length; i++) {
+      const state = this.itemState[i];
+      if (!state.available) continue;
+      const item = this.items[i];
+      if (hdist(p.body.pos, item.p) > RK.pickupRadius || Math.abs(p.body.pos.y - item.p.y) >= 1) continue;
+      // Shards are always taken (Quake 3); armor only when it adds something; mega health stacks up to the cap.
+      if (item.k === 'mega') {
+        if (p.hp >= ITEM.maxOverheal) continue;
+        p.hp = Math.min(ITEM.maxOverheal, p.hp + ITEM.mega.health);
+      } else {
+        if (item.k === 'armor' && p.armor >= ITEM.maxArmor) continue;
+        p.armor = Math.min(ITEM.maxArmor, p.armor + ITEM[item.k].armor);
+      }
+      state.available = false;
+      state.respawnAt = this.now + itemRespawn(item.k);
+      this.events.push({ k: 'item', i, t: item.k, by: p.id });
+      return;
+    }
+  }
+
+  /**
+   * Splits a hit between armor and health: armor soaks ITEM.armorProtection of it while it lasts, and the rest
+   * (plus whatever the armor could not cover) comes off health. Returns the health damage; `damage()` subtracts it.
+   */
+  private absorb(p: RPlayer, dmg: number): number {
+    const soaked = Math.min(p.armor, Math.ceil(dmg * ITEM.armorProtection));
+    p.armor -= soaked;
+    return dmg - soaked;
   }
 
   private updatePacks() {
     for (const pack of this.packs) if (!pack.available && this.now >= pack.respawnAt) pack.available = true;
+    for (const state of this.itemState) if (!state.available && this.now >= state.respawnAt) state.available = true;
+    const decay = this.now >= this.nextDecay;
+    if (decay) this.nextDecay += 1;
+    for (const p of this.players.values()) {
+      if (p.dead) {
+        p.armor = 0;
+        continue;
+      }
+      if (decay) {
+        if (p.hp > ITEM.overhealFloor) p.hp--;
+        if (p.armor > ITEM.overhealFloor) p.armor--;
+      }
+      // Swept every step as well as on each command, so standing still on an item that just respawned picks it up.
+      this.tryPickup(p);
+    }
   }
 
   // ---- bots -------------------------------------------------------------------------------------------------
@@ -415,6 +470,7 @@ class RocketsGame implements GameServer {
         y: Math.round(p.yaw * 1000) / 1000,
         pt: Math.round(p.pitch * 1000) / 1000,
         hp: p.hp,
+        ...(p.armor > 0 ? { ar: p.armor } : {}),
         d: p.dead ? 1 : 0,
         g: p.body.onGround ? 1 : 0,
       });
@@ -422,7 +478,18 @@ class RocketsGame implements GameServer {
     const rk: RocketSnap[] = this.rockets.map((r) => ({ id: r.id, o: r.owner, p: toTuple(r.pos), v: toTuple(r.vel) }));
     const pk: number[] = [];
     this.packs.forEach((pack, i) => pack.available && pk.push(i));
-    const base = { tick: this.tick, t: Date.now(), left: Math.round(this.timeLeft() * 10) / 10, rk, pk };
+    const it: number[] = [];
+    this.itemState.forEach((state, i) => state.available && it.push(i));
+    const base = {
+      tick: this.tick,
+      t: Date.now(),
+      left: Math.round(this.timeLeft() * 10) / 10,
+      rk,
+      pk,
+      it,
+      ...(this.frozen() ? { cd: Math.round((RocketsGame.COUNTDOWN - this.now) * 10) / 10 } : {}),
+      ...(this.overtime ? { ot: 1 as const } : {}),
+    };
 
     if (this.events.length) {
       this.host.broadcast({ k: 'ev', e: this.events });
