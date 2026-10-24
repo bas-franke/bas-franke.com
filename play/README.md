@@ -8,6 +8,7 @@ Node.js + Express + `ws` backend on port **3004**. No database; rooms live in me
 |-------------|---------------------------------------------------------------------------------------------------------|
 | **Rockets** | First-person rocket arena (Quake 3 "rockets only"): infinite rockets, splash damage, rocket jumps, jump pads, health packs. 5 minutes or 15 frags. |
 | **Ruckus**  | Party game in five rounds (Uther Party style). Each round is a minigame: Hot Potato, Floor is Lava, Coin Rush, Sweeper, Sumo. Points for placement; highest total wins. |
+| **Dustrunners** | Single-player podracing through red-rock canyons at `/race`: career (cups, prize money, garage), quick race, time trial against AI pilots. Not a room game: listed in the lobby from `SOLO_GAMES`. |
 
 Both games support bots (easy / normal / hard), chosen when the room is created or changed by the host in the room.
 
@@ -69,7 +70,7 @@ next round starts. Each minigame is one small class in `games/ruckus/minigames/`
 
 A single-player podracer at `/race`, in the painted canyon style of a concept art piece: career mode (four cups, prize
 money, a garage with pods and upgrades), quick race and time trial against AI pilots. Client-only (no backend, career
-saved in localStorage), so it lives outside the room system and is not in `GAMES` yet. Code in
+saved in localStorage), so it lives outside the room system: it is in `SOLO_GAMES` (shared/protocol.ts), which the lobby lists with a Play button that opens `/race`. Code in
 `frontend/src/racer/`: `core/` (track splines, flight model in track space, AI racing line, race rules, career),
 `world/` (one module per part of the scenery; `zones.ts` decides where things go), `vehicle/` (procedural pods),
 `fx/` (camera, controls, speed particles, post-processing), `audio/` (synthesized), `ui/` (HUD and menus).

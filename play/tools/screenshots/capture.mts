@@ -1,9 +1,9 @@
 // Takes the screenshots the lobby shows for each game: a few Rockets maps and every Ruckus minigame, captured from
-// a real match against bots in a headless browser. Starts its own backend and dev server on spare ports, so a dev
+// a real match against bots in a headless browser, and a few Dustrunners tracks mid-race with the AI flying. Starts its own backend and dev server on spare ports, so a dev
 // server you have open is left alone.
 //
 //   npm run screenshots                          everything
-//   npm run screenshots -- --only rockets        one game (rockets, ruckus)
+//   npm run screenshots -- --only rockets        one game (rockets, ruckus, dustrunners)
 //   npm run screenshots -- --maps foundry,orbit  which Rockets maps (default below)
 //   npm run screenshots -- --browser msedge      chrome | msedge | chromium (default: first one that starts)
 //   npm run screenshots -- --headful --verbose   watch it happen / see server output
@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
-import { GAME_IDS, GAMES, type GameId } from '../../backend/src/shared/protocol.js';
+import { GAME_IDS, GAMES, SOLO_GAME_IDS, SOLO_GAMES, type GameId, type SoloGameId } from '../../backend/src/shared/protocol.js';
 import { MAP_LIST } from '../../backend/src/shared/rockets/maps.js';
 import { MINIGAME_IDS, MINIGAMES, type MinigameId } from '../../backend/src/shared/ruckus/world.js';
 
@@ -40,7 +40,10 @@ interface Shot {
   file: string;
   caption: string;
 }
-type Manifest = Partial<Record<GameId, Shot[]>>;
+type AnyGame = GameId | SoloGameId;
+type Manifest = Partial<Record<AnyGame, Shot[]>>;
+const ALL_IDS: AnyGame[] = [...GAME_IDS, ...SOLO_GAME_IDS];
+const gameName = (id: AnyGame) => (id in GAMES ? GAMES[id as GameId] : SOLO_GAMES[id as SoloGameId]).name;
 
 // ---- arguments ---------------------------------------------------------------------------------------------------
 
@@ -50,7 +53,7 @@ const option = (name: string) => {
   return i >= 0 ? (argv[i + 1] ?? '') : undefined;
 };
 const flag = (name: string) => argv.includes(`--${name}`);
-const only = (option('only')?.split(',').filter(Boolean) ?? GAME_IDS) as GameId[];
+const only = (option('only')?.split(',').filter(Boolean) ?? ALL_IDS) as AnyGame[];
 const maps = option('maps')?.split(',').filter(Boolean) ?? DEFAULT_MAPS;
 const browserPreference = option('browser');
 const headless = !flag('headful');
@@ -64,7 +67,7 @@ function fail(message: string): never {
 const log = (message: string) => console.log(`[screenshots] ${message}`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-for (const g of only) if (!(g in GAMES)) fail(`Unknown game "${g}". Games: ${GAME_IDS.join(', ')}.`);
+for (const g of only) if (!ALL_IDS.includes(g)) fail(`Unknown game "${g}". Games: ${ALL_IDS.join(', ')}.`);
 for (const m of maps) if (!MAP_LIST.some((x) => x.id === m)) fail(`Unknown map "${m}". Maps: ${MAP_LIST.map((x) => x.id).join(', ')}.`);
 if (!existsSync(tsxCli) || !existsSync(viteCli)) fail('Dependencies are missing. Run `npm run install:all` in play/ first.');
 
@@ -237,9 +240,37 @@ async function shootRuckus(context: BrowserContext): Promise<Shot[]> {
   return MINIGAME_IDS.filter((id) => got.has(id)).map((id) => got.get(id)!);
 }
 
-const shooters: Record<GameId, (context: BrowserContext) => Promise<Shot[]>> = {
+/** Dustrunners tracks shown, each a little way into the lap so the scenery and the pack are in view. */
+const RACER_SHOTS = [
+  { track: 'falls', at: 0.3, caption: 'Thunder Falls' },
+  { track: 'redrock', at: 0.12, caption: 'Redrock Run' },
+  { track: 'mesa', at: 0.2, caption: 'Mesa Loop' },
+  { track: 'spires', at: 0.2, caption: 'Needle Spires' },
+];
+
+async function shootDustrunners(context: BrowserContext): Promise<Shot[]> {
+  const shots: Shot[] = [];
+  for (const { track, at, caption } of RACER_SHOTS) {
+    log(`Dustrunners · ${caption}`);
+    const page = await context.newPage();
+    page.on('pageerror', (e) => console.error(`[page] ${e.message}`));
+    await page.goto(`${site}/race?go=${track}&autopilot&at=${at}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => !!(window as unknown as { __racer?: unknown }).__racer, null, { timeout: 90_000 });
+    // A few seconds at speed: dust, trails and motion blur build up.
+    await sleep(6000);
+    await page.addStyleTag({ content: '.hud-pause-btn { display: none !important; }' });
+    const file = `dustrunners-${track}.jpg`;
+    await screenshot(page, file);
+    shots.push({ file, caption });
+    await page.close();
+  }
+  return shots;
+}
+
+const shooters: Record<AnyGame, (context: BrowserContext) => Promise<Shot[]>> = {
   rockets: shootRockets,
   ruckus: shootRuckus,
+  dustrunners: shootDustrunners,
 };
 
 // ---- output ------------------------------------------------------------------------------------------------------
@@ -255,12 +286,12 @@ function readManifest(): Manifest {
 function writeManifest(update: Manifest) {
   const previous = readManifest();
   const next: Manifest = {};
-  for (const id of GAME_IDS) next[id] = update[id] ?? previous[id] ?? [];
+  for (const id of ALL_IDS) next[id] = update[id] ?? previous[id] ?? [];
   writeFileSync(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
 }
 
 /** Removes a game's old screenshots that this run did not produce. */
-function prune(game: GameId, keep: Shot[]) {
+function prune(game: AnyGame, keep: Shot[]) {
   for (const f of readdirSync(outDir)) {
     if (f.startsWith(`${game}-`) && !keep.some((s) => s.file === f)) unlinkSync(path.join(outDir, f));
   }
@@ -282,16 +313,16 @@ const context = await browser.newContext({ viewport: { width: WIDTH, height: HEI
 await context.addInitScript(() => localStorage.setItem('play.name', 'Player'));
 
 const update: Manifest = {};
-for (const game of GAME_IDS) {
+for (const game of ALL_IDS) {
   if (!only.includes(game)) continue;
   const shoot = shooters[game];
   if (!shoot) {
-    log(`${GAMES[game].name}: no capture routine yet (add one to tools/screenshots/capture.mts)`);
+    log(`${gameName(game)}: no capture routine yet (add one to tools/screenshots/capture.mts)`);
     continue;
   }
   update[game] = await shoot(context);
 }
-for (const [game, shots] of Object.entries(update) as [GameId, Shot[]][]) prune(game, shots);
+for (const [game, shots] of Object.entries(update) as [AnyGame, Shot[]][]) prune(game, shots);
 writeManifest(update);
 
 await browser.close();

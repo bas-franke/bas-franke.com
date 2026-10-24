@@ -38,5 +38,23 @@
       "file": "ruckus-sumo.jpg",
       "caption": "Sumo"
     }
+  ],
+  "dustrunners": [
+    {
+      "file": "dustrunners-falls.jpg",
+      "caption": "Thunder Falls"
+    },
+    {
+      "file": "dustrunners-redrock.jpg",
+      "caption": "Redrock Run"
+    },
+    {
+      "file": "dustrunners-mesa.jpg",
+      "caption": "Mesa Loop"
+    },
+    {
+      "file": "dustrunners-spires.jpg",
+      "caption": "Needle Spires"
+    }
   ]
 }

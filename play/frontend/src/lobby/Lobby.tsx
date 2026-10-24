@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { GAME_IDS, GAMES, type GameId, type GameMeta, type RoomSummary } from '@shared/protocol';
+import { GAME_IDS, GAMES, SOLO_GAME_IDS, SOLO_GAMES, type GameId, type GameMeta, type RoomSummary, type SoloGameMeta } from '@shared/protocol';
 import { type QuickStart, listRooms, quickBots, quickPlay } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
@@ -80,6 +80,10 @@ export function Lobby() {
     const q = query.trim().toLowerCase();
     return GAME_IDS.filter((id) => !q || GAMES[id].name.toLowerCase().includes(q) || GAMES[id].tagline.toLowerCase().includes(q));
   }, [query]);
+  const soloGames = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return SOLO_GAME_IDS.filter((id) => !q || SOLO_GAMES[id].name.toLowerCase().includes(q) || SOLO_GAMES[id].tagline.toLowerCase().includes(q));
+  }, [query]);
 
   return (
     <div className="page lobby">
@@ -148,11 +152,11 @@ export function Lobby() {
       <section className="section" aria-labelledby="games-title">
         <div className="section-head">
           <h2 id="games-title">
-            Games <span className="count">{GAME_IDS.length}</span>
+            Games <span className="count">{GAME_IDS.length + SOLO_GAME_IDS.length}</span>
           </h2>
           <input className="search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search games" aria-label="Search games" />
         </div>
-        {games.length ? (
+        {games.length + soloGames.length ? (
           <div className="game-grid">
             {games.map((id) => (
               <GameTile
@@ -163,6 +167,9 @@ export function Lobby() {
                 onHost={() => setDialog({ kind: 'create', game: id })}
                 onPlay={() => playNow(id)}
               />
+            ))}
+            {soloGames.map((id) => (
+              <SoloTile key={id} meta={SOLO_GAMES[id]} onPlay={() => navigate(SOLO_GAMES[id].path)} />
             ))}
           </div>
         ) : (
@@ -219,6 +226,35 @@ function GameTile({ meta, busy, onDetails, onHost, onPlay }: { meta: GameMeta; b
           </button>
           <button type="button" className="btn small primary play-now" onClick={onPlay} disabled={busy} title={`Start a match against ${quickBots(meta.id)} bots right away`}>
             <PlayIcon /> {busy ? 'Starting…' : 'Play now'}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** A single-player game: same card, but it opens the game's own page instead of a room. */
+function SoloTile({ meta, onPlay }: { meta: SoloGameMeta; onPlay: () => void }) {
+  const shots = SCREENSHOTS[meta.id].length;
+  return (
+    <article className="game-tile" style={{ ['--accent' as string]: meta.accent }}>
+      <button type="button" className="tile-media" onClick={onPlay} aria-label={`Play ${meta.name}`}>
+        <GameCover game={meta.id} />
+        {shots > 0 && (
+          <span className="tile-shots">
+            <CameraIcon /> {shots}
+          </span>
+        )}
+      </button>
+      <div className="tile-body">
+        <div className="tile-title">
+          <h3>{meta.name}</h3>
+          <span className="pill accent">Solo</span>
+        </div>
+        <p>{meta.tagline}</p>
+        <div className="tile-actions">
+          <button type="button" className="btn small primary play-now" onClick={onPlay}>
+            <PlayIcon /> Play
           </button>
         </div>
       </div>
