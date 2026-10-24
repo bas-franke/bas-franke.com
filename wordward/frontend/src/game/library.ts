@@ -1,11 +1,18 @@
 // The enchanted library around the play field: tall bookshelves on both sides and at the far end, arched windows on a
 // starry night, brass lanterns, ivy, flowers, mushrooms, cushions, globes and piles of books spilling onto the floor.
 //
-// Everything is procedural and seeded, so the room is the same every time. To stay cheap on phones the whole room is
-// about a dozen draw calls: static pieces are merged into a few vertex-coloured meshes, repeated props (books, leaves,
-// flowers, cushions, open books) are InstancedMeshes, and lantern light is faked: it is baked into a per-vertex /
-// per-instance `bake` value that the materials add as warm emissive light, plus additive camera-facing glow quads
-// that flicker in the vertex shader. No real lights are added here, and `update` only advances one time uniform.
+// Everything is procedural and seeded, so the room is the same every time. To stay cheap on phones:
+// - Everything static is merged into two materials: 'solid' (wood, brass, books, cushions, lantern glass: one atlas,
+//   untextured and unlit pieces flagged by their uvs) and 'foliage' (leaves and flowers, double sided, swaying).
+// - Triangles that can never face the camera (Game.placeCamera keeps it high above, in front, on x = 0) are dropped
+//   at build time: undersides, backs, the sides of books facing the far end. About 40% of the room.
+// - Both materials are cut into chunks (shelf bands along z, floor strips, far wall) that are frustum culled with
+//   tight boxes: a portrait phone looks down from so high that it never sees the shelves by the defenders, a
+//   landscape screen never sees the far end. 12 chunk draws at most, ~8 on screen.
+// - Lantern light is faked: baked into a per-vertex `bake` value that the materials add as warm emissive light, plus
+//   additive camera-facing glow octagons (shrunk to where their falloff still changes a pixel) and floor light pools.
+// - 'low' quality (detectQuality) thins the foliage and the faintest glows.
+// No real lights are added here, and `update` only advances one time uniform.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -107,6 +114,12 @@ interface AddOpts {
   pivot?: boolean;
   /** Shifts spine uvs (u < 0.79) by this many 0.2-wide atlas columns. */
   uvShift?: number;
+  /**
+   * How the piece is textured in the solid material (default 'plain'): 'atlas' = book atlas, 'cushion' = the cushion
+   * mask packed beside it, 'plain' = vertex colour only (u = -1, no texture fetch), 'unlit' = vertex colour as light
+   * (u = -2: lantern glass, flames), 'raw' = the geometry's own uvs.
+   */
+  tex?: 'atlas' | 'cushion' | 'plain' | 'unlit' | 'raw';
   /** Fraction of albedo added as light everywhere (foliage). */
   lit?: number;
 }
@@ -122,11 +135,15 @@ class Chunk {
   sway: number[] = [];
   lit: number[] = [];
   idx: number[] = [];
-  /** Bounds per wall (left, right, far), for frustum culling. */
-  boxes: (THREE.Box3 | null)[] = [null, null, null];
+  /**
+   * Bounds for frustum culling, one per group of pieces with similar extents (same wall, similar height and reach into
+   * the room), so a box never pairs a lantern's reach with the floor under the shelves.
+   */
+  boxes = new Map<number, THREE.Box3>();
 }
 
 const _nm = new THREE.Matrix3();
+const _pb = new THREE.Box3();
 const _remap = new Int32Array(4096);
 
 /**
@@ -135,10 +152,11 @@ const _remap = new Int32Array(4096);
  */
 class Bag {
   readonly chunks = new Map<number, Chunk>();
-  constructor(private readonly o: { uv?: boolean; sway?: boolean; doubleSided?: boolean } = {}) {}
+  constructor(private readonly o: { uv?: boolean; sway?: boolean; doubleSided?: boolean; single?: boolean } = {}) {}
 
   add(geo: THREE.BufferGeometry, m: THREE.Matrix4, color: THREE.Color | number, chunk: number, side: number, x: AddOpts = {}) {
     const c = typeof color === 'number' ? _col.setHex(color) : color;
+    if (this.o.single) chunk = 0;
     let ch = this.chunks.get(chunk);
     if (!ch) this.chunks.set(chunk, (ch = new Chunk()));
     const P = geo.attributes.position as THREE.BufferAttribute;
@@ -157,8 +175,7 @@ class Bag {
     const sy = this.o.sway ? Math.hypot(e[4], e[5], e[6]) : 0;
     const remap = _remap.length >= P.count ? _remap : new Int32Array(P.count);
     remap.fill(-1, 0, P.count);
-    let box = ch.boxes[side];
-    if (!box) box = ch.boxes[side] = new THREE.Box3();
+    const box = _pb.makeEmpty();
     const tx = (i: number, k: number) => {
       const px = P.getX(i);
       const py = P.getY(i);
@@ -200,8 +217,18 @@ class Bag {
           else ch.col.push(c.r, c.g, c.b);
           if (this.o.uv) {
             let u = U ? U.getX(i) : 0;
+            let v = U ? U.getY(i) : 0;
             if (x.uvShift && u < 0.79) u += x.uvShift * 0.2;
-            ch.uv.push(u, U ? U.getY(i) : 0);
+            const tex = x.tex ?? 'plain';
+            if (tex === 'atlas') u *= ATLAS_BOOKS;
+            else if (tex === 'cushion') {
+              u = ATLAS_BOOKS + u * (1 - ATLAS_BOOKS);
+              v = 0.5 + v * 0.5;
+            } else if (tex !== 'raw') {
+              u = tex === 'plain' ? -1 : -2;
+              v = 0;
+            }
+            ch.uv.push(u, v);
           }
           if (x.pivot) ch.bp.push(ox, oy, oz);
           else ch.bp.push(px, py, pz);
@@ -213,6 +240,13 @@ class Bag {
         ch.idx.push(o);
       }
     }
+    if (box.isEmpty()) return;
+    // Group by wall, by the piece's lowest point and by how far it reaches towards the field.
+    const reach = side === 0 ? box.max.x : side === 1 ? -box.min.x : box.max.z;
+    const key = side * 10000 + Math.floor(box.min.y / 1.2) * 100 + Math.floor(reach * 3);
+    const g = ch.boxes.get(key);
+    if (g) g.union(box);
+    else ch.boxes.set(key, box.clone());
   }
 
   /** One geometry per chunk; `bake(x, y, z)` gives the lantern light (omit for unlit materials). */
@@ -237,8 +271,8 @@ class Bag {
       }
       g.setIndex(ch.idx);
       g.computeBoundingSphere();
-      // Leaves sway a little: pad the bounds.
-      const boxes = ch.boxes.filter((b): b is THREE.Box3 => !!b && !b.isEmpty()).map((b) => b.expandByScalar(0.25));
+      // Leaves sway a few centimetres: pad the bounds.
+      const boxes = [...ch.boxes.values()].map((b) => b.expandByScalar(this.o.sway ? 0.1 : 0.01));
       out.push({ chunk, geo: g, boxes });
     }
     this.chunks.clear();
@@ -295,9 +329,12 @@ function libMaterial(key: string, o: MatOpts = {}) {
         '#include <map_fragment>',
         `#include <color_fragment>
 #ifdef USE_MAP
-	vec4 tx = texture2D( map, vMapUv );
-	diffuseColor.rgb = mix( diffuseColor.rgb * tx.r, vec3( 0.58, 0.38, 0.13 ) * ( 0.75 + 0.35 * tx.r ), tx.g );
-	diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.66, 0.56, 0.40 ) * tx.r, tx.b );
+	// u < 0 marks untextured pieces (constant over each triangle, so the branch never splits a pixel quad).
+	if ( vMapUv.x >= 0.0 ) {
+		vec4 tx = texture2D( map, vMapUv );
+		diffuseColor.rgb = mix( diffuseColor.rgb * tx.r, vec3( 0.58, 0.38, 0.13 ) * ( 0.75 + 0.35 * tx.r ), tx.g );
+		diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.66, 0.56, 0.40 ) * tx.r, tx.b );
+	}
 #endif`,
       );
     fs = fs.replace(
@@ -307,7 +344,14 @@ function libMaterial(key: string, o: MatOpts = {}) {
 	float farF = smoothstep( uFade.x, uFade.y, -vWz );
 	float litF = clamp( vBake * 2.4, 0.0, 1.0 );
 	diffuseColor.rgb *= mix( ${(o.shadow ?? 0.55).toFixed(3)}, 1.0, litF ) * ( 1.0 - 0.85 * farF );
-	totalEmissiveRadiance += diffuseColor.rgb * ( vBake * uWarm * ( 1.0 - 0.3 * farF ) + vLit * ( 1.0 - farF ) );`,
+	totalEmissiveRadiance += diffuseColor.rgb * ( vBake * uWarm * ( 1.0 - 0.3 * farF ) + vLit * ( 1.0 - farF ) );
+	#ifdef USE_MAP
+		// Unlit pieces (u = -2): the vertex colour is the light (lantern glass, flames, the globe's core).
+		if ( vMapUv.x < -1.5 ) {
+			totalEmissiveRadiance = vColor.rgb;
+			diffuseColor.rgb = vec3( 0.0 );
+		}
+	#endif`,
     );
     sh.fragmentShader = fs;
   };
@@ -324,11 +368,17 @@ function canvas(w: number, h: number) {
   return c;
 }
 
-/** Book atlas 320x256: four spine patterns (columns 0-3), then paper (top half) and plain cover (bottom half). */
+/** Width of the atlas taken by the book columns (the cushion mask fills the rest). */
+const ATLAS_BOOKS = 320 / 448;
+
+/**
+ * Atlas 448x256. Books (u 0..320 px): four spine patterns (columns 0-3), then paper (top half) and plain cover (bottom
+ * half). Then the cushion mask (128x128, top right; repeated below so mip levels never blend in anything else).
+ */
 function bookAtlas() {
   const W = 320;
   const H = 256;
-  const c = canvas(W, H);
+  const c = canvas(448, H);
   const ctx = c.getContext('2d')!;
   const img = ctx.createImageData(W, H);
   const rnd = mulberry32(7);
@@ -383,13 +433,16 @@ function bookAtlas() {
     }
   }
   ctx.putImageData(img, 0, 0);
+  const cushion = cushionCanvas();
+  ctx.drawImage(cushion, W, 0);
+  ctx.drawImage(cushion, W, 128);
   const t = new THREE.CanvasTexture(c);
   t.anisotropy = 4;
   return t;
 }
 
 /** Cushion mask 128x128: r = shade (puffy vignette), g = gold border and star motif. */
-function cushionTexture() {
+function cushionCanvas() {
   const S = 128;
   const c = canvas(S, S);
   const ctx = c.getContext('2d')!;
@@ -416,7 +469,7 @@ function cushionTexture() {
       img.data[i + 3] = 255;
     }
   ctx.putImageData(img, 0, 0);
-  return new THREE.CanvasTexture(c);
+  return c;
 }
 
 /** Night sky for the windows: deep blue gradient with stars. */
@@ -780,11 +833,9 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   const thinRng = mulberry32(4242);
   const keep = (p: number) => !low || thinRng() < p;
 
-  const props = new Bag();
-  const glowBag = new Bag();
-  const skyBag = new Bag({ uv: true });
-  const books = new Bag({ uv: true });
-  const cushions = new Bag({ uv: true });
+  // Everything solid (wood, brass, books, cushions, lantern glass) shares one material, so each chunk is one draw.
+  const solid = new Bag({ uv: true });
+  const skyBag = new Bag({ uv: true, single: true });
   const foliage = new Bag({ sway: true, doubleSided: true });
   const lights: LightSpot[] = [];
   const glowC: number[] = [];
@@ -793,7 +844,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   // Chunks, frustum culled as a whole (see `cull` below): the shelves of the side walls in four bands along z, the
   // floor strips in front of them in two, the far wall with its strip. A portrait phone looks down from so high that it
   // sees no shelf near the defenders; a landscape screen never sees the far end.
-  const WALL_BANDS = [opts.lineZ - 6, opts.lineZ - 15, opts.lineZ - 25];
+  const WALL_BANDS = [opts.lineZ - 7, opts.lineZ - 14, opts.lineZ - 26];
   const STRIP_BAND = opts.lineZ - 24;
   /** 0 = left wall, 1 = right wall, 2 = far wall (and the corners). */
   let side = 0;
@@ -837,15 +888,15 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   const lantern = (x: number, y: number, z: number, s: number, hanging = false) => {
     const brass = jitter(BRASS, 0.05);
     const dark = jitter(BRASS_DARK, 0.05);
-    piece(props, cyl, local(x, y + 0.03 * s, z, 0, 0, 0, 0.17 * s, 0.06 * s, 0.17 * s), dark);
-    piece(glowBag, cyl, local(x, y + 0.2 * s, z, 0, 0.4, 0, 0.09 * s, 0.26 * s, 0.09 * s), 0xffb85a);
+    piece(solid, cyl, local(x, y + 0.03 * s, z, 0, 0, 0, 0.17 * s, 0.06 * s, 0.17 * s), dark);
+    piece(solid, cyl, local(x, y + 0.2 * s, z, 0, 0.4, 0, 0.09 * s, 0.26 * s, 0.09 * s), 0xffb85a, { tex: 'unlit' });
     for (let k = 0; k < 4; k++) {
       const a = (k / 4) * Math.PI * 2 + 0.4;
-      piece(props, box, local(x + Math.cos(a) * 0.12 * s, y + 0.2 * s, z + Math.sin(a) * 0.12 * s, 0, -a, 0, 0.05 * s, 0.3 * s, 0.05 * s), dark);
+      piece(solid, box, local(x + Math.cos(a) * 0.12 * s, y + 0.2 * s, z + Math.sin(a) * 0.12 * s, 0, -a, 0, 0.05 * s, 0.3 * s, 0.05 * s), dark);
     }
-    piece(props, cone, local(x, y + 0.42 * s, z, 0, 0.4, 0, 0.18 * s, 0.16 * s, 0.18 * s), brass);
-    piece(props, box, local(x, y + 0.54 * s, z, 0, 0.4, 0, 0.1 * s, 0.07 * s, 0.03 * s), dark);
-    if (hanging) piece(props, box, local(x, y + 0.6 * s + 0.25, z, 0, 0, 0, 0.02, 0.5, 0.02), dark);
+    piece(solid, cone, local(x, y + 0.42 * s, z, 0, 0.4, 0, 0.18 * s, 0.16 * s, 0.18 * s), brass);
+    piece(solid, box, local(x, y + 0.54 * s, z, 0, 0.4, 0, 0.1 * s, 0.07 * s, 0.03 * s), dark);
+    if (hanging) piece(solid, box, local(x, y + 0.6 * s + 0.25, z, 0, 0, 0, 0.02, 0.5, 0.02), dark);
     glow(x, y + 0.22 * s, z, 1.6 * Math.min(s, 1.2), 0.26, 0);
     glow(x, y + 0.22 * s, z, 0.42 * s, 0.6, 1);
     light(x, y + 0.25 * s, z, 0.45, 2.8 * Math.min(1.6, s));
@@ -853,14 +904,14 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   };
 
   const candle = (x: number, y: number, z: number, h: number) => {
-    piece(props, cyl, local(x, y + h / 2, z, 0, 0, 0, 0.05, h, 0.05), jitter(0xeee0c0, 0.04));
-    piece(glowBag, cone, local(x, y + h + 0.05, z, 0, 0, 0, 0.03, 0.1, 0.03), 0xffd27a);
+    piece(solid, cyl, local(x, y + h / 2, z, 0, 0, 0, 0.05, h, 0.05), jitter(0xeee0c0, 0.04));
+    piece(solid, cone, local(x, y + h + 0.05, z, 0, 0, 0, 0.03, 0.1, 0.03), 0xffd27a, { tex: 'unlit' });
     glow(x, y + h + 0.06, z, 0.45, 0.55, 1);
     light(x, y + h + 0.05, z, 0.3, 1.6);
   };
 
   const candles = (x: number, z: number, y = 0) => {
-    piece(props, cyl12, local(x, y + 0.02, z, 0, 0, 0, 0.24, 0.04, 0.24), jitter(BRASS));
+    piece(solid, cyl12, local(x, y + 0.02, z, 0, 0, 0, 0.24, 0.04, 0.24), jitter(BRASS));
     const n = 2 + Math.floor(R(0, 2));
     for (let k = 0; k < n; k++) candle(x + R(-0.12, 0.12), y + 0.04, z + R(-0.12, 0.12), R(0.12, 0.38));
     glow(x, y + 0.3, z, 1.1, 0.12, 0, 0.5);
@@ -874,12 +925,12 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const mx = x + R(-0.35, 0.35);
       const mz = z + R(-0.3, 0.3);
       const h = 0.2 * s;
-      piece(props, cyl, local(mx, h / 2, mz, R(-0.1, 0.1), 0, R(-0.1, 0.1), 0.045 * s, h, 0.045 * s), jitter(0xeadcc0, 0.04));
-      piece(props, hemi, local(mx, h - 0.02, mz, 0, 0, 0, 0.15 * s, 0.075 * s, 0.15 * s), jitter(0xa83a2a, 0.06));
+      piece(solid, cyl, local(mx, h / 2, mz, R(-0.1, 0.1), 0, R(-0.1, 0.1), 0.045 * s, h, 0.045 * s), jitter(0xeadcc0, 0.04));
+      piece(solid, hemi, local(mx, h - 0.02, mz, 0, 0, 0, 0.15 * s, 0.075 * s, 0.15 * s), jitter(0xa83a2a, 0.06));
       for (let d = 0; d < 3; d++) {
         const a = R(0, Math.PI * 2);
         const rr = R(0.02, 0.1) * s;
-        piece(props, dot, local(mx + Math.cos(a) * rr, h - 0.02 + 0.07 * s * Math.sqrt(Math.max(0, 1 - (rr / (0.15 * s)) ** 2)), mz + Math.sin(a) * rr, 0, 0, 0, 0.022 * s, 0.01 * s, 0.022 * s), 0xfff4e0);
+        piece(solid, dot, local(mx + Math.cos(a) * rr, h - 0.02 + 0.07 * s * Math.sqrt(Math.max(0, 1 - (rr / (0.15 * s)) ** 2)), mz + Math.sin(a) * rr, 0, 0, 0, 0.022 * s, 0.01 * s, 0.022 * s), 0xfff4e0);
       }
     }
   };
@@ -890,7 +941,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     const oz = cz - (h / 2) * Math.sin(yaw);
     const m = local(ox, cy, oz, 0, yaw, Math.PI / 2, t, h, d);
     const c = jitter(pick(BOOK_COLORS));
-    piece(books, bookGeo, m, c, { pivot: true, uvShift: Math.floor(R(0, 4)) });
+    piece(solid, bookGeo, m, c, { pivot: true, tex: 'atlas', uvShift: Math.floor(R(0, 4)) });
   };
 
   const bookStack = (x: number, z: number, y0 = 0, maxN = 7, s = 1) => {
@@ -909,12 +960,12 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
 
   const openBook = (x: number, z: number, y = 0, s = 1) => {
     const m = local(x, y, z, 0, R(-0.6, 0.6) + Math.PI, 0, 0.62 * s, 1, 0.62 * s);
-    piece(books, openBookGeo, m, jitter(pick(BOOK_COLORS)), { pivot: true });
+    piece(solid, openBookGeo, m, jitter(pick(BOOK_COLORS)), { pivot: true, tex: 'atlas' });
   };
 
   const cushion = (x: number, z: number, y = 0, s = R(0.75, 1.05)) => {
     const m = local(x, y, z, R(-0.06, 0.06), R(0, Math.PI), R(-0.06, 0.06), s, s, s);
-    piece(cushions, cushionGeo, m, jitter(pick(CUSHION_COLORS), 0.06), { pivot: true });
+    piece(solid, cushionGeo, m, jitter(pick(CUSHION_COLORS), 0.06), { pivot: true, tex: 'cushion' });
     return y + 0.34 * s;
   };
 
@@ -960,8 +1011,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   };
 
   const pottedPlant = (x: number, z: number, y = 0, s = 1) => {
-    piece(props, cyl12, local(x, y + 0.16 * s, z, 0, 0, 0, 0.2 * s, 0.32 * s, 0.2 * s), jitter(0xa45a36, 0.06));
-    piece(props, cyl12, local(x, y + 0.33 * s, z, 0, 0, 0, 0.23 * s, 0.05 * s, 0.23 * s), jitter(0x8e4a2c, 0.05));
+    piece(solid, cyl12, local(x, y + 0.16 * s, z, 0, 0, 0, 0.2 * s, 0.32 * s, 0.2 * s), jitter(0xa45a36, 0.06));
+    piece(solid, cyl12, local(x, y + 0.33 * s, z, 0, 0, 0, 0.23 * s, 0.05 * s, 0.23 * s), jitter(0x8e4a2c, 0.05));
     const n = Math.round(16 * s);
     for (let k = 0; k < n; k++) {
       const yaw = R(0, Math.PI * 2);
@@ -1011,15 +1062,15 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
 
   const globe = (x: number, z: number, s = 1) => {
     const brass = jitter(BRASS, 0.03);
-    piece(props, cyl12, local(x, 0.04 * s, z, 0, 0, 0, 0.32 * s, 0.08 * s, 0.32 * s), jitter(WOOD_DARK));
-    piece(props, cyl, local(x, 0.45 * s, z, 0, 0, 0, 0.04 * s, 0.8 * s, 0.04 * s), brass);
+    piece(solid, cyl12, local(x, 0.04 * s, z, 0, 0, 0, 0.32 * s, 0.08 * s, 0.32 * s), jitter(WOOD_DARK));
+    piece(solid, cyl, local(x, 0.45 * s, z, 0, 0, 0, 0.04 * s, 0.8 * s, 0.04 * s), brass);
     const cy = 1.2 * s;
     const rr = 0.42 * s;
-    piece(props, ring, local(x, cy, z, 0, 0, 0.4, rr, rr, rr), brass);
-    piece(props, ring, local(x, cy, z, Math.PI / 2, 0, 0.4, rr, rr, rr), brass);
-    piece(props, ring, local(x, cy, z, Math.PI / 2, Math.PI / 2, 0.4, rr * 0.92, rr * 0.92, rr * 0.92), brass);
-    piece(props, ring, local(x, cy, z, Math.PI / 2, 0.8, 0, rr * 1.12, rr * 1.12, rr * 1.12), jitter(BRASS_DARK));
-    piece(glowBag, ball, local(x, cy, z, 0, 0, 0, 0.12 * s, 0.12 * s, 0.12 * s), 0xffd890);
+    piece(solid, ring, local(x, cy, z, 0, 0, 0.4, rr, rr, rr), brass);
+    piece(solid, ring, local(x, cy, z, Math.PI / 2, 0, 0.4, rr, rr, rr), brass);
+    piece(solid, ring, local(x, cy, z, Math.PI / 2, Math.PI / 2, 0.4, rr * 0.92, rr * 0.92, rr * 0.92), brass);
+    piece(solid, ring, local(x, cy, z, Math.PI / 2, 0.8, 0, rr * 1.12, rr * 1.12, rr * 1.12), jitter(BRASS_DARK));
+    piece(solid, ball, local(x, cy, z, 0, 0, 0, 0.12 * s, 0.12 * s, 0.12 * s), 0xffd890, { tex: 'unlit' });
     glow(x, cy, z, 1.3 * s, 0.32, 0);
     light(x, cy, z, 0.5, 2.8);
   };
@@ -1067,7 +1118,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const lean = rng() < 0.06 && !inRun ? R(-0.2, 0.2) : 0;
       const color = jitter(inRun ? runColor : pick(BOOK_COLORS), inRun ? 0.03 : 0.08);
       const m = local(x + t / 2, y0, -0.05 - d / 2 - R(0, 0.06), 0, 0, lean, t, h, d);
-      piece(books, shelfBookGeo, m, color, { pivot: true, uvShift: inRun ? runColor % 4 : Math.floor(R(0, 4)) });
+      piece(solid, shelfBookGeo, m, color, { pivot: true, tex: 'atlas', uvShift: inRun ? runColor % 4 : Math.floor(R(0, 4)) });
       x += t + (lean ? 0.06 : R(0, 0.012));
       run--;
     }
@@ -1089,19 +1140,19 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     const uv = sg.attributes.uv as THREE.BufferAttribute;
     const sp = sg.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, (sp.getX(i) + r) / (2 * r), sp.getY(i) / (rectH + r));
-    piece(skyBag, sg, local(cx, y0, -DEPTH + 0.06), 0xffffff);
+    piece(skyBag, sg, local(cx, y0, -DEPTH + 0.06), 0xffffff, { tex: 'raw' });
     sg.dispose();
     const fz = -DEPTH + 0.14;
     const frame = jitter(WOOD, 0.04);
-    piece(props, box, local(x0 + 0.06, y0 + rectH / 2, fz, 0, 0, 0, 0.14, rectH, 0.16), frame);
-    piece(props, box, local(x1 - 0.06, y0 + rectH / 2, fz, 0, 0, 0, 0.14, rectH, 0.16), frame);
+    piece(solid, box, local(x0 + 0.06, y0 + rectH / 2, fz, 0, 0, 0, 0.14, rectH, 0.16), frame);
+    piece(solid, box, local(x1 - 0.06, y0 + rectH / 2, fz, 0, 0, 0, 0.14, rectH, 0.16), frame);
     const arch = new THREE.TorusGeometry(r - 0.04, 0.08, 4, 14, Math.PI);
-    piece(props, arch, local(cx, y0 + rectH, fz), frame);
+    piece(solid, arch, local(cx, y0 + rectH, fz), frame);
     arch.dispose();
-    piece(props, box, local(cx, y0 + (rectH + r * 0.9) / 2, fz, 0, 0, 0, 0.08, rectH + r * 0.9, 0.1), frame);
-    for (const f of [0.38, 0.75]) piece(props, box, local(cx, y0 + rectH * f, fz, 0, 0, 0, 2 * r, 0.07, 0.1), frame);
+    piece(solid, box, local(cx, y0 + (rectH + r * 0.9) / 2, fz, 0, 0, 0, 0.08, rectH + r * 0.9, 0.1), frame);
+    for (const f of [0.38, 0.75]) piece(solid, box, local(cx, y0 + rectH * f, fz, 0, 0, 0, 2 * r, 0.07, 0.1), frame);
     // Deep sill with a candle or a plant.
-    piece(props, box, local(cx, y0 + 0.04, -DEPTH / 2 + 0.05, 0, 0, 0, x1 - x0, 0.1, DEPTH + 0.1), jitter(WOOD, 0.04));
+    piece(solid, box, local(cx, y0 + 0.04, -DEPTH / 2 + 0.05, 0, 0, 0, x1 - x0, 0.1, DEPTH + 0.1), jitter(WOOD, 0.04));
     if (rng() < 0.5) candles(cx + R(-0.4, 0.4), -0.45, y0 + 0.09);
     else pottedPlant(cx + R(-0.4, 0.4), -0.45, y0 + 0.09, 0.8);
   };
@@ -1140,7 +1191,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       for (let k = 0; k + 1 < cuts.length; k++) {
         const a = cuts[k] - (k === 0 ? ext : 0);
         const b = cuts[k + 1] + (k + 2 === cuts.length ? ext : 0);
-        piece(props, box, local((a + b) / 2, y, z, 0, 0, 0, b - a, h, d), color);
+        piece(solid, box, local((a + b) / 2, y, z, 0, 0, 0, b - a, h, d), color);
       }
     };
     long(HEIGHT / 2, -DEPTH - 0.05, HEIGHT, 0.1, jitter(WOOD_DARK, 0.02));
@@ -1156,8 +1207,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     for (let i = 0; i <= nb; i++) {
       const x = i * bw;
       if (!ends && (i === 0 || i === nb)) continue;
-      piece(props, box, local(x, HEIGHT / 2, -DEPTH / 2 + 0.02, 0, 0, 0, 0.2, HEIGHT, DEPTH + 0.04), wood());
-      piece(props, box, local(x, HEIGHT / 2, 0.04, 0, 0, 0, 0.26, HEIGHT, 0.06), jitter(0x553722, 0.04));
+      piece(solid, box, local(x, HEIGHT / 2, -DEPTH / 2 + 0.02, 0, 0, 0, 0.2, HEIGHT, DEPTH + 0.04), wood());
+      piece(solid, box, local(x, HEIGHT / 2, 0.04, 0, 0, 0, 0.26, HEIGHT, 0.06), jitter(0x553722, 0.04));
       // Ivy climbing the post from the floor, thick at the bottom.
       if (rng() < 0.85) {
         const top = R(1.0, 3.2);
@@ -1170,7 +1221,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       // Hanging lanterns on brackets in front of every inner post, at alternating heights.
       if (i > 0 && i < nb) {
         const y = (i % 2 ? ROWS[2] : ROWS[3]) + R(0.05, 0.3);
-        piece(props, box, local(x, y + 0.95, 0.22, 0, 0, 0, 0.05, 0.05, 0.4), jitter(BRASS_DARK));
+        piece(solid, box, local(x, y + 0.95, 0.22, 0, 0, 0, 0.05, 0.05, 0.4), jitter(BRASS_DARK));
         lantern(x, y, 0.4, R(1.0, 1.15), true);
       }
     }
@@ -1186,7 +1237,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
           if (r === winRow) windowBay(x0, x1, y0);
           continue;
         }
-        if (r > 0) piece(props, box, local((x0 + x1) / 2, y0 - 0.04, -DEPTH / 2, 0, 0, 0, x1 - x0, 0.08, DEPTH), wood(0.05));
+        if (r > 0) piece(solid, box, local((x0 + x1) / 2, y0 - 0.04, -DEPTH / 2, 0, 0, 0, x1 - x0, 0.08, DEPTH), wood(0.05));
         fillShelf(x0, x1, y0, next - y0 - 0.08);
         // Ivy spilling over the shelf edge.
         if (r > 0 && rng() < 0.32) ivyCascade(R(x0 + 0.3, x1 - 0.3), y0, R(0.4, 0.9), R(0.4, 1.4));
@@ -1303,15 +1354,15 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     const base = HEIGHT - r - 0.1;
     const wood = jitter(WOOD, 0.03);
     for (const s of [-1, 1]) {
-      piece(props, box, local(cx + s * r, base / 2, 0.3, 0, 0, 0, 0.5, base, 0.5), wood);
-      piece(props, box, local(cx + s * r, base + 0.06, 0.3, 0, 0, 0, 0.66, 0.14, 0.62), jitter(0x5a3a22, 0.03));
+      piece(solid, box, local(cx + s * r, base / 2, 0.3, 0, 0, 0, 0.5, base, 0.5), wood);
+      piece(solid, box, local(cx + s * r, base + 0.06, 0.3, 0, 0, 0, 0.66, 0.14, 0.62), jitter(0x5a3a22, 0.03));
       ivyCascade(cx + s * r, base + 0.1, 0.6, 2.4, 0.4);
     }
     const arch = new THREE.TorusGeometry(r, 0.26, 5, 18, Math.PI);
-    piece(props, arch, local(cx, base, 0.3, 0, 0, 0, 1, 1, 0.9), wood);
+    piece(solid, arch, local(cx, base, 0.3, 0, 0, 0, 1, 1, 0.9), wood);
     arch.dispose();
-    piece(props, box, local(cx, base + r + 0.05, 0.36, 0, 0, 0, 0.4, 0.5, 0.5), jitter(0x5a3a22, 0.03));
-    piece(props, box, local(cx, base + r - 0.6, 0.6, 0, 0, 0, 0.03, 0.9, 0.03), jitter(BRASS_DARK));
+    piece(solid, box, local(cx, base + r + 0.05, 0.36, 0, 0, 0, 0.4, 0.5, 0.5), jitter(0x5a3a22, 0.03));
+    piece(solid, box, local(cx, base + r - 0.6, 0.6, 0, 0, 0, 0.03, 0.9, 0.03), jitter(BRASS_DARK));
     lantern(cx, base + r - 1.7, 0.6, 1.4, false);
     ivyCascade(cx, base + r + 0.2, 1.6, 1.5, 0.4);
   }
@@ -1321,7 +1372,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   // Corner posts where the side walls meet the far wall.
   for (const s of [-1, 1]) {
     W.identity();
-    piece(props, box, local(s * (wallX + DEPTH / 2), HEIGHT / 2 + 0.2, zBack - DEPTH / 2, 0, 0, 0, DEPTH + 0.1, HEIGHT + 0.4, DEPTH + 0.1), jitter(WOOD_DARK));
+    piece(solid, box, local(s * (wallX + DEPTH / 2), HEIGHT / 2 + 0.2, zBack - DEPTH / 2, 0, 0, 0, DEPTH + 0.1, HEIGHT + 0.4, DEPTH + 0.1), jitter(WOOD_DARK));
   }
 
   // ---- bake the lantern light ----
@@ -1369,11 +1420,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     }
   };
   const atlas = bookAtlas();
-  addBag(props, libMaterial('props'), bakeAt);
-  addBag(books, libMaterial('books', { map: atlas, trim: true }), bakeAt);
+  addBag(solid, libMaterial('solid', { map: atlas, trim: true }), bakeAt);
   addBag(foliage, libMaterial('foliage', { foliage: true, side: THREE.DoubleSide }), bakeAt);
-  addBag(cushions, libMaterial('cushions', { map: cushionTexture(), trim: true }), bakeAt);
-  addBag(glowBag, new THREE.MeshBasicMaterial({ vertexColors: true }));
   addBag(skyBag, new THREE.MeshBasicMaterial({ map: skyTexture(), vertexColors: true }));
 
   group.add(glowMesh(glowC, glowD));
