@@ -89,8 +89,11 @@ class RocketsGame implements GameServer {
   // ---- lifecycle --------------------------------------------------------------------------------------------
 
   start() {
-    this.host.systemChat(`Map: ${this.map.name}`);
+    this.host.systemChat(`Map: ${this.map.name} · fight in ${RocketsGame.COUNTDOWN} seconds`);
     for (const p of this.host.players()) this.addPlayer(p);
+    // Everyone appears straight away, one after the other so each spawn sees the ones already placed, and stands
+    // frozen through the countdown: the match starts with nobody spawning on top of or in front of anybody else.
+    for (const p of this.players.values()) this.spawn(p);
     this.timer = setInterval(() => this.loop(), 1000 / RK.loopHz);
   }
 
@@ -162,25 +165,32 @@ class RocketsGame implements GameServer {
     this.acc += Math.min(0.25, (nowMs - this.lastLoop) / 1000);
     this.lastLoop = nowMs;
     let substeps = 0;
-    while (this.acc >= RK.dt - 1e-9 && substeps < 10) {
+    while (this.acc >= RK.dt - 1e-9 && substeps < 10 && !this.ended) {
       this.acc -= RK.dt;
       substeps++;
       this.now += RK.dt;
       this.tick++;
+      const frozen = this.frozen();
       for (const p of this.players.values()) {
         if (p.dead && this.now >= p.respawnAt) this.spawn(p);
-        if (p.brain) this.applyInput(p, p.brain.think(this.botView(p)));
+        if (p.brain) {
+          const cmd = p.brain.think(this.botView(p));
+          this.applyInput(p, frozen ? this.holdStill(cmd) : cmd);
+        }
       }
       this.stepRockets(RK.dt);
       this.updatePacks();
     }
-    if (substeps === 0) return;
+    if (substeps === 0 || this.ended) return;
+    const frozen = this.frozen();
     for (const p of this.players.values()) {
       if (p.brain) continue;
       let n = 0;
       const limit = Math.max(RK.maxCommandsPerLoop, substeps * 3);
       while (p.queue.length && n < limit) {
-        this.applyInput(p, p.queue.shift()!);
+        const cmd = p.queue.shift()!;
+        // During the countdown the command still counts (look around, seq acknowledged) but nobody moves or fires.
+        this.applyInput(p, frozen ? this.holdStill(cmd) : cmd);
         p.lastInputAt = this.now;
         n++;
       }
@@ -189,7 +199,8 @@ class RocketsGame implements GameServer {
         for (let i = 0; i < substeps; i++) this.applyInput(p, { ...IDLE, seq: p.lastSeq, yaw: p.yaw, pitch: p.pitch }, true);
       }
     }
-    if (this.timeLeft() <= 0) this.endMatch();
+    this.updateMatchFlow();
+    if (this.ended) return;
     this.flush();
   }
 
@@ -307,12 +318,31 @@ class RocketsGame implements GameServer {
     if (killer && !self && killer.frags >= RK.fragLimit) this.endMatch();
   }
 
+  /**
+   * Picks the fairest spawn point: never inside another player, preferably out of every enemy's sight and away from
+   * rockets about to land, far from the nearest enemy, and not where this player just died or last spawned. Ties
+   * are broken at random so spawns stay hard to camp. When every point is occupied the spawn waits a moment.
+   */
   private spawn(p: RPlayer) {
     const alive = [...this.players.values()].filter((o) => o !== p && !o.dead);
-    const ranked = this.map.spawns
-      .map((s) => ({ s, d: alive.length ? Math.min(...alive.map((o) => hdist(o.body.pos, s.pos))) : 99 }))
-      .sort((a, b) => b.d - a.d);
-    const choice = ranked[Math.floor(this.rng() * Math.min(3, ranked.length))].s;
+    const diedAt = p.body.pos; // a dead body does not move, so this is where the player died
+    const last = this.lastSpawn.get(p.id) ?? -1;
+    let best = -Infinity;
+    const scored: { i: number; score: number }[] = [];
+    this.map.spawns.forEach((s, i) => {
+      const score = this.spawnScore(s.pos, alive, diedAt, i === last);
+      if (score === -Infinity) return;
+      scored.push({ i, score });
+      if (score > best) best = score;
+    });
+    if (!scored.length) {
+      p.respawnAt = this.now + 0.25;
+      return;
+    }
+    const good = scored.filter((c) => c.score >= best - RocketsGame.SPAWN_SLACK);
+    const index = good[Math.floor(this.rng() * good.length)].i;
+    this.lastSpawn.set(p.id, index);
+    const choice = this.map.spawns[index];
     p.body.pos = v3(choice.pos.x, choice.pos.y + 0.05, choice.pos.z);
     p.body.vel = v3();
     p.body.onGround = false;
@@ -370,8 +400,9 @@ class RocketsGame implements GameServer {
     return [...this.players.values()].map((p) => ({ id: p.id, frags: p.frags, deaths: p.deaths }));
   }
 
+  /** Match clock: full during the countdown, then counts down; sits at 0 through overtime. */
   private timeLeft() {
-    return Math.max(0, RK.matchSeconds - this.now);
+    return clamp(RK.matchSeconds - (this.now - RocketsGame.COUNTDOWN), 0, RK.matchSeconds);
   }
 
   private flush() {
@@ -407,13 +438,99 @@ class RocketsGame implements GameServer {
 
   private endMatch() {
     if (this.ended) return;
+    // Deliver the deciding frag (kill event, final positions) before the results screen goes up.
+    this.flush();
     this.ended = true;
     this.stop();
+    this.rockets = [];
     const scores = this.scores().sort((a, b) => b.frags - a.frags || a.deaths - b.deaths);
     const top = scores[0];
     const tie = scores.length > 1 && scores[1].frags === top?.frags && scores[1].deaths === top?.deaths;
-    this.host.broadcast({ k: 'end', scores, winner: top && !tie ? top.id : null });
+    const winner = top && !tie ? top.id : null;
+    const name = winner ? this.players.get(winner)?.name : undefined;
+    this.host.systemChat(name ? `${name} wins with ${top.frags} frags` : 'The match ends in a draw');
+    this.host.broadcast({ k: 'end', scores, winner });
     this.host.matchEnded();
+  }
+
+  // ---- match flow -------------------------------------------------------------------------------------------
+
+  /** Seconds of 3-2-1 freeze at the start of a match: players can look around but not move or fire. */
+  private static readonly COUNTDOWN = 3;
+  /** Longest overtime before a still-level match is settled on deaths (or declared a draw). */
+  private static readonly OVERTIME_MAX = 90;
+  /** Spawn points scoring within this much of the best one are picked from at random. */
+  private static readonly SPAWN_SLACK = 4;
+
+  private overtime = false;
+  private overtimeAt = 0;
+  private countdownCalled = false;
+  private readonly lastSpawn = new Map<string, number>();
+
+  private frozen() {
+    return this.now < RocketsGame.COUNTDOWN;
+  }
+
+  private holdStill(cmd: RocketsInput): RocketsInput {
+    return { ...cmd, f: 0, s: 0, jump: false, fire: false };
+  }
+
+  /** Countdown call, time limit, and overtime: tied leaders at the buzzer play on until one of them pulls ahead. */
+  private updateMatchFlow() {
+    if (!this.countdownCalled && !this.frozen()) {
+      this.countdownCalled = true;
+      this.host.systemChat('Fight!');
+    }
+    if (this.timeLeft() > 0) return;
+    const leaders = this.leaders();
+    if (!this.overtime) {
+      if (leaders === 1) return this.endMatch();
+      this.overtime = true;
+      this.overtimeAt = this.now;
+      this.host.systemChat('Overtime! Next frag wins');
+      return;
+    }
+    if (leaders === 1 || this.now - this.overtimeAt >= RocketsGame.OVERTIME_MAX) this.endMatch();
+  }
+
+  /** How many players share the top frag count (1 with fewer than two players, so a lone player is never stuck). */
+  private leaders() {
+    let top = -Infinity;
+    let count = 0;
+    for (const p of this.players.values()) {
+      if (p.frags > top) {
+        top = p.frags;
+        count = 1;
+      } else if (p.frags === top) count++;
+    }
+    return Math.max(1, count);
+  }
+
+  /** Higher is better; -Infinity means the point is occupied (spawning there would telefrag). */
+  private spawnScore(pos: Vec3, alive: RPlayer[], diedAt: Vec3, sameAsLast: boolean) {
+    const eye = v3(pos.x, pos.y + RK.eyeHeight, pos.z);
+    const centre = v3(pos.x, pos.y + RK.height * 0.5, pos.z);
+    let nearest = 40;
+    let seen = 0;
+    for (const o of alive) {
+      if (hdist(o.body.pos, pos) < RK.halfWidth * 2 + 0.3 && Math.abs(o.body.pos.y - pos.y) < RK.height) return -Infinity;
+      nearest = Math.min(nearest, vdist(o.body.pos, pos));
+      if (!segmentBoxes(eyePosition(o.body.pos), eye, this.map.boxes)) seen++;
+    }
+    // Rockets in flight that will pass (or burst) within splash range over the next half second.
+    let danger = 0;
+    for (const r of this.rockets) {
+      const end = vadd(r.pos, vscale(r.vel, 0.5));
+      const seg = vsub(end, r.pos);
+      const t = clamp(((centre.x - r.pos.x) * seg.x + (centre.y - r.pos.y) * seg.y + (centre.z - r.pos.z) * seg.z) / (seg.x ** 2 + seg.y ** 2 + seg.z ** 2 || 1), 0, 1);
+      if (vdist(vadd(r.pos, vscale(seg, t)), centre) < RK.splashRadius + 1) danger++;
+    }
+    let score = nearest;
+    score -= seen ? 25 + 5 * seen : 0;
+    score -= danger * 30;
+    if (vdist(diedAt, pos) < 10) score -= 12;
+    if (sameAsLast) score -= 8;
+    return score;
   }
 }
 
