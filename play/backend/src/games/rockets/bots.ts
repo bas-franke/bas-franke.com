@@ -52,6 +52,8 @@ export interface BotParams {
   dodgeDelay: number;
   /** Health below which the bot goes looking for a pack. */
   healAt: number;
+  /** Aims splash on the inside of targets standing near a void, so the blast knocks them off (the faller counts as a frag). */
+  edgeKnock: boolean;
 }
 
 export const BOT_PARAMS: Record<BotDifficulty, BotParams> = {
@@ -69,6 +71,7 @@ export const BOT_PARAMS: Record<BotDifficulty, BotParams> = {
     dodge: 0.12,
     dodgeDelay: 0.4,
     healAt: 30,
+    edgeKnock: false,
   },
   normal: {
     aimError: 0.065,
@@ -84,6 +87,7 @@ export const BOT_PARAMS: Record<BotDifficulty, BotParams> = {
     dodge: 0.5,
     dodgeDelay: 0.2,
     healAt: 45,
+    edgeKnock: false,
   },
   hard: {
     aimError: 0.025,
@@ -99,6 +103,7 @@ export const BOT_PARAMS: Record<BotDifficulty, BotParams> = {
     dodge: 0.85,
     dodgeDelay: 0.07,
     healAt: 55,
+    edgeKnock: true,
   },
 };
 
@@ -193,6 +198,9 @@ export class RocketsBot {
   private jumpUntil = 0;
   private rj: RocketJump | null = null;
   private rjTryAt = 0;
+  private roamRetryAt = 0;
+  private progressPos: Vec3 = v3();
+  private progressAt = 0;
   /** A rocket jump the bot would like to make; tried on the next step it stands on the ground. */
   private rjWant: { dest: Vec3; until: number } | null = null;
   private dodgeDir: Vec3 | null = null;
@@ -206,7 +214,7 @@ export class RocketsBot {
   /** Per-bot quirks so a room of bots does not move in lockstep. */
   private readonly style: { range: number; strafeMin: number; strafeSpan: number; hop: number; aim: number; rjChance: number };
   /** Counters for tuning scripts. */
-  readonly stats = { rocketJumps: 0, rocketJumpsLanded: 0, dodges: 0 };
+  readonly stats = { rocketJumps: 0, rocketJumpsLanded: 0, dodges: 0, unstuck: 0 };
 
   constructor(
     private readonly params: BotParams,
@@ -290,7 +298,12 @@ export class RocketsBot {
         // Keep some approach pressure so fights do not stall at range, and back off when they get too close.
         moveDir = vadd(perp, vscale(toTarget, dist > range ? 0.6 : dist < range - 3 ? -0.5 : 0));
       } else {
-        moveDir = dist > range ? toTarget : null;
+        // No real strafing, but do not stand like a statue either: drift sideways now and then.
+        if (now > this.strafeUntil) {
+          this.strafeDir = this.rng() < 0.4 ? 0 : this.rng() < 0.5 ? -1 : 1;
+          this.strafeUntil = now + 1 + this.rng() * 1.5;
+        }
+        moveDir = dist > range ? toTarget : this.strafeDir ? v3(-toTarget.z * this.strafeDir, 0, toTarget.x * this.strafeDir) : null;
       }
     } else {
       moveDir = this.followPath(view);
@@ -308,7 +321,11 @@ export class RocketsBot {
     // Never walk off into the void or off a big drop unless the path says so.
     if (moveDir && !onPath && body.onGround && !this.safeAhead(view, moveDir)) {
       this.strafeDir *= -1;
-      moveDir = vscale(moveDir, -1);
+      const original = moveDir;
+      moveDir = vscale(original, -1);
+      // On a bridge neither side works: run along it instead, or stand still.
+      if (!this.safeAhead(view, moveDir)) moveDir = v3(-original.z, 0, original.x);
+      if (!this.safeAhead(view, moveDir)) moveDir = v3(original.z, 0, -original.x);
       if (!this.safeAhead(view, moveDir)) moveDir = null;
     }
     // Momentum carrying us over an edge: brake against it.
@@ -446,12 +463,37 @@ export class RocketsBot {
       return;
     }
 
-    if (self.hp < this.params.healAt) {
-      const pack = this.nearestPack(view);
+    // Badly hurt: any pack within reach. A bit hurt: only one that is a short walk away.
+    if (self.hp < this.params.healAt || self.hp <= 70) {
+      const pack = this.nearestPack(view, self.hp < this.params.healAt ? 30 : 12);
       const goal = pack ? nearestNode(this.graph, pack) : null;
       if (goal) {
         const reachable = goal !== this.goal || now > this.repathAt ? this.setGoal(here, goal, now) : this.path.length > 0 || hdist(self.body.pos, goal.pos) < 1.5;
-        if (reachable) mode = 'heal';
+        if (reachable && (self.hp < this.params.healAt || this.path.length <= 10)) mode = 'heal';
+      }
+    }
+
+    // Stuck watchdog: no real progress for 3 s while not busy shooting at someone (a dead-end alley, a lip the
+    // nav graph thinks is walkable): drop the plan, maybe rocket-jump out, and pick somewhere else to go.
+    const shooting = !!best && mode !== 'roam';
+    if (shooting || hdist(self.body.pos, this.progressPos) > 2 || Math.abs(self.body.pos.y - this.progressPos.y) > 1) {
+      this.progressPos = { ...self.body.pos };
+      this.progressAt = now;
+    } else if (now - this.progressAt > 3) {
+      this.progressPos = { ...self.body.pos };
+      this.progressAt = now;
+      this.stats.unstuck++;
+      this.path = [];
+      this.goal = null;
+      if (!best) {
+        this.targetId = null;
+        this.lastSeenPos = null;
+        mode = 'roam';
+      }
+      const up = this.nearbyHighNode(self.body.pos);
+      if (up) {
+        this.rjTryAt = 0;
+        this.tryRocketJump(view, up.pos, 1);
       }
     }
 
@@ -477,18 +519,23 @@ export class RocketsBot {
       }
     } else {
       const reached = this.path.length === 0;
-      if (wasMode !== 'roam' || reached || !this.goal || now > this.repathAt + 4) {
+      if ((wasMode !== 'roam' || reached || !this.goal || now > this.repathAt + 4) && now >= this.roamRetryAt) {
         const nodes = this.graph.nodes;
-        let goal: NavNode = nodes[Math.floor(this.rng() * nodes.length)];
-        // Prefer the high ground.
-        for (let i = 0; i < 4; i++) {
-          const candidate = nodes[Math.floor(this.rng() * nodes.length)];
-          if (candidate.pos.y > goal.pos.y && hdist(candidate.pos, self.body.pos) > 6) goal = candidate;
-        }
-        const reachable = this.setGoal(here, goal, now);
-        // Unreachable on foot or a long way round: try to rocket-jump up there instead.
-        if ((!reachable || this.pathLonger(self.body.pos, goal, 2.5)) && goal.pos.y > self.body.pos.y + 1.5 && hdist(goal.pos, self.body.pos) < 24) {
-          this.tryRocketJump(view, goal.pos, this.style.rjChance);
+        // A few tries per decision; when nothing is reachable from here, back off instead of searching every step.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          let goal: NavNode = nodes[Math.floor(this.rng() * nodes.length)];
+          // Prefer the high ground.
+          for (let i = 0; i < 4; i++) {
+            const candidate = nodes[Math.floor(this.rng() * nodes.length)];
+            if (candidate.pos.y > goal.pos.y && hdist(candidate.pos, self.body.pos) > 6) goal = candidate;
+          }
+          const reachable = this.setGoal(here, goal, now);
+          // Unreachable on foot or a long way round: try to rocket-jump up there instead.
+          if ((!reachable || this.pathLonger(self.body.pos, goal, 2.5)) && goal.pos.y > self.body.pos.y + 1.5 && hdist(goal.pos, self.body.pos) < 24) {
+            this.tryRocketJump(view, goal.pos, this.style.rjChance);
+          }
+          if (reachable || this.rjWant) break;
+          if (attempt === 2) this.roamRetryAt = now + 1;
         }
       }
     }
@@ -501,6 +548,23 @@ export class RocketsBot {
     const path = findPath(this.graph, here.id, goal.id);
     this.path = path ?? [];
     return path !== null;
+  }
+
+  /** A node a few metres up within rocket-jump range, to escape a pit. */
+  private nearbyHighNode(pos: Vec3): NavNode | null {
+    let best: NavNode | null = null;
+    let bestD = Infinity;
+    for (const n of this.graph.nodes) {
+      const dy = n.pos.y - pos.y;
+      const d = hdist(n.pos, pos);
+      if (dy < 1.5 || dy > 10 || d > 16 || d < 2) continue;
+      const score = d + this.rng() * 4;
+      if (score < bestD) {
+        bestD = score;
+        best = n;
+      }
+    }
+    return best;
   }
 
   /** Is the current path (if it leads to `goal`) much longer than the straight line? No path counts as longer. */
@@ -516,13 +580,13 @@ export class RocketsBot {
     return len > hdist(from, goal.pos) * factor + 4;
   }
 
-  private nearestPack(view: BotView): Vec3 | null {
+  private nearestPack(view: BotView, maxD: number): Vec3 | null {
     let best: Vec3 | null = null;
     let bestD = Infinity;
     for (const p of view.packs) {
       if (!p.available) continue;
       const d = hdist(view.self.body.pos, p.pos) + Math.abs(p.pos.y - view.self.body.pos.y) * 3;
-      if (d < bestD && d < 30) {
+      if (d < bestD && d < maxD) {
         bestD = d;
         best = p.pos;
       }
@@ -547,14 +611,24 @@ export class RocketsBot {
     return null;
   }
 
-  /** Is there floor `ahead` metres along `dir`, at most a few metres below us? */
+  /**
+   * Is there floor `ahead` metres along `dir`, at most a few metres below us, and all the way along where our current
+   * speed plus pressing toward `dir` carries us in the next 0.8 s? Momentum is what throws bots off narrow bridges.
+   */
   private safeAhead(view: BotView, dir: Vec3, ahead = 1.6): boolean {
     const l = Math.hypot(dir.x, dir.z) || 1;
-    const p = view.self.body.pos;
-    for (const d of [ahead * 0.6, ahead]) {
-      const g = floorBelow(view.map, p.x + (dir.x / l) * d, p.z + (dir.z / l) * d, p.y + RK.stepHeight + 0.05);
-      if (g === null || p.y - g > 4) return false;
-    }
+    const nx = dir.x / l;
+    const nz = dir.z / l;
+    const b = view.self.body;
+    const p = b.pos;
+    const ok = (x: number, z: number) => {
+      const g = floorBelow(view.map, x, z, p.y + RK.stepHeight + 0.05);
+      return g !== null && p.y - g <= 4;
+    };
+    for (const d of [ahead * 0.6, ahead]) if (!ok(p.x + nx * d, p.z + nz * d)) return false;
+    const vx = b.vel.x * 0.5 + nx * RK.groundSpeed * 0.5;
+    const vz = b.vel.z * 0.5 + nz * RK.groundSpeed * 0.5;
+    for (const t of [0.25, 0.5, 0.8]) if (!ok(p.x + vx * t, p.z + vz * t)) return false;
     return true;
   }
 
@@ -655,6 +729,30 @@ export class RocketsBot {
     const dist = hdist(view.self.body.pos, p);
     if (grounded && this.feetThisFight && dist > 4.5) {
       const feet = v3(p.x, p.y + 0.12, p.z);
+      if (this.params.edgeKnock) {
+        // Void next to them: put the blast on the inside so the knockback pushes them over the edge.
+        let ox = 0;
+        let oz = 0;
+        for (let k = 0; k < 8; k++) {
+          const a = (k * Math.PI) / 4;
+          const dx = Math.cos(a);
+          const dz = Math.sin(a);
+          if (floorBelow(view.map, p.x + dx * 2.2, p.z + dz * 2.2, p.y + 0.05) === null) {
+            ox -= dx;
+            oz -= dz;
+          }
+        }
+        const ol = Math.hypot(ox, oz);
+        if (ol > 0.5) {
+          const fx = p.x + (ox / ol) * 0.8;
+          const fz = p.z + (oz / ol) * 0.8;
+          const g = floorBelow(view.map, fx, fz, p.y + 0.05);
+          if (g !== null && Math.abs(g - p.y) < 0.1) {
+            feet.x = fx;
+            feet.z = fz;
+          }
+        }
+      }
       // A ledge edge between us and their feet would eat the rocket: then go for the body.
       if (view.canSee(eye, feet)) return feet;
     }
