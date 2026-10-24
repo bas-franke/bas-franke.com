@@ -35,6 +35,8 @@ export interface FeedTopic {
   /** 0 = not trending; 1–5 from the trend radar. */
   heat: number;
   heat_reason: string;
+  /** ISO country code for national news (only shown to visitors from there in the feed); null = global. */
+  country: string | null;
   /** Published stories in the topic. */
   stories: number;
 }
@@ -47,6 +49,7 @@ export interface TrendingTopic {
   kind: TopicKind;
   heat: number;
   heat_reason: string;
+  country: string | null;
   stories: number;
   latest_slug: string | null;
 }
@@ -174,6 +177,7 @@ export interface Settings {
   trending_guidance: string;
   radar_hours: number;
   radar_at: string | null;
+  local_countries: string[];
   site_name: string;
   tagline: string;
   last_run_at: string | null;
@@ -191,6 +195,7 @@ export interface AdminTopic {
   heat: number;
   heat_reason: string;
   heat_at: string | null;
+  country: string | null;
   planned_at: string | null;
   stories: number;
   sections: number;

@@ -72,14 +72,15 @@ export async function newsFeed(url: string, source: string, max = 15): Promise<S
   return { source, items: items.filter(Boolean) };
 }
 
-export async function collectSignals(): Promise<Signal[]> {
+/** `countries`: the local countries whose own trending searches (and the news behind them) the radar should see. */
+export async function collectSignals(countries: string[] = []): Promise<Signal[]> {
+  const geos = [...new Set(['US', 'GB', ...countries.map((c) => c.toUpperCase())])];
   const results = await Promise.allSettled([
     newsFeed('https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC News, world headlines'),
     newsFeed('https://feeds.bbci.co.uk/news/business/rss.xml', 'BBC News, business headlines', 10),
     newsFeed('https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', 'BBC News, science headlines', 8),
     newsFeed('https://rss.nytimes.com/services/xml/rss/nyt/World.xml', 'New York Times, world headlines'),
-    googleTrends('US'),
-    googleTrends('GB'),
+    ...geos.map((geo) => googleTrends(geo)),
     wikipediaTop(),
     hackerNews(),
   ]);

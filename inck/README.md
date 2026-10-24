@@ -31,6 +31,13 @@ instance. Vite + React frontend, Node.js + Express backend on port **3003**.
    Google Trends, Wikipedia's most-read pages, Hacker News), searches the web, and returns the 6–10 hottest subjects
    with a **heat** score (1–5) and a one-line reason. Each becomes a topic (or updates the existing topic it belongs
    to); topics it no longer lists cool down one step per scan. The seeded topics are never a menu for it.
+   **Country-specific news:** for each of `local_countries` (default NL, US, GB, DE; Settings → Trending) the radar
+   also reads that country's Google Trends and adds up to two national subjects. A topic it marks with a country
+   (editable per topic in the admin) is only offered in the latest feed, the trending strip and "go deeper" links to
+   visitors from that country; topic hubs, topic mode, search and direct links stay open to everyone. News from one
+   country that the world follows (riots in France) stays global. The visitor's country comes from the IP address via
+   the free [db-ip.com](https://db-ip.com) country database, downloaded to `data/geo/` at startup and refreshed monthly;
+   unknown visitors see global news only. Locally, `DEV_COUNTRY=NL` in `.env.local` pretends every visitor is Dutch.
    **A run** is either a *right now* story or a *curriculum* story, so that over time `trending_share` (default 60%)
    of stories serve hot topics. Right now: pick a hot topic (the hotter the likelier, spread over the day); a hot topic
    with few stories first gets its curriculum basics, then the scout picks the one thing to explain about it today.

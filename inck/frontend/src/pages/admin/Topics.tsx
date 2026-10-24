@@ -144,6 +144,19 @@ function TopicRow({
             <option value="field">Field</option>
             <option value="event">Event</option>
           </select>
+          <input
+            className="topic-country"
+            defaultValue={topic.country ?? ''}
+            key={topic.country ?? ''}
+            maxLength={2}
+            placeholder="global"
+            aria-label="Country (ISO code) for national news, empty for global"
+            title="National news: only offered in the feed to visitors from this country (ISO code, e.g. NL). Empty = everyone."
+            onBlur={(e) => {
+              const next = e.target.value.trim().toUpperCase() || null;
+              if (next !== topic.country) onChange({ country: next });
+            }}
+          />
           <Link to={`/t/${topic.slug}`} className="small">
             view hub →
           </Link>

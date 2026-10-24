@@ -53,6 +53,8 @@ export interface Settings {
   /** How often the radar rescans what is trending (it runs lazily, before a "right now" story). */
   radar_hours: number;
   radar_at: Date | null;
+  /** Countries (ISO alpha-2) the radar also looks for national news in; their visitors get it in the feed. */
+  local_countries: string[];
   site_name: string;
   tagline: string;
   last_run_at: Date | null;
@@ -75,6 +77,8 @@ export interface Topic {
   /** One sentence for readers: what is happening that makes this topic hot. */
   heat_reason: string;
   heat_at: Date | null;
+  /** ISO 3166-1 alpha-2 code for news that matters mainly to people in one country; null = of interest everywhere. */
+  country: string | null;
   created_at: Date;
   updated_at: Date;
 }

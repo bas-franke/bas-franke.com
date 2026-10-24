@@ -63,6 +63,8 @@ export default function App() {
           {site ? `${site.stories} stories · ${site.topics} topics` : ''}
           <br />
           <a href="https://bas-franke.com">by Bas Franke</a>
+          <br />
+          <a href="https://db-ip.com">IP geolocation by DB-IP</a>
         </p>
       </nav>
 

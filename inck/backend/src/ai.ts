@@ -176,17 +176,25 @@ const RADAR_SCHEMA: Schema = {
   properties: {
     trends: {
       type: 'array',
-      description: '6 to 10 subjects the world is talking about and trying to understand right now, hottest first.',
+      description: '6 to 10 global subjects the world is talking about and trying to understand right now, hottest first, then up to 2 national subjects for each local country.',
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'existing_slug', 'category', 'kind', 'heat', 'why_now', 'description'],
+        required: ['name', 'existing_slug', 'category', 'kind', 'country', 'heat', 'why_now', 'description'],
         properties: {
           name: { type: 'string', description: 'Neutral, specific topic name of at most 40 characters, e.g. "The Sudan civil war" or "The 2026 oil price shock".' },
           existing_slug: { type: 'string', description: 'Slug of the existing topic this trend belongs to, or empty when it is new.' },
           category: { type: 'string', enum: ['technology', 'science', 'money', 'world', 'society'] },
           kind: { type: 'string', enum: ['field', 'event'], description: 'event = something happening; field = a lasting subject that is suddenly hot.' },
-          heat: { type: 'integer', description: '5 = everyone worldwide is talking about it, 3 = big in several countries or communities, 1 = notable in one.' },
+          country: {
+            type: 'string',
+            description:
+              'ISO 3166-1 alpha-2 code (e.g. "NL") when the subject matters mainly to people living in that one country; empty when people elsewhere follow it too, even if it happens in one country (riots in France, a US presidential election).',
+          },
+          heat: {
+            type: 'integer',
+            description: '5 = everyone worldwide is talking about it, 3 = big in several countries or communities, 1 = notable in one. National subjects: how hot it is inside that country.',
+          },
           why_now: { type: 'string', description: 'One sentence for readers: what is happening and why people care today.' },
           description: { type: 'string', description: 'One sentence on what the topic covers, for the planner.' },
         },
@@ -200,6 +208,8 @@ export interface Trend {
   existing_slug: string;
   category: Category;
   kind: TopicKind;
+  /** Upper-case ISO code for national news, empty for global. */
+  country: string;
   heat: number;
   why_now: string;
   description: string;
@@ -212,14 +222,18 @@ export interface Trend {
 export async function scanTrends(opts: {
   settings: Settings;
   signals: string;
-  topics: Pick<Topic, 'slug' | 'name' | 'kind' | 'category' | 'heat'>[];
+  topics: Pick<Topic, 'slug' | 'name' | 'kind' | 'category' | 'heat' | 'country'>[];
 }): Promise<{ trends: Trend[]; usage: Usage }> {
   const { settings } = opts;
+  const local = settings.local_countries ?? [];
   const instructions = [
     `You are the trend radar for ${settings.site_name}, a learning feed that explains complicated things to anyone. Today is ${new Date().toISOString().slice(0, 10)}.`,
     'Discover, on your own, the 6 to 10 subjects the world is talking about and trying to UNDERSTAND right now, hottest first. Use the live signals as evidence of attention and use web search to confirm what is actually happening and to find big stories the signals miss (other regions, markets, science, technology).',
     'Good: wars and conflicts, elections and political crises, market crashes and rallies, inflation and rate decisions, bankruptcies and trade disputes, disasters and their causes, scientific results, technology everyone suddenly uses, cultural moments with substance behind them.',
     'Skip: celebrity gossip and scandals, individual crime cases, sports results, unverified rumours, anything where the only story is graphic detail.',
+    local.length
+      ? `LOCAL COUNTRIES: ${local.join(', ')}. After the global subjects, add up to 2 national subjects for each of them: what people living there are talking about and trying to understand (a national election or coalition crisis, a strike, the budget, a national policy, a domestic disaster), found with web search in that country's news. Give these the country code. Global news is never repeated as a national subject, and a national subject the whole world follows (riots in France, a US presidential election) is global: country empty.`
+      : 'Every subject is global: leave country empty.',
     'Each trend becomes a topic of the site: an "event" for something happening (a specific war, election, crisis, crash, disaster, trial, launch) or a "field" for a lasting subject that is suddenly hot. Name topics neutrally and specifically; never a headline, never a person\'s name alone.',
     'The EXISTING TOPICS list is not a menu: never pick from it. It is only there so that a trend that is a development inside an existing topic (a new offensive in an ongoing war, a new model in Artificial intelligence) returns that topic\'s slug in existing_slug instead of creating a duplicate.',
     settings.trending_guidance,
@@ -228,7 +242,7 @@ export async function scanTrends(opts: {
     .join('\n');
   const input =
     `LIVE SIGNALS\n\n${opts.signals}\n\n` +
-    `EXISTING TOPICS (slug: name)\n${opts.topics.map((t) => `- ${t.slug}: ${t.name} (${t.kind}, ${t.category}${t.heat ? `, currently hot ${t.heat}/5` : ''})`).join('\n')}`;
+    `EXISTING TOPICS (slug: name)\n${opts.topics.map((t) => `- ${t.slug}: ${t.name} (${t.kind}, ${t.category}${t.country ? `, national: ${t.country}` : ''}${t.heat ? `, currently hot ${t.heat}/5` : ''})`).join('\n')}`;
   const { data, usage } = await structured<{ trends: Trend[] }>({ settings, name: 'radar', schema: RADAR_SCHEMA, instructions, input, webSearch: settings.web_search_enabled });
   const trends = (data.trends ?? [])
     .filter((t) => t.name?.trim())
@@ -237,6 +251,7 @@ export async function scanTrends(opts: {
       name: cleanLine(t.name, 60),
       why_now: cleanLine(t.why_now),
       description: cleanLine(t.description),
+      country: /^[A-Za-z]{2}$/.test(t.country?.trim() ?? '') ? t.country.trim().toUpperCase() : '',
       heat: Math.min(5, Math.max(1, Math.round(Number(t.heat) || 1))),
     }));
   if (!trends.length) throw new Error('The radar found no trends.');

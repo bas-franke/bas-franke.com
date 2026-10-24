@@ -4,6 +4,7 @@ import { login, logout, me, requireAdmin } from '../auth.js';
 import { config, estimateCostUsd } from '../config.js';
 import { dbReady, one, query } from '../db.js';
 import { deleteImages, generate, isGenerating, planRun, radarRun, regenerateImages, type GenerateMode } from '../generator.js';
+import { normalizeCountry } from '../geo.js';
 import { schedulerState } from '../scheduler.js';
 import { createTopic, planProgress } from '../topics.js';
 import { CATEGORIES, type Settings, type Story, type Topic } from '../types.js';
@@ -71,7 +72,7 @@ adminRouter.get('/overview', async (_req, res) => {
 const SETTINGS_FIELDS: (keyof Settings)[] = [
   'enabled', 'interval_minutes', 'max_per_day', 'active_hours_start', 'active_hours_end', 'timezone',
   'text_model', 'image_model', 'image_quality', 'images_enabled', 'images_max', 'web_search_enabled',
-  'language', 'tone', 'audience', 'target_words', 'extra_instructions', 'trending_share', 'trending_guidance', 'radar_hours', 'site_name', 'tagline',
+  'language', 'tone', 'audience', 'target_words', 'extra_instructions', 'trending_share', 'trending_guidance', 'radar_hours', 'local_countries', 'site_name', 'tagline',
 ];
 
 adminRouter.get('/settings', async (_req, res) => {
@@ -86,6 +87,7 @@ adminRouter.put('/settings', async (req, res) => {
     if (!(field in body)) continue;
     let value: unknown = body[field];
     if (field === 'active_hours_start' || field === 'active_hours_end') value = value === '' || value === null ? null : Number(value);
+    if (field === 'local_countries') value = [...new Set((Array.isArray(value) ? value : String(value ?? '').split(/[\s,]+/)).map(normalizeCountry).filter(Boolean))];
     params.push(value);
     sets.push(`${field} = $${params.length}`);
   }
@@ -115,11 +117,11 @@ adminRouter.get('/topics/:id', async (req, res) => {
 });
 
 adminRouter.post('/topics', async (req, res) => {
-  const { name, description, category, kind, weight } = (req.body ?? {}) as Partial<Topic>;
+  const { name, description, category, kind, weight, country } = (req.body ?? {}) as Partial<Topic>;
   try {
     if (category && !CATEGORIES.includes(category)) throw new Error('Unknown category.');
     if (kind && !['field', 'event'].includes(kind)) throw new Error('Kind must be field or event.');
-    res.status(201).json(await createTopic({ name: name ?? '', description, category, kind, weight }));
+    res.status(201).json(await createTopic({ name: name ?? '', description, category, kind, weight, country: normalizeCountry(country) }));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }
@@ -129,8 +131,8 @@ adminRouter.patch('/topics/:id', async (req, res) => {
   const body = (req.body ?? {}) as Partial<Topic>;
   const sets: string[] = [];
   const params: unknown[] = [];
-  for (const field of ['name', 'description', 'category', 'kind', 'weight', 'enabled', 'heat', 'heat_reason'] as const) {
-    if (field in body) params.push(body[field]), sets.push(`${field} = $${params.length}`);
+  for (const field of ['name', 'description', 'category', 'kind', 'weight', 'enabled', 'heat', 'heat_reason', 'country'] as const) {
+    if (field in body) params.push(field === 'country' ? normalizeCountry(body.country) : body[field]), sets.push(`${field} = $${params.length}`);
   }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update.' });
   params.push(Number(req.params.id));

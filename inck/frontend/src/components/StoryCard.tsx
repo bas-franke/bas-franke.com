@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { mediaUrl, readLabel, timeAgo } from '../api';
+import { countryName, mediaUrl, readLabel, timeAgo } from '../api';
 import type { Story } from '../types';
 import { CategoryIcon, Flame } from './Art';
 import Markdown from './Markdown';
@@ -34,6 +34,11 @@ export default function StoryCard({ story, index, active, topicMode }: { story: 
             {story.topic.name}
           </Link>
           {story.section_name && <span className="chip chip-section">{story.section_name}</span>}
+          {story.topic.country && (
+            <span className="chip chip-section" title="National news, shown in the feed to readers in this country">
+              {countryName(story.topic.country)}
+            </span>
+          )}
           {story.topic.heat >= 3 && (
             <span className={`chip chip-hot heat-${story.topic.heat}`} title={story.topic.heat_reason}>
               <Flame />

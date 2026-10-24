@@ -32,14 +32,14 @@ export function withLiveSection(plan: TopicPlan): TopicPlan {
   return { intro: plan.intro, sections };
 }
 
-export async function createTopic(input: { name: string; description?: string; category?: Category; kind?: TopicKind; weight?: number }) {
+export async function createTopic(input: { name: string; description?: string; category?: Category; kind?: TopicKind; weight?: number; country?: string | null }) {
   const name = input.name.trim().slice(0, 60);
   if (!name) throw new Error('Topic name is required.');
   const existing = await one<Topic>('SELECT * FROM topics WHERE lower(name) = lower($1)', [name]);
   if (existing) return existing;
   return one<Topic>(
-    `INSERT INTO topics (slug, name, description, category, kind, weight) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [await uniqueSlug('topics', name), name, input.description?.trim() ?? '', input.category ?? 'world', input.kind ?? 'field', input.weight ?? 5],
+    `INSERT INTO topics (slug, name, description, category, kind, weight, country) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [await uniqueSlug('topics', name), name, input.description?.trim() ?? '', input.category ?? 'world', input.kind ?? 'field', input.weight ?? 5, input.country ?? null],
   );
 }
 

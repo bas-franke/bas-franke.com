@@ -19,6 +19,8 @@ export const config = {
   dataDir: env.DATA_DIR ?? path.resolve(process.cwd(), '../data'),
 
   publicUrl: env.PUBLIC_URL ?? 'https://inck.ai',
+  /** Local development: pretend every visitor is in this country (e.g. NL) to see its country-specific news. */
+  devCountry: optional(env.DEV_COUNTRY)?.toUpperCase(),
   schedulerTickMs: 30_000,
 };
 

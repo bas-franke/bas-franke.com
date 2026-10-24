@@ -4,6 +4,7 @@ import { aiConfigured } from './ai.js';
 import { config, imagesDir } from './config.js';
 import { dbReady, migrate } from './db.js';
 import { sweepOrphanImages } from './generator.js';
+import { loadGeo } from './geo.js';
 import { adminRouter } from './routes/admin.js';
 import { publicRouter } from './routes/public.js';
 import { startScheduler } from './scheduler.js';
@@ -70,5 +71,8 @@ app.listen(config.port, config.host, async () => {
   const sweep = () => sweepOrphanImages().catch((err) => console.error('image sweep failed', err));
   sweep();
   setInterval(sweep, 24 * 60 * 60_000);
+  // The visitor-country database refreshes itself once it is a month old.
+  loadGeo();
+  setInterval(loadGeo, 24 * 60 * 60_000);
   startScheduler();
 });

@@ -127,13 +127,14 @@ export const radarStale = (settings: Settings) => !settings.radar_at || Date.now
 export async function runRadar(settings: Settings, step: (s: string) => void = () => {}, signals?: string): Promise<{ trends: Trend[]; topics: Topic[]; usage: Usage }> {
   step('scanning what is trending');
   const { rows: existing } = await query<Topic>('SELECT * FROM topics ORDER BY name');
-  const scan = await scanTrends({ settings, signals: signals ?? formatSignals(await collectSignals()), topics: existing });
+  const scan = await scanTrends({ settings, signals: signals ?? formatSignals(await collectSignals(settings.local_countries)), topics: existing });
   const touched = new Set<number>();
   const topics: Topic[] = [];
   for (const trend of scan.trends) {
     let topic = trend.existing_slug ? existing.find((t) => t.slug === trend.existing_slug) : undefined;
     topic ??= existing.find((t) => t.name.toLowerCase() === trend.name.toLowerCase());
-    topic ??= await createTopic({ name: trend.name, description: trend.description, category: trend.category, kind: trend.kind });
+    // The radar decides once whether a new topic is national; after that the admin owns the choice.
+    topic ??= await createTopic({ name: trend.name, description: trend.description, category: trend.category, kind: trend.kind, country: trend.country || null });
     if (touched.has(topic.id)) continue;
     touched.add(topic.id);
     topics.push(
@@ -146,7 +147,7 @@ export async function runRadar(settings: Settings, step: (s: string) => void = (
   }
   await query(`UPDATE topics SET heat = heat - 1, updated_at = now() WHERE heat > 0 AND NOT (id = ANY($1::int[]))`, [[...touched]]);
   await query('UPDATE settings SET radar_at = now() WHERE id = 1');
-  console.log(`radar: ${topics.map((t) => `${t.name} (${t.heat})`).join(', ')}`);
+  console.log(`radar: ${topics.map((t) => `${t.name} (${t.heat}${t.country ? `, ${t.country}` : ''})`).join(', ')}`);
   return { trends: scan.trends, topics, usage: scan.usage };
 }
 
@@ -190,7 +191,7 @@ async function runGeneration(trigger: Run['trigger'], opts: { topicId?: number; 
     let trend: TrendPick | undefined;
     let item: NextItem | undefined;
     let signalsText: string | undefined;
-    const signals = async () => (signalsText ??= formatSignals(await collectSignals()));
+    const signals = async () => (signalsText ??= formatSignals(await collectSignals(settings.local_countries)));
 
     if (kind === 'trending') {
       // The radar decides what is hot; a "right now" run then serves one of those topics.

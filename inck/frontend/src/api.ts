@@ -20,6 +20,17 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
   return body as T;
 }
 
+const regionNames = (() => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' });
+  } catch {
+    return null;
+  }
+})();
+
+/** "NL" → "Netherlands" (the code itself when the browser cannot name it). */
+export const countryName = (code: string) => regionNames?.of(code) ?? code;
+
 export const mediaUrl = (file: string | null | undefined) => (file ? `/api/media/${file}` : null);
 
 export function formatDate(iso: string, withTime = false) {

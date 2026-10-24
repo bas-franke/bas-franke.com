@@ -1591,6 +1591,12 @@ fieldset.panel {
   color: var(--ink-2);
 }
 
+.topic-fields .topic-country {
+  width: 4.5em;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
 .topic-weight {
   display: flex;
   align-items: center;

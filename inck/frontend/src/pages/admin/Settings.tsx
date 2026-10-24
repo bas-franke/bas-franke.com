@@ -144,6 +144,17 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
               <input type="number" min={1} max={48} value={s.radar_hours} onChange={(e) => set('radar_hours', Number(e.target.value))} />
             </label>
             <label className="wide">
+              National news for (country codes, e.g. NL, US, GB)
+              <input
+                value={(s.local_countries ?? []).join(', ')}
+                onChange={(e) => set('local_countries', e.target.value.toUpperCase().split(',').map((c) => c.trim()))}
+              />
+              <span className="muted small">
+                The radar also looks for what people in these countries are talking about. Those topics only appear in the feed of visitors
+                from that country (by IP); anyone can still find them under Topics or in search. Leave empty for global news only.
+              </span>
+            </label>
+            <label className="wide">
               Guidance for the radar and scout
               <textarea rows={3} value={s.trending_guidance} onChange={(e) => set('trending_guidance', e.target.value)} />
             </label>
