@@ -17,9 +17,11 @@ export const config = {
   /** Optional fine-grained token (Actions: read, Secrets: read). Without it, secrets cannot be checked. */
   githubToken: optional(env.GITHUB_TOKEN),
 
-  /** Optional HTTP basic auth for the status API. */
+  /** Login for the status page. Without a password the page is public. */
   statusUser: env.STATUS_USER ?? 'admin',
   statusPassword: optional(env.STATUS_PASSWORD),
+  /** Optional; by default sessions are signed with a key derived from the password. */
+  sessionSecret: optional(env.SESSION_SECRET),
 
   appsDir: env.APPS_DIR ?? '/srv/apps',
   wwwDir: env.WWW_DIR ?? '/var/www',

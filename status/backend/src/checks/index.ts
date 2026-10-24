@@ -27,7 +27,7 @@ const accessCheck: CheckDef = {
     steps: [{ text: 'On the server:', code: `echo "STATUS_PASSWORD=<choose-a-password>" >> ${statusEnvFile}\npm2 restart status --update-env` }],
   },
   run: async () =>
-    config.statusPassword ? ok(`Basic auth enabled for user "${config.statusUser}".`) : warn('Anyone can view this page.'),
+    config.statusPassword ? ok(`Login required for user "${config.statusUser}".`) : warn('Anyone can view this page.'),
 };
 
 export interface GroupDef {

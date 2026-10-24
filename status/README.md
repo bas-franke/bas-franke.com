@@ -18,7 +18,7 @@ Checks run every 60 seconds; **Check now** forces a run. Projects are listed in
 | Variable          | Required | Purpose                                                                    |
 |-------------------|----------|----------------------------------------------------------------------------|
 | `EXPECTED_IP`     | yes      | The Elastic IP that all domains must resolve to                           |
-| `STATUS_PASSWORD` | advised  | Enables basic auth (user `admin`, or set `STATUS_USER`)                    |
+| `STATUS_PASSWORD` | advised  | Enables the login page (user `admin`, or set `STATUS_USER`). Changing it signs everyone out. |
 | `RDS_HOST`        | when you have RDS | RDS endpoint, for the reachability check                          |
 | `GITHUB_TOKEN`    | optional | Fine-grained token (Actions: read, Secrets: read) to verify repo secrets   |
 
@@ -175,7 +175,8 @@ sudo nginx -t && sudo systemctl reload nginx
 (the portfolio deploy succeeds, but its site only works after its own setup).
 You can also start a deploy by hand: GitHub → **Actions → Deploy status → Run workflow**.
 
-Open <https://status.bas-franke.com> and log in with `admin` / your `STATUS_PASSWORD`.
+Open <https://status.bas-franke.com> and sign in with `admin` / your `STATUS_PASSWORD`. Your browser offers to save
+the login, and "Keep me signed in" keeps the session for 30 days.
 
 ## Step 11: Work through the red items
 

@@ -1,5 +1,5 @@
-import { timingSafeEqual } from 'node:crypto';
-import express, { type RequestHandler } from 'express';
+import express from 'express';
+import { login, logout, me, requireLogin } from './auth.js';
 import { config } from './config.js';
 import { runAll } from './runner.js';
 import type { Report } from './types.js';
@@ -16,34 +16,20 @@ function refresh() {
   return inFlight;
 }
 
-const safeEqual = (a: string, b: string) => {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ab.length === bb.length && timingSafeEqual(ab, bb);
-};
-
-const basicAuth: RequestHandler = (req, res, next) => {
-  if (!config.statusPassword) return next();
-  const [scheme, encoded] = (req.headers.authorization ?? '').split(' ');
-  if (scheme === 'Basic' && encoded) {
-    const decoded = Buffer.from(encoded, 'base64').toString();
-    const sep = decoded.indexOf(':');
-    if (safeEqual(decoded.slice(0, sep), config.statusUser) && safeEqual(decoded.slice(sep + 1), config.statusPassword)) {
-      return next();
-    }
-  }
-  res.set('WWW-Authenticate', 'Basic realm="status", charset="UTF-8"').status(401).json({ error: 'Unauthorized' });
-};
-
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+app.use(express.json({ limit: '10kb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', uptime: Math.round(process.uptime()) });
 });
 
-app.get('/api/status', basicAuth, async (req, res) => {
+app.post('/api/login', login);
+app.post('/api/logout', logout);
+app.get('/api/me', me);
+
+app.get('/api/status', requireLogin, async (req, res) => {
   const stale = !latest || Date.now() - Date.parse(latest.generatedAt) > MIN_REFRESH_MS;
   const report = req.query.refresh && stale ? await refresh() : (latest ?? (await refresh()));
   res.set('Cache-Control', 'no-store').json(report);

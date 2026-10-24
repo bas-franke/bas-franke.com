@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import Login from './Login';
 import type { CheckGroup, CheckResult, CheckStatus, Fix, Report } from './types';
 
 const POLL_MS = 60_000;
@@ -18,25 +19,50 @@ function timeAgo(iso: string) {
   return `${Math.round(s / 60)} min ago`;
 }
 
+type Auth = { state: 'checking' } | { state: 'login' } | { state: 'in'; user: string | null };
+
 export default function App() {
+  const [auth, setAuth] = useState<Auth>({ state: 'checking' });
+
+  useEffect(() => {
+    fetch('/api/me')
+      .then(async (res) => {
+        if (res.status === 401) return setAuth({ state: 'login' });
+        const body = await res.json();
+        setAuth({ state: 'in', user: body.user ?? null });
+      })
+      // Backend unreachable: show the dashboard, which explains the error.
+      .catch(() => setAuth({ state: 'in', user: null }));
+  }, []);
+
+  if (auth.state === 'checking') return null;
+  if (auth.state === 'login') return <Login onLogin={(user) => setAuth({ state: 'in', user })} />;
+  return <Dashboard user={auth.user} onLoggedOut={() => setAuth({ state: 'login' })} />;
+}
+
+function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: () => void }) {
   const [report, setReport] = useState<Report>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [, tick] = useState(0);
 
-  const load = useCallback(async (refresh = false) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/status${refresh ? '?refresh=1' : ''}`);
-      if (!res.ok) throw new Error(`The status API returned HTTP ${res.status}.`);
-      setReport(await res.json());
-      setError(undefined);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (refresh = false) => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/status${refresh ? '?refresh=1' : ''}`);
+        if (res.status === 401) return onLoggedOut();
+        if (!res.ok) throw new Error(`The status API returned HTTP ${res.status}.`);
+        setReport(await res.json());
+        setError(undefined);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onLoggedOut],
+  );
 
   useEffect(() => {
     load();
@@ -48,6 +74,11 @@ export default function App() {
     };
   }, [load]);
 
+  async function logout() {
+    await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+    onLoggedOut();
+  }
+
   const overall = report ? worst(report.groups.flatMap((g) => g.checks)) : undefined;
 
   return (
@@ -57,9 +88,16 @@ export default function App() {
           <p className="eyebrow">bas-franke.com</p>
           <h1>System status</h1>
         </div>
-        <button className="refresh" onClick={() => load(true)} disabled={loading}>
-          {loading ? 'Checking…' : 'Check now'}
-        </button>
+        <div className="actions">
+          <button className="refresh" onClick={() => load(true)} disabled={loading}>
+            {loading ? 'Checking…' : 'Check now'}
+          </button>
+          {user && (
+            <button onClick={logout} title={`Signed in as ${user}`}>
+              Sign out
+            </button>
+          )}
+        </div>
       </header>
 
       {error && (
