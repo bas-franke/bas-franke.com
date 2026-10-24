@@ -6,9 +6,11 @@
     "install:all": "npm install && npm --prefix frontend install && npm --prefix backend install",
     "dev": "concurrently -n api,web -c blue,green \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
-    "models": "node tools/blender/run.mjs"
+    "models": "node tools/blender/run.mjs",
+    "screenshots": "node backend/node_modules/tsx/dist/cli.mjs tools/screenshots/capture.mts"
   },
   "devDependencies": {
-    "concurrently": "^10.0.6"
+    "concurrently": "^10.0.6",
+    "playwright": "^1.64.1"
   }
 }
