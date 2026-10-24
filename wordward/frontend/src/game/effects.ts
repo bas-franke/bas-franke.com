@@ -276,7 +276,7 @@ function buildAtlas() {
     hg.shadowColor = 'rgba(255,140,25,0.9)';
     hg.fillStyle = 'rgba(255,170,50,0.3)';
     // A tight bright edge glow plus a wider soft one, so the letter shape still reads through its halo.
-    hg.shadowBlur = 22;
+    hg.shadowBlur = 16;
     hg.fillText(ch, 0, y);
     hg.shadowBlur = 5;
     hg.fillText(ch, 0, y);
@@ -284,7 +284,8 @@ function buildAtlas() {
     hg.restore();
     const img = hg.getImageData(0, 0, CELL, CELL);
     const d = img.data;
-    for (let k = 3; k < d.length; k += 4) if (d[k] > 55) d[k] = 55; // ≤ 0.22: a soft glow, never solid
+    // Scaled down (not clamped, which flattens the blur into a box-like plateau): ≤ 0.22, a soft glow, never solid.
+    for (let k = 3; k < d.length; k += 4) d[k] = Math.min(50, d[k] * 0.24);
     hg.putImageData(img, 0, 0);
     inCell(g, C_LETTER + i, (g) => {
       g.drawImage(halo, -CELL / 2, -CELL / 2);
@@ -631,7 +632,7 @@ export class Effects {
     for (let i = 0; i < count; i++) {
       if (i < glyphs) {
         const a = a0 + (i / glyphs) * Math.PI * 2 + rand(-0.5, 0.5);
-        this.glyph(at, src[(Math.random() * src.length) | 0], speed * 0.9, size * 5, a);
+        this.glyph(at, src[(Math.random() * src.length) | 0], speed * 0.9, size * 9, a);
       }
       this.spark(at, GOLD, speed * 1.6, size * 1.1);
       this.spark(at, GOLD_PALE, speed * 2, size * 0.9);
@@ -760,7 +761,7 @@ export class Effects {
       this.star(this.tmp, s * rand(0.4, 0.7), GOLD_PALE, rand(0.3, 0.55));
     }
     for (let i = 0; i < 14; i++) this.spark(at, i % 3 ? GOLD : GOLD_PALE, 5.5 * s, 0.16 * s);
-    for (let i = 0; i < 3; i++) this.glyph(at, LETTERS[(Math.random() * 26) | 0], 4.5, 0.8);
+    for (let i = 0; i < 3; i++) this.glyph(at, LETTERS[(Math.random() * 26) | 0], 4.5, 1.45);
   }
 
   /** A bubble shield pops: a spinning golden rune circle bursts outward with a ring of sparks. */
