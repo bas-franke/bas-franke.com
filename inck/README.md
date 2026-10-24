@@ -26,6 +26,9 @@ backend on port **3003**.
 
 Charts are rendered in the browser from the data (Recharts), so numbers stay readable and the page stays light.
 
+The site has slots for decorative illustrations (mascot, topic icons, empty states). Prompts, sizes and filenames are in
+[ART.md](ART.md); finished PNGs go in `frontend/public/art/`. Missing images are simply left out.
+
 ## Configuration: `/srv/apps/inck/.env` on the server
 
 | Variable         | Required | Purpose                                                                 |

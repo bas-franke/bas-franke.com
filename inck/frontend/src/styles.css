@@ -175,13 +175,64 @@ input[type='checkbox'] {
 }
 
 .topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   max-width: var(--content);
   width: 100%;
   margin: 0 auto;
-  padding: 18px 20px;
+  padding: 14px 20px 0;
+}
+
+.topbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.icon-btn:hover {
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.search {
+  display: flex;
+  gap: 8px;
+  padding: 12px 0 4px;
+  animation: drop 0.2s ease-out;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.btn-small {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 0.8rem;
 }
 
 .brand {
@@ -194,7 +245,8 @@ input[type='checkbox'] {
 
 .topbar-nav {
   display: flex;
-  gap: 20px;
+  align-items: center;
+  gap: 14px;
   font-size: 0.875rem;
   font-weight: 500;
 }
@@ -217,24 +269,50 @@ input[type='checkbox'] {
 }
 
 .masthead {
-  padding: 56px 0 40px;
+  padding: 40px 0 28px;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+}
+
+.masthead-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
 }
 
 .masthead-title {
-  font-size: clamp(3.5rem, 11vw, 7.5rem);
+  font-size: clamp(3.2rem, 10vw, 7rem);
   font-weight: 600;
   line-height: 0.95;
   letter-spacing: -0.04em;
 }
 
+.masthead-art {
+  height: clamp(64px, 9vw, 120px);
+  width: auto;
+  margin-bottom: 6px;
+}
+
 .masthead-tagline {
-  margin: 18px 0 0;
+  margin: 14px 0 0;
   font-family: var(--serif);
   font-style: italic;
-  font-size: clamp(1.1rem, 2.4vw, 1.5rem);
+  font-size: clamp(1.05rem, 2.2vw, 1.4rem);
   color: var(--ink-2);
+}
+
+.ticker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 14px 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.ticker-sep {
+  color: var(--faint);
 }
 
 .topics {
@@ -242,21 +320,14 @@ input[type='checkbox'] {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 32px;
-}
-
-.search {
-  margin-right: auto;
-  order: 99;
-  width: 100%;
-}
-
-.search input {
-  width: 100%;
-  background: var(--surface);
+  margin-bottom: 28px;
 }
 
 .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 500;
@@ -266,6 +337,33 @@ input[type='checkbox'] {
   background: var(--surface);
   color: var(--ink-2);
   cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+
+.pill:active {
+  transform: scale(0.97);
+}
+
+.pill-now:not(.pill-active) {
+  color: var(--accent);
+  border-color: rgba(217, 72, 15, 0.35);
+}
+
+.topic-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.section-label {
+  margin: 36px 0 16px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .pill:hover {
@@ -285,14 +383,25 @@ input[type='checkbox'] {
 }
 
 .results-line {
-  margin: -12px 0 24px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: -8px 0 24px;
   color: var(--muted);
 }
 
 .empty {
-  padding: 72px 20px;
+  padding: 56px 20px;
   text-align: center;
   color: var(--muted);
+}
+
+.empty-art {
+  width: 200px;
+  max-width: 60%;
+  height: auto;
+  margin: 0 auto 12px;
 }
 
 .empty-title {
@@ -317,14 +426,49 @@ input[type='checkbox'] {
 }
 
 .card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 16px 32px -20px rgba(23, 20, 18, 0.35);
+  transform: translateY(-3px);
+  box-shadow: 0 18px 36px -20px rgba(23, 20, 18, 0.35);
+}
+
+/* A touch of mischief: cards tilt a hair when hovered, alternating direction. */
+.grid .card:nth-child(odd):hover {
+  transform: translateY(-3px) rotate(-0.6deg);
+}
+
+.grid .card:nth-child(even):hover {
+  transform: translateY(-3px) rotate(0.6deg);
+}
+
+.card-now {
+  border-top: 3px solid var(--accent);
 }
 
 .card-media {
+  position: relative;
   aspect-ratio: 3 / 2;
   background: var(--paper-2);
   overflow: hidden;
+}
+
+.card-no {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: rgba(250, 248, 244, 0.92);
+  border-radius: 999px;
+}
+
+.card-cta {
+  display: inline-block;
+  margin-top: 16px;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
 .card-media img {
@@ -460,8 +604,35 @@ input[type='checkbox'] {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 22px;
+}
+
+.card-wide {
+  grid-column: span 2;
+  flex-direction: row;
+}
+
+.card-wide .card-media {
+  flex: 1.1;
+  aspect-ratio: auto;
+}
+
+.card-wide .card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.card-wide .card-title {
+  font-size: 1.7rem;
+}
+
+@media (max-width: 1000px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .more {
@@ -774,6 +945,13 @@ input[type='checkbox'] {
   align-items: flex-start;
   gap: 40px;
   margin-bottom: 28px;
+}
+
+.foot-art {
+  margin-left: auto;
+  width: 110px;
+  height: auto;
+  flex: none;
 }
 
 .foot-blurb {
@@ -1435,21 +1613,106 @@ fieldset.panel {
 }
 
 @media (max-width: 760px) {
+  /* Phones: the first story must be visible without scrolling, so everything above it gets compact. */
+  .topbar {
+    padding-top: 10px;
+  }
+
+  .masthead {
+    padding: 18px 0 14px;
+    margin-bottom: 14px;
+  }
+
+  .masthead-row {
+    align-items: center;
+    gap: 14px;
+  }
+
+  .masthead-title {
+    font-size: 2.6rem;
+  }
+
+  .masthead-art {
+    height: 44px;
+    margin: 0;
+  }
+
+  .masthead-tagline {
+    margin-top: 6px;
+    font-size: 1rem;
+  }
+
+  .ticker {
+    margin-top: 8px;
+    font-size: 0.68rem;
+  }
+
+  .topics {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -20px 16px;
+    padding: 2px 20px 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .topics::-webkit-scrollbar {
+    display: none;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .card-wide {
+    grid-column: auto;
+    flex-direction: column;
+  }
+
+  .card-wide .card-media {
+    aspect-ratio: 3 / 2;
+  }
+
+  .card-wide .card-title {
+    font-size: 1.35rem;
+  }
+
   .card-featured {
     flex-direction: column;
+    margin-bottom: 20px;
   }
 
   .card-featured .card-media {
     min-height: 0;
-    aspect-ratio: 3 / 2;
+    aspect-ratio: 16 / 10;
   }
 
   .card-featured .card-body {
-    padding: 22px 20px 26px;
+    padding: 18px 18px 20px;
   }
 
-  .masthead {
-    padding: 32px 0 28px;
+  .card-featured .card-title {
+    font-size: 1.6rem;
+    margin-bottom: 8px;
+  }
+
+  .card-featured .card-dek {
+    font-size: 0.95rem;
+    -webkit-line-clamp: 2;
+  }
+
+  .card-cta {
+    margin-top: 10px;
+  }
+
+  .section-label {
+    margin: 24px 0 12px;
+  }
+
+  .foot-art {
+    margin-left: 0;
+    width: 80px;
   }
 
   .chart,

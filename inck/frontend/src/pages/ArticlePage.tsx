@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError, api, formatDate, mediaUrl } from '../api';
+import Art, { artSlug } from '../components/Art';
 import ArticleCard from '../components/ArticleCard';
 import Markdown from '../components/Markdown';
 import type { Article, ArticleCard as Card } from '../types';
@@ -31,6 +32,7 @@ export default function ArticlePage() {
     return (
       <main className="article-page">
         <div className="empty">
+          <Art name="notfound" className="empty-art" />
           <p className="empty-title">{error}</p>
           <Link to="/" className="btn">
             Back to the front page
@@ -50,6 +52,11 @@ export default function ArticlePage() {
           <p className="card-meta">
             {article.topic_name && (
               <Link to={`/?topic=${article.topic_id}`} className={`topic ${article.kind === 'trending' ? 'topic-now' : ''}`}>
+                {article.kind === 'trending' ? (
+                  <span className="now-dot" />
+                ) : (
+                  <Art name={`topic-${artSlug(article.topic_name)}`} fallback="topic-default" className="topic-icon" />
+                )}
                 {article.kind === 'trending' ? 'Right now' : article.topic_name}
               </Link>
             )}
@@ -107,7 +114,7 @@ export default function ArticlePage() {
 
       {related.length > 0 && (
         <aside className="related">
-          <h2 className="section-title">Keep reading</h2>
+          <h2 className="section-label mono">— keep reading</h2>
           <div className="grid">
             {related.map((a) => (
               <ArticleCard key={a.id} article={a} />
