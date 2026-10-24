@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { colorHex } from '@shared/protocol';
 import { RU } from '@shared/ruckus/constants';
 import type { RuckusScore } from '@shared/ruckus/protocol';
+import { MINIGAMES } from '@shared/ruckus/world';
 import { type ClientContext, useStore } from '../types';
 import { type RuckusClient, minigameName, minigameRules } from './client';
 
@@ -97,6 +98,25 @@ export function RuckusHud({ client, ctx }: { client: RuckusClient; ctx: ClientCo
           <h2>{minigameName(s.mg)}</h2>
           <p>{minigameRules(s.mg)}</p>
           <div className="count">{Math.max(1, Math.ceil(s.left))}</div>
+        </div>
+      )}
+
+      {s.phase === 'play' && s.mg && MINIGAMES[s.mg].seconds - s.left < 1 && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '38%',
+            transform: 'translate(-50%, -50%) rotate(-6deg)',
+            font: '900 128px Impact, "Arial Black", system-ui, sans-serif',
+            color: '#ffe14d',
+            WebkitTextStroke: '8px #16121c',
+            paintOrder: 'stroke fill',
+            textShadow: '6px 6px 0 #ff4b2e',
+            pointerEvents: 'none',
+          }}
+        >
+          GO!
         </div>
       )}
 
