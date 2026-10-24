@@ -84,11 +84,11 @@ function plates(ctx: CanvasRenderingContext2D, rand: () => number, cols: number,
 
 const PAINT: Record<TexKey, Paint> = {
   tiles: (ctx, rand) => {
-    // Two big tiles per repeat, thin grout at 150 grey: the floor colour roughly halved, never black.
-    plates(ctx, rand, 2, 2, 3, 150, false, [238, 255]);
+    // Two big tiles per repeat, grout at 128 grey: clearly a grid even on pale floors, still never black.
+    plates(ctx, rand, 2, 2, 5, 128, false, [238, 255]);
     speckle(ctx, rand, 240, 0.05);
-    ctx.strokeStyle = grey(0, 0.05);
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = grey(0, 0.1);
+    ctx.lineWidth = 3;
     for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) ctx.strokeRect(i * 256 + 26, j * 256 + 26, 204, 204);
   },
   turf: (ctx, rand) => {
@@ -191,19 +191,20 @@ const PAINT: Record<TexKey, Paint> = {
     speckle(ctx, rand, 90, 0.04);
   },
   windows: (ctx, rand) => {
-    plates(ctx, rand, 1, 2, 4, 160, false, [240, 255]);
-    const cols = 4;
-    const rows = 4;
+    // Few big panes at low contrast: small dark-on-light windows shimmer into noise at range.
+    plates(ctx, rand, 1, 2, 4, 175, false, [240, 255]);
+    const cols = 2;
+    const rows = 2;
     for (let c = 0; c < cols; c++) {
       for (let r = 0; r < rows; r++) {
-        const x = c * (S / cols) + 22;
-        const y = r * (S / rows) + 26;
-        const w = S / cols - 44;
-        const h = S / rows - 52;
+        const x = c * (S / cols) + 30;
+        const y = r * (S / rows) + 34;
+        const w = S / cols - 60;
+        const h = S / rows - 80;
         const lit = rand() < 0.3;
-        ctx.fillStyle = grey(lit ? 250 : 95);
+        ctx.fillStyle = grey(lit ? 245 : 150);
         ctx.fillRect(x, y, w, h);
-        ctx.fillStyle = grey(lit ? 255 : 150, 0.6);
+        ctx.fillStyle = grey(lit ? 255 : 190, 0.5);
         ctx.beginPath();
         ctx.moveTo(x, y + h);
         ctx.lineTo(x + w * 0.45, y);
@@ -275,11 +276,17 @@ const PAINT: Record<TexKey, Paint> = {
   },
 };
 
+/** Canvas resolution multipliers: the crate is mapped once per 1 m face and seen up close, so it gets more pixels. */
+const RES: Partial<Record<TexKey, number>> = { crate: 2 };
+
 /** Paints texture `key`; the seed varies the jitter per map. */
 export function arenaTexture(key: TexKey, seed: number): THREE.CanvasTexture {
+  const res = RES[key] ?? 1;
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = S;
+  canvas.width = canvas.height = S * res;
   const ctx = canvas.getContext('2d')!;
+  // Painters draw in S x S units; scaling the context keeps them resolution-independent.
+  ctx.scale(res, res);
   PAINT[key](ctx, mulberry(seed * 31 + key.length * 977 + key.charCodeAt(0)));
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;

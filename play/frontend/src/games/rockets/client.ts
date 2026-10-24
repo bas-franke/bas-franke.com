@@ -55,6 +55,8 @@ export interface RocketsHudState {
   armor?: number;
   /** Horizontal speed in m/s. */
   speed?: number;
+  /** Vertical speed in m/s (up is positive), so rocket-jump climbs read on the speedometer too. */
+  vspeed?: number;
   /** this.time of our last shot (reload ring). */
   firedAt?: number;
   /** Screen angle (radians, 0 = ahead, clockwise) towards whoever last hurt us. */
@@ -123,8 +125,8 @@ const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; colo
 
 const ROCKET_COLOR = 0xffa14a;
 /** Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the crosshair. */
-const VM_POS = { x: 0.235, y: -0.24, z: -0.34 };
-const VM_YAW = 0.085;
+const VM_POS = { x: 0.252, y: -0.252, z: -0.34 };
+const VM_YAW = 0.1;
 const VM_PITCH = 0.06;
 const VM_SCALE = 0.48;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */
@@ -279,6 +281,8 @@ export class RocketsClient implements GameClient {
   private deathT = 0;
   private deathYaw = 0;
   private deathPitch = 0;
+  /** Where the death camera settles: up and back from the body, away from the killer, never inside a solid. */
+  private deathCam: Vec3 | null = null;
   private killer: string | null = null;
   private countdown = 0;
   private countdownAt = 0;
@@ -903,6 +907,8 @@ export class RocketsClient implements GameClient {
       if (Math.abs(fps - s.fps) >= 2) this.hud.set({ fps });
       const speed = this.me.dead ? 0 : Math.hypot(this.me.body.vel.x, this.me.body.vel.z);
       if (s.speed === undefined || Math.abs(s.speed - speed) > 0.3) this.hud.set({ speed });
+      const vspeed = this.me.dead || this.me.body.onGround ? 0 : this.me.body.vel.y;
+      if (s.vspeed === undefined || Math.abs(s.vspeed - vspeed) > 0.3) this.hud.set({ vspeed });
     }
   }
 
@@ -986,7 +992,22 @@ export class RocketsClient implements GameClient {
     scratchV.copy(VM_MUZZLE).applyMatrix4(vm.matrix).applyEuler(scratchEuler.set(me.pitch, me.yaw, 0, 'YXZ'));
     view.off = v3(scratchV.x + me.smooth.x - dir.x * RK.muzzleOffset, scratchV.y + me.smooth.y - dir.y * RK.muzzleOffset, scratchV.z + me.smooth.z - dir.z * RK.muzzleOffset);
     const muzzle = vadd(view.pos, view.off);
-    this.effects?.burst(muzzle, 0xeeeae2, 6, 1.4, 0.35, 0.25);
+    // The rocket shows at the muzzle from this very frame, with a hot trail puff behind it, so the shot reads at once.
+    view.group.position.set(muzzle.x, muzzle.y, muzzle.z);
+    view.trail = TRAIL_STEP;
+    // Two small, quick puffs at the barrel tip, drifting forward and out to the right, away from the crosshair.
+    const rx = Math.cos(me.yaw);
+    const rz = -Math.sin(me.yaw);
+    for (let i = 0; i < 2; i++) {
+      const out = 0.6 + Math.random() * 0.6;
+      this.effects?.smoke(
+        { x: muzzle.x + rx * 0.05, y: muzzle.y - 0.02, z: muzzle.z + rz * 0.05 },
+        0.1 + Math.random() * 0.06,
+        0.16 + Math.random() * 0.06,
+        { x: dir.x * 2 + rx * out, y: dir.y * 2 + 0.3, z: dir.z * 2 + rz * out },
+        1,
+      );
+    }
     this.effects?.flash(muzzle, 0xffc24a, 0.22, 0.09, 6);
   }
 
@@ -1007,6 +1028,7 @@ export class RocketsClient implements GameClient {
       this.deathT = 0;
       this.deathYaw = me.yaw;
       this.deathPitch = me.pitch;
+      this.deathCam = null;
     } else if (!me.dead && this.wasDead) {
       // Respawn: the launcher swings up into view, nothing left over from the last life.
       this.raise.reset(-0.3);
@@ -1078,12 +1100,14 @@ export class RocketsClient implements GameClient {
     let pitch = me.pitch;
     let roll = this.roll;
     if (me.dead) {
-      // Death camera: sink to the floor, tip onto one side and turn to face whoever got us.
+      // Death camera: pull up and back from the body, tip a little and turn to face whoever got us.
       this.deathT += dt;
       const k = smoothstep(this.deathT / 0.9);
-      const floor = (me.deathPos ?? me.body.pos).y + 0.4;
-      ey += (floor - ey) * k;
       const killer = this.killer ? this.remotes.get(this.killer) : undefined;
+      this.deathCam ??= this.safeDeathCam(ex, ey, ez, killer?.group.visible ? killer.group.position : null, me.yaw);
+      ex += (this.deathCam.x - ex) * k;
+      ey += (this.deathCam.y - ey) * k;
+      ez += (this.deathCam.z - ez) * k;
       if (killer?.group.visible) {
         const dx = killer.group.position.x - ex;
         const dz = killer.group.position.z - ez;
@@ -1093,7 +1117,7 @@ export class RocketsClient implements GameClient {
       } else this.deathPitch = damp(this.deathPitch, -0.25, 2, dt);
       yaw = this.deathYaw;
       pitch = this.deathPitch;
-      roll = 0.38 * k * (calm ? 0.3 : 1);
+      roll = 0.2 * k * (calm ? 0.3 : 1);
     }
     cam.position.set(ex + shX, ey + bobY * 0.022 + land + shY, ez);
     cam.rotation.set(pitch + punchPitch + shPitch, yaw + punchYaw + shYaw, roll + shRoll);
@@ -1132,6 +1156,36 @@ export class RocketsClient implements GameClient {
       if (this.muzzleGlow) this.muzzleGlow.intensity = this.recoil * 14;
     }
     void now;
+  }
+
+  /**
+   * The death camera's resting spot: up to 2 m above the eye, then up to 3.5 m back along the line from the killer
+   * (or behind the view without one). Each leg is traced against the map and stops short of whatever it hits, so the
+   * camera never ends up inside a box or its ink hull (which would paint the whole screen black).
+   */
+  private safeDeathCam(x: number, y: number, z: number, killer: THREE.Vector3 | null, yaw: number): Vec3 {
+    const boxes = this.map?.boxes ?? [];
+    const leg = (from: Vec3, dx: number, dy: number, dz: number, len: number): Vec3 => {
+      // Probe a margin further than we go, then back off by it, so the lens keeps clear of the surface.
+      const margin = 0.6;
+      const reach = len + margin;
+      const hit = segmentBoxes(from, v3(from.x + dx * reach, from.y + dy * reach, from.z + dz * reach), boxes);
+      const go = hit ? Math.max(0, hit.t * reach - margin) : len;
+      return v3(from.x + dx * go, from.y + dy * go, from.z + dz * go);
+    };
+    const up = leg(v3(x, y, z), 0, 1, 0, 2);
+    let bx = Math.sin(yaw);
+    let bz = Math.cos(yaw);
+    if (killer) {
+      const dx = x - killer.x;
+      const dz = z - killer.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.5) {
+        bx = dx / d;
+        bz = dz / d;
+      }
+    }
+    return leg(up, bx, 0, bz, 3.5);
   }
 
   private updateRemotes(dt: number, now: number) {
