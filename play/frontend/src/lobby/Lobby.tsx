@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { GAME_IDS, GAMES, type GameId, type GameMeta, type RoomSummary } from '@shared/protocol';
-import { listRooms } from '../api';
+import { type QuickStart, listRooms, quickBots, quickPlay } from '../api';
+import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
 import { GameCover } from '../ui/GameCover';
 import { GameDetails } from '../ui/GameDetails';
@@ -22,6 +23,7 @@ export function Lobby() {
   const [filter, setFilter] = useState<GameId | 'all'>('all');
   const [query, setQuery] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [quick, setQuick] = useState<GameId | null>(null);
   // /?create or /?create=rockets opens the create dialog straight away (used by links from elsewhere).
   const [dialog, setDialog] = useState<Dialog>(() => {
     const create = params.get('create');
@@ -45,6 +47,21 @@ export function Lobby() {
   const closeDialog = () => {
     setDialog(null);
     if (params.has('create')) setParams({}, { replace: true });
+  };
+
+  // One click from a tile to a running match: a fresh room with bots that the room page starts on arrival.
+  const playNow = async (game: GameId) => {
+    // The click is the user gesture the browser wants before it lets the game make sound.
+    sfx.unlock();
+    setQuick(game);
+    setError('');
+    try {
+      const code = await quickPlay(game);
+      navigate(`/room/${code}`, { state: { quickStart: true } satisfies QuickStart });
+    } catch (err) {
+      setError((err as Error).message);
+      setQuick(null);
+    }
   };
 
   const join = (e: FormEvent) => {
@@ -138,7 +155,14 @@ export function Lobby() {
         {games.length ? (
           <div className="game-grid">
             {games.map((id) => (
-              <GameTile key={id} meta={GAMES[id]} onDetails={() => setDialog({ kind: 'details', game: id })} onHost={() => setDialog({ kind: 'create', game: id })} />
+              <GameTile
+                key={id}
+                meta={GAMES[id]}
+                busy={quick === id}
+                onDetails={() => setDialog({ kind: 'details', game: id })}
+                onHost={() => setDialog({ kind: 'create', game: id })}
+                onPlay={() => playNow(id)}
+              />
             ))}
           </div>
         ) : (
@@ -162,8 +186,11 @@ export function Lobby() {
   );
 }
 
-/** One compact card in the catalogue: cover, name, tagline, player range. Details on the picture, Host on the button. */
-function GameTile({ meta, onDetails, onHost }: { meta: GameMeta; onDetails: () => void; onHost: () => void }) {
+/**
+ * One compact card in the catalogue: cover, name, tagline, player range. Details on the picture; Host opens the create
+ * dialog, Play now drops you straight into a match against bots.
+ */
+function GameTile({ meta, busy, onDetails, onHost, onPlay }: { meta: GameMeta; busy: boolean; onDetails: () => void; onHost: () => void; onPlay: () => void }) {
   const shots = SCREENSHOTS[meta.id].length;
   return (
     <article className="game-tile" style={{ ['--accent' as string]: meta.accent }}>
@@ -187,8 +214,11 @@ function GameTile({ meta, onDetails, onHost }: { meta: GameMeta; onDetails: () =
           <button type="button" className="btn small ghost" onClick={onDetails}>
             Details
           </button>
-          <button type="button" className="btn small primary" onClick={onHost}>
+          <button type="button" className="btn small" onClick={onHost}>
             Host
+          </button>
+          <button type="button" className="btn small primary play-now" onClick={onPlay} disabled={busy} title={`Start a match against ${quickBots(meta.id)} bots right away`}>
+            <PlayIcon /> {busy ? 'Starting…' : 'Play now'}
           </button>
         </div>
       </div>
@@ -200,6 +230,14 @@ function PlusIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M7 4.5v15l13-7.5z" />
     </svg>
   );
 }
