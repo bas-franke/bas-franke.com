@@ -1,6 +1,6 @@
 # Portfolio artwork
 
-The site has six optional image slots. Each one shows a procedural line drawing in the site's own ink until the
+The site has eight optional image slots. Each one shows a procedural line drawing in the site's own ink until the
 file exists, so the page is complete without any of them and you can add them one at a time.
 
 **Where files go:** `frontend/src/art/` (picked up at build time, hashed and cached forever), except the link
@@ -16,7 +16,7 @@ Paste this into ChatGPT as a single message. It asks for the six images one afte
 each one, download it and save it with the filename it names (see the table below for where it goes and how to resize).
 
 ```text
-I need a set of 6 illustrations for my portfolio website, all in exactly the same style. Please generate them one at a time, in the order below, each as a separate image, and keep the style identical across all of them: same paper, same ink, same blue. Do not add any text, letters, numbers, logos, watermarks, signatures, frames or borders to any image.
+I need a set of 8 illustrations for my portfolio website, all in exactly the same style. Please generate them one at a time, in the order below, each as a separate image, and keep the style identical across all of them: same paper, same ink, same blue. Do not add any text, letters, numbers, logos, watermarks, signatures, frames or borders to any image.
 
 STYLE FOR ALL IMAGES
 Minimal ink-wash illustration on warm off-white paper (#f5f2ec). Thin, confident charcoal-ink lines (#1b1d1c), soft diluted ink washes in warm grey, and one accent colour of dusty lake blue (#4f6b7c) used sparingly. Calm, quiet and precise, with a lot of empty paper. The restraint of Japanese sumi-e, but no clichés: no lotus, no bamboo, no stacked stones, no enso brush circle, no people, no mountains. Subtle paper grain and a very slight ink bleed at the edge of each stroke.
@@ -27,16 +27,22 @@ A wide, perfectly still body of water meets a pale empty sky, the horizon about 
 IMAGE 2, "hero-dark" (portrait, 1024x1536)
 The same scene as image 1 at night: near-black paper (#141516) with warm pale ink (#ebe7df) instead of charcoal, the same lake-blue accent, and a small moon instead of the sun. Nothing else. Mood: quiet, late, calm.
 
-IMAGE 3, "work-saxo" (landscape, 1536x1024)
+IMAGE 3, "work-binck" (landscape, 1536x1024)
 Eight thin horizontal hairlines across the page like ruled paper, with generous margins. One single confident line in lake blue rises from the lower left to the upper right in a slow, smooth curve, like a hand-drawn chart of steady growth, ending in a small filled dot. Nothing else.
 
-IMAGE 4, "work-binck" (landscape, 1536x1024)
+IMAGE 4, "work-transparent" (landscape, 1536x1024)
 A fine, even grid of thin ink hairlines, like a page from an accountant's ledger, slightly off-centre with wide margins. Five or six cells filled with a soft lake-blue wash, scattered like entries being recorded. Precise, orderly, calm. Nothing else.
 
 IMAGE 5, "work-irp" (landscape, 1536x1024)
 Concentric thin ink circles, like ripples spreading from a single drop on still water, centred a little right of the middle. The inner rings are crisp, the outer rings fade until they dissolve into the paper. Nothing else.
 
-IMAGE 6, "og" (landscape, 1536x1024)
+IMAGE 6, "work-gohome" (landscape, 1536x1024)
+The outline of a single simple house drawn with five or six thin, confident ink lines (a roof, two walls, a door), a little left of centre with wide empty margins. The door is a small rectangle of lake-blue wash. One faint horizontal ground line runs beneath it. Nothing else.
+
+IMAGE 7, "work-piggy" (landscape, 1536x1024)
+Three thin-lined rectangles with the proportions of a loyalty card, fanned slightly like a hand of cards, a little right of centre. The front card carries one small lake-blue filled circle, like a stamp. A soft grey shadow under the stack. Nothing else.
+
+IMAGE 8, "og" (landscape, 1536x1024)
 The same dawn scene as image 1, but very wide: still water, a low horizon, faint mist, a handful of thin horizontal lines for the surface, one small pale sun on the right. The left two thirds of the image is empty pale sky. No text.
 
 After each image, tell me its name from this list so I can save it with the right filename, then continue with the next one.
@@ -69,10 +75,16 @@ Minimal ink-wash illustration on warm off-white paper (#f5f2ec). Thin, confident
 |---|------|----------------|-------|-------------|-----------|
 | 1 | `src/art/hero.webp` | Hero, right of the headline | 4:5 | 1024×1536, crop | 1200×1500 |
 | 2 | `src/art/hero-dark.webp` | Hero in dark mode (optional) | 4:5 | 1024×1536, crop | 1200×1500 |
-| 3 | `src/art/work-saxo.webp` | Work list: Saxo Bank | 4:3 | 1536×1024, crop | 960×720 |
-| 4 | `src/art/work-binck.webp` | Work list: BinckBank | 4:3 | 1536×1024, crop | 960×720 |
-| 5 | `src/art/work-irp.webp` | Work list: IRP | 4:3 | 1536×1024, crop | 960×720 |
-| 6 | `public/og.jpg` | Link preview in chat apps and social media | 1.91:1 | 1536×1024, crop | 1200×630 (JPEG) |
+| 3 | `src/art/work-binck.webp` | Experience: BinckBank (Saxo Bank) | 4:3 | 1536×1024, crop | 960×720 |
+| 4 | `src/art/work-transparent.webp` | Experience: Transparent | 4:3 | 1536×1024, crop | 960×720 |
+| 5 | `src/art/work-irp.webp` | Experience: IRP | 4:3 | 1536×1024, crop | 960×720 |
+| 6 | `src/art/work-gohome.webp` | Experience: GoHome.io | 4:3 | 1536×1024, crop | 960×720 |
+| 7 | `src/art/work-piggy.webp` | Experience: Piggy | 4:3 | 1536×1024, crop | 960×720 |
+| 8 | `public/og.jpg` | Link preview in chat apps and social media | 1.91:1 | 1536×1024, crop | 1200×630 (JPEG) |
+
+Images 1 to 5 and 8 are done (the first ChatGPT batch; its "work-saxo" became `work-binck.webp` and its "work-binck"
+became `work-transparent.webp`). Images 6 and 7 are still to generate. Company marks for the rows live in
+`src/art/logos/<slug>.png` (gohome, transparent, piggy, binck), 128×128.
 
 The export sizes are roughly 3× the display size, so they stay crisp on high-DPI screens.
 
@@ -90,14 +102,14 @@ Portrait composition. A wide, perfectly still body of water meets a pale empty s
 Portrait composition. The same night-time view: a perfectly still body of water under an empty dark sky, horizon two thirds down, faint mist on the water, one thin pale line of a distant shore, a handful of thin horizontal pale lines for the surface of the water, spaced more widely towards the bottom. A small moon, drawn as one quiet circle, hangs above the horizon on the right. Nothing else. Mood: quiet, late, calm.
 ```
 
-### 3. `work-saxo.webp`
+### 3. `work-binck.webp`
 
 ```text
 [STYLE BLOCK]
 Landscape composition. Eight thin horizontal hairlines run across the page like ruled paper, with generous margins. One single confident line in lake blue rises from the lower left to the upper right in a slow, smooth curve, like a hand-drawn chart of steady growth, ending in a small filled dot. Nothing else.
 ```
 
-### 4. `work-binck.webp`
+### 4. `work-transparent.webp`
 
 ```text
 [STYLE BLOCK]
@@ -111,7 +123,21 @@ Landscape composition. A fine, even grid of thin ink hairlines, like a page from
 Landscape composition. Concentric thin ink circles, like ripples spreading from a single drop on still water, centred a little right of the middle. The inner rings are crisp, the outer rings fade until they dissolve into the paper. Nothing else.
 ```
 
-### 6. `og.jpg`
+### 6. `work-gohome.webp`
+
+```text
+[STYLE BLOCK]
+Landscape composition. The outline of a single simple house drawn with five or six thin, confident ink lines (a roof, two walls, a door), a little left of centre with wide empty margins. The door is a small rectangle of lake-blue wash. One faint horizontal ground line runs beneath it. Nothing else.
+```
+
+### 7. `work-piggy.webp`
+
+```text
+[STYLE BLOCK]
+Landscape composition. Three thin-lined rectangles with the proportions of a loyalty card, fanned slightly like a hand of cards, a little right of centre. The front card carries one small lake-blue filled circle, like a stamp. A soft grey shadow under the stack. Nothing else.
+```
+
+### 8. `og.jpg`
 
 ```text
 [STYLE BLOCK]

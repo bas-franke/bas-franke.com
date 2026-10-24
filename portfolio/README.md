@@ -11,7 +11,10 @@ Personal portfolio on the root domain. Vite + React frontend, Node.js + Express 
   and can be switched with the toggle in the header.
 - **Artwork:** the hero and every project have an image slot that shows a procedural line drawing until an image
   exists. The ChatGPT prompts, sizes and filenames are in [ART.md](ART.md); finished files go in `frontend/src/art/`.
-- **Portrait:** `frontend/src/art/profile.jpg`.
+- **Portrait:** `frontend/src/art/profile.jpg`. Company marks for the experience rows go in `frontend/src/art/logos/<slug>.png`.
+- **Résumé:** the *Download résumé* button in the hero builds a white A4 PDF in the browser from the same
+  `content.ts` (see [frontend/src/resume.ts](frontend/src/resume.ts)); pdf-lib is loaded only when clicked.
+  Dates and locations come from the `experience` list.
 
 ## Contact form (optional)
 

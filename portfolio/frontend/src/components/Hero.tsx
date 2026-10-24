@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import Art from './Art';
 import Motif from './Motif';
+import ResumeButton from './ResumeButton';
 import { hero } from '../content';
 
 const delay = (ms: number) => ({ '--d': `${ms}ms` }) as CSSProperties;
@@ -28,6 +29,7 @@ export default function Hero() {
             <a className="link" href={hero.secondary.href}>
               {hero.secondary.label}
             </a>
+            <ResumeButton />
           </div>
         </div>
         <div className="hero__art" data-reveal style={delay(200)}>

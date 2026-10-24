@@ -3,13 +3,16 @@
  * the components only decide how it looks.
  */
 
-export type MotifKind = 'horizon' | 'rise' | 'ledger' | 'ripples';
+export type MotifKind = 'horizon' | 'rise' | 'ledger' | 'ripples' | 'drop' | 'pulse' | 'fold';
 
-export interface Project {
-  /** Also the artwork filename: src/art/work-<slug>.webp (see ART.md). */
+export interface Experience {
+  /** Also the artwork and logo filenames: src/art/work-<slug>.webp and src/art/logos/<slug>.png (see ART.md). */
   slug: string;
-  title: string;
-  kind: string;
+  company: string;
+  role: string;
+  /** e.g. 'Dec 2023 – present'. Leave out for things that are not a job. */
+  period?: string;
+  location?: string;
   summary: string;
   tags: string[];
   href?: string;
@@ -20,7 +23,7 @@ export interface Project {
 export const site = {
   name: 'Bas Franke',
   role: 'Software engineer',
-  location: 'The Netherlands',
+  location: 'Amsterdam, the Netherlands',
   email: 'bas.franke.89@gmail.com',
   phone: '06 208 388 09',
   phoneHref: 'tel:+31620838809',
@@ -28,10 +31,10 @@ export const site = {
 };
 
 export const hero = {
-  eyebrow: 'Full-stack software engineer · The Netherlands',
+  eyebrow: 'Full-stack software engineer · Amsterdam',
   title: 'Software that works,',
   titleEm: 'and keeps working.',
-  lead: 'I’m Bas Franke, a full-stack engineer with more than twenty years of shipping web platforms, from high-stakes trading systems to the tools that keep them running. Today I pair that experience with AI-assisted, agentic development: moving faster without cutting corners.',
+  lead: 'I’m Bas Franke, a full-stack engineer with twenty-plus years of shipping web platforms, from a broker’s trading systems to the rental platform I now lead as Head of Development at GoHome.io. I pair that experience with AI-assisted, agentic development: faster, without cutting corners.',
   primary: { label: 'See my work', href: '#work' },
   secondary: { label: 'Get in touch', href: '#contact' },
 };
@@ -40,44 +43,74 @@ export const about = {
   heading: 'Who I am',
   paragraphs: [
     'I’m a full-stack software engineer with more than twenty years of experience, and I still love the craft. Understanding a problem properly, shaping a solution no bigger than it needs to be, and then looking after it in production: that is the work, and I enjoy every part of it.',
-    'I’m at home across the whole stack: C# and Python on the server, JavaScript and TypeScript in the browser, and the infrastructure in between. Part of that work was in fintech, where correctness and uptime are not negotiable, and it shaped how I write software everywhere else.',
+    'I’m at home across the whole stack: C#, Java and Python on the server, JavaScript and TypeScript in the browser, SQL underneath, and the infrastructure in between. Four years leading tech at an online broker taught me that correctness and uptime are not negotiable; the proptech and loyalty platforms since then taught me how to move fast without losing that.',
     'Lately the way I work has changed as much as the tools. I build with AI at my side: Claude and Claude Code, GitHub Copilot in Visual Studio, Cursor, and agentic workflows that take on whole tasks while I focus on design, review and the decisions that matter.',
   ],
   facts: [
-    ['Based in', 'The Netherlands'],
-    ['Focus', 'Full-stack web'],
+    ['Based in', 'Amsterdam area'],
+    ['Right now', 'Head of Development, GoHome.io'],
     ['Experience', '20+ years'],
     ['Working with', 'AI-assisted development'],
   ] as [string, string][],
 };
 
 export const work = {
-  heading: 'Work where the software had to be right.',
+  heading: 'Where I’ve worked, and what I built there.',
 };
 
-export const projects: Project[] = [
+export const experience: Experience[] = [
   {
-    slug: 'saxo',
-    title: 'Saxo Bank',
-    kind: 'Fintech · Trading platform',
+    slug: 'gohome',
+    company: 'GoHome.io',
+    role: 'Head of Development',
+    period: 'Dec 2023 – present',
+    location: 'Amsterdam',
     summary:
-      'A Danish investment bank built around online trading. Platform work where every release touches real money and live markets, so correctness, speed and uptime are the whole job.',
-    tags: ['Fintech', 'Trading', 'High availability'],
-    motif: 'rise',
+      'Amsterdam proptech that turns renting out a home into one platform: advertising, tenant screening, pricing and management. I lead development: the team, the architecture and the engineering side of the roadmap, for a product that automates most of the leasing process.',
+    tags: ['Java', 'React', 'Architecture', 'Team lead'],
+    href: 'https://gohome.io',
+    motif: 'fold',
   },
   {
-    slug: 'binck',
-    title: 'BinckBank',
-    kind: 'Fintech · Online broker',
+    slug: 'transparent',
+    company: 'Transparent',
+    role: 'Software Engineer',
+    period: 'Apr 2022 – Dec 2023',
+    location: 'Amstelveen',
     summary:
-      'The Dutch online broker, part of Saxo Bank since 2019. Software for people trading with their own savings: clear interfaces, careful data handling and no surprises.',
-    tags: ['Fintech', 'Brokerage', 'Web platform'],
+      'Procure-to-pay specialists whose software finds overpayments, duplicate invoices and unclaimed money in the accounts payable of large companies. I worked on the SQL-heavy analysis engine and the DevOps around it: pipelines, environments and the automation that lets a small team process very large datasets reliably.',
+    tags: ['SQL', 'DevOps', 'Data', 'Automation'],
+    href: 'https://www.transparent.eu',
     motif: 'ledger',
   },
   {
+    slug: 'piggy',
+    company: 'Piggy',
+    role: 'Software Engineer',
+    period: 'Oct 2020 – May 2022',
+    location: 'Maarssen',
+    summary:
+      'Loyalty platform used by thousands of businesses to run their own rewards programmes. I built customer-facing features across the React front end and PHP back end, in a product where every change ships to a lot of shops at once.',
+    tags: ['React', 'PHP', 'SaaS', 'Loyalty'],
+    href: 'https://www.piggy.eu',
+    motif: 'drop',
+  },
+  {
+    slug: 'binck',
+    company: 'BinckBank (Saxo Bank)',
+    role: 'Tech Lead',
+    period: 'Nov 2016 – Oct 2020',
+    location: 'Amsterdam',
+    summary:
+      'Dutch online broker, part of Saxo Bank since 2019. As tech lead I was responsible for the engineering behind a trading platform where correctness, speed and uptime are the whole job, through the integration into Saxo.',
+    tags: ['C#', 'SQL', 'AngularJS', 'Trading', 'Tech lead'],
+    href: 'https://www.home.saxo',
+    motif: 'rise',
+  },
+  {
     slug: 'irp',
-    title: 'IRP',
-    kind: 'Confidential',
+    company: 'IRP',
+    role: 'Confidential project',
     summary: 'Some work stays behind closed doors. Ask me about this one in person and I’ll happily tell you more.',
     tags: ['Ask me'],
     motif: 'ripples',
@@ -90,7 +123,7 @@ export const skills = {
     {
       name: 'Every day',
       note: 'My core tools',
-      items: ['C#', 'TypeScript', 'JavaScript', 'HTML & CSS', 'Python'],
+      items: ['C#', 'Java', 'TypeScript', 'JavaScript', 'HTML & CSS', 'SQL'],
     },
     {
       name: 'AI-assisted',
@@ -109,7 +142,7 @@ export const skills = {
     {
       name: 'Comfortable',
       note: 'Used in production',
-      items: ['Java', 'Node.js', 'React', 'Angular', 'Vue', 'C++', 'SQL'],
+      items: ['Python', 'PHP', 'Node.js', 'React', 'Angular', 'Vue', 'C++'],
     },
     {
       name: 'Working knowledge',
@@ -144,6 +177,20 @@ export const skills = {
 export const contact = {
   heading: 'Let’s talk.',
   lead: 'A product to build, a platform to steady, or a team that could use a senior pair of hands? My inbox is open, and I read every message myself.',
+};
+
+/** The PDF résumé (see src/resume.ts) is built from this plus the sections above. */
+export const resume = {
+  fileName: 'Bas-Franke-Resume.pdf',
+  title: 'Head of Development · Full-stack software engineer',
+  summary:
+    'Full-stack software engineer and engineering lead with more than twenty years of experience designing, building and running web platforms: an online broker’s trading systems, a loyalty platform used by thousands of businesses, procure-to-pay analytics, and today the rental platform GoHome.io as Head of Development. Comfortable owning the whole stack, from database and API to interface and infrastructure, and working with AI-assisted, agentic development to deliver more with the same care.',
+  sections: {
+    profile: 'Profile',
+    experience: 'Experience',
+    skills: 'Skills',
+    approach: 'How I work',
+  },
 };
 
 export const footer = {
