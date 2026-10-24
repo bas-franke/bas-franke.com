@@ -66,6 +66,9 @@ interface Rocket {
 
 const IDLE: Omit<RocketsInput, 'seq' | 'yaw' | 'pitch'> = { f: 0, s: 0, jump: false, fire: false };
 
+// Build every map's nav graph once at boot, so the first match on a map does not stall the event loop.
+for (const m of MAPS) navGraphFor(m);
+
 /** The last map each room played, so 'random' never repeats a map twice in a row. */
 const lastMap = new WeakMap<GameHost, string>();
 
