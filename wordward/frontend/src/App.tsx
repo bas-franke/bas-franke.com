@@ -730,7 +730,7 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
             </div>
           </>
         ) : (
-          <form onSubmit={submit} className="account-form">
+          <form onSubmit={submit} className={`account-form${deleting ? ' deleting' : ''}`}>
             <div className="sheet-head">
               <span className="sheet-emoji">
                 <Icon name={deleting ? 'trash' : 'owl'} />
@@ -788,7 +788,11 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
                 required
               />
             </label>
-            {error && <p className="form-error">{error.text}</p>}
+            {error && (
+              <p className="form-error" role="alert">
+                <Icon name="alert" /> {error.text}
+              </p>
+            )}
             <div className="row">
               <button className={`btn ${deleting ? 'danger' : 'primary'}`} type="submit" disabled={busy}>
                 {busy ? '…' : deleting ? 'Delete forever' : mode === 'register' ? 'Sign up' : 'Log in'}
