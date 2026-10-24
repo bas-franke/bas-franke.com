@@ -129,7 +129,7 @@ function canvasTexture(w: number, h: number, draw: (g: CanvasRenderingContext2D)
 /** Soft, matte, lit by the scene's warm lamps: fur, paper, books, snail skin. */
 const matSoft = once(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 }));
 /** Wet and glossy: the ink slime. */
-const matGloss = once(() => new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 60, specular: 0x6a96a0, emissive: 0x06222a }));
+const matGloss = once(() => new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 120, specular: 0x4f7f88, emissive: 0x06222a }));
 /** Unlit: eyes, highlights, little mouths, so faces stay crisp in any light. */
 const matFace = once(() => new THREE.MeshBasicMaterial({ vertexColors: true }));
 /** The moth glows from within. */
@@ -258,8 +258,8 @@ const wingMat = once(() => {
       // Warm amber membrane: deeper and more opaque at the root and rim, lighter and see-through in between.
       const grad = g.createRadialGradient(8, 130, 8, 8, 130, 250);
       grad.addColorStop(0, 'rgba(236,150,48,0.95)');
-      grad.addColorStop(0.3, 'rgba(250,200,104,0.8)');
-      grad.addColorStop(0.75, 'rgba(252,214,128,0.66)');
+      grad.addColorStop(0.3, 'rgba(248,186,80,0.86)');
+      grad.addColorStop(0.75, 'rgba(250,204,108,0.76)');
       grad.addColorStop(1, 'rgba(226,142,46,0.9)');
       g.fillStyle = grad;
       g.fill(path);
@@ -328,8 +328,8 @@ const wingGeo = once(() => {
     }
     return mergeGeometries(parts) as THREE.BufferGeometry;
   };
-  const g = pose(-0.5);
-  const up = pose(0.8);
+  const g = pose(-0.4);
+  const up = pose(0.6);
   g.morphAttributes.position = [up.attributes.position];
   g.morphTargetsRelative = false;
   g.computeBoundingSphere();
@@ -410,9 +410,9 @@ const mothGeo = once(() => {
   }
   const face = new Bake();
   const look = new THREE.Vector3(0, 0.35, 1).normalize();
-  for (const s of [-1, 1]) eye(face, [s * 0.125, 0.05, 0.235], new THREE.Vector3(s * 0.3, 0.35, 1).normalize(), 0.105);
-  smile(face, [0, -0.1, 0.275], 0.04, new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), look));
-  for (const s of [-1, 1]) face.add(new THREE.SphereGeometry(0.04, 8, 6), 0xff8f6a, [s * 0.2, -0.06, 0.21], [0, 0, 0], [1, 0.7, 0.4]);
+  for (const s of [-1, 1]) eye(face, [s * 0.125, 0.11, 0.22], new THREE.Vector3(s * 0.3, 0.45, 1).normalize(), 0.105);
+  smile(face, [0, -0.03, 0.28], 0.04, new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), look));
+  for (const s of [-1, 1]) face.add(new THREE.SphereGeometry(0.04, 6, 4), 0xff8f6a, [s * 0.2, 0.0, 0.215], [0, 0, 0], [1, 0.7, 0.4]);
   return { body: body.build(), face: face.build() };
 });
 
@@ -465,7 +465,7 @@ export function makeBat(): Model {
 
 // Slightly cool greys, so the warm lamp light leaves them charcoal rather than brown.
 const SOOT_DARK = 0x111217;
-const SOOT_TIP = 0x33353d;
+const SOOT_TIP = 0x2e3038;
 const FACE_DIR = new THREE.Vector3(0, 0.32, 1).normalize();
 
 /** A fluffy black ball of fur tufts with a cream face patch, centred at height `c` with core radius `r`. */
@@ -517,10 +517,10 @@ function sootFace(r: number, c: number): { geo: THREE.BufferGeometry; at: Vec } 
   const face = new Bake();
   for (const s of [-1, 1]) {
     const p = new THREE.Vector3(s * r * 0.22, r * 0.06, r * 0.22).applyQuaternion(fq).add(fc).sub(center);
-    eye(face, [p.x, p.y, p.z], FACE_DIR, r * 0.1);
+    eye(face, [p.x, p.y, p.z], FACE_DIR, r * 0.115);
   }
   const m = new THREE.Vector3(0, -r * 0.13, r * 0.24).applyQuaternion(fq).add(fc).sub(center);
-  face.add(new THREE.SphereGeometry(r * 0.06, 10, 6), 0x2a1416, [m.x, m.y, m.z], fq, [1.4, 0.55, 0.4]);
+  face.add(new THREE.SphereGeometry(r * 0.05, 8, 4), 0x2a1416, [m.x, m.y, m.z], fq, [1.3, 0.4, 0.4]);
   return { geo: face.build(), at: [0, c + center.y, center.z] };
 }
 
@@ -612,9 +612,9 @@ function makeSoot(zmeu: boolean): Model {
   const feet = [-1, 1].map((s) => mesh(g.foot, matSoft(), body, [s * r * 0.42, 0, r * 0.3]));
   const load = mesh(g.books, matSoft(), waddle);
   if (zmeu) {
-    // Held up behind the head, tipped back so its cover faces the camera.
+    // Held up behind the head, tipped back so its cover faces the camera and turned so the page edges show.
     load.position.set(0, g.top - r * 0.3, -r * 0.62);
-    load.rotation.x = 0.42;
+    load.rotation.set(0.42, -0.42, 0);
   } else load.position.set(0, g.top - 0.08, -0.04);
   const loadY = load.position.y;
   const phase = Math.random() * 10;
@@ -874,7 +874,8 @@ const DROP: [number, number][] = [
   [0, 0], [0.36, 0.02], [0.55, 0.1], [0.64, 0.24], [0.66, 0.38], [0.62, 0.54], [0.53, 0.68],
   [0.41, 0.8], [0.3, 0.9], [0.22, 1.0], [0.16, 1.1], [0.1, 1.2], [0.05, 1.27], [0, 1.3],
 ];
-const EYE_Y = 0.5;
+// Eyes high on the drop, so they still face the camera looking down from above.
+const EYE_Y = 0.6;
 function dropRadius(y: number) {
   for (let i = 1; i < DROP.length; i++) {
     if (DROP[i][1] >= y) {
@@ -918,10 +919,10 @@ const slimeGeo = once(() => {
     const y = EYE_Y;
     const x = s * 0.23;
     const z = Math.sqrt(dropRadius(y) ** 2 - x * x);
-    eye(face, [x, y, z - 0.02], new THREE.Vector3(x * 0.7, 0.3, z).normalize(), 0.15);
+    eye(face, [x, y, z - 0.02], new THREE.Vector3(x * 0.7, 0.5, z).normalize(), 0.15);
   }
-  const fq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0.2, 1).normalize());
-  smile(face, [0, 0.33, dropRadius(0.33) + 0.004], 0.04, fq, 0x061c22);
+  const fq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0.35, 1).normalize());
+  smile(face, [0, 0.43, dropRadius(0.43) + 0.004], 0.045, fq, 0x061c22);
   return { body: body.build(), face: face.build() };
 });
 
