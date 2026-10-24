@@ -1,7 +1,8 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameServerMsg, type RoomView, colorHex } from '@shared/protocol';
+import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type GameServerMsg, type PlayerInfo, type RoomView, type Team, colorHex } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
+import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
 import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
@@ -33,15 +34,17 @@ interface LastMatch {
   /** Rockets map the match was played on. */
   mapId?: string;
   mapName?: string;
+  /** Rockets team modes: the winning team (null on a draw). */
+  winnerTeam?: Team | null;
 }
 
 /** Reads the final standings out of a game's `end` message; every game sends `scores` and `winner`. */
 function lastMatchFrom(end: GameServerMsg | undefined, init: GameServerMsg | undefined): LastMatch {
-  const e = end as { winner?: string | null; scores?: { id: string; frags?: number; points?: number }[] } | undefined;
+  const e = end as { winner?: string | null; winnerTeam?: Team | null; scores?: { id: string; frags?: number; points?: number }[] } | undefined;
   const map = (init as { map?: { id: string; name: string } } | undefined)?.map;
   const rows = (e?.scores ?? []).map((r) => ({ id: r.id, value: r.frags ?? r.points ?? 0 }));
   const unit = e?.scores?.[0] && 'frags' in e.scores[0] ? 'frags' : 'points';
-  return { finished: !!e, winner: e?.winner ?? null, rows, unit, mapId: map?.id, mapName: map?.name };
+  return { finished: !!e, winner: e?.winner ?? null, rows, unit, mapId: map?.id, mapName: map?.name, winnerTeam: e?.winnerTeam };
 }
 
 export function RoomPage() {
@@ -97,9 +100,12 @@ export function RoomPage() {
           }
           break;
         }
-        case 'chat':
-          setChat((c) => [...c.slice(-120), { id: ++chatId.current, from: msg.from, text: msg.text, system: msg.system }]);
+        case 'chat': {
+          // The id is taken outside the updater: StrictMode runs updaters twice, which used to hand out duplicate keys.
+          const line = { id: ++chatId.current, from: msg.from, text: msg.text, system: msg.system };
+          setChat((c) => [...c.slice(-120), line]);
           break;
+        }
         case 'error':
           setNotice(msg.message);
           break;
@@ -297,12 +303,33 @@ function WaitingRoom({
   };
   const setBots = (count: number, difficulty?: BotDifficulty) => socket.send({ t: 'setBots', count, difficulty });
   const setMap = (map: string) => socket.send({ t: 'setMap', map });
+  const setMode = (mode: GameMode) => socket.send({ t: 'setMode', mode });
+  const setTeam = (team: Team) => socket.send({ t: 'setTeam', team });
   const start = () => (sfx.unlock(), socket.send({ t: 'start' }));
   const hasMaps = room.game === 'rockets';
   const mapName = MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map';
   const difficulty = DIFFICULTIES.find((d) => d.id === room.botDifficulty) ?? DIFFICULTIES[1];
   const botsLabel = `${bots} ${difficulty.label.toLowerCase()} ${bots === 1 ? 'bot' : 'bots'}`;
-  const lineup = `${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${hasMaps ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : ''}`;
+  const rules = hasMaps ? MODES[room.mode ?? 'ffa'] : null;
+  const teamMode = !!rules?.teams;
+  const onMap = hasMaps ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : '';
+  const lineup = teamMode
+    ? `${rules!.name}: ${teamCount(room.players, 0)} vs ${teamCount(room.players, 1)}${onMap}, first to ${rules!.limit} ${GOAL_WORDS[rules!.goal]}`
+    : `${rules ? `${rules.name}: ` : ''}${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${onMap}${rules ? `, first to ${rules.limit} frags` : ''}`;
+  const myTeam = room.players.find((p) => p.id === you)?.team;
+  const playerRow = (p: PlayerInfo) => (
+    <li key={p.id} className={!p.connected ? 'offline' : ''}>
+      <span className="avatar" style={{ background: colorHex(p.color) }}>
+        {p.name.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="who">{p.name}</span>
+      {p.id === you && <span className="tag">you</span>}
+      {p.id === room.hostId && <span className="tag host">host</span>}
+      {p.bot && <span className="tag">bot · {difficulty.label.toLowerCase()}</span>}
+      {!p.bot && p.id !== you && p.connected && <span className="tag">{p.ping} ms</span>}
+      {!p.connected && <span className="tag">reconnecting…</span>}
+    </li>
+  );
 
   return (
     <>
@@ -345,27 +372,43 @@ function WaitingRoom({
                 {room.players.length} / {room.maxPlayers} seats
               </span>
             </div>
-            <ul className="players">
-              {room.players.map((p) => (
-                <li key={p.id} className={!p.connected ? 'offline' : ''}>
-                  <span className="avatar" style={{ background: colorHex(p.color) }}>
-                    {p.name.slice(0, 1).toUpperCase()}
-                  </span>
-                  <span className="who">{p.name}</span>
-                  {p.id === you && <span className="tag">you</span>}
-                  {p.id === room.hostId && <span className="tag host">host</span>}
-                  {p.bot && <span className="tag">bot · {difficulty.label.toLowerCase()}</span>}
-                  {!p.bot && p.id !== you && p.connected && <span className="tag">{p.ping} ms</span>}
-                  {!p.connected && <span className="tag">reconnecting…</span>}
-                </li>
-              ))}
-              {Array.from({ length: room.maxPlayers - room.players.length }, (_, i) => (
-                <li key={`free-${i}`} className="free">
-                  <span className="avatar" />
-                  <span className="who">Open seat</span>
-                </li>
-              ))}
-            </ul>
+            {teamMode ? (
+              <div className="team-columns">
+                {([0, 1] as Team[]).map((t) => {
+                  const members = room.players.filter((p) => p.team === t);
+                  return (
+                    <div key={t} className={`team-col${myTeam === t ? ' mine' : ''}`} style={{ ['--team' as string]: TEAMS[t].css }}>
+                      <div className="team-col-head">
+                        <h3>{TEAMS[t].name}</h3>
+                        <span className="slots">
+                          {members.length} {members.length === 1 ? 'player' : 'players'}
+                        </span>
+                        {myTeam === t ? (
+                          <span className="tag team-you">your team</span>
+                        ) : (
+                          <button type="button" className="btn small team-join" data-testid={`join-${t === 0 ? 'red' : 'blue'}`} onClick={() => setTeam(t)}>
+                            Join {TEAMS[t].name}
+                          </button>
+                        )}
+                      </div>
+                      <ul className="players">{members.map(playerRow)}</ul>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <ul className="players">
+                {room.players.map(playerRow)}
+                {Array.from({ length: room.maxPlayers - room.players.length }, (_, i) => (
+                  <li key={`free-${i}`} className="free">
+                    <span className="avatar" />
+                    <span className="who">Open seat</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* Room for per-player actions next to the line-up (the robot customiser button goes here). */}
+            <div className="player-actions" />
 
             <div className="host-controls">
               {isHost ? (
@@ -419,6 +462,53 @@ function WaitingRoom({
               </div>
             </div>
           </div>
+
+          {hasMaps && rules && (
+            <div className="panel">
+              <div className="section-head">
+                <h2>Mode</h2>
+                <span className="slots">
+                  {rules.name}
+                  {!isHost && ' · the host picks'}
+                </span>
+              </div>
+              {/* The cards are the picker; this select stays for keyboard users and the screenshot tool. */}
+              {isHost && (
+                <select className="visually-hidden" data-testid="mode-select" aria-label="Game mode" value={room.mode} disabled={playing} onChange={(e) => setMode(e.target.value as GameMode)}>
+                  {MODE_IDS.map((id) => (
+                    <option key={id} value={id}>
+                      {MODES[id].name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="mode-cards" role="radiogroup" aria-label="Game mode">
+                {MODE_IDS.map((id) => {
+                  const m = MODES[id];
+                  return (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={id === room.mode}
+                      key={id}
+                      className={`mode-card mode-${id}${id === room.mode ? ' active' : ''}`}
+                      disabled={!isHost || playing}
+                      onClick={() => setMode(id)}
+                    >
+                      <span className="mode-icon" aria-hidden>
+                        {MODE_ICONS[id]}
+                      </span>
+                      <b>{m.name}</b>
+                      <span>{m.blurb}</span>
+                      <em>
+                        {m.teams ? 'Red vs Blue' : 'Solo'} · {Math.round(m.seconds / 60)} min
+                      </em>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {hasMaps && (
             <div className="panel">
@@ -474,6 +564,11 @@ function WaitingRoom({
   );
 }
 
+const GOAL_WORDS = { frags: 'frags', captures: 'captures', rounds: 'rounds' } as const;
+const teamCount = (players: PlayerInfo[], team: Team) => players.filter((p) => p.team === team).length;
+/** A comic glyph per mode for the mode cards. */
+const MODE_ICONS: Record<GameMode, string> = { ffa: '✸', tdm: '⚔', ctf: '⚑', elim: '☠' };
+
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
 
 /** Shown above the room after a match: who won, where you placed, and one click to go again. */
@@ -499,7 +594,18 @@ function AfterMatch({
   const player = (id: string) => room.players.find((p) => p.id === id);
   const sorted = [...last.rows].sort((a, b) => b.value - a.value);
   const place = sorted.findIndex((r) => r.id === you);
-  const headline = !last.finished ? 'Match ended early' : last.winner === you ? 'You won!' : last.winner ? `${player(last.winner)?.name ?? 'Someone'} won` : 'Draw';
+  const myTeam = player(you)?.team;
+  const headline = !last.finished
+    ? 'Match ended early'
+    : last.winnerTeam !== undefined
+      ? last.winnerTeam === null
+        ? 'Draw'
+        : `${TEAMS[last.winnerTeam].name} won${last.winnerTeam === myTeam ? ': that is you!' : ''}`
+      : last.winner === you
+        ? 'You won!'
+        : last.winner
+          ? `${player(last.winner)?.name ?? 'Someone'} won`
+          : 'Draw';
   const nextMap = () => {
     onMap(randomMapId(last.mapId));
     onStart();
