@@ -89,4 +89,12 @@ export const migrations: { name: string; sql: string }[] = [
       CREATE INDEX runs_started_idx ON runs (started_at DESC);
     `,
   },
+  {
+    // gpt-image-1 is no longer offered to new accounts; move to its successor unless the model was changed by hand.
+    name: '002_image_model_gpt_image_2',
+    sql: `
+      ALTER TABLE settings ALTER COLUMN image_model SET DEFAULT 'gpt-image-2';
+      UPDATE settings SET image_model = 'gpt-image-2' WHERE image_model = 'gpt-image-1';
+    `,
+  },
 ];

@@ -1,7 +1,7 @@
 # inck: inck.ai
 
 An automated magazine. Every hour (configurable) it picks a topic, has ChatGPT write a genuinely interesting article with
-data charts, has `gpt-image-1` paint a hero illustration, and publishes it. Everything (settings, topics, articles, run
+data charts, has `gpt-image-2` paint a hero illustration, and publishes it. Everything (settings, topics, articles, run
 history) lives in its own PostgreSQL database on the shared RDS instance. Vite + React frontend, Node.js + Express
 backend on port **3003**.
 
@@ -17,7 +17,7 @@ backend on port **3003**.
 2. A topic is picked at random, weighted by its `weight` and favouring topics with fewer articles this week.
 3. The text model (default `gpt-5-mini`, with web search on) returns a strict JSON article: title, dek, Markdown body,
    tags, 0–3 charts with real figures, sources, and an image prompt. `[[chart:N]]` markers in the body say where charts go.
-4. The image model (default `gpt-image-1`) renders the hero illustration (WebP, stored in `/srv/apps/inck/data/images`).
+4. The image model (default `gpt-image-2`) renders the hero illustration (WebP, stored in `/srv/apps/inck/data/images`).
 5. The article is published. Failed runs are logged with their error and shown on the dashboard.
 
 Charts are rendered in the browser from the data (Recharts), so numbers stay readable and the page stays light.

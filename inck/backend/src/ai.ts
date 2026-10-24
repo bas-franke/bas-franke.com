@@ -102,7 +102,10 @@ export async function writeArticle(opts: {
     `You write for ${settings.site_name}, a site that publishes one genuinely interesting article at a time.`,
     `Audience: ${settings.audience}. Tone: ${settings.tone}. Language: ${settings.language}.`,
     `Length: about ${settings.target_words} words.`,
-    'Pick ONE specific, surprising angle inside the topic, not an overview. Lead with the most interesting fact.',
+    'Pick ONE specific, surprising angle inside the topic, not an overview. Open with the most interesting fact.',
+    'Formatting rules for body_markdown: start directly with the opening paragraph (no title, no labels such as "lead" or "intro"); ' +
+      'split the article into 3 to 5 sections, each introduced by a Markdown heading line starting with "## "; ' +
+      'short paragraphs; **bold** only for a handful of key facts; no bullet lists longer than five items.',
     'Be accurate. Prefer well-established facts; when numbers are estimates, say so. Never invent studies, quotes or URLs.',
     settings.charts_enabled
       ? 'Include 1 to 3 charts only when there is real quantitative data worth showing, and place [[chart:N]] markers in the body.'
@@ -160,6 +163,8 @@ export async function illustrate(settings: Settings, prompt: string): Promise<Bu
     size: '1536x1024',
     quality: settings.image_quality,
     output_format: 'webp',
+    // Lossy WebP; without this the API returns ~2 MB files for a hero image.
+    output_compression: 80,
   });
   const b64 = result.data?.[0]?.b64_json;
   if (!b64) throw new Error('The image model returned no image.');
