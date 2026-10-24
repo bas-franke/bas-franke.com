@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GAME_IDS, GAMES, LIMITS, type BotDifficulty, type GameId, type GameMeta, type RoomSummary } from '@shared/protocol';
-import { createRoom, listRooms, saveName, savedName } from '../api';
+import { DIFFICULTIES, QUICK_BOTS, type QuickStart, createRoom, listRooms, quickPlay, saveDifficulty, saveName, savedDifficulty, savedName } from '../api';
+import { sfx } from '../engine/audio';
 
 export function Lobby() {
   const navigate = useNavigate();
@@ -48,6 +49,7 @@ export function Lobby() {
           Small multiplayer games that run in the browser, no account needed. A room lives as long as someone is in it, and you can fill
           the empty seats with bots.
         </p>
+        <QuickPlay onReady={(code) => navigate(`/room/${code}`, { state: { quickStart: true } satisfies QuickStart })} />
       </section>
 
       <section className="section">
@@ -90,6 +92,58 @@ export function Lobby() {
       </footer>
 
       {creating && <CreateRoomModal game={creating} onClose={() => setCreating(null)} onCreated={(code) => navigate(`/room/${code}`)} />}
+    </div>
+  );
+}
+
+/** The front door: one click and you are in a Rockets match against bots on a random map. */
+function QuickPlay({ onReady }: { onReady: (code: string) => void }) {
+  const [difficulty, setDifficulty] = useState<BotDifficulty>(savedDifficulty());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const meta = GAMES.rockets;
+  const blurb = DIFFICULTIES.find((d) => d.id === difficulty)?.blurb;
+
+  const go = async () => {
+    // The click is the user gesture the browser wants before it lets the game make sound.
+    sfx.unlock();
+    setBusy(true);
+    setError('');
+    try {
+      onReady(await quickPlay(difficulty));
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="quick-play" style={{ ['--accent' as string]: meta.accent }}>
+      <button className="btn primary quick-btn" onClick={go} disabled={busy}>
+        <span className="quick-label">{busy ? 'Setting up…' : 'Quick play'}</span>
+        <span className="quick-sub">
+          {meta.name} · you + {QUICK_BOTS} bots · random map
+        </span>
+      </button>
+      <div className="quick-options">
+        <span className="quick-caption">Bot difficulty</span>
+        <div className="segmented" role="radiogroup" aria-label="Bot difficulty">
+          {DIFFICULTIES.map((d) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={d.id === difficulty}
+              key={d.id}
+              className={d.id === difficulty ? 'active' : ''}
+              onClick={() => (setDifficulty(d.id), saveDifficulty(d.id))}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+        <span className="quick-caption">{blurb}</span>
+        {error && <span className="error">{error}</span>}
+      </div>
     </div>
   );
 }
@@ -158,7 +212,7 @@ function CreateRoomModal({ game: initial, onClose, onCreated }: { game: GameId; 
   const [roomName, setRoomName] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(meta.maxPlayers);
   const [bots, setBots] = useState(1);
-  const [difficulty, setDifficulty] = useState<BotDifficulty>('normal');
+  const [difficulty, setDifficulty] = useState<BotDifficulty>(savedDifficulty());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -222,12 +276,13 @@ function CreateRoomModal({ game: initial, onClose, onCreated }: { game: GameId; 
         <div className="field" style={{ marginTop: 14 }}>
           Bot difficulty
           <div className="segmented">
-            {(['easy', 'normal', 'hard'] as BotDifficulty[]).map((d) => (
-              <button type="button" key={d} className={d === difficulty ? 'active' : ''} onClick={() => setDifficulty(d)}>
-                {d}
+            {DIFFICULTIES.map((d) => (
+              <button type="button" key={d.id} className={d.id === difficulty ? 'active' : ''} onClick={() => (setDifficulty(d.id), saveDifficulty(d.id))}>
+                {d.label}
               </button>
             ))}
           </div>
+          <span className="slots">{DIFFICULTIES.find((d) => d.id === difficulty)?.blurb}</span>
         </div>
 
         {error && (
