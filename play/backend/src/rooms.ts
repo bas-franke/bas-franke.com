@@ -252,10 +252,13 @@ export class Room implements GameHost {
         if (text) this.broadcastAll({ t: 'chat', from: member.name, text });
         return;
       }
-      case 'setBots':
+      case 'setBots': {
         this.requireHost(member);
-        this.setBots(msg.count, msg.difficulty);
+        // Validate: an unknown difficulty used to crash the bot code inside the game loop.
+        const d = msg.difficulty === 'easy' || msg.difficulty === 'normal' || msg.difficulty === 'hard' ? msg.difficulty : undefined;
+        this.setBots(Number(msg.count) || 0, d);
         return;
+      }
       case 'setMap':
         this.requireHost(member);
         if (msg.map === RANDOM_MAP || mapById(String(msg.map))) this.settings.map = msg.map;
@@ -293,6 +296,8 @@ export class Room implements GameHost {
 
   send(id: string, m: GameServerMsg) {
     const member = this.members.get(id);
+    // Snapshots are superseded 30 times a second: skip them for a socket that is not draining.
+    if (member?.socket && (m as { k?: string }).k === 'snap' && member.socket.bufferedAmount > 64 * 1024) return;
     if (member) this.sendTo(member, { t: 'g', m });
   }
 

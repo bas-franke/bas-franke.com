@@ -1,14 +1,32 @@
-import { type FormEvent, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { GAME_IDS, GAMES, LIMITS, type BotDifficulty, type GameId, type GameMeta, type RoomSummary } from '@shared/protocol';
-import { createRoom, listRooms, saveName, savedName } from '../api';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { GAME_IDS, GAMES, type GameId, type GameMeta, type RoomSummary } from '@shared/protocol';
+import { listRooms } from '../api';
+import { SCREENSHOTS } from '../games/catalog';
+import { GameCover } from '../ui/GameCover';
+import { GameDetails } from '../ui/GameDetails';
+import { Header } from '../ui/Header';
+import { CreateRoom } from './CreateRoom';
+import { RoomList } from './RoomList';
 
+type Dialog = { kind: 'create'; game?: GameId } | { kind: 'details'; game: GameId } | null;
+
+const isGame = (v: string | null): v is GameId => v !== null && v in GAMES;
+
+/** The front page: the list of open rooms with one big button to create a room, then the game catalogue. */
 export function Lobby() {
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [rooms, setRooms] = useState<RoomSummary[] | null>(null);
   const [error, setError] = useState('');
-  const [creating, setCreating] = useState<GameId | null>(null);
+  const [filter, setFilter] = useState<GameId | 'all'>('all');
+  const [query, setQuery] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  // /?create or /?create=rockets opens the create dialog straight away (used by links from elsewhere).
+  const [dialog, setDialog] = useState<Dialog>(() => {
+    const create = params.get('create');
+    return create === null ? null : { kind: 'create', game: isGame(create) ? create : undefined };
+  });
 
   useEffect(() => {
     let alive = true;
@@ -24,64 +42,113 @@ export function Lobby() {
     };
   }, []);
 
+  const closeDialog = () => {
+    setDialog(null);
+    if (params.has('create')) setParams({}, { replace: true });
+  };
+
   const join = (e: FormEvent) => {
     e.preventDefault();
     const code = joinCode.trim().toUpperCase();
-    if (code) navigate(`/room/${code}`);
+    if (code.length === 4) navigate(`/room/${code}`);
   };
 
+  const counts = useMemo(() => {
+    const c: Partial<Record<GameId, number>> = {};
+    for (const r of rooms ?? []) c[r.game] = (c[r.game] ?? 0) + 1;
+    return c;
+  }, [rooms]);
+  const players = useMemo(() => (rooms ?? []).reduce((n, r) => n + r.humans, 0), [rooms]);
+  const games = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return GAME_IDS.filter((id) => !q || GAMES[id].name.toLowerCase().includes(q) || GAMES[id].tagline.toLowerCase().includes(q));
+  }, [query]);
+
   return (
-    <div className="page">
-      <header className="topbar">
-        <a className="brand" href="/">
-          play<span className="dot">.</span>
-          <small>bas-franke.com</small>
-        </a>
+    <div className="page lobby">
+      <Header>
         <a className="btn ghost small" href="https://bas-franke.com">
           by Bas Franke
         </a>
-      </header>
+      </Header>
 
-      <section className="hero">
-        <h1>Pick a game. Host a room. Send the code.</h1>
-        <p>
-          Small multiplayer games that run in the browser, no account needed. A room lives as long as someone is in it, and you can fill
-          the empty seats with bots.
-        </p>
-      </section>
-
-      <section className="section">
-        <div className="section-head">
-          <h2>Games</h2>
-          <span className="hint">All games: WASD to move, Tab for scores, Esc for the menu</span>
-        </div>
-        <div className="games">
-          {GAME_IDS.map((id) => (
-            <GameCard key={id} meta={GAMES[id]} onHost={() => setCreating(id)} />
-          ))}
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="section-head">
-          <h2>Open rooms</h2>
-          <form onSubmit={join} style={{ display: 'flex', gap: 8 }}>
-            <input
-              className="mono"
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              placeholder="CODE"
-              maxLength={4}
-              aria-label="Room code"
-              style={{ width: 90, textAlign: 'center', letterSpacing: '0.2em', padding: '6px 8px', borderRadius: 10, border: '1px solid var(--line-strong)', background: 'rgba(0,0,0,0.25)' }}
-            />
-            <button className="btn small" type="submit" disabled={joinCode.trim().length < 4}>
-              Join by code
+      <section className="deck" aria-labelledby="rooms-title">
+        <div className="deck-head">
+          <div className="deck-title">
+            <h1 id="rooms-title">Open rooms</h1>
+            <p>Jump into a room, enter a code from a friend, or create your own and share it. No account needed.</p>
+          </div>
+          <div className="deck-actions">
+            <form className="join-code" onSubmit={join}>
+              <input
+                className="mono"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                placeholder="CODE"
+                maxLength={4}
+                aria-label="Room code"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button className="btn" type="submit" disabled={joinCode.length < 4}>
+                Join
+              </button>
+            </form>
+            <button type="button" className="btn primary big" onClick={() => setDialog({ kind: 'create' })}>
+              <PlusIcon /> Create a room
             </button>
-          </form>
+          </div>
         </div>
+
+        <div className="deck-bar">
+          <div className="chips" role="group" aria-label="Filter rooms by game">
+            <button type="button" className={`chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+              All <span className="count">{rooms?.length ?? '–'}</span>
+            </button>
+            {GAME_IDS.map((id) => (
+              <button
+                type="button"
+                key={id}
+                className={`chip ${filter === id ? 'active' : ''}`}
+                style={{ ['--accent' as string]: GAMES[id].accent }}
+                onClick={() => setFilter(id)}
+              >
+                <i className="dot" />
+                {GAMES[id].name} <span className="count">{counts[id] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+          <span className="live-stat">
+            <i className="pulse" />
+            {rooms ? `${players} ${players === 1 ? 'player' : 'players'} online · ${rooms.length} ${rooms.length === 1 ? 'room' : 'rooms'}` : 'Connecting…'}
+          </span>
+        </div>
+
         {error && <p className="error">{error}</p>}
-        <RoomList rooms={rooms} onJoin={(code) => navigate(`/room/${code}`)} />
+        <RoomList rooms={rooms} filter={filter} onJoin={(code) => navigate(`/room/${code}`)} onCreate={() => setDialog({ kind: 'create', game: filter === 'all' ? undefined : filter })} />
+      </section>
+
+      <section className="section" aria-labelledby="games-title">
+        <div className="section-head">
+          <h2 id="games-title">
+            Games <span className="count">{GAME_IDS.length}</span>
+          </h2>
+          <input className="search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search games" aria-label="Search games" />
+        </div>
+        {games.length ? (
+          <div className="game-grid">
+            {games.map((id) => (
+              <GameTile key={id} meta={GAMES[id]} onDetails={() => setDialog({ kind: 'details', game: id })} onHost={() => setDialog({ kind: 'create', game: id })} />
+            ))}
+          </div>
+        ) : (
+          <div className="empty">
+            <p>No game matches “{query}”.</p>
+          </div>
+        )}
+        <p className="hint" style={{ marginTop: 14 }}>
+          Every game: <kbd>WASD</kbd> to move, <kbd>Tab</kbd> for scores, <kbd>Esc</kbd> for the menu. Rooms live as long as someone is in them.
+        </p>
       </section>
 
       <footer className="site">
@@ -89,161 +156,59 @@ export function Lobby() {
         <a href="https://github.com/bas-franke/bas-franke.com/tree/master/play">Source</a>
       </footer>
 
-      {creating && <CreateRoomModal game={creating} onClose={() => setCreating(null)} onCreated={(code) => navigate(`/room/${code}`)} />}
+      {dialog?.kind === 'create' && <CreateRoom initialGame={dialog.game} onClose={closeDialog} onCreated={(code) => navigate(`/room/${code}`)} />}
+      {dialog?.kind === 'details' && <GameDetails game={dialog.game} onClose={closeDialog} onHost={() => setDialog({ kind: 'create', game: dialog.game })} />}
     </div>
   );
 }
 
-function GameCard({ meta, onHost }: { meta: GameMeta; onHost: () => void }) {
+/** One compact card in the catalogue: cover, name, tagline, player range. Details on the picture, Host on the button. */
+function GameTile({ meta, onDetails, onHost }: { meta: GameMeta; onDetails: () => void; onHost: () => void }) {
+  const shots = SCREENSHOTS[meta.id].length;
   return (
-    <article className="game-card" style={{ ['--accent' as string]: meta.accent }}>
-      <div>
-        <h3>{meta.name}</h3>
-        <p className="tagline">{meta.tagline}</p>
-      </div>
-      <p className="desc">{meta.description}</p>
-      <dl className="controls">
-        {meta.controls.map((c) => (
-          <div key={c.keys} style={{ display: 'contents' }}>
-            <dt>{c.keys}</dt>
-            <dd>{c.does}</dd>
-          </div>
-        ))}
-      </dl>
-      <div className="actions">
-        <button className="btn primary" onClick={onHost}>
-          Host a room
-        </button>
-        <span className="pill accent">
-          {meta.minPlayers}–{meta.maxPlayers} players
-        </span>
+    <article className="game-tile" style={{ ['--accent' as string]: meta.accent }}>
+      <button type="button" className="tile-media" onClick={onDetails} aria-label={`About ${meta.name}`}>
+        <GameCover game={meta.id} />
+        {shots > 0 && (
+          <span className="tile-shots">
+            <CameraIcon /> {shots}
+          </span>
+        )}
+      </button>
+      <div className="tile-body">
+        <div className="tile-title">
+          <h3>{meta.name}</h3>
+          <span className="pill accent">
+            {meta.minPlayers}–{meta.maxPlayers}
+          </span>
+        </div>
+        <p>{meta.tagline}</p>
+        <div className="tile-actions">
+          <button type="button" className="btn small ghost" onClick={onDetails}>
+            Details
+          </button>
+          <button type="button" className="btn small primary" onClick={onHost}>
+            Host
+          </button>
+        </div>
       </div>
     </article>
   );
 }
 
-function RoomList({ rooms, onJoin }: { rooms: RoomSummary[] | null; onJoin: (code: string) => void }) {
-  if (!rooms) return <div className="empty">Loading rooms…</div>;
-  if (!rooms.length) return <div className="empty">No open rooms right now. Host one and share the code.</div>;
+function PlusIcon() {
   return (
-    <div className="room-list">
-      {rooms.map((r) => {
-        const meta = GAMES[r.game];
-        const full = r.humans + r.bots >= r.maxPlayers && r.bots === 0;
-        return (
-          <div className="room-row" key={r.code} style={{ ['--accent' as string]: meta.accent }}>
-            <span className="code">{r.code}</span>
-            <div>
-              <div className="name">{r.name}</div>
-              <div className="meta">
-                <span className="pill accent">{meta.name}</span> · {r.humans} {r.humans === 1 ? 'player' : 'players'}
-                {r.bots ? ` + ${r.bots} ${r.bots === 1 ? 'bot' : 'bots'}` : ''} · {r.maxPlayers} seats
-              </div>
-            </div>
-            <span className={`pill ${r.state}`}>{r.state === 'playing' ? 'In a match' : 'Waiting'}</span>
-            <button className="btn small" onClick={() => onJoin(r.code)} disabled={full}>
-              {full ? 'Full' : 'Join'}
-            </button>
-          </div>
-        );
-      })}
-    </div>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
   );
 }
 
-function CreateRoomModal({ game: initial, onClose, onCreated }: { game: GameId; onClose: () => void; onCreated: (code: string) => void }) {
-  const [game, setGame] = useState<GameId>(initial);
-  const meta = GAMES[game];
-  const [name, setName] = useState(savedName());
-  const [roomName, setRoomName] = useState('');
-  const [maxPlayers, setMaxPlayers] = useState(meta.maxPlayers);
-  const [bots, setBots] = useState(1);
-  const [difficulty, setDifficulty] = useState<BotDifficulty>('normal');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError('');
-    try {
-      const nick = name.trim() || 'Player';
-      saveName(nick);
-      const { room } = await createRoom({
-        name: roomName.trim() || `${nick}'s ${meta.name.toLowerCase()} room`,
-        game,
-        maxPlayers,
-        bots: Math.min(bots, maxPlayers - 1),
-        botDifficulty: difficulty,
-      });
-      onCreated(room.code);
-    } catch (err) {
-      setError((err as Error).message);
-      setBusy(false);
-    }
-  };
-
+function CameraIcon() {
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit} style={{ ['--accent' as string]: meta.accent }}>
-        <h2>Host a room</h2>
-        <p className="sub">You get a four-letter code to share. The room closes when the last player leaves.</p>
-
-        <div className="segmented" style={{ marginBottom: 16 }}>
-          {GAME_IDS.map((id) => (
-            <button type="button" key={id} className={id === game ? 'active' : ''} onClick={() => setGame(id)}>
-              {GAMES[id].name}
-            </button>
-          ))}
-        </div>
-
-        <div className="form-row">
-          <label className="field">
-            Your name
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={LIMITS.playerNameMax} placeholder="Player" autoFocus />
-          </label>
-          <label className="field">
-            Room name
-            <input value={roomName} onChange={(e) => setRoomName(e.target.value)} maxLength={LIMITS.roomNameMax} placeholder={`${meta.name} room`} />
-          </label>
-        </div>
-
-        <div className="form-row" style={{ marginTop: 14 }}>
-          <label className="field">
-            Seats: {maxPlayers}
-            <input type="range" min={LIMITS.minPlayers} max={meta.maxPlayers} value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))} />
-          </label>
-          <label className="field">
-            Bots: {Math.min(bots, maxPlayers - 1)}
-            <input type="range" min={0} max={maxPlayers - 1} value={Math.min(bots, maxPlayers - 1)} onChange={(e) => setBots(Number(e.target.value))} />
-          </label>
-        </div>
-
-        <div className="field" style={{ marginTop: 14 }}>
-          Bot difficulty
-          <div className="segmented">
-            {(['easy', 'normal', 'hard'] as BotDifficulty[]).map((d) => (
-              <button type="button" key={d} className={d === difficulty ? 'active' : ''} onClick={() => setDifficulty(d)}>
-                {d}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {error && (
-          <p className="error" style={{ marginTop: 12 }}>
-            {error}
-          </p>
-        )}
-        <div className="form-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="btn primary" disabled={busy}>
-            {busy ? 'Creating…' : `Create ${meta.name} room`}
-          </button>
-        </div>
-      </form>
-    </div>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
   );
 }

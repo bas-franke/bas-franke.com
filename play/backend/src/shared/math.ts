@@ -121,13 +121,14 @@ export interface RayHit {
 export function rayAABB(origin: Vec3, dir: Vec3, box: AABB, maxT = Infinity): RayHit | null {
   let tmin = 0;
   let tmax = maxT;
-  let normal: Vec3 = { x: 0, y: 0, z: 0 };
-  const axes: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z'];
-  for (const ax of axes) {
-    const o = origin[ax];
-    const d = dir[ax];
-    const lo = box.min[ax];
-    const hi = box.max[ax];
+  let axis = -1;
+  let sign = 0;
+  // Unrolled over x, y, z without temporaries: this runs for every box on every sight check.
+  for (let k = 0; k < 3; k++) {
+    const o = k === 0 ? origin.x : k === 1 ? origin.y : origin.z;
+    const d = k === 0 ? dir.x : k === 1 ? dir.y : dir.z;
+    const lo = k === 0 ? box.min.x : k === 1 ? box.min.y : box.min.z;
+    const hi = k === 0 ? box.max.x : k === 1 ? box.max.y : box.max.z;
     if (Math.abs(d) < 1e-12) {
       if (o < lo || o > hi) return null;
       continue;
@@ -137,18 +138,20 @@ export function rayAABB(origin: Vec3, dir: Vec3, box: AABB, maxT = Infinity): Ra
     let t2 = (hi - o) * inv;
     let n = -1;
     if (t1 > t2) {
-      [t1, t2] = [t2, t1];
+      const swap = t1;
+      t1 = t2;
+      t2 = swap;
       n = 1;
     }
     if (t1 > tmin) {
       tmin = t1;
-      normal = { x: 0, y: 0, z: 0 };
-      normal[ax] = n;
+      axis = k;
+      sign = n;
     }
     if (t2 < tmax) tmax = t2;
     if (tmin > tmax) return null;
   }
-  return { t: tmin, normal };
+  return { t: tmin, normal: { x: axis === 0 ? sign : 0, y: axis === 1 ? sign : 0, z: axis === 2 ? sign : 0 } };
 }
 
 /** Segment a→b against a box; t is in [0, 1]. */
