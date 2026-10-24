@@ -4,10 +4,12 @@ import {
   BACKPACKS,
   BODY_COLORS,
   BOOTS,
+  CHESTS,
   DEFAULT_LOOK,
   EARS,
   EMBLEMS,
   FACES,
+  GAUNTLETS,
   HELMETS,
   type Look,
   PATTERNS,
@@ -25,7 +27,7 @@ import './customize.css';
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 const label = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace('-', ' ');
 
-type Choice = 'helmet' | 'visorShape' | 'face' | 'ears' | 'shoulders' | 'pattern' | 'backpack' | 'boots' | 'emblem';
+type Choice = 'helmet' | 'visorShape' | 'face' | 'ears' | 'shoulders' | 'chest' | 'gauntlets' | 'pattern' | 'backpack' | 'boots' | 'emblem';
 /** The part pickers, in order, with their headings. */
 const CHOICES: [Choice, string, readonly string[]][] = [
   ['helmet', 'Helmet', HELMETS],
@@ -33,6 +35,8 @@ const CHOICES: [Choice, string, readonly string[]][] = [
   ['face', 'Face', FACES],
   ['ears', 'Ears', EARS],
   ['shoulders', 'Shoulders', SHOULDERS],
+  ['chest', 'Chest', CHESTS],
+  ['gauntlets', 'Gauntlets', GAUNTLETS],
   ['pattern', 'Paint', PATTERNS],
   ['backpack', 'Backpack', BACKPACKS],
   ['boots', 'Boots', BOOTS],
