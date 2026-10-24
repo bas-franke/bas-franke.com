@@ -1,6 +1,6 @@
 # inck: inck.ai
 
-A learning feed. Every 15 minutes (configurable) it writes one **very short story** (about 200 words) that makes a single
+A learning feed. Every hour (configurable) it writes one **very short story** (about 200 words) that makes a single
 complicated idea click: a qubit, a ceasefire, why prices rise, how a chip is made. You scroll through them one per screen,
 like a video feed; the site opens on the latest story. Each story belongs to a **topic** (Artificial intelligence, The war in
 Ukraine, Inflation & central banks, …) that has its own hub page where the stories are organised as a curriculum from
@@ -24,7 +24,7 @@ instance. Vite + React frontend, Node.js + Express backend on port **3003**.
    For events the sections always cover what is happening, how it started (history), who is involved, key moments,
    consequences and what could happen next. Every topic also gets an automatic **Latest** section for "right now" stories.
    When every planned item has been written, the plan is extended. Thirteen topics are seeded; the scout adds more.
-2. **The scheduler** ticks every 30 s. When `enabled`, the last run is ≥ `interval_minutes` ago (default 15), the time
+2. **The scheduler** ticks every 30 s. When `enabled`, the last run is ≥ `interval_minutes` ago (default 60), the time
    is inside the active hours and fewer than `max_per_day` stories were made in the last 24 h, it starts a run.
 3. **The trend radar** discovers, on its own, what the world is talking about. Every `radar_hours` (default 3,
    checked before a "right now" story) it reads free live signals (BBC and NYT world/business/science headlines,
@@ -63,7 +63,7 @@ stored in the database. After editing `.env`: `pm2 restart inck --update-env`.
 
 **Costs:** a story is one text request of a few thousand tokens (plus about $0.01 per web search for "right now" stories
 and events) and, now and then, one low-quality picture (about half a cent). Planning a curriculum is one extra request per
-topic. At a story every 15 minutes with `gpt-5.4-mini`, expect roughly $2–4 per day; the dashboard shows the estimate.
+topic. At a story an hour with `gpt-5.4-mini`, expect roughly $0.50–1 per day; the dashboard shows the estimate.
 Set a usage limit in your OpenAI account to be safe.
 
 ---

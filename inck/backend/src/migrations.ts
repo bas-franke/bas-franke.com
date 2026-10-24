@@ -336,4 +336,27 @@ export const migrations: { name: string; sql?: string; run?: (client: pg.PoolCli
       }
     },
   },
+  {
+    // Country-specific news: a topic can belong to one country (its national politics, strikes, budget) and is then
+    // only offered in the feed to visitors from there. NULL keeps a topic global, which also covers news from one
+    // country that the whole world follows. A story every 5 minutes, so the daily cap moves up with it.
+    name: '010_country_news',
+    sql: `
+      ALTER TABLE topics ADD COLUMN country text CHECK (country ~ '^[A-Z]{2}$');
+      CREATE INDEX topics_country_idx ON topics (country) WHERE country IS NOT NULL;
+
+      ALTER TABLE settings ADD COLUMN local_countries text[] NOT NULL DEFAULT '{NL,US,GB,DE}';
+      ALTER TABLE settings
+        ALTER COLUMN interval_minutes SET DEFAULT 5,
+        ALTER COLUMN max_per_day SET DEFAULT 288;
+      UPDATE settings SET interval_minutes = 5, max_per_day = greatest(max_per_day, 288), updated_at = now();
+    `,
+  },
+  {
+    name: '010_hourly',
+    sql: `
+      ALTER TABLE settings ALTER COLUMN interval_minutes SET DEFAULT 60;
+      UPDATE settings SET interval_minutes = 60;
+    `,
+  },
 ];
