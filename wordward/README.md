@@ -10,10 +10,16 @@ player's device (mirrored to `localStorage`).
 
 ## How it plays
 
-- **Adventure:** 35 themed levels on a map, from *Salut!* (first words) through food, animals, town, verbs, school,
-  holidays and science to *Maestru* (everything). A level is 3–8 waves of its topics, ends with the balaur (3–5 heads;
-  not on sentence-only levels) and gets a little faster than the one before. Clearing it gives 1–3 stars
-  (★★★ = 8+ HP and 90%+ accuracy) and opens the next level. Stars are kept per direction. Defined in `game/levels.ts`.
+- **Adventure (campaign):** a winding path through 8 chapters (village → forest → home → town → school → fair →
+  mountains → citadel), 54 missions in all (`game/campaign.ts`). Every chapter has 3–6 missions, a **review** mission
+  built from that chapter's words you have not mastered yet, and a **boss** mission (a balaur every wave).
+  - **Variants:** every mission has a standard run plus two of: 🧠 *din memorie* (the translation is hidden; two
+    misses on a letter reveal it), 🔄 *invers* (the other direction), ⚡ *viteză* (much faster, 5 HP), 🎯 *fără
+    greșeli* (three typos ends the mission). Variants open once the standard run is won.
+  - **Going back:** some missions only open after a variant of an earlier one (e.g. *Familia* needs *Salut!* from
+    memory; *Bucătărie* needs *La masă* at speed), and each boss needs a number of stars and variant wins from its
+    chapter, so you replay missions to earn them. The mission sheet lists what is missing with a link to it.
+  - Stars (1–3: ★★★ = 80%+ HP left and 90%+ accuracy) are kept per mission, variant and direction.
 - **Free play:** endless waves from the topics you pick, with a balaur every 5th wave.
 
 - **Directions:** EN → RO (read English, type Romanian) or RO → EN.
@@ -64,7 +70,7 @@ frontend/src/
 │   ├── world.ts     banded sky, smiling sun, clouds, pastel mountains, hills, the castle and the owl guardian
 │   ├── enemies.ts   procedural creatures (bat, rock buddy, ghost, baby dragon, pebble, balaur) and bubbles
 │   ├── progress.ts  per-word learning progress (mastered after two typo-free wins)
-│   ├── levels.ts    the adventure levels, stars and unlocking
+│   ├── campaign.ts  chapters, missions, variants, requirements, stars; builds the run config for a mission
 │   ├── save.ts      the save: cookies (budgeted) + localStorage
 │   ├── effects.ts   pooled star beams, sparkles, poof clouds, bubble pops, dust
 │   ├── toon.ts      toon shader look-dev patch, cached materials, ink outlines (copied from play/)
