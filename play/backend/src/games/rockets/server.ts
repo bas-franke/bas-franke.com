@@ -37,6 +37,10 @@ interface RPlayer extends GamePlayer {
   respawnAt: number;
   protectedUntil: number;
   lastSeq: number;
+  /** Highest seq accepted into the queue: rejects replays, reordering and absurd jumps. */
+  lastQueued: number;
+  /** Commands this player may still apply, earned at one per simulation step (anti speed-hack). */
+  credit: number;
   nextFire: number;
   queue: RocketsInput[];
   lastInputAt: number;
@@ -94,7 +98,14 @@ class RocketsGame implements GameServer {
     // Everyone appears straight away, one after the other so each spawn sees the ones already placed, and stands
     // frozen through the countdown: the match starts with nobody spawning on top of or in front of anybody else.
     for (const p of this.players.values()) this.spawn(p);
-    this.timer = setInterval(() => this.loop(), 1000 / RK.loopHz);
+    this.timer = setInterval(() => {
+      try {
+        this.loop();
+      } catch (err) {
+        // One bad room must never take down every other room on the server.
+        console.error('rockets loop failed', err);
+      }
+    }, 1000 / RK.loopHz);
   }
 
   stop() {
@@ -114,6 +125,8 @@ class RocketsGame implements GameServer {
       respawnAt: this.now + 0.3,
       protectedUntil: 0,
       lastSeq: 0,
+      lastQueued: 0,
+      credit: 2,
       nextFire: 0,
       queue: [],
       lastInputAt: this.now,
@@ -129,6 +142,8 @@ class RocketsGame implements GameServer {
 
   removePlayer(id: string) {
     if (!this.players.delete(id)) return;
+    // A departed player's rockets would otherwise kill with no owner, which counts as a suicide for the victim.
+    this.rockets = this.rockets.filter((r) => r.owner !== id);
     this.host.broadcast({ k: 'score', scores: this.scores() });
   }
 
@@ -137,8 +152,12 @@ class RocketsGame implements GameServer {
     if (!p || p.bot || m.k !== 'in' || !Array.isArray(m.i)) return;
     for (const raw of m.i as Partial<RocketsInput>[]) {
       if (!raw || typeof raw !== 'object') continue;
+      const seq = Math.floor(Number(raw.seq));
+      if (!Number.isSafeInteger(seq) || seq <= p.lastQueued || seq > p.lastQueued + 120) continue;
+      if (p.queue.length >= 30) break;
+      p.lastQueued = seq;
       const input: RocketsInput = {
-        seq: Number(raw.seq) || 0,
+        seq,
         f: clamp(Number(raw.f) || 0, -1, 1),
         s: clamp(Number(raw.s) || 0, -1, 1),
         jump: !!raw.jump,
@@ -146,11 +165,8 @@ class RocketsGame implements GameServer {
         yaw: typeof raw.yaw === 'number' && Number.isFinite(raw.yaw) ? raw.yaw : p.yaw,
         pitch: clamp(Number(raw.pitch) || 0, -RK.maxPitch, RK.maxPitch),
       };
-      if (input.seq <= p.lastSeq) continue;
       p.queue.push(input);
     }
-    // A client that falls far behind is not allowed to catch up all at once.
-    if (p.queue.length > 30) p.queue.splice(0, p.queue.length - 30);
   }
 
   // ---- main loop ----------------------------------------------------------------------------------------------
@@ -186,8 +202,10 @@ class RocketsGame implements GameServer {
     for (const p of this.players.values()) {
       if (p.brain) continue;
       let n = 0;
-      const limit = Math.max(RK.maxCommandsPerLoop, substeps * 3);
-      while (p.queue.length && n < limit) {
+      // One command per simulated step plus a little slack for network jitter, capped so nobody banks speed.
+      p.credit = Math.min(p.credit + substeps * 1.15, RK.maxCommandsPerLoop + 2);
+      while (p.queue.length && p.credit >= 1) {
+        p.credit--;
         const cmd = p.queue.shift()!;
         // During the countdown the command still counts (look around, seq acknowledged) but nobody moves or fires.
         this.applyInput(p, frozen ? this.holdStill(cmd) : cmd);
