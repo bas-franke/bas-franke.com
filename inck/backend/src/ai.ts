@@ -105,6 +105,8 @@ export interface Usage {
   input_tokens: number;
   output_tokens: number;
   images: number;
+  /** Output tokens billed by the image model (its price unit). */
+  image_tokens: number;
 }
 
 const isReasoningModel = (model: string) => /^(gpt-5|o\d)/.test(model);
@@ -176,11 +178,14 @@ export async function writeArticle(opts: {
   return {
     draft,
     model: response.model,
-    usage: { input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, images: 0 },
+    usage: { input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, images: 0, image_tokens: 0 },
   };
 }
 
-export async function illustrate(settings: Settings, prompt: string): Promise<Buffer> {
+export type ImageQuality = Settings['image_quality'];
+
+/** Renders one illustration. Returns the WebP bytes and the image output tokens the API billed. */
+export async function illustrate(settings: Settings, prompt: string, quality: ImageQuality): Promise<{ bytes: Buffer; tokens: number }> {
   const style =
     'Editorial illustration for a thoughtful online magazine. Clean, modern, slightly painterly, rich but harmonious colours, ' +
     'strong single focal point, no text, no letters, no numbers, no logos, no watermark.';
@@ -189,12 +194,12 @@ export async function illustrate(settings: Settings, prompt: string): Promise<Bu
     prompt: `${style}\n\nScene: ${prompt}`,
     n: 1,
     size: '1536x1024',
-    quality: settings.image_quality,
+    quality,
     output_format: 'webp',
     // Lossy WebP; without this the API returns ~2 MB files for a hero image.
     output_compression: 80,
   });
   const b64 = result.data?.[0]?.b64_json;
   if (!b64) throw new Error('The image model returned no image.');
-  return Buffer.from(b64, 'base64');
+  return { bytes: Buffer.from(b64, 'base64'), tokens: result.usage?.output_tokens ?? 0 };
 }

@@ -982,6 +982,12 @@ fieldset.panel {
   font-size: 1.4rem;
 }
 
+.cost {
+  margin: 0 0 4px;
+  font-family: var(--serif);
+  font-size: 1.3rem;
+}
+
 .spinner {
   display: inline-block;
   width: 12px;

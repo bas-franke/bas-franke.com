@@ -132,8 +132,16 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
               <dd>{data.tokens.failed_runs}</dd>
             </div>
           </dl>
+          <p className="cost">
+            ≈ ${data.cost.last_24h_usd.toFixed(2)} <span className="muted small">last 24 h</span>
+            <span className="muted small">
+              {' '}
+              · ${data.cost.per_article_usd.toFixed(3)} per article · ${data.cost.total_usd.toFixed(2)} all time
+            </span>
+          </p>
           <p className="muted small">
-            Models: {data.settings.text_model} · {data.settings.image_model} ({data.settings.image_quality})
+            Estimate from list prices. Models: {data.settings.text_model} · {data.settings.image_model} (cover {data.settings.image_quality}, figures{' '}
+            {data.settings.figure_quality})
           </p>
         </div>
       </section>

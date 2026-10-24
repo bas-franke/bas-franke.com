@@ -70,18 +70,22 @@ export const deleteImages = (images: ArticleImage[] | null | undefined) => Promi
 const setStep = (runId: number, step: string) => query('UPDATE runs SET step = $2 WHERE id = $1', [runId, step]);
 
 /**
- * Renders every requested illustration, two at a time. A failed image is skipped (logged) rather than
- * failing the article; the remaining ones keep their [[image:N]] numbering via the returned index map.
+ * Renders every requested illustration, two at a time. The cover (index 0) uses the cover quality, inline
+ * figures the (cheaper) figure quality. A failed image is skipped (logged) rather than failing the article;
+ * the remaining ones keep their [[image:N]] numbering via the returned index map.
  */
 async function renderImages(settings: Settings, specs: ImageSpec[], onProgress: (done: number) => void) {
   const results: (ArticleImage | undefined)[] = new Array(specs.length);
   let next = 0;
   let done = 0;
+  let tokens = 0;
   const worker = async () => {
     while (next < specs.length) {
       const i = next++;
       try {
-        const file = await saveImage(await illustrate(settings, specs[i].prompt));
+        const rendered = await illustrate(settings, specs[i].prompt, i === 0 ? settings.image_quality : settings.figure_quality);
+        tokens += rendered.tokens;
+        const file = await saveImage(rendered.bytes);
         results[i] = { file, alt: specs[i].alt, caption: specs[i].caption, prompt: specs[i].prompt };
       } catch (err) {
         console.warn(`image ${i + 1}/${specs.length} failed:`, (err as Error).message);
@@ -90,7 +94,7 @@ async function renderImages(settings: Settings, specs: ImageSpec[], onProgress: 
     }
   };
   await Promise.all([worker(), worker()]);
-  return results;
+  return { results, tokens };
 }
 
 /**
@@ -154,7 +158,7 @@ export function generate(trigger: Run['trigger'], topicId?: number): Promise<Run
 
 async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise<Run> {
   const run = await one<Run>('INSERT INTO runs (trigger) VALUES ($1) RETURNING *', [trigger]);
-  const usage: Usage = { input_tokens: 0, output_tokens: 0, images: 0 };
+  const usage: Usage = { input_tokens: 0, output_tokens: 0, images: 0, image_tokens: 0 };
   try {
     const settings = await one<Settings>('SELECT * FROM settings WHERE id = 1');
     await setStep(run.id, 'choosing topic');
@@ -173,10 +177,11 @@ async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise
     if (settings.images_enabled) {
       const specs = draft.images.slice(0, Math.max(1, settings.images_max));
       await setStep(run.id, `illustrating 0/${specs.length}`);
-      const results = await renderImages(settings, specs, (done) => void setStep(run.id, `illustrating ${done}/${specs.length}`));
+      const { results, tokens } = await renderImages(settings, specs, (done) => void setStep(run.id, `illustrating ${done}/${specs.length}`));
       body = remapMarkers(body, results);
       images = results.filter((r): r is ArticleImage => Boolean(r));
       usage.images = images.length;
+      usage.image_tokens = tokens;
       body = placeUnusedImages(body, images.length);
     } else {
       body = body.replace(/^\s*\[\[image:\d+\]\]\s*$/gm, '');
@@ -233,7 +238,7 @@ export async function regenerateImages(articleId: number) {
     ? article.images.map((i) => ({ prompt: i.prompt || `${article.title}. ${article.dek}`, alt: i.alt, caption: i.caption }))
     : [{ prompt: article.image_prompt || `${article.title}. ${article.dek}`, alt: article.hero_alt ?? article.title, caption: '' }];
 
-  const results = await renderImages(settings, specs, () => {});
+  const { results } = await renderImages(settings, specs, () => {});
   // Keep an old image wherever the new one failed, so the article never loses a placed figure.
   const images = results.map((r, i) => r ?? article.images[i]).filter((r): r is ArticleImage => Boolean(r));
   const replaced = article.images.filter((old, i) => results[i] && old.file !== results[i]!.file);

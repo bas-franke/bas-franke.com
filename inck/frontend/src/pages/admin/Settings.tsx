@@ -138,11 +138,19 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
               <input value={s.image_model} onChange={(e) => set('image_model', e.target.value)} className="mono" />
             </label>
             <label>
-              Image quality
+              Cover image quality
               <select value={s.image_quality} onChange={(e) => set('image_quality', e.target.value as SettingsData['image_quality'])}>
-                <option value="low">low (cheapest)</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
+                <option value="low">low (≈ ½ cent)</option>
+                <option value="medium">medium (≈ 4 cents)</option>
+                <option value="high">high (expensive)</option>
+              </select>
+            </label>
+            <label>
+              Inline figure quality
+              <select value={s.figure_quality} onChange={(e) => set('figure_quality', e.target.value as SettingsData['figure_quality'])}>
+                <option value="low">low (≈ ½ cent)</option>
+                <option value="medium">medium (≈ 4 cents)</option>
+                <option value="high">high (expensive)</option>
               </select>
             </label>
           </div>

@@ -35,7 +35,7 @@ Everything else (interval, hours, models, tone, topics, site name) is changed in
 After editing `.env`: `pm2 restart inck --update-env`.
 
 **Costs:** each article is one text request (a few thousand tokens, more with web search) plus one image. At hourly
-generation with `gpt-5.4-mini` and up to six medium-quality images, expect several dollars per day; the dashboard shows token and
+generation with `gpt-5.4-nano`, a medium-quality cover and low-quality inline figures, expect about $1–2 per day; the dashboard shows token and
 image counts. Set a usage limit in your OpenAI account to be safe.
 
 ---

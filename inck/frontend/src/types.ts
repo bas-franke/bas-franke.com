@@ -64,6 +64,7 @@ export interface Settings {
   text_model: string;
   image_model: string;
   image_quality: 'low' | 'medium' | 'high';
+  figure_quality: 'low' | 'medium' | 'high';
   images_enabled: boolean;
   images_min: number;
   images_max: number;
@@ -102,6 +103,7 @@ export interface Overview {
   env: { database: boolean; openai: boolean; admin_password: boolean; data_dir: string };
   counts: { published: number; hidden: number; views: number };
   tokens: { input: number; output: number; images: number; failed_runs: number };
+  cost: { total_usd: number; last_24h_usd: number; per_article_usd: number };
   recent_runs: Run[];
 }
 

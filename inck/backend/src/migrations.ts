@@ -121,4 +121,11 @@ export const migrations: { name: string; sql: string }[] = [
       UPDATE settings SET text_model = 'gpt-5.4-nano' WHERE text_model IN ('gpt-5-mini', 'gpt-5.4-mini');
     `,
   },
+  {
+    // Inline figures at low quality cost ~1/9 of medium with gpt-image-2 and still look good; the cover stays medium.
+    name: '005_figure_quality',
+    sql: `
+      ALTER TABLE settings ADD COLUMN figure_quality text NOT NULL DEFAULT 'low' CHECK (figure_quality IN ('low','medium','high'));
+    `,
+  },
 ];

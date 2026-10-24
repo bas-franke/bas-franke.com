@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { aiConfigured } from '../ai.js';
 import { login, logout, me, requireAdmin } from '../auth.js';
-import { config } from '../config.js';
+import { config, estimateCostUsd } from '../config.js';
 import { dbReady, one, query } from '../db.js';
 import { deleteImages, generate, isGenerating, regenerateImages } from '../generator.js';
 import { schedulerState } from '../scheduler.js';
@@ -22,11 +22,17 @@ adminRouter.get('/overview', async (_req, res) => {
               count(*) FILTER (WHERE status = 'hidden') AS hidden,
               coalesce(sum(views), 0) AS views FROM articles`,
     ),
-    one<{ input: string; output: string; images: string; failed: string }>(
+    one<{ input: string; output: string; images: string; image_tokens: string; failed: string; succeeded: string; today_cost_input: string; today_cost_output: string; today_image_tokens: string; today_runs: string }>(
       `SELECT coalesce(sum((usage->>'input_tokens')::bigint), 0) AS input,
               coalesce(sum((usage->>'output_tokens')::bigint), 0) AS output,
               coalesce(sum((usage->>'images')::int), 0) AS images,
-              count(*) FILTER (WHERE status = 'failed') AS failed
+              coalesce(sum((usage->>'image_tokens')::bigint), 0) AS image_tokens,
+              count(*) FILTER (WHERE status = 'failed') AS failed,
+              count(*) FILTER (WHERE status = 'succeeded') AS succeeded,
+              coalesce(sum((usage->>'input_tokens')::bigint) FILTER (WHERE started_at > now() - interval '24 hours'), 0) AS today_cost_input,
+              coalesce(sum((usage->>'output_tokens')::bigint) FILTER (WHERE started_at > now() - interval '24 hours'), 0) AS today_cost_output,
+              coalesce(sum((usage->>'image_tokens')::bigint) FILTER (WHERE started_at > now() - interval '24 hours'), 0) AS today_image_tokens,
+              count(*) FILTER (WHERE status = 'succeeded' AND started_at > now() - interval '24 hours') AS today_runs
        FROM runs`,
     ),
     query(
@@ -40,6 +46,16 @@ adminRouter.get('/overview', async (_req, res) => {
     env: { database: await dbReady(), openai: aiConfigured(), admin_password: Boolean(config.adminPassword), data_dir: config.dataDir },
     counts: { published: Number(counts.published), hidden: Number(counts.hidden), views: Number(counts.views) },
     tokens: { input: Number(tokens.input), output: Number(tokens.output), images: Number(tokens.images), failed_runs: Number(tokens.failed) },
+    cost: {
+      total_usd: estimateCostUsd({ input_tokens: Number(tokens.input), output_tokens: Number(tokens.output), image_tokens: Number(tokens.image_tokens) }, Number(tokens.succeeded)),
+      last_24h_usd: estimateCostUsd(
+        { input_tokens: Number(tokens.today_cost_input), output_tokens: Number(tokens.today_cost_output), image_tokens: Number(tokens.today_image_tokens) },
+        Number(tokens.today_runs),
+      ),
+      per_article_usd: Number(tokens.succeeded)
+        ? estimateCostUsd({ input_tokens: Number(tokens.input), output_tokens: Number(tokens.output), image_tokens: Number(tokens.image_tokens) }, Number(tokens.succeeded)) / Number(tokens.succeeded)
+        : 0,
+    },
     recent_runs: runs.rows,
   });
 });
@@ -47,7 +63,7 @@ adminRouter.get('/overview', async (_req, res) => {
 /* Settings */
 const SETTINGS_FIELDS: (keyof Settings)[] = [
   'enabled', 'interval_minutes', 'max_per_day', 'active_hours_start', 'active_hours_end', 'timezone',
-  'text_model', 'image_model', 'image_quality', 'images_enabled', 'images_min', 'images_max', 'charts_enabled', 'web_search_enabled',
+  'text_model', 'image_model', 'image_quality', 'figure_quality', 'images_enabled', 'images_min', 'images_max', 'charts_enabled', 'web_search_enabled',
   'language', 'tone', 'audience', 'target_words', 'extra_instructions', 'site_name', 'tagline',
 ];
 

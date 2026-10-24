@@ -8,7 +8,10 @@ export interface Settings {
   timezone: string;
   text_model: string;
   image_model: string;
+  /** Quality of the cover image (shown on cards and above the article). */
   image_quality: 'low' | 'medium' | 'high';
+  /** Quality of inline figures; "low" is about a ninth of the price of "medium" and still looks good. */
+  figure_quality: 'low' | 'medium' | 'high';
   images_enabled: boolean;
   images_min: number;
   images_max: number;
