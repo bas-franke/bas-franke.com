@@ -12,8 +12,11 @@ export class RoomSocket {
   status: SocketStatus = 'connecting';
   /** Why the socket closed, as told by the server (or a generic message). */
   closeReason = '';
+  /** Round trip in ms, smoothed. */
   rtt = 0;
   private offset = 0;
+  /** Recent pongs as [rtt, offset]; the lowest-RTT one gives the most trustworthy clock offset. */
+  private readonly pongs: [number, number][] = [];
 
   constructor(
     readonly code: string,
@@ -38,10 +41,15 @@ export class RoomSocket {
         return;
       }
       if (msg.t === 'pong') {
-        const now = Date.now();
-        this.rtt = now - msg.at;
-        // Server clock relative to ours, assuming symmetric latency.
-        this.offset = msg.serverTime - (msg.at + this.rtt / 2);
+        const rtt = Date.now() - msg.at;
+        this.rtt = this.rtt ? this.rtt + (rtt - this.rtt) * 0.25 : rtt;
+        // Server clock relative to ours, assuming symmetric latency. A ping that was itself delayed by jitter skews
+        // that, so trust the fastest of the last few.
+        this.pongs.push([rtt, msg.serverTime - (msg.at + rtt / 2)]);
+        if (this.pongs.length > 8) this.pongs.shift();
+        let best = this.pongs[0];
+        for (const p of this.pongs) if (p[0] < best[0]) best = p;
+        this.offset = best[1];
       }
       if (msg.t === 'error' && this.status === 'connecting') this.closeReason = msg.message;
       if (msg.t === 'closed') this.closeReason = msg.reason;
