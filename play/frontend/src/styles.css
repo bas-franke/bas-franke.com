@@ -1344,6 +1344,8 @@ footer.site {
 .stage {
   position: fixed;
   inset: 0;
+  /* Above the waiting room it covers (whose badges and pills have their own stacking), below dialogs (50). */
+  z-index: 40;
   background: #000;
   overflow: hidden;
   user-select: none;
