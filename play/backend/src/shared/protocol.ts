@@ -7,6 +7,10 @@ import type { RuckusClientMsg, RuckusServerMsg } from './ruckus/protocol.js';
 export type GameId = 'rockets' | 'ruckus';
 export type BotDifficulty = 'easy' | 'normal' | 'hard';
 export type RoomState = 'waiting' | 'playing';
+/** Rockets game modes; rules live in shared/rockets/modes.ts. Other games ignore the mode. */
+export type GameMode = 'ffa' | 'tdm' | 'ctf' | 'elim';
+/** 0 = Red, 1 = Blue (names and colours in shared/rockets/modes.ts TEAMS). */
+export type Team = 0 | 1;
 
 export interface GameMeta {
   id: GameId;
@@ -77,6 +81,8 @@ export interface RoomSettings {
   botDifficulty: BotDifficulty;
   /** Rockets map id, or 'random' for a different one every match. Other games ignore it. */
   map: string;
+  /** Rockets game mode. Other games ignore it. */
+  mode: GameMode;
 }
 
 /** What the lobby list shows. */
@@ -99,6 +105,8 @@ export interface PlayerInfo {
   color: number;
   connected: boolean;
   ping: number;
+  /** Set in team modes. */
+  team?: Team;
 }
 
 export interface RoomView {
@@ -109,6 +117,7 @@ export interface RoomView {
   maxPlayers: number;
   botDifficulty: BotDifficulty;
   map: string;
+  mode: GameMode;
   hostId: string | null;
   players: PlayerInfo[];
 }
@@ -119,6 +128,10 @@ export type GameServerMsg = RocketsServerMsg | RuckusServerMsg;
 export type ClientMsg =
   | { t: 'setBots'; count: number; difficulty?: BotDifficulty }
   | { t: 'setMap'; map: string }
+  /** Host only, while waiting. */
+  | { t: 'setMode'; mode: GameMode }
+  /** Any player, any time (also mid-match); the room keeps bots balanced around humans. */
+  | { t: 'setTeam'; team: Team }
   | { t: 'start' }
   | { t: 'stop' }
   | { t: 'chat'; text: string }

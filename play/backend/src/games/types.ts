@@ -1,12 +1,14 @@
 // Contract between a room and the game running inside it. Each game is a self-contained module under games/<id>/.
 
-import type { BotDifficulty, GameClientMsg, GameServerMsg, RoomSettings } from '../shared/protocol.js';
+import type { BotDifficulty, GameClientMsg, GameServerMsg, RoomSettings, Team } from '../shared/protocol.js';
 
 export interface GamePlayer {
   id: string;
   name: string;
   bot: boolean;
   color: number;
+  /** Set in team modes. */
+  team?: Team;
 }
 
 /** What a game can see and do in its room. */
@@ -29,6 +31,8 @@ export interface GameServer {
   /** A player joined (possibly mid-match). The game must send that player whatever it needs to render. */
   addPlayer(p: GamePlayer): void;
   removePlayer(id: string): void;
+  /** A player changed team mid-match (team modes only). */
+  setTeam?(id: string, team: Team): void;
   onMessage(id: string, m: GameClientMsg): void;
 }
 

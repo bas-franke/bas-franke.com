@@ -22,6 +22,8 @@ import {
   sanitizeName,
 } from './shared/protocol.js';
 import { mapById, RANDOM_MAP } from './shared/rockets/maps.js';
+import { MODES, TEAMS } from './shared/rockets/modes.js';
+import type { GameMode, Team } from './shared/protocol.js';
 
 export class RoomError extends Error {
   constructor(
@@ -81,7 +83,7 @@ export class Room implements GameHost {
   }
 
   players(): GamePlayer[] {
-    return [...this.members.values()].map(({ id, name, bot, color }) => ({ id, name, bot, color }));
+    return [...this.members.values()].map(({ id, name, bot, color, team }) => ({ id, name, bot, color, team }));
   }
 
   humans() {
@@ -105,6 +107,7 @@ export class Room implements GameHost {
       color: m.color,
       connected: m.bot || m.socket?.readyState === 1,
       ping: m.ping,
+      ...(m.team !== undefined ? { team: m.team } : {}),
     }));
     return {
       code: this.code,
@@ -114,6 +117,7 @@ export class Room implements GameHost {
       maxPlayers: this.settings.maxPlayers,
       botDifficulty: this.settings.botDifficulty,
       map: this.settings.map,
+      mode: this.settings.mode,
       hostId: this.hostId,
       players,
     };
@@ -151,7 +155,9 @@ export class Room implements GameHost {
       ping: 0,
       joinedAt: Date.now(),
     };
+    if (this.teamMode()) member.team = this.smallerTeam();
     this.members.set(member.id, member);
+    this.balanceBots();
     this.everJoined = true;
     this.emptySince = null;
     if (!this.hostId) this.hostId = member.id;
@@ -188,6 +194,65 @@ export class Room implements GameHost {
       if (next) this.systemChat(`${next.name} is now the host`);
     }
     if (this.humans().length === 0) this.emptySince ??= Date.now();
+    this.balanceBots();
+    this.broadcastRoom();
+  }
+
+  // ---- teams ----------------------------------------------------------------------------------------------------
+
+  private teamMode() {
+    return this.settings.game === 'rockets' && MODES[this.settings.mode].teams;
+  }
+
+  private teamCount(team: Team, onlyBots = false) {
+    let n = 0;
+    for (const m of this.members.values()) if (m.team === team && (!onlyBots || m.bot)) n++;
+    return n;
+  }
+
+  /** The team a newcomer should join: fewer players, then fewer bots (so humans spread out), then Red. */
+  private smallerTeam(): Team {
+    const red = this.teamCount(0);
+    const blue = this.teamCount(1);
+    if (red !== blue) return red < blue ? 0 : 1;
+    return this.teamCount(0, true) >= this.teamCount(1, true) ? 0 : 1;
+  }
+
+  private moveTo(m: Member, team: Team) {
+    if (m.team === team) return;
+    m.team = team;
+    this.game?.setTeam?.(m.id, team);
+  }
+
+  /** Keeps teams within one player of each other by moving bots, never humans. */
+  private balanceBots() {
+    if (!this.teamMode()) return;
+    for (let guard = 0; guard < LIMITS.maxPlayers; guard++) {
+      const red = this.teamCount(0);
+      const blue = this.teamCount(1);
+      if (Math.abs(red - blue) < 2) return;
+      const big: Team = red > blue ? 0 : 1;
+      const bot = this.bots().find((b) => b.team === big);
+      if (!bot) return;
+      this.moveTo(bot, big === 0 ? 1 : 0);
+    }
+  }
+
+  /** Puts everyone on a team (team modes) or clears teams (free for all). */
+  private assignTeams() {
+    if (!this.teamMode()) {
+      for (const m of this.members.values()) delete m.team;
+      return;
+    }
+    for (const m of this.members.values()) if (m.team === undefined) m.team = this.smallerTeam();
+    this.balanceBots();
+  }
+
+  private setTeam(member: Member, team: Team) {
+    if (!this.teamMode() || (team !== 0 && team !== 1) || member.team === team) return;
+    this.moveTo(member, team);
+    this.balanceBots();
+    this.systemChat(`${member.name} joined ${TEAMS[team].name}`);
     this.broadcastRoom();
   }
 
@@ -201,11 +266,13 @@ export class Room implements GameHost {
       const taken = new Set(bots.map((b) => b.name));
       const name = BOT_NAMES.find((n) => !taken.has(n)) ?? `Bot ${bots.length + 1}`;
       const bot: Member = { id: randomId('b'), name, bot: true, color: this.freeColor(), ping: 0, joinedAt: Date.now() };
+      if (this.teamMode()) bot.team = this.smallerTeam();
       this.members.set(bot.id, bot);
       bots.push(bot);
       this.game?.addPlayer(bot);
     }
     this.settings.bots = count;
+    this.balanceBots();
     this.broadcastRoom();
   }
 
@@ -263,6 +330,17 @@ export class Room implements GameHost {
         this.requireHost(member);
         if (msg.map === RANDOM_MAP || mapById(String(msg.map))) this.settings.map = msg.map;
         this.broadcastRoom();
+        return;
+      case 'setMode':
+        this.requireHost(member);
+        if (this.state === 'playing') throw new RoomError('Change the mode between matches.');
+        if (!(msg.mode in MODES)) return;
+        this.settings.mode = msg.mode;
+        this.assignTeams();
+        this.broadcastRoom();
+        return;
+      case 'setTeam':
+        this.setTeam(member, msg.team);
         return;
       case 'start':
         this.requireHost(member);
@@ -364,6 +442,7 @@ export class RoomManager {
       bots,
       botDifficulty,
       map: typeof raw.map === 'string' && mapById(raw.map) ? raw.map : RANDOM_MAP,
+      mode: typeof raw.mode === 'string' && raw.mode in MODES ? (raw.mode as GameMode) : 'ffa',
     };
     let code = randomCode();
     while (this.rooms.has(code)) code = randomCode();

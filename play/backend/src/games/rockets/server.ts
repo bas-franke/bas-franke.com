@@ -187,7 +187,7 @@ class RocketsGame implements GameServer {
     };
     if (p.bot) player.brain = new RocketsBot(BOT_PARAMS[this.host.botDifficulty()], this.graph, makeRng(Math.floor(this.rng() * 1e9)));
     this.players.set(p.id, player);
-    this.host.send(p.id, { k: 'init', map: this.map, items: this.items, scores: this.scores(), left: this.timeLeft() });
+    this.host.send(p.id, { k: 'init', map: this.map, mode: this.host.settings.mode ?? 'ffa', items: this.items, scores: this.scores(), left: this.timeLeft() });
     this.host.broadcast({ k: 'score', scores: this.scores() });
   }
 

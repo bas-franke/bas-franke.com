@@ -10,7 +10,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const listRooms = () => api<{ rooms: RoomSummary[] }>('/api/rooms');
 export const getRoom = (code: string) => api<{ room: RoomSummary }>(`/api/rooms/${encodeURIComponent(code)}`);
-export const createRoom = (settings: Omit<RoomSettings, 'map'> & { map?: string }) => api<{ room: RoomSummary }>('/api/rooms', { method: 'POST', body: JSON.stringify(settings) });
+export const createRoom = (settings: Omit<RoomSettings, 'map' | 'mode'> & Partial<Pick<RoomSettings, 'map' | 'mode'>>) => api<{ room: RoomSummary }>('/api/rooms', { method: 'POST', body: JSON.stringify(settings) });
 
 /** Bot difficulties in picker order, with the one-line promise each makes (see the profiles in bots.ts). */
 export const DIFFICULTIES: { id: BotDifficulty; label: string; blurb: string }[] = [
