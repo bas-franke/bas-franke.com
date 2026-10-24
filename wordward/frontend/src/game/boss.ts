@@ -1,150 +1,107 @@
-// The boss "balaur": a big, chubby library dragon in ink blue and teal that sits on the floor hugging a book. Its
-// wings are fanned-out book pages, its tail ends in a rolled-up scroll, and it has one head per word (the game places
-// the heads, each a separate `Model` from `makeHead`, at offsets relative to the body; a neck runs to each one).
+// The boss "balaur", the Bookwyrm: a chubby ink-blue library dragon sat on the floor hugging a book. Its wings are
+// open books (fanned cream pages with lines of text and a gilded drop cap, a teal leather cover), its tail curls round
+// on the floor and ends in a rolled-up scroll, and it has one head per word (the game places the heads, each a
+// separate `Model` from `makeHead`, at offsets relative to the body; a neck arches up to each one).
 //
-// Built for few draw calls: every rigid part is merged into one soft-lit vertex-coloured mesh, the
-// face details into one flat vertex-coloured mesh. Body 1, contact shadow 1, wings 2, tail 1, each head 2: a
-// three-headed balaur is 11 draw calls. Head geometry is shared by every head.
+// Draw calls: the whole body (torso, necks, wings, tail) is ONE soft-lit vertex-coloured mesh whose wings and tail
+// move by morph targets, plus its contact shadow; each head is one lit mesh and one unlit face mesh (the face blinks
+// by a morph target). A three-headed Bookwyrm is 2 + 3 x 2 = 8 draw calls. Head geometry is shared by every head;
+// the materials are the shared `vertexColorMaterial(true)` / `flatVertexColorMaterial()` of every creature, and the
+// morph target counts (5 lit, 4 face) match enemies.ts so no extra shader programs are compiled.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { shadowBlob, toonRamp, vertexColorMaterial } from './toon';
+import { flatVertexColorMaterial, shadowBlob, vertexColorMaterial } from './toon';
 import type { Model } from './enemies';
 
 // ---- palette ------------------------------------------------------------------------------------------------------
 
-const BLUE = 0x2d5f9e; // ink-blue hide
-const TEAL = 0x3fa9a4; // fins, spikes, wing covers
-const MUZZLE = 0x6cbcc9;
-const CREAM = 0xf3e2b4; // belly, scroll, claws
+const HIDE = 0x3166a6; // ink-blue hide
+const TEAL = 0x3aa69a; // fins, spikes, ear frills
+const CREAM = 0xf3e2b4; // belly, muzzle, scroll, claws
+const BELLY_LINE = 0xdcc38c; // belly plates
 const GOLD = 0xe9b54a;
 const RED = 0xa8383f; // the book it hugs
+const LEATHER = 0x1f5a6e; // wing covers
+const PAPER = 0xfbf1d8;
+const INK_TEXT = 0x9a7352;
 const INKY = 0x1b1630;
 const PINK = 0xff8fb1;
 
-// ---- shared materials ---------------------------------------------------------------------------------------------
+// ---- materials ----------------------------------------------------------------------------------------------------
 
-/** Soft lit with per-vertex colours (and the warm rim), so a whole creature part is one draw call. */
-const vcToon = () => vertexColorMaterial(true);
-
-let flatVC: THREE.MeshBasicMaterial | null = null;
+/** Soft lit with per-vertex colours and the warm rim: shared with every creature. */
+const matSoft = () => vertexColorMaterial(true);
 /** Unlit per-vertex colour: eyes, highlights, blush, mouths. */
-function vcFlat() {
-  if (!flatVC) flatVC = new THREE.MeshBasicMaterial({ vertexColors: true });
-  return flatVC;
-}
-
-let pageMat: THREE.MeshToonMaterial | null = null;
-/**
- * The wing texture is an atlas: the left 72% is a book page (cream paper, lines of ink text, a golden illumination,
- * a dark outline at the edge), the right part is the leather cover (teal with a gold trim).
- */
-function pageMaterial() {
-  if (!pageMat) {
-    const W = 1024;
-    const H = 512;
-    const c = document.createElement('canvas');
-    c.width = W;
-    c.height = H;
-    const g = c.getContext('2d')!;
-    const PW = 736;
-    const paper = g.createLinearGradient(0, 0, PW, 0);
-    paper.addColorStop(0, '#d9c08c');
-    paper.addColorStop(0.18, '#f6e8c6');
-    paper.addColorStop(1, '#fbf1d8');
-    g.fillStyle = paper;
-    g.fillRect(0, 0, PW, H);
-    // Lines of handwriting: short dashes of varying length in brown ink.
-    let seed = 3;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    g.strokeStyle = 'rgba(92, 62, 40, 0.75)';
-    g.lineCap = 'round';
-    g.lineWidth = 5;
-    for (let y = 70; y < H - 50; y += 30) {
-      let x = y < 200 ? 250 : 70;
-      while (x < PW - 70) {
-        const len = 18 + rnd() * 60;
-        g.beginPath();
-        g.moveTo(x, y);
-        g.lineTo(Math.min(x + len, PW - 70), y);
-        g.stroke();
-        x += len + 14;
-      }
-    }
-    // An illuminated drop cap: a golden roundel with a star.
-    g.fillStyle = '#e9b54a';
-    g.beginPath();
-    g.arc(150, 130, 70, 0, Math.PI * 2);
-    g.fill();
-    g.strokeStyle = '#8a4b22';
-    g.lineWidth = 6;
-    g.stroke();
-    g.fillStyle = '#a8383f';
-    g.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
-      const r = i % 2 ? 22 : 50;
-      g.lineTo(150 + Math.cos(a) * r, 130 + Math.sin(a) * r);
-    }
-    g.fill();
-    // Cover leather with a gold trim.
-    g.fillStyle = '#1f5a6e';
-    g.fillRect(PW + 32, 0, W - PW - 32, H);
-    g.strokeStyle = '#e9b54a';
-    g.lineWidth = 10;
-    g.strokeRect(PW + 62, 30, W - PW - 92, H - 60);
-    // Dark ink outline at the edge of both regions (it follows the wing outline, since the UVs span the sheet).
-    g.strokeStyle = '#5a3524';
-    g.lineWidth = 12;
-    g.strokeRect(9, 9, PW - 18, H - 18);
-    g.strokeRect(PW + 32 + 9, 9, W - PW - 32 - 18, H - 18);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    pageMat = new THREE.MeshToonMaterial({ map: tex, gradientMap: toonRamp(), side: THREE.DoubleSide });
-  }
-  return pageMat;
-}
-const PAGE_U = 0.7; // where the page region ends in the atlas
-const COVER_U0 = 0.75;
+const matFace = () => flatVertexColorMaterial();
 
 // ---- geometry kit -------------------------------------------------------------------------------------------------
 
-const tmpColor = new THREE.Color();
-const placer = new THREE.Object3D();
+type Paint = number | ((p: THREE.Vector3) => number);
 
-/** Gives `geo` a flat vertex colour (in the linear working space, like material colours). */
-function paint(geo: THREE.BufferGeometry, hex: number) {
-  tmpColor.setHex(hex);
-  const n = geo.attributes.position.count;
-  const arr = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) {
-    arr[i * 3] = tmpColor.r;
-    arr[i * 3 + 1] = tmpColor.g;
-    arr[i * 3 + 2] = tmpColor.b;
+const _c = new THREE.Color();
+const _v = new THREE.Vector3();
+const placer = new THREE.Object3D();
+const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
+/** Gives `geo` vertex colours (linear, like material colours): one hex or a function of the vertex position. */
+function paint(geo: THREE.BufferGeometry, color: Paint) {
+  const p = geo.attributes.position;
+  const arr = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    _c.setHex(typeof color === 'number' ? color : color(_v.fromBufferAttribute(p, i)));
+    arr[i * 3] = _c.r;
+    arr[i * 3 + 1] = _c.g;
+    arr[i * 3 + 2] = _c.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
   return geo;
 }
 
+/** Keeps only position, normal and colour, indexed, so every part merges with every other. */
+function clean(geo: THREE.BufferGeometry) {
+  for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'color') geo.deleteAttribute(name);
+  if (!geo.index) {
+    const n = geo.attributes.position.count;
+    const idx = new Uint32Array(n);
+    for (let i = 0; i < n; i++) idx[i] = i;
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  }
+  return geo;
+}
+
+/** Reverses the triangle winding (after a mirroring transform, or for the back of a sheet). */
+function flipWinding(geo: THREE.BufferGeometry) {
+  const idx = geo.index!;
+  for (let i = 0; i < idx.count; i += 3) {
+    const a = idx.getX(i + 1);
+    idx.setX(i + 1, idx.getX(i + 2));
+    idx.setX(i + 2, a);
+  }
+  return geo;
+}
+
 /** Collects coloured primitives and merges them into one geometry. */
 class Parts {
-  private list: THREE.BufferGeometry[] = [];
-  /** Adds `geo` in `color`, moved to `pos`, optionally rotated (Euler) first or turned to face `look`. */
-  add(geo: THREE.BufferGeometry, color: number, pos?: THREE.Vector3Like, rot?: THREE.Euler, look?: THREE.Vector3Like) {
+  list: THREE.BufferGeometry[] = [];
+  /**
+   * Adds `geo` scaled by `scale`, rotated by `rot` (or turned so +z faces `look`), moved to `pos`, then painted
+   * (a paint function sees final positions).
+   */
+  add(geo: THREE.BufferGeometry, color: Paint | undefined, pos?: THREE.Vector3Like, rot?: THREE.Euler | null, look?: THREE.Vector3Like | null, scale?: THREE.Vector3Like) {
     placer.position.set(pos?.x ?? 0, pos?.y ?? 0, pos?.z ?? 0);
     placer.rotation.set(0, 0, 0);
     if (rot) placer.rotation.copy(rot);
     if (look) placer.lookAt(look.x, look.y, look.z);
-    placer.scale.set(1, 1, 1);
+    placer.scale.set(scale?.x ?? 1, scale?.y ?? 1, scale?.z ?? 1);
     placer.updateMatrix();
     geo.applyMatrix4(placer.matrix);
-    this.list.push(paint(geo, color));
+    this.list.push(clean(color === undefined ? geo : paint(geo, color)));
     return geo;
   }
   /** Adds a geometry that already has its own vertex colours. */
   raw(geo: THREE.BufferGeometry) {
-    this.list.push(geo);
+    this.list.push(clean(geo));
     return geo;
   }
   merge(): THREE.BufferGeometry {
@@ -153,15 +110,6 @@ class Parts {
     this.list = [];
     return g;
   }
-}
-
-const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
-
-/** A soft-lit vertex-coloured mesh. */
-function meshVC(parent: THREE.Object3D, geo: THREE.BufferGeometry) {
-  const mesh = new THREE.Mesh(geo, vcToon());
-  parent.add(mesh);
-  return mesh;
 }
 
 /** Darkens vertex colours towards `y0` and lightens them towards `y1`: a soft painted gradient, top lit. */
@@ -176,15 +124,16 @@ function gradeByHeight(geo: THREE.BufferGeometry, y0: number, y1: number, lo = 0
   return geo;
 }
 
-/** A tube along `curve` whose radius goes from r0 to r1, with the underside (normal pointing down) in `belly`. */
-function taperedTube(curve: THREE.Curve<THREE.Vector3>, r0: number, r1: number, color: number, belly?: number, segs = 20, radial = 10) {
+/** A tube along `curve` whose radius goes from r0 to r1, with the underside and front (by normal) in `belly`. */
+function taperedTube(curve: THREE.Curve<THREE.Vector3>, r0: number, r1: number, color: number, belly?: number, segs = 20, radial = 10, front = true) {
   const g = new THREE.TubeGeometry(curve, segs, 1, radial, false);
   const pos = g.attributes.position;
   const nor = g.attributes.normal;
   const c = new THREE.Vector3();
   for (let i = 0; i <= segs; i++) {
     curve.getPointAt(i / segs, c);
-    const r = r0 + (r1 - r0) * (i / segs);
+    const t = i / segs;
+    const r = r0 + (r1 - r0) * t;
     for (let j = 0; j <= radial; j++) {
       const k = i * (radial + 1) + j;
       pos.setXYZ(k, c.x + (pos.getX(k) - c.x) * r, c.y + (pos.getY(k) - c.y) * r, c.z + (pos.getZ(k) - c.z) * r);
@@ -194,10 +143,16 @@ function taperedTube(curve: THREE.Curve<THREE.Vector3>, r0: number, r1: number, 
   if (belly !== undefined) {
     const col = g.attributes.color;
     const b = new THREE.Color(belly);
-    for (let k = 0; k < nor.count; k++) if (nor.getY(k) < -0.35 || nor.getZ(k) > 0.75) col.setXYZ(k, b.r, b.g, b.b);
+    for (let k = 0; k < nor.count; k++) if (nor.getY(k) < -0.3 || (front && nor.getZ(k) > 0.7)) col.setXYZ(k, b.r, b.g, b.b);
   }
   return g;
 }
+
+/** A cone pointing along +y with its base at the origin, golden at the tip. */
+const spike = (r: number, h: number, base = TEAL, tip = GOLD, radial = 7) => {
+  const g = new THREE.ConeGeometry(r, h, radial).translate(0, h / 2, 0);
+  return paint(g, (p) => (p.y > h * 0.62 ? tip : base));
+};
 
 /** Squash and stretch on hit, decaying over a fraction of a second. */
 function squash(body: THREE.Object3D) {
@@ -209,233 +164,464 @@ function squash(body: THREE.Object3D) {
     step(dt: number) {
       if (k <= 0) return;
       k = Math.max(0, k - dt * 6);
-      const s = 1 + Math.sin(k * Math.PI) * 0.18;
+      const s = 1 + Math.sin(k * Math.PI) * 0.12;
       body.scale.set(s, 1 / s, s);
     },
   };
 }
 
+/** Eyes that close for a moment every few seconds: the step returns whether they are closed now. */
+function blinker() {
+  let next = 1 + Math.random() * 4;
+  let closed = 0;
+  return (dt: number) => {
+    next -= dt;
+    if (next <= 0) {
+      closed = 0.13;
+      next = 2.5 + Math.random() * 3.5;
+    }
+    closed = Math.max(0, closed - dt);
+    return closed > 0;
+  };
+}
+
+/** Relative morph targets for `geo`: one delta array per target (null = this part does not move for it). */
+function setMorphs(geo: THREE.BufferGeometry, targets: (Float32Array | null)[]) {
+  const n = geo.attributes.position.count;
+  geo.morphAttributes.position = targets.map((d) => new THREE.BufferAttribute(d ?? new Float32Array(n * 3), 3));
+  geo.morphTargetsRelative = true;
+  return geo;
+}
+
+/** Positions of `geo` moved by `to` minus moved by `from`: a relative morph target. */
+function delta(geo: THREE.BufferGeometry, from: THREE.Matrix4, to: THREE.Matrix4) {
+  const p = geo.attributes.position;
+  const d = new Float32Array(p.count * 3);
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    a.fromBufferAttribute(p, i).applyMatrix4(from);
+    b.fromBufferAttribute(p, i).applyMatrix4(to);
+    d[i * 3] = b.x - a.x;
+    d[i * 3 + 1] = b.y - a.y;
+    d[i * 3 + 2] = b.z - a.z;
+  }
+  return d;
+}
+
+/** Merges geometries that all carry the same number of morph targets (mergeGeometries drops the relative flag). */
+function mergeMorphed(list: THREE.BufferGeometry[]) {
+  const g = mergeGeometries(list)!;
+  for (const p of list) p.dispose();
+  g.morphTargetsRelative = true;
+  return g;
+}
+
 // ---- head ---------------------------------------------------------------------------------------------------------
 
-/** Head centre above the chin (the head's origin). */
-const HEAD_C = 0.95;
-const headGeos: { toon: THREE.BufferGeometry; face: THREE.BufferGeometry }[] = [];
+/** Head centre above the chin (the head's origin), and the cranium's radii. */
+const HEAD_C = 1.0;
+const HR = v3(1.1, 0.92, 0.95);
+/** The face tips up towards the high camera by this much. */
+const HEAD_TILT = -0.42;
+const headGeos: { soft: THREE.BufferGeometry; face: THREE.BufferGeometry }[] = [];
+
+/** The point of the cranium in direction (x, y, z) from its centre, and the surface normal there. */
+function onCranium(x: number, y: number, z: number) {
+  const d = v3(x, y, z).normalize();
+  const p = v3(d.x * HR.x, HEAD_C + d.y * HR.y, d.z * HR.z);
+  const n = v3(d.x / HR.x, d.y / HR.y, d.z / HR.z).normalize();
+  return { p, n };
+}
 
 function buildHead(glasses: boolean) {
   const C = HEAD_C;
   const p = new Parts();
-  p.add(new THREE.SphereGeometry(0.85, 22, 16).scale(1.15, 0.95, 1), BLUE, v3(0, C, 0));
-  p.add(new THREE.SphereGeometry(0.55, 18, 12).scale(1.2, 0.72, 0.95), MUZZLE, v3(0, C - 0.3, 0.55));
+  p.add(new THREE.SphereGeometry(1, 20, 14), HIDE, v3(0, C, 0), null, null, HR);
+  // A round cream snout, wide and short, with the cheeks puffing out at the sides.
+  p.add(new THREE.SphereGeometry(0.6, 16, 10), CREAM, v3(0, C - 0.36, 0.55), null, null, v3(1.3, 0.72, 0.95));
   for (const s of [-1, 1]) {
-    // Little curled golden horns and soft teal ear fins.
-    p.add(new THREE.ConeGeometry(0.14, 0.55, 8).translate(0, 0.27, 0), GOLD, v3(s * 0.42, C + 0.62, -0.12), new THREE.Euler(-0.45, 0, -s * 0.45));
-    p.add(new THREE.ConeGeometry(0.2, 0.62, 8).scale(1, 1, 0.35).translate(0, 0.3, 0), TEAL, v3(s * 0.9, C + 0.05, -0.15), new THREE.Euler(0, 0, -s * 1.2));
-    // Cheek tufts.
-    p.add(new THREE.ConeGeometry(0.13, 0.4, 6).translate(0, 0.2, 0), TEAL, v3(s * 0.8, C - 0.35, 0.05), new THREE.Euler(0.3, 0, -s * 1.9));
+    // Little golden horns curling back, soft teal ear frills, cheek tufts.
+    p.add(spike(0.15, 0.58, GOLD, 0xf6d27a), undefined, v3(s * 0.45, C + 0.68, -0.18), new THREE.Euler(-0.65, 0, -s * 0.4));
+    p.add(new THREE.ConeGeometry(0.24, 0.7, 8).scale(1, 1, 0.35).translate(0, 0.33, 0), TEAL, v3(s * 0.92, C + 0.1, -0.2), new THREE.Euler(-0.2, 0, -s * 1.15));
+    p.add(new THREE.ConeGeometry(0.15, 0.42, 6).translate(0, 0.2, 0), TEAL, v3(s * 0.86, C - 0.38, 0.0), new THREE.Euler(0.3, 0, -s * 1.95));
   }
   for (let i = 0; i < 3; i++) {
-    p.add(new THREE.ConeGeometry(0.13 - i * 0.02, 0.36, 6).translate(0, 0.18, 0), TEAL, v3(0, C + 0.72 - i * 0.22, -0.35 - i * 0.28), new THREE.Euler(-0.7 - i * 0.45, 0, 0));
+    p.add(spike(0.15 - i * 0.025, 0.42 - i * 0.05, TEAL, TEAL), undefined, v3(0, C + 0.8 - i * 0.3, -0.3 - i * 0.3), new THREE.Euler(-0.6 - i * 0.5, 0, 0));
   }
-  const toonGeo = gradeByHeight(p.merge(), 0.1, 1.9);
+  const soft = gradeByHeight(p.merge(), 0.1, 2.0, 0.8, 1.1);
 
+  // The face, unlit so it stays crisp: big glossy eyes, blush, nostrils and a little smile with one fang.
   const f = new Parts();
+  const eyeParts: { g: THREE.BufferGeometry; centre: THREE.Vector3; up: THREE.Vector3; dot: boolean }[] = [];
   for (const s of [-1, 1]) {
-    const ex = s * 0.36;
-    const ey = C + 0.17;
-    const ez = 0.72;
-    f.add(new THREE.SphereGeometry(0.21, 16, 12).scale(0.82, 1.08, 0.5), INKY, v3(ex, ey, ez));
-    f.add(new THREE.SphereGeometry(0.075, 10, 8), 0xffffff, v3(ex - 0.05, ey + 0.09, ez + 0.08));
-    f.add(new THREE.SphereGeometry(0.035, 8, 6), 0xffffff, v3(ex + 0.06, ey - 0.06, ez + 0.08));
-    f.add(new THREE.CircleGeometry(0.12, 14), PINK, v3(s * 0.6, C - 0.1, 0.62), undefined, v3(s * 1.8, C - 0.1, 4.6));
-    f.add(new THREE.SphereGeometry(0.045, 6, 4), INKY, v3(s * 0.15, C - 0.18, 1.05));
-    if (glasses) f.add(new THREE.TorusGeometry(0.26, 0.035, 6, 22), GOLD, v3(ex, ey, ez + 0.1), undefined, v3(ex * 1.4, ey + 0.4, 5));
+    const { p: at, n } = onCranium(s * 0.42, 0.3, 0.86);
+    const up = v3(0, 1, 0).addScaledVector(n, -n.y).normalize();
+    const side = new THREE.Vector3().crossVectors(up, n);
+    const eye = f.add(new THREE.SphereGeometry(0.27, 14, 9), INKY, at.clone().addScaledVector(n, -0.04), null, at.clone().add(n), v3(0.82, 1.08, 0.38));
+    eyeParts.push({ g: eye, centre: at, up, dot: false });
+    const hl = at.clone().addScaledVector(up, 0.1).addScaledVector(side, -0.07 * s).addScaledVector(n, 0.07);
+    eyeParts.push({ g: f.add(new THREE.SphereGeometry(0.085, 8, 5), 0xffffff, hl), centre: hl, up, dot: true });
+    const hl2 = at.clone().addScaledVector(up, -0.09).addScaledVector(side, 0.07 * s).addScaledVector(n, 0.07);
+    eyeParts.push({ g: f.add(new THREE.SphereGeometry(0.04, 6, 4), 0xffffff, hl2), centre: hl2, up, dot: true });
+    const blush = onCranium(s * 0.72, -0.12, 0.62);
+    f.add(new THREE.CircleGeometry(0.15, 14), PINK, blush.p.addScaledVector(blush.n, 0.03), null, blush.p.clone().add(blush.n), v3(1.2, 0.8, 1));
+    f.add(new THREE.SphereGeometry(0.05, 6, 4), 0x8a6a4a, v3(s * 0.2, C - 0.2, 1.08), null, null, v3(1.2, 0.7, 1));
+    if (glasses) f.add(new THREE.TorusGeometry(0.31, 0.04, 5, 20), GOLD, at.clone().addScaledVector(n, 0.12), null, at.clone().add(n));
   }
-  if (glasses) f.add(new THREE.TorusGeometry(0.1, 0.03, 5, 10, Math.PI), GOLD, v3(0, C + 0.2, 0.86));
-  f.add(new THREE.RingGeometry(0.09, 0.14, 14, 1, Math.PI * 1.1, Math.PI * 0.8), INKY, v3(0, C - 0.33, 1.02), undefined, v3(0, C + 0.4, 4));
-  f.add(new THREE.ConeGeometry(0.05, 0.12, 4).rotateX(Math.PI), 0xffffff, v3(0.1, C - 0.47, 0.98));
-  const faceGeo = f.merge();
-  for (const g of [toonGeo, faceGeo]) g.userData.shared = true;
-  return { toon: toonGeo, face: faceGeo };
+  if (glasses) f.add(new THREE.TorusGeometry(0.12, 0.035, 5, 10, Math.PI), GOLD, v3(0, C + 0.36, 0.98), new THREE.Euler(-0.35, 0, 0));
+  f.add(new THREE.TorusGeometry(0.13, 0.03, 5, 14, Math.PI * 0.9), INKY, v3(0, C - 0.4, 1.1), new THREE.Euler(0.2, 0, Math.PI * 1.05));
+  f.add(new THREE.ConeGeometry(0.045, 0.11, 4).rotateX(Math.PI), 0xffffff, v3(0.09, C - 0.53, 1.06));
+  // Blink morph (eyes flatten about their centre along the face's up, highlights shrink away), padded to the
+  // 4 targets every creature face has.
+  const n = f.list.map((g) => g.attributes.position.count);
+  const blink = f.list.map((g, i) => {
+    const e = eyeParts.find((x) => x.g === g);
+    if (!e) return new Float32Array(n[i] * 3);
+    const pos = g.attributes.position;
+    const d = new Float32Array(pos.count * 3);
+    for (let k = 0; k < pos.count; k++) {
+      _v.fromBufferAttribute(pos, k).sub(e.centre);
+      const move = e.dot ? _v.clone().multiplyScalar(-1) : e.up.clone().multiplyScalar(-_v.dot(e.up) * 0.88);
+      d[k * 3] = move.x;
+      d[k * 3 + 1] = move.y;
+      d[k * 3 + 2] = move.z;
+    }
+    return d;
+  });
+  f.list.forEach((g, i) => setMorphs(g, [blink[i], null, null, null]));
+  const face = mergeMorphed(f.list);
+  f.list = [];
+  for (const g of [soft, face]) {
+    g.computeBoundingSphere();
+    g.userData.shared = true;
+  }
+  return { soft, face };
 }
 
 let headCount = 0;
 
-/** A balaur head with its own word, origin at its chin; every other head wears round golden reading glasses. */
+/** A Bookwyrm head with its own word, origin at its chin; every other head wears round golden reading glasses. */
 export function makeHead(): Model {
   const variant = headCount++ % 2;
   const geos = (headGeos[variant] ??= buildHead(variant === 1));
   const root = new THREE.Group();
+  root.name = 'bookwyrm-head';
   const body = new THREE.Group();
   root.add(body);
-  // Pivot at the head centre, tipped up a little so the face reads from the high camera.
+  // Pivot at the head centre, tipped up so the face reads from the high camera.
   const head = new THREE.Group();
   head.position.y = HEAD_C;
   body.add(head);
   const tilt = new THREE.Group();
   tilt.position.y = -HEAD_C;
-  tilt.rotation.x = -0.32;
+  tilt.rotation.x = HEAD_TILT;
   head.add(tilt);
-  tilt.add(new THREE.Mesh(geos.toon, vcToon()), new THREE.Mesh(geos.face, vcFlat()));
+  const face = new THREE.Mesh(geos.face, matFace());
+  tilt.add(new THREE.Mesh(geos.soft, matSoft()), face);
+  const fm = face.morphTargetInfluences!;
+  const blink = blinker();
   const phase = Math.random() * 10;
   const sq = squash(body);
-  const model: Model & { height: number } = {
+  return {
     root,
-    radius: 1.0,
-    height: 2.0,
-    color: BLUE,
+    radius: 1.15,
+    height: 2.2,
+    color: HIDE,
     hit: sq.hit,
     animate(dt, t) {
-      head.rotation.z = Math.sin(t * 1.8 + phase) * 0.14;
-      head.rotation.y = Math.sin(t * 1.1 + phase) * 0.2;
+      head.rotation.z = Math.sin(t * 1.8 + phase) * 0.12;
+      head.rotation.y = Math.sin(t * 1.1 + phase) * 0.18;
       head.rotation.x = Math.sin(t * 1.4 + phase * 1.3) * 0.06;
+      fm[0] = blink(dt) ? 1 : 0;
       sq.step(dt);
     },
   };
-  return model;
+}
+
+// ---- wings --------------------------------------------------------------------------------------------------------
+
+/** A point of wing sheet `k` (0 front page .. 3 cover) at (u along from the spine, v up), in the wing's own space. */
+function sheetPoint(k: number, u: number, v: number, len: number, tall: number, out = new THREE.Vector3()) {
+  const L = len * (k === 3 ? 1.04 : 1 - k * 0.05);
+  // Outline: the top edge sweeps up to the tip, the bottom edge is scalloped like a dragon wing.
+  const top = tall * (0.62 + 0.38 * Math.sin(u * Math.PI * 0.5));
+  const bottom = -tall * (0.32 - 0.12 * u) + Math.abs(Math.sin(u * Math.PI * 2.5)) * tall * 0.16 * u;
+  // Pages bulge forward away from the spine and curl back at the tip; the sheets fan back about the spine.
+  const z = Math.sin(u * Math.PI) * 0.35 * (1 - k * 0.15) - u * u * 0.3 - k * 0.03;
+  out.set(u * L, bottom + (top - bottom) * v, z);
+  const a = k * 0.12;
+  return out.set(out.x * Math.cos(a) + out.z * Math.sin(a), out.y, -out.x * Math.sin(a) + out.z * Math.cos(a));
+}
+
+/** A grid over sheet `k` with the given u/v rows, coloured per (u, v), front and back (back in `back`). */
+function sheet(k: number, us: number[], vs: number[], len: number, tall: number, color: (u: number, v: number) => number, back: number) {
+  const nu = us.length;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const p = new THREE.Vector3();
+  for (const v of vs) for (const u of us) pos.push(...sheetPoint(k, u, v, len, tall, p).toArray());
+  for (let j = 0; j < vs.length - 1; j++)
+    for (let i = 0; i < nu - 1; i++) {
+      const a = j * nu + i;
+      idx.push(a, a + 1, a + nu + 1, a, a + nu + 1, a + nu);
+    }
+  const front = new THREE.BufferGeometry();
+  front.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  front.setIndex(idx);
+  front.computeVertexNormals();
+  const col: number[] = [];
+  for (const v of vs) for (const u of us) col.push(..._c.setHex(color(u, v)).toArray());
+  front.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  // The back: the same sheet a hair behind, wound the other way, normals flipped.
+  const rear = front.clone();
+  const n = rear.attributes.normal;
+  const rp = rear.attributes.position;
+  for (let i = 0; i < n.count; i++) {
+    rp.setXYZ(i, rp.getX(i) - n.getX(i) * 0.012, rp.getY(i) - n.getY(i) * 0.012, rp.getZ(i) - n.getZ(i) * 0.012);
+    n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
+  }
+  paint(rear, back);
+  flipWinding(rear);
+  return [front, rear];
+}
+
+/** A strip lying on the front page between u0..u1 around v (text lines), lifted off the paper a little. */
+function pageStrip(u0: number, u1: number, v: number, h: number, len: number, tall: number, color: number) {
+  const segs = Math.max(1, Math.round((u1 - u0) * 12));
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const p = new THREE.Vector3();
+  for (const dv of [-h / 2, h / 2])
+    for (let i = 0; i <= segs; i++) {
+      sheetPoint(0, u0 + ((u1 - u0) * i) / segs, v + dv, len, tall, p);
+      pos.push(p.x, p.y, p.z + 0.025);
+    }
+  for (let i = 0; i < segs; i++) idx.push(i, i + 1, i + segs + 2, i, i + segs + 2, i + segs + 1);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return paint(g, color);
+}
+
+/**
+ * An open-book wing in its own space, spine along y at the origin, extending along +x: three fanned pages (the front
+ * one with lines of text and a gilded drop cap) and the teal leather cover behind, with a gold-capped spine.
+ */
+function wingGeometry(len: number, tall: number) {
+  const parts = new Parts();
+  const us = Array.from({ length: 15 }, (_, i) => i / 14);
+  const pageV = [0, 0.03, 0.25, 0.5, 0.75, 0.97, 1];
+  const shades = [PAPER, 0xf0dfb6, 0xe4cc98];
+  for (let k = 0; k < 3; k++) {
+    const shade = shades[k];
+    for (const g of sheet(k, us, pageV, len, tall, (u, v) => {
+      if (v <= 0 || v >= 1 || u >= 1) return 0xb08850; // the gilt-brown page edge
+      return lerpHex(0xd9bf8a, shade, Math.min(1, u * 5));
+    }, 0xe8d3a4))
+      parts.raw(g);
+  }
+  const coverV = [0, 0.04, 0.96, 1];
+  for (const g of sheet(3, us, coverV, len, tall, (u, v) => (v <= 0 || v >= 1 || u >= 1 ? GOLD : LEATHER), LEATHER)) parts.raw(g);
+  // Lines of handwriting: dashes of varying length in brown ink, shorter beside the drop cap.
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let v = 0.15; v < 0.88; v += 0.065) {
+    let u = v > 0.56 ? 0.42 : 0.12;
+    while (u < 0.86) {
+      const l = 0.05 + rnd() * 0.12;
+      const u1 = Math.min(u + l, 0.88);
+      parts.raw(pageStrip(u, u1, v, 0.016, len, tall, INK_TEXT));
+      u = u1 + 0.025;
+    }
+  }
+  // The illuminated drop cap: a gold roundel with a red star, ringed in brown.
+  const cap = sheetPoint(0, 0.24, 0.73, len, tall);
+  cap.z += 0.04;
+  const r = tall * 0.12;
+  parts.add(new THREE.CircleGeometry(r, 20), GOLD, cap);
+  parts.add(new THREE.RingGeometry(r, r * 1.18, 20), 0x7a4424, v3(cap.x, cap.y, cap.z + 0.002));
+  const star = new THREE.Shape();
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + Math.PI / 2;
+    const rr = i % 2 ? r * 0.32 : r * 0.72;
+    if (i === 0) star.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    else star.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  parts.add(new THREE.ShapeGeometry(star), RED, v3(cap.x, cap.y, cap.z + 0.01));
+  // The spine: a rounded leather roll with gold caps.
+  parts.add(new THREE.CylinderGeometry(0.16, 0.16, tall * 1.02, 10), LEATHER, v3(0, tall * 0.15, -0.08));
+  for (const y of [-tall * 0.36, tall * 0.66]) parts.add(new THREE.SphereGeometry(0.2, 10, 8), GOLD, v3(0, y, -0.08));
+  return parts.merge();
+}
+
+function lerpHex(a: number, b: number, k: number) {
+  return _c.setHex(a).lerp(new THREE.Color(b), Math.min(1, Math.max(0, k))).getHex();
 }
 
 // ---- body ---------------------------------------------------------------------------------------------------------
 
-/** Two fanned book pages and a cover, bent like an open book, as one mesh extending along +x from the spine. */
-function wingGeometry(len: number, tall: number) {
-  const sheets: THREE.BufferGeometry[] = [];
-  const SEG = 16;
-  for (let k = 0; k < 4; k++) {
-    const cover = k === 3;
-    const L = len * (cover ? 1.04 : 1 - k * 0.05);
-    const g = new THREE.PlaneGeometry(1, 1, SEG, 2);
-    const pos = g.attributes.position;
-    const uv = g.attributes.uv;
-    for (let i = 0; i < pos.count; i++) {
-      const u = pos.getX(i) + 0.5; // 0 at the spine, 1 at the tip
-      const v = pos.getY(i) + 0.5;
-      // Wing outline: the top edge sweeps up to the tip, the bottom edge is scalloped like a dragon wing.
-      const top = tall * (0.62 + 0.38 * Math.sin(u * Math.PI * 0.5));
-      const bottom = -tall * (0.32 - 0.12 * u) + Math.abs(Math.sin(u * Math.PI * 2.5)) * tall * 0.16 * u;
-      const y = bottom + (top - bottom) * v;
-      // Pages bulge forward away from the spine and curl back at the tip.
-      const z = Math.sin(u * Math.PI) * 0.35 * (1 - k * 0.15) - u * u * 0.3;
-      pos.setXYZ(i, u * L, y, z);
-      uv.setX(i, cover ? COVER_U0 + u * (1 - COVER_U0) : u * PAGE_U);
-    }
-    // Fan the sheets back about the spine, the cover furthest back.
-    g.rotateY(k * 0.12);
-    g.translate(0, 0, -k * 0.03);
-    g.computeVertexNormals();
-    sheets.push(g);
-  }
-  const g = mergeGeometries(sheets)!;
-  for (const s of sheets) s.dispose();
-  return g;
-}
+/** Morph targets of the body mesh (5, like every lit creature mesh). */
+const M_WING_UP = 0;
+const M_WING_DOWN = 1;
+const M_TAIL = 2;
+const M_BREATH = 3;
+const BODY_TARGETS = 5;
 
-/** The balaur's body: sat on the floor hugging a book, page wings, a scroll tail and a neck up to each head (x, y). */
+/** The Bookwyrm's body: sat on the floor hugging a book, open-book wings, a scroll tail and a neck to each head (x, y). */
 export function makeBalaurBody(heads: { x: number; y: number }[]): Model {
   const root = new THREE.Group();
+  root.name = 'bookwyrm';
   const maxX = Math.max(0, ...heads.map((h) => Math.abs(h.x)));
   const maxY = Math.max(0, ...heads.map((h) => h.y));
-  const span = Math.max(2.3, maxX * 0.6);
-  const TZ = -0.9; // torso centre, behind the heads
-  const TY = 1.7;
+  const W = 1.55; // torso half-width
+  const TZ = -1.1; // torso centre, behind the heads
+  const TY = 1.75;
+  const pieces: THREE.BufferGeometry[] = [];
+  const none = (): (Float32Array | null)[] => Array(BODY_TARGETS).fill(null);
 
-  const p = new Parts();
-  p.add(new THREE.SphereGeometry(1, 28, 20).scale(span, 1.65, 1.35), BLUE, v3(0, TY, TZ));
-  p.add(new THREE.SphereGeometry(1, 22, 14).scale(span * 0.7, 1.3, 0.75), CREAM, v3(0, TY - 0.15, TZ + 0.68));
+  // Torso (breathes): a chubby pear sat on the floor, a plated cream belly, stubby arms round a big red book.
+  const t = new Parts();
+  t.add(new THREE.SphereGeometry(1, 24, 16), HIDE, v3(0, TY + 0.2, TZ), null, null, v3(W, 1.65, 1.35));
+  t.add(new THREE.SphereGeometry(1, 20, 12), HIDE, v3(0, 1.05, TZ - 0.05), null, null, v3(W * 1.18, 1.05, 1.5));
+  t.add(new THREE.SphereGeometry(1, 18, 14), (p) => (Math.floor((p.y - 0.2) / 0.34) % 2 ? BELLY_LINE : CREAM), v3(0, TY - 0.1, TZ + 0.62), null, null, v3(W * 0.74, 1.45, 0.82));
   for (const s of [-1, 1]) {
-    const lx = s * span * 0.72;
-    p.add(new THREE.SphereGeometry(0.8, 16, 12).scale(1, 0.85, 1.1), BLUE, v3(lx, 0.62, TZ + 0.45));
-    p.add(new THREE.SphereGeometry(0.48, 14, 10).scale(1.25, 0.55, 1.4), BLUE, v3(lx, 0.22, TZ + 1.2));
-    for (let c = -1; c <= 1; c++) p.add(new THREE.SphereGeometry(0.13, 8, 6).scale(1, 0.8, 1.2), CREAM, v3(lx + c * 0.24, 0.17, TZ + 1.85));
-    // Stubby arms wrapped round the book.
-    p.add(new THREE.SphereGeometry(0.34, 12, 10).scale(1, 1, 2.0), BLUE, v3(s * span * 0.62, TY + 0.2, TZ + 1.25), new THREE.Euler(0.5, -s * 0.6, 0));
-    p.add(new THREE.SphereGeometry(0.28, 10, 8), BLUE, v3(s * 0.62, TY + 0.15, TZ + 1.95));
+    t.add(new THREE.SphereGeometry(0.36, 12, 10), HIDE, v3(s * W * 0.82, TY + 0.35, TZ + 0.85), new THREE.Euler(0.4, -s * 0.7, 0), null, v3(1, 1, 2.0));
+    t.add(new THREE.SphereGeometry(0.3, 10, 8), HIDE, v3(s * 0.6, TY + 0.25, TZ + 1.68));
+    for (let c = -1; c <= 1; c++) t.add(new THREE.SphereGeometry(0.08, 6, 5), CREAM, v3(s * 0.48 + c * 0.1, TY + 0.38, TZ + 1.86));
   }
-  // The book it hugs: red cover, cream pages, gold clasp.
-  const tilt = new THREE.Euler(-0.55, 0, 0);
-  p.add(new THREE.BoxGeometry(1.5, 1.15, 0.36), RED, v3(0, TY + 0.05, TZ + 1.7), tilt);
-  p.add(new THREE.BoxGeometry(1.42, 1.05, 0.28).translate(0.06, 0, 0), CREAM, v3(0, TY + 0.05, TZ + 1.7), tilt);
-  p.add(new THREE.TorusGeometry(0.22, 0.05, 6, 16), GOLD, v3(0, TY + 0.2, TZ + 1.9), tilt);
-  p.add(new THREE.SphereGeometry(0.1, 8, 6), GOLD, v3(0, TY + 0.2, TZ + 1.9));
-  // Soft spikes down the back.
+  // The book: red cover, cream page block showing at the top and side, a gold clasp and corners.
+  const tilt = new THREE.Euler(-0.5, 0, 0);
+  const bookAt = v3(0, TY + 0.05, TZ + 1.45);
+  t.add(new THREE.BoxGeometry(1.5, 1.15, 0.4), RED, bookAt, tilt);
+  t.add(new THREE.BoxGeometry(1.4, 1.08, 0.3), CREAM, v3(0, 0.05, 0.02).applyEuler(tilt).add(bookAt), tilt);
+  t.add(new THREE.CircleGeometry(0.24, 16), GOLD, v3(0, 0, 0.205).applyEuler(tilt).add(bookAt), tilt);
+  t.add(new THREE.CircleGeometry(0.13, 12), RED, v3(0, 0, 0.21).applyEuler(tilt).add(bookAt), tilt);
+  for (const cx of [-1, 1]) for (const cy of [-1, 1]) t.add(new THREE.BoxGeometry(0.2, 0.2, 0.44), GOLD, v3(cx * 0.66, cy * 0.48, 0).applyEuler(tilt).add(bookAt), tilt);
+  // Soft gold-tipped spikes down the back.
   for (let i = 0; i < 6; i++) {
-    const a = 0.5 + i * 0.32;
-    const at = v3(0, TY + 1.62 * Math.cos(a), TZ - 1.3 * Math.sin(a));
-    p.add(new THREE.ConeGeometry(0.22 - i * 0.015, 0.55, 8).translate(0, 0.25, 0), TEAL, at, new THREE.Euler(-a, 0, 0));
+    const a = 0.45 + i * 0.3;
+    t.add(spike(0.24 - i * 0.02, 0.6 - i * 0.04), undefined, v3(0, TY + 0.2 + 1.62 * Math.cos(a), TZ - 1.32 * Math.sin(a)), new THREE.Euler(-a, 0, 0));
   }
-  // A neck up to each head: from the shoulders, up and out, into the back of the head.
-  for (const h of heads) {
-    const from = v3(h.x * 0.3, TY + 0.9, TZ + 0.1);
-    const to = v3(h.x, h.y + 0.75, 0.15);
-    const mid = v3(h.x * 0.55, Math.max(from.y, to.y) + 1.1, (from.z + to.z) / 2 - 0.5);
-    p.raw(taperedTube(new THREE.QuadraticBezierCurve3(from, mid, to), 0.55, 0.42, BLUE));
+  const torso = gradeByHeight(t.merge(), 0, TY + 1.9, 0.74, 1.08);
+  const breath = new Float32Array(torso.attributes.position.count * 3);
+  {
+    const p = torso.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const k = THREE.MathUtils.clamp((p.getY(i) - 0.4) / 2.5, 0, 1); // the floor contact stays put
+      breath[i * 3] = p.getX(i) * 0.05 * k;
+      breath[i * 3 + 1] = (p.getY(i) - 0.4) * 0.035 * k;
+      breath[i * 3 + 2] = (p.getZ(i) - TZ) * 0.05 * k;
+    }
   }
-  const bodyGeo = gradeByHeight(p.merge(), 0, maxY + 1.5, 0.72, 1.1);
-  const bodyMesh = meshVC(root, bodyGeo);
-  const blob = shadowBlob(span * 1.25, 0.35);
-  blob.geometry.userData.shared = true; // the blob plane is shared by every contact shadow
-  blob.position.z = TZ + 0.2;
-  blob.scale.z *= 0.8;
-  root.add(blob);
+  const tm = none();
+  tm[M_BREATH] = breath;
+  pieces.push(setMorphs(torso, tm));
 
-  // Page wings behind the shoulders. The outer group mirrors the left one; the inner group flaps about the spine.
-  const wings: THREE.Group[] = [];
-  const wingGeo = wingGeometry(span * 1.3 + 1.6, 3.0);
+  // Feet and necks (still).
+  const l = new Parts();
   for (const s of [-1, 1]) {
-    const side = new THREE.Group();
-    side.position.set(s * span * 0.3, TY + 1.3, TZ - 0.7);
-    side.scale.x = s;
-    const flap = new THREE.Group();
-    flap.rotation.set(-0.75, 0.3, 0.3);
-    flap.add(new THREE.Mesh(wingGeo, pageMaterial()));
-    side.add(flap);
-    root.add(side);
-    wings.push(flap);
+    const fx = s * W * 0.7;
+    l.add(new THREE.SphereGeometry(0.62, 12, 9), HIDE, v3(fx, 0.36, TZ + 1.0), null, null, v3(1.05, 0.62, 1.3));
+    for (let c = -1; c <= 1; c++) l.add(new THREE.SphereGeometry(0.13, 8, 6), CREAM, v3(fx + c * 0.26, 0.2, TZ + 1.74), null, null, v3(1, 0.8, 1.2));
   }
+  // A neck arching up from the shoulders into the back of each head, cream underneath, a few fins along the top.
+  for (const h of heads) {
+    const from = v3(THREE.MathUtils.clamp(h.x * 0.25, -0.8, 0.8), TY + 1.2, TZ + 0.15);
+    const to = v3(h.x, h.y + 0.85, -0.1);
+    const mid = v3(h.x * 0.55, Math.max(from.y, to.y) + 1.3, (from.z + to.z) / 2 - 0.5);
+    const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+    l.raw(taperedTube(curve, 0.5, 0.36, HIDE, CREAM, 16, 9, false));
+    // A rounded end, so a neck whose head was defeated ends in a soft stump.
+    l.add(new THREE.SphereGeometry(0.36, 8, 6), HIDE, to);
+    for (const u of [0.3, 0.5, 0.7]) {
+      const at = curve.getPointAt(u);
+      const tan = curve.getTangentAt(u);
+      const up = v3(0, 1, 0).addScaledVector(tan, -tan.y).normalize();
+      const r = 0.5 + (0.36 - 0.5) * u;
+      const q = new THREE.Quaternion().setFromUnitVectors(v3(0, 1, 0), up.clone().addScaledVector(tan, -0.5).normalize());
+      l.add(spike(0.16, 0.38), undefined, at.addScaledVector(up, r * 0.85), new THREE.Euler().setFromQuaternion(q));
+    }
+  }
+  pieces.push(setMorphs(gradeByHeight(l.merge(), 0, maxY + 1.5, 0.76, 1.08), none()));
 
-  // A tail curling round the right side on the floor, ending in a rolled-up scroll with golden knobs.
-  const tail = new THREE.Group();
-  tail.position.set(0.3, 0.5, TZ - 1.1);
-  root.add(tail);
+  // Open-book wings behind the shoulders, flapping about the spine by two morph targets (up and down from the
+  // middle pose, so the swing stays an arc rather than a chord).
+  const len = 3.4 + Math.min(maxX, 6) * 0.22;
+  const wing = wingGeometry(len, 2.9);
+  const pose = (s: number, f: number) => {
+    const side = new THREE.Matrix4().compose(v3(s * 0.75, TY + 1.15, TZ - 0.75), new THREE.Quaternion(), v3(s, 1, 1));
+    const flap = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(-0.72, 0.3 + f * 0.3, 0.3 + f * 0.1));
+    return side.multiply(flap);
+  };
+  for (const s of [-1, 1]) {
+    const g = wing.clone();
+    const base = pose(s, 0);
+    const tw = none();
+    tw[M_WING_UP] = delta(g, base, pose(s, 1));
+    tw[M_WING_DOWN] = delta(g, base, pose(s, -1));
+    g.applyMatrix4(base);
+    if (s < 0) flipWinding(g);
+    pieces.push(setMorphs(g, tw));
+  }
+  wing.dispose();
+
+  // A tail curling round the right side on the floor, ending in a rolled-up scroll with golden knobs; it sways by a
+  // morph target (a turn about its root).
   const tp = new Parts();
-  const curve = new THREE.CatmullRomCurve3([
-    v3(0, 0, 0),
-    v3(1.2, -0.12, -0.5),
-    v3(span + 0.9, -0.2, 0.0),
-    v3(span + 1.5, -0.18, 1.3),
-    v3(span + 1.0, -0.15, 2.3),
-  ]);
-  tp.raw(taperedTube(curve, 0.55, 0.2, BLUE, CREAM, 28, 10));
+  const curve = new THREE.CatmullRomCurve3([v3(0, 0, 0), v3(1.1, -0.1, -0.45), v3(W + 1.5, -0.16, 0.0), v3(W + 2.0, -0.15, 1.3), v3(W + 1.5, -0.12, 2.3)]);
+  tp.raw(taperedTube(curve, 0.55, 0.2, HIDE, CREAM, 22, 9));
+  for (const u of [0.25, 0.45, 0.65]) {
+    const at = curve.getPointAt(u);
+    const r = 0.55 + (0.2 - 0.55) * u;
+    tp.add(spike(0.14, 0.32), undefined, at.add(v3(0, r * 0.85, 0)));
+  }
   const end = curve.getPointAt(1);
   const dir = curve.getTangentAt(1);
-  const scrollAt = end.clone().addScaledVector(dir, 0.15);
-  scrollAt.y = -0.18;
+  const scrollAt = end.clone().addScaledVector(dir, 0.18);
+  scrollAt.y = -0.17;
   const across = Math.atan2(dir.x, dir.z);
-  tp.add(new THREE.CylinderGeometry(0.3, 0.3, 1.3, 16).rotateZ(Math.PI / 2), CREAM, scrollAt, new THREE.Euler(0, across, 0));
-  for (const s of [-1, 1]) {
-    const knob = v3(s * 0.75, 0, 0).applyEuler(new THREE.Euler(0, across, 0)).add(scrollAt);
-    tp.add(new THREE.SphereGeometry(0.16, 10, 8), GOLD, knob);
-  }
-  // The unrolled bit of the scroll, a curved sheet running back along the tail.
-  tp.add(new THREE.BoxGeometry(1.1, 0.04, 0.7).translate(0, 0, -0.35), CREAM, scrollAt.clone().add(v3(0, 0.26, 0)), new THREE.Euler(0.25, across, 0));
-  meshVC(tail, tp.merge());
+  const turn = new THREE.Euler(0, across, 0);
+  tp.add(new THREE.CylinderGeometry(0.3, 0.3, 1.3, 16).rotateZ(Math.PI / 2), CREAM, scrollAt, turn);
+  for (const s of [-1, 1]) tp.add(new THREE.SphereGeometry(0.17, 10, 8), GOLD, v3(s * 0.75, 0, 0).applyEuler(turn).add(scrollAt));
+  tp.add(new THREE.CylinderGeometry(0.31, 0.31, 0.16, 16).rotateZ(Math.PI / 2), RED, scrollAt, turn);
+  const tail = tp.merge();
+  const tailRoot = new THREE.Matrix4().makeTranslation(0.3, 0.5, TZ - 1.2);
+  const tt = none();
+  tt[M_TAIL] = delta(tail, tailRoot, tailRoot.clone().multiply(new THREE.Matrix4().makeRotationY(0.14)));
+  tail.applyMatrix4(tailRoot);
+  pieces.push(setMorphs(tail, tt));
+
+  const geo = mergeMorphed(pieces);
+  geo.computeBoundingSphere();
+  geo.boundingSphere!.radius += 1.2; // the wings swing outside the rest pose
+  const bodyMesh = new THREE.Mesh(geo, matSoft());
+  root.add(bodyMesh);
+  const m = bodyMesh.morphTargetInfluences!;
+
+  const blob = shadowBlob(W * 2.0, 0.35);
+  blob.geometry.userData.shared = true; // the blob plane is shared by every contact shadow
+  blob.position.z = TZ + 0.3;
+  blob.scale.z *= 0.75;
+  root.add(blob);
 
   const sq = squash(bodyMesh);
-  const model: Model & { height: number } = {
+  return {
     root,
-    radius: span,
-    height: Math.max(3.4, maxY + 2.0),
-    color: BLUE,
+    radius: Math.max(2.3, maxX * 0.6),
+    height: Math.max(3.8, maxY + 2.2),
+    color: HIDE,
     hit: sq.hit,
     animate(dt, t) {
-      // A slow book-like flap: the pages swing about the spine and lift a little.
-      const flap = Math.sin(t * 2.6);
-      for (const w of wings) {
-        w.rotation.y = 0.3 + flap * 0.32;
-        w.rotation.z = 0.3 + flap * 0.1;
-      }
-      tail.rotation.y = Math.sin(t * 1.3) * 0.12;
+      // A slow book-like flap: the pages swing about the spine.
+      const f = Math.sin(t * 2.6);
+      m[M_WING_UP] = Math.max(0, f);
+      m[M_WING_DOWN] = Math.max(0, -f);
+      m[M_TAIL] = Math.sin(t * 1.3);
+      m[M_BREATH] = 0.5 + Math.sin(t * 2.1) * 0.5;
       sq.step(dt);
     },
   };
-  return model;
 }
+
