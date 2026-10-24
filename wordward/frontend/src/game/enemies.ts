@@ -4,12 +4,13 @@
 //   strigoi  — a restless ghost that sways (long words)
 //   zmeu     — a horned dragon head, big and slow (the longest words)
 //   convoy   — a chain of small rocks, one word each, for sentences
+//   balaur   — the boss: a winged dragon body with one zmeu head per word
 
 import * as THREE from 'three';
 import { flat, hullGeometry, inkMaterial, toon } from './toon';
 import { inked } from './world';
 
-export type Kind = 'meteor' | 'bat' | 'ghost' | 'zmeu' | 'rock';
+export type Kind = 'meteor' | 'bat' | 'ghost' | 'zmeu' | 'rock' | 'head';
 
 export interface Model {
   root: THREE.Group;
@@ -273,7 +274,74 @@ export function makeModel(kind: Kind): Model {
       return makeZmeu();
     case 'rock':
       return makeRock();
+    case 'head': {
+      const m = makeZmeu();
+      m.root.scale.setScalar(0.85);
+      return m;
+    }
     default:
       return makeMeteor();
   }
+}
+
+/** The balaur's body: belly, bat wings, a curling tail and a neck up to each head position (x, y relative to it). */
+export function makeBalaurBody(heads: { x: number; y: number }[]): Model {
+  const root = new THREE.Group();
+  const green = 0x3fae6b;
+  const span = Math.max(4, Math.max(...heads.map((h) => Math.abs(h.x))) * 0.9);
+  inked(root, new THREE.SphereGeometry(1, 20, 14).scale(span * 0.55, 1.7, 1.4), green);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12).scale(span * 0.4, 1.2, 0.6), toon(0xf2d27a));
+  belly.position.set(0, -0.3, 0.95);
+  root.add(belly);
+  // Necks: a chain of spheres from the shoulders to each head, so any head position works.
+  for (const h of heads) {
+    const from = new THREE.Vector3(h.x * 0.35, 0.8, 0.2);
+    const to = new THREE.Vector3(h.x, h.y - 0.9, 0);
+    for (let i = 0; i <= 6; i++) {
+      const k = i / 6;
+      const p = from.clone().lerp(to, k);
+      p.y += Math.sin(k * Math.PI) * 0.5;
+      const ball = inked(root, new THREE.SphereGeometry(0.62 - k * 0.12, 12, 8), green);
+      ball.position.copy(p);
+    }
+  }
+  const wings: THREE.Group[] = [];
+  for (const s of [-1, 1]) {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(span * 0.9, 2.6);
+    shape.quadraticCurveTo(span * 0.85, 0.8, span * 1.05, -0.4);
+    shape.quadraticCurveTo(span * 0.7, -0.1, span * 0.6, -1.0);
+    shape.quadraticCurveTo(span * 0.35, -0.4, 0, -0.6);
+    const geo = new THREE.ShapeGeometry(shape);
+    const pivot = new THREE.Group();
+    pivot.position.set(s * span * 0.35, 0.6, -0.6);
+    pivot.scale.x = s;
+    const wing = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x2f8f8a, side: THREE.DoubleSide }));
+    const ink = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x16121c, side: THREE.DoubleSide }));
+    ink.scale.setScalar(1.05);
+    ink.position.z = -0.05;
+    pivot.add(ink, wing);
+    root.add(pivot);
+    wings.push(pivot);
+  }
+  const tail = new THREE.Group();
+  root.add(tail);
+  for (let i = 0; i < 8; i++) {
+    const ball = inked(tail, new THREE.SphereGeometry(0.5 - i * 0.05, 10, 8), green);
+    ball.position.set(Math.sin(i * 0.7) * 1.2, -1.4 - i * 0.45, -0.3);
+  }
+  const tip = inked(tail, new THREE.ConeGeometry(0.35, 0.8, 4), 0xe0483a);
+  tip.position.set(Math.sin(8 * 0.7) * 1.2, -1.4 - 8 * 0.45, -0.3);
+  tip.rotation.z = Math.PI;
+  return {
+    root,
+    radius: span,
+    animate(_dt, t) {
+      const flap = Math.sin(t * 3.2) * 0.45;
+      wings[0].rotation.z = -flap;
+      wings[1].rotation.z = flap;
+      tail.rotation.z = Math.sin(t * 1.7) * 0.15;
+    },
+  };
 }

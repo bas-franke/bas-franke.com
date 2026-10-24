@@ -12,11 +12,14 @@ No database: settings and best scores live in the browser's `localStorage`.
 - **Modes:** words, sentences, or a mix (sentences join from wave 2). A sentence arrives as a convoy of rocks, one
   word each, which you shoot from left to right.
 - **Enemies:** liliac (bat, short words, fast and fluttering), meteorit (burning rock), strigoi (ghost, long words,
-  sways), zmeu (dragon head, the longest words, 2 damage), convoi (sentences, damage = words left).
+  sways), zmeu (dragon head, the longest words, 2 damage), convoi (sentences, damage = words left), and every 5th
+  wave the **balaur**, a winged dragon with one head per word (3 heads at wave 5, up to 5), typed left to right.
 - **Typing:** case-insensitive; spaces and punctuation are skipped for you. With *diacritice ușoare* on (default),
   `a` also matches `ă`/`â`, `i` → `î`, `s` → `ș`, `t` → `ț`. Real diacritics always work, including dead keys and
   phone keyboards (input goes through a hidden text field).
 - **Learning:** a word you get wrong comes back a few enemies later; the game-over screen lists the words to practise.
+  Progress is kept per word and direction in `localStorage` (`game/progress.ts`): two typo-free kills = mastered, and
+  unmastered words are served first. The menu shows how many words of the chosen topics you have mastered.
 - **Citadel:** 10 hearts, +1 at the start of every wave. Houses catch fire as it takes damage.
 
 ## Code
@@ -27,7 +30,8 @@ frontend/src/
 ├── game/
 │   ├── Game.ts      waves, spawning, targeting, typing, scoring; positions the DOM word tags each frame
 │   ├── world.ts     sky, Carpathian mountain ranges, the citadel and its laser tower
-│   ├── enemies.ts   procedural enemy models (bat, meteor, ghost, zmeu, convoy rock)
+│   ├── enemies.ts   procedural enemy models (bat, meteor, ghost, zmeu, convoy rock, balaur body)
+│   ├── progress.ts  per-word learning progress in localStorage
 │   ├── effects.ts   pooled lasers, sparks, inked fireballs, debris
 │   ├── toon.ts      toon ramp, cached materials, ink outlines (same technique as play/)
 │   ├── engine.ts    renderer wrapper with an adaptive-resolution governor
@@ -35,11 +39,12 @@ frontend/src/
 └── vocab/
     ├── words-a.ts   nouns by topic       `english|romanian`, "(hints)" are shown but not typed
     ├── words-b.ts   verbs, adjectives, small words, feelings
-    ├── sentences.ts short sentences (≤ 6 words a side)
+    ├── words-c.ts   phrases, countries, travel, cooking, office, Romania, castle & battle, space, more of everything
+    ├── sentences*.ts short sentences (≤ 6 words a side)
     └── index.ts     categories, parsing, the typing/matching rules
 ```
 
-To add vocabulary, add `english|romanian` lines to a category block (or a new block plus an entry in `CATEGORIES`).
+About 1,900 words and phrases in 40 topics plus 300+ sentences. To add vocabulary, add `english|romanian` lines to a category block (or a new block plus an entry in `CATEGORIES`).
 Verbs are written `(to) eat|(a) mânca` so the infinitive marker is shown but not typed.
 
 ## Configuration

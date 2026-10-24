@@ -2,7 +2,9 @@
 
 import { WORDS_A } from './words-a';
 import { WORDS_B } from './words-b';
+import { WORDS_C } from './words-c';
 import { SENTENCES } from './sentences';
+import { SENTENCES_B } from './sentences-b';
 
 export type Lang = 'en' | 'ro';
 /** `en-ro`: you read English and type Romanian. `ro-en`: the other way round. */
@@ -24,6 +26,7 @@ export interface Category {
 
 export const CATEGORIES: Category[] = [
   { id: 'basics', en: 'Basics', ro: 'De bază' },
+  { id: 'phrases', en: 'Phrases', ro: 'Expresii' },
   { id: 'numbers', en: 'Numbers', ro: 'Numere' },
   { id: 'colors', en: 'Colours', ro: 'Culori' },
   { id: 'family', en: 'Family', ro: 'Familie' },
@@ -51,6 +54,16 @@ export const CATEGORIES: Category[] = [
   { id: 'adjectives', en: 'Adjectives', ro: 'Adjective' },
   { id: 'small', en: 'Small words', ro: 'Cuvinte mici' },
   { id: 'emotions', en: 'Feelings', ro: 'Sentimente' },
+  { id: 'nouns', en: 'More nouns', ro: 'Alte substantive' },
+  { id: 'verbs2', en: 'More verbs', ro: 'Alte verbe' },
+  { id: 'adjectives2', en: 'More adjectives', ro: 'Alte adjective' },
+  { id: 'countries', en: 'Countries', ro: 'Țări' },
+  { id: 'travel', en: 'Travel', ro: 'Călătorii' },
+  { id: 'kitchen', en: 'Cooking', ro: 'Bucătărie' },
+  { id: 'office', en: 'Work & office', ro: 'Birou' },
+  { id: 'romania', en: 'Romania', ro: 'România' },
+  { id: 'castle', en: 'Castle & battle', ro: 'Cetate și luptă' },
+  { id: 'space', en: 'Space', ro: 'Spațiu' },
   { id: 'sentences', en: 'Sentences', ro: 'Propoziții' },
 ];
 
@@ -67,8 +80,8 @@ function parse(block: string, category: string, sentence: boolean): Entry[] {
 }
 
 export const ENTRIES: Entry[] = [
-  ...Object.entries({ ...WORDS_A, ...WORDS_B }).flatMap(([cat, block]) => parse(block, cat, false)),
-  ...parse(SENTENCES, 'sentences', true),
+  ...Object.entries({ ...WORDS_A, ...WORDS_B, ...WORDS_C }).flatMap(([cat, block]) => parse(block, cat, false)),
+  ...parse(SENTENCES + SENTENCES_B, 'sentences', true),
 ];
 
 export const countIn = (cats: string[]) => ENTRIES.filter((e) => cats.includes(e.category)).length;

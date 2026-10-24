@@ -10,7 +10,8 @@
   --red: #e0483a;
   --dim: #6b5d7a;
   --font: 'Nunito', system-ui, sans-serif;
-  --comic: 'Bangers', 'Nunito', system-ui, sans-serif;
+  --comic: 'Lilita One', 'Nunito', system-ui, sans-serif;
+  --logo: 'Bangers', 'Lilita One', system-ui, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
   color-scheme: dark;
 }
@@ -435,7 +436,7 @@ input {
 }
 
 .logo {
-  font-family: var(--comic);
+  font-family: var(--logo);
   font-weight: 400;
   font-size: clamp(56px, 10vw, 84px);
   letter-spacing: 0.04em;
@@ -719,4 +720,37 @@ input {
   .tag.target .dst {
     font-size: 16px;
   }
+}
+
+.letter {
+  position: absolute;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--pink);
+  -webkit-text-stroke: 1px var(--ink);
+  pointer-events: none;
+  animation: letter 0.65s ease-in forwards;
+  z-index: 4;
+}
+@keyframes letter {
+  0% {
+    transform: translate(-50%, -50%) scale(1.3);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx)), 60px) rotate(var(--rot)) scale(0.6);
+    opacity: 0;
+  }
+}
+.tag.balaur {
+  background: #eaffe9;
+  border-color: #1d5c36;
+}
+.mastered {
+  font-size: 13px;
+  color: #4a3a5a;
+}
+.mastered b {
+  color: var(--pink);
 }

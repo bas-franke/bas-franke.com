@@ -5,7 +5,8 @@
 import * as THREE from 'three';
 import { Engine } from './engine';
 import { Effects } from './effects';
-import { makeModel, type Kind, type Model } from './enemies';
+import { makeBalaurBody, makeModel, type Kind, type Model } from './enemies';
+import { flush as flushProgress, isMastered, record } from './progress';
 import { buildWorld, IMPACT_Y, type World } from './world';
 import { sfx } from './audio';
 import {
@@ -32,6 +33,9 @@ export interface Settings {
   lenient: boolean;
 }
 
+/** Every kind of enemy: a single-word model, a sentence convoy, or the boss. */
+export type EnemyKind = Kind | 'convoy' | 'balaur';
+
 export interface TargetView {
   source: string;
   /** The text being typed, as glyphs, and how many have been typed. For sentences: the current word. */
@@ -40,7 +44,7 @@ export interface TargetView {
   /** Sentence progress: all words of the typed sentence and the index of the current one. */
   words?: string[];
   wordIdx?: number;
-  kind: Kind | 'convoy';
+  kind: EnemyKind;
 }
 
 export interface Missed {
@@ -66,7 +70,14 @@ export interface GameState {
 }
 
 interface WordPart {
+  /** The entry this word belongs to (each boss head has its own; convoy rocks share the sentence). */
+  entry: Entry;
+  source: string;
   glyphs: Glyph[];
+  mistakes: number;
+  /** Last on-screen position of its tag, for letter pops. */
+  sx: number;
+  sy: number;
   pos: number;
   model: Model;
   /** Offset from the enemy centre (sentences are a row of rocks). */
@@ -77,7 +88,7 @@ interface WordPart {
 
 interface Enemy {
   id: number;
-  kind: Kind | 'convoy';
+  kind: EnemyKind;
   entry: Entry;
   source: string;
   target: string;
@@ -90,8 +101,10 @@ interface Enemy {
   aimX: number;
   speed: number;
   phase: number;
-  /** A tag above a sentence convoy showing the whole source sentence. */
+  /** A tag under a sentence convoy showing the whole source sentence. */
   banner?: HTMLElement;
+  /** The boss's body, which the heads sit on. */
+  body?: Model;
   mistakes: number;
 }
 
@@ -102,7 +115,7 @@ const DIFF = {
   hard: { time: 0.75, cps: 3.2 },
 };
 /** Seconds an enemy of each kind takes to fall the whole screen at wave 1 on normal. */
-const FALL_TIME: Record<Kind | 'convoy', number> = { bat: 13, meteor: 16, ghost: 18, zmeu: 22, rock: 16, convoy: 30 };
+const FALL_TIME: Record<EnemyKind, number> = { bat: 13, meteor: 16, ghost: 18, zmeu: 22, rock: 16, head: 22, convoy: 30, balaur: 55 };
 const POPS = ['BUM!', 'PAC!', 'POC!', 'ZBANG!', 'BAM!', 'TRANC!', 'PUF!'];
 
 export class Game {
@@ -121,6 +134,7 @@ export class Game {
   private waveLeft = 0;
   private spawnTimer = 0;
   private waveBreak = 0;
+  private bossPending = false;
   private targetId = 0;
   private shake = 0;
   private hurtFlash = 0;
@@ -180,8 +194,14 @@ export class Game {
     this.clearEnemies();
     this.effects.clear();
     const pool = ENTRIES.filter((e) => settings.categories.includes(e.category));
-    this.deck = shuffle(pool.filter((e) => !e.sentence));
-    this.sentenceDeck = shuffle(pool.filter((e) => e.sentence));
+    // Draws come from the end of a deck, so words not yet mastered go last and are served first.
+    const order = (list: Entry[]) => {
+      const mastered = list.filter((e) => isMastered(e.id, settings.direction));
+      const fresh = list.filter((e) => !isMastered(e.id, settings.direction));
+      return [...shuffle(mastered), ...shuffle(fresh)];
+    };
+    this.deck = order(pool.filter((e) => !e.sentence));
+    this.sentenceDeck = order(pool.filter((e) => e.sentence));
     if (settings.mix === 'sentences' && !this.sentenceDeck.length) this.sentenceDeck = shuffle(ENTRIES.filter((e) => e.sentence));
     if (settings.mix !== 'sentences' && !this.deck.length) this.deck = shuffle(ENTRIES.filter((e) => !e.sentence));
     this.review = [];
@@ -201,6 +221,7 @@ export class Game {
   }
 
   quit() {
+    flushProgress();
     this.clearEnemies();
     this.state = { ...this.state, phase: 'idle', banner: null };
     this.emit();
@@ -208,16 +229,21 @@ export class Game {
 
   private nextWave() {
     const wave = this.state.wave + 1;
-    this.waveLeft = Math.min(32, 5 + wave * 2);
+    const boss = wave % 5 === 0 && this.settings.mix !== 'sentences';
+    this.bossPending = boss;
+    this.waveLeft = Math.min(32, 5 + wave * 2) - (boss ? 6 : 0);
     this.waveBreak = 2.6;
     this.spawnTimer = 0;
+    if (wave > 1) flushProgress();
     const heal = wave > 1 && this.state.hp < MAX_HP;
     if (heal) sfx.play('heal');
     this.state = {
       ...this.state,
       wave,
       hp: heal ? this.state.hp + 1 : this.state.hp,
-      banner: { text: `Valul ${wave}`, sub: wave === 1 ? 'Wave 1 — apără cetatea!' : `Wave ${wave}${heal ? ' · +1 ♥' : ''}`, n: wave },
+      banner: boss
+        ? { text: 'Balaurul!', sub: `Wave ${wave} · the many-headed dragon${heal ? ' · +1 ♥' : ''}`, n: wave }
+        : { text: `Valul ${wave}`, sub: wave === 1 ? 'Wave 1 — apără cetatea!' : `Wave ${wave}${heal ? ' · +1 ♥' : ''}`, n: wave },
     };
     this.world.setDamage(this.state.hp / MAX_HP);
     if (wave > 1) sfx.play('wave');
@@ -225,7 +251,13 @@ export class Game {
   }
 
   private gameOver() {
+    flushProgress();
     sfx.play('lose');
+    // Everything still in the air goes up in flames with the citadel.
+    for (const e of [...this.enemies]) {
+      this.effects.explode(e.root.position, 1.2);
+      this.remove(e);
+    }
     this.state = { ...this.state, phase: 'over', hp: 0, banner: null };
     this.world.setDamage(0);
     this.emit();
@@ -256,67 +288,112 @@ export class Game {
   }
 
   private spawn() {
-    const sentence = this.wantSentence();
-    const entry = this.draw(sentence);
-    this.spawned++;
-    const { direction } = this.settings;
-    const source = entry[sourceLang(direction)];
-    const target = stripHints(entry[targetLang(direction)]);
-    const letters = glyphs(target).filter((g) => g.typed).length;
-
-    let kind: Kind | 'convoy';
+    const entry = this.draw(this.wantSentence());
+    const letters = countTyped(stripHints(entry[targetLang(this.settings.direction)]));
+    let kind: EnemyKind;
     if (entry.sentence) kind = 'convoy';
     else if (letters <= 4) kind = 'bat';
     else if (letters <= 7) kind = Math.random() < 0.7 ? 'meteor' : 'ghost';
     else if (letters <= 10) kind = Math.random() < 0.6 ? 'ghost' : 'meteor';
     else kind = 'zmeu';
+    this.create(kind, [entry]);
+  }
+
+  /** The balaur: one head per word (3 at wave 5, one more every 5 waves, at most 5), short words only. */
+  private spawnBoss() {
+    const heads = Math.min(5, 2 + Math.floor(this.state.wave / 5));
+    const entries: Entry[] = [];
+    for (let tries = 0; entries.length < heads && tries < 40; tries++) {
+      const e = this.draw(false);
+      const len = countTyped(stripHints(e[targetLang(this.settings.direction)]));
+      if ((len <= 9 || tries > 30) && !entries.includes(e)) entries.push(e);
+    }
+    this.create('balaur', entries);
+  }
+
+  private create(kind: EnemyKind, entries: Entry[]) {
+    this.spawned++;
+    const { direction } = this.settings;
+    const first = entries[0];
+    const source = first[sourceLang(direction)];
+    const target = stripHints(first[targetLang(direction)]);
+    // A sentence is one rock per word; the boss is one head per entry; anything else is a single word.
+    const words =
+      kind === 'convoy'
+        ? target.split(' ').map((text) => ({ entry: first, source, text }))
+        : entries.map((e) => ({ entry: e, source: e[sourceLang(direction)], text: stripHints(e[targetLang(direction)]) }));
 
     const root = new THREE.Group();
     this.engine.scene.add(root);
-    const words = kind === 'convoy' ? target.split(' ') : [target];
-    // Lay sentence rocks out left to right, spaced by word length.
-    const widths = words.map((w) => Math.max(3, w.length * 0.78 + 1.8));
+    // Lay the words out left to right, spaced by word length so their tags do not overlap.
+    const widths = words.map((w) => {
+      const chars = kind === 'balaur' ? Math.max(w.text.length, w.source.length * 0.8) : w.text.length;
+      return Math.max(kind === 'balaur' ? 4.2 : 3, chars * 0.78 + 1.8);
+    });
     const total = widths.reduce((a, b) => a + b, 0);
     let cursor = -total / 2;
+    const offsets = widths.map((w) => {
+      const o = cursor + w / 2;
+      cursor += w;
+      return o;
+    });
+    // Boss heads rise in an arch over the body.
+    const headY = (x: number) => 3.4 - ((x * x) / (total * total)) * 3;
+    let body: Model | undefined;
+    if (kind === 'balaur') {
+      body = makeBalaurBody(offsets.map((x) => ({ x, y: headY(x) })));
+      root.add(body.root);
+    }
     const parts: WordPart[] = words.map((w, i) => {
-      const model = makeModel(kind === 'convoy' ? 'rock' : kind);
-      const offset = cursor + widths[i] / 2;
-      cursor += widths[i];
-      model.root.position.x = offset;
+      const model = makeModel(kind === 'convoy' ? 'rock' : kind === 'balaur' ? 'head' : kind);
+      model.root.position.set(offsets[i], kind === 'balaur' ? headY(offsets[i]) : 0, kind === 'balaur' ? 0.4 : 0);
       root.add(model.root);
-      const g = glyphs(w);
       const tag = document.createElement('div');
       tag.className = `tag ${kind}`;
       this.tags.appendChild(tag);
-      const part: WordPart = { glyphs: g, pos: 0, model, offset, tag, done: false };
+      const part: WordPart = {
+        entry: w.entry,
+        source: w.source,
+        glyphs: glyphs(w.text),
+        pos: 0,
+        mistakes: 0,
+        sx: 0,
+        sy: 0,
+        model,
+        offset: offsets[i],
+        tag,
+        done: false,
+      };
       skipUntyped(part);
       return part;
     });
 
+    const letters = parts.reduce((n, p) => n + p.glyphs.filter((g) => g.typed).length, 0);
     const margin = Math.min(this.halfWidth - 1, total / 2 + 2.5);
-    const x = (Math.random() * 2 - 1) * Math.max(0, this.halfWidth - margin);
-    const aimX = kind === 'convoy' ? x * 0.6 : (Math.random() * 2 - 1) * Math.min(this.halfWidth * 0.8, 14);
+    const x = kind === 'balaur' ? 0 : (Math.random() * 2 - 1) * Math.max(0, this.halfWidth - margin);
+    const aimX = kind === 'convoy' || kind === 'balaur' ? x * 0.6 : (Math.random() * 2 - 1) * Math.min(this.halfWidth * 0.8, 14);
     const diff = DIFF[this.settings.difficulty];
     const waveFactor = Math.min(2.3, 1 + (this.state.wave - 1) * 0.08);
     // Never faster than a learner at this difficulty can type it, plus a few seconds to read.
-    const typeTime = letters / diff.cps + (kind === 'convoy' ? 6 : 3);
-    const time = Math.max(FALL_TIME[kind] * diff.time / waveFactor, typeTime);
-    const fall = this.top + 2 - IMPACT_Y;
+    const typeTime = letters / diff.cps + (parts.length > 1 ? 6 : 3);
+    const time = Math.max((FALL_TIME[kind] * diff.time) / (kind === 'balaur' ? 1 : waveFactor), typeTime);
+    const startY = this.top + (kind === 'balaur' ? 5 : 2);
     const enemy: Enemy = {
       id: this.nextId++,
       kind,
-      entry,
+      entry: first,
       source,
       target,
       parts,
       partIdx: 0,
       root,
       x,
-      y: this.top + 2,
+      y: startY,
       aimX,
-      speed: fall / time,
+      speed: (startY - IMPACT_Y) / time,
       phase: Math.random() * 10,
       mistakes: 0,
+      body,
     };
     if (kind === 'convoy') {
       enemy.banner = document.createElement('div');
@@ -386,15 +463,22 @@ export class Game {
       const at = this.partPosition(enemy, part, this.tmp);
       this.fire(at);
       this.effects.sparks(at, 4, 5);
+      this.letterPop(part, want.ch);
       if (part.pos >= part.glyphs.length) {
         part.done = true;
+        if (enemy.kind !== 'convoy') record(part.entry.id, this.settings.direction, part.mistakes === 0);
         part.tag.remove();
         part.model.root.visible = false;
-        this.effects.explode(at, enemy.kind === 'convoy' ? 0.9 : part.model.radius, enemy.kind === 'bat' ? 0x4a3070 : enemy.kind === 'ghost' ? 0xd8fff4 : enemy.kind === 'zmeu' ? 0x3fae6b : 0x8a5a9c);
+        this.effects.explode(at, enemy.kind === 'convoy' ? 0.9 : part.model.radius, DEBRIS[enemy.kind]);
         this.pop(at, enemy.kind === 'zmeu' ? 'ZDRANG!' : POPS[(Math.random() * POPS.length) | 0]);
         enemy.partIdx++;
         if (enemy.partIdx >= enemy.parts.length) {
-          sfx.play(enemy.kind === 'zmeu' || enemy.kind === 'convoy' ? 'bigboom' : 'boom');
+          if (enemy.kind === 'convoy') record(enemy.entry.id, this.settings.direction, enemy.mistakes === 0);
+          if (enemy.body) {
+            this.effects.explode(enemy.root.position, 3.2, 0x3fae6b);
+            this.pop(enemy.root.position, 'VICTORIE!');
+          }
+          sfx.play(enemy.kind === 'zmeu' || enemy.kind === 'convoy' || enemy.kind === 'balaur' ? 'bigboom' : 'boom');
           score += this.killBonus(enemy) * multiplier;
           destroyed++;
           this.remove(enemy);
@@ -404,12 +488,10 @@ export class Game {
     } else {
       errors++;
       enemy.mistakes++;
+      part.mistakes++;
       this.zapPitch = 1;
       sfx.play('miss');
-      const m = this.missed.get(enemy.entry.id) ?? { entry: enemy.entry, count: 0 };
-      m.count++;
-      this.missed.set(enemy.entry.id, m);
-      if (!this.review.some((r) => r.entry.id === enemy.entry.id)) this.review.push({ entry: enemy.entry, due: this.spawned + 5 });
+      this.noteMissed(part.entry, 5);
       part.tag.classList.remove('wrong');
       void part.tag.offsetWidth;
       part.tag.classList.add('wrong');
@@ -418,9 +500,30 @@ export class Game {
     this.emit();
   }
 
+  /** Remember a word the player struggled with: listed at game over and served again a few enemies later. */
+  private noteMissed(entry: Entry, after: number) {
+    const m = this.missed.get(entry.id) ?? { entry, count: 0 };
+    m.count++;
+    this.missed.set(entry.id, m);
+    if (!this.review.some((r) => r.entry.id === entry.id)) this.review.push({ entry, due: this.spawned + after });
+  }
+
+  /** The letter just shot flies off its tag. */
+  private letterPop(part: WordPart, ch: string) {
+    const el = document.createElement('div');
+    el.className = 'letter';
+    el.textContent = ch;
+    el.style.left = `${part.sx}px`;
+    el.style.top = `${part.sy}px`;
+    el.style.setProperty('--dx', `${((Math.random() - 0.5) * 120).toFixed(0)}px`);
+    el.style.setProperty('--rot', `${((Math.random() - 0.5) * 540).toFixed(0)}deg`);
+    this.tags.appendChild(el);
+    setTimeout(() => el.remove(), 650);
+  }
+
   private killBonus(e: Enemy) {
     const letters = e.parts.reduce((n, p) => n + p.glyphs.filter((g) => g.typed).length, 0);
-    return letters * 5 + (e.mistakes === 0 ? 50 : 0);
+    return letters * 5 + (e.mistakes === 0 ? 50 : 0) + (e.kind === 'balaur' ? 500 : 0);
   }
 
   private fire(at: THREE.Vector3) {
@@ -446,7 +549,7 @@ export class Game {
     const part = e.parts[e.partIdx];
     if (!part) return null;
     return {
-      source: e.source,
+      source: part.source,
       glyphs: part.glyphs,
       pos: part.pos,
       kind: e.kind,
@@ -466,7 +569,7 @@ export class Game {
       const cls = i < part.pos ? 'done' : i === part.pos && isNext ? 'cur' : '';
       return `<span class="${cls}">${escape(g.ch)}</span>`;
     });
-    const src = e.kind === 'convoy' ? '' : `<div class="src">${escape(e.source)}</div>`;
+    const src = e.kind === 'convoy' ? '' : `<div class="src">${escape(part.source)}</div>`;
     part.tag.innerHTML = `${src}<div class="dst">${typed.join('')}</div>`;
   }
 
@@ -509,6 +612,10 @@ export class Game {
           this.state = { ...this.state, banner: null };
           this.emit();
         }
+      } else if (this.bossPending) {
+        this.bossPending = false;
+        this.spawnBoss();
+        this.spawnTimer = 8;
       } else if (this.waveLeft > 0) {
         this.spawnTimer -= dt;
         const maxAlive = Math.min(9, 3 + Math.floor(this.state.wave / 2));
@@ -528,8 +635,10 @@ export class Game {
       let x = e.x + (e.aimX - e.x) * Math.max(0, progress);
       if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 1.2;
       if (e.kind === 'ghost') x += Math.sin(t * 1.2 + e.phase) * 1.6;
+      if (e.kind === 'balaur') x = Math.sin(t * 0.5 + e.phase) * Math.max(0, this.halfWidth - 12) * 0.5;
       e.root.position.set(x, e.y, 0);
       for (const p of e.parts) if (!p.done) p.model.animate(step, t);
+      e.body?.animate(step, t);
       if (playing && e.y <= IMPACT_Y) this.impact(e);
     }
     if (this.state.phase !== 'playing' && this.state.phase !== 'paused') this.effects.update(dt);
@@ -562,16 +671,14 @@ export class Game {
 
   private impact(e: Enemy) {
     const remaining = e.parts.filter((p) => !p.done).length;
-    const damage = e.kind === 'convoy' ? remaining : e.kind === 'zmeu' ? 2 : 1;
+    const damage = e.kind === 'convoy' ? remaining : e.kind === 'balaur' ? remaining + 1 : e.kind === 'zmeu' ? 2 : 1;
     const at = this.tmp.set(e.root.position.x, IMPACT_Y, 0.5);
     this.effects.explode(at, 1.8, 0xb99c74);
     sfx.play('hurt');
     this.shake = 1;
     this.hurtFlash = 0.5;
-    const m = this.missed.get(e.entry.id) ?? { entry: e.entry, count: 0 };
-    m.count++;
-    this.missed.set(e.entry.id, m);
-    if (!this.review.some((r) => r.entry.id === e.entry.id)) this.review.push({ entry: e.entry, due: this.spawned + 4 });
+    if (e.kind === 'convoy') this.noteMissed(e.entry, 4);
+    else for (const p of e.parts) if (!p.done) this.noteMissed(p.entry, 4);
     this.remove(e);
     const hp = Math.max(0, this.state.hp - damage);
     this.state = { ...this.state, hp, combo: 0, multiplier: 1 };
@@ -591,6 +698,8 @@ export class Game {
         p.model.root.getWorldPosition(v);
         v.y -= p.model.radius + 0.3;
         const s = this.project(v);
+        p.sx = s.x;
+        p.sy = s.y + 18;
         p.tag.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px) translate(-50%, 0)`;
       }
       if (e.banner) {
@@ -604,6 +713,19 @@ export class Game {
     }
   }
 }
+
+const DEBRIS: Record<EnemyKind, number> = {
+  bat: 0x4a3070,
+  ghost: 0xd8fff4,
+  zmeu: 0x3fae6b,
+  head: 0x3fae6b,
+  balaur: 0x3fae6b,
+  meteor: 0x8a5a9c,
+  rock: 0x8a5a9c,
+  convoy: 0x8a5a9c,
+};
+
+const countTyped = (text: string) => glyphs(text).filter((g) => g.typed).length;
 
 function firstTyped(g: Glyph[]) {
   const i = g.findIndex((x) => x.typed);

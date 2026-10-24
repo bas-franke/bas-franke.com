@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Game, type Difficulty, type GameState, type Mix, type Settings } from './game/Game';
 import { sfx } from './game/audio';
+import { masteredCount } from './game/progress';
 import { CATEGORIES, countIn, ENTRIES, sourceLang, stripHints, targetLang, type Direction } from './vocab';
 
 const SETTINGS_KEY = 'wordward:settings';
@@ -124,7 +125,7 @@ export default function App() {
         spellCheck={false}
         aria-label="Type here"
       />
-      {state && phase !== 'idle' && <Hud state={state} settings={settings} onPause={() => game?.pause(true)} />}
+      {state && (phase === 'playing' || phase === 'paused') && <Hud state={state} settings={settings} onPause={() => game?.pause(true)} />}
       {phase === 'idle' && <Menu settings={settings} setSettings={setSettings} best={best[bestKey] ?? 0} onStart={start} />}
       {phase === 'paused' && (
         <div className="overlay">
@@ -273,6 +274,7 @@ function Menu({
   const toggleCat = (id: string) =>
     set('categories', settings.categories.includes(id) ? settings.categories.filter((c) => c !== id) : [...settings.categories, id]);
   const total = useMemo(() => countIn(settings.categories), [settings.categories]);
+  const mastered = masteredCount(settings.direction, settings.categories);
   const sample = useMemo(() => ENTRIES[(Math.random() * ENTRIES.length) | 0], []);
   return (
     <div className="overlay menu">
@@ -359,6 +361,9 @@ function Menu({
                 Record: <b>{best.toLocaleString()}</b>
               </>
             )}
+            <div className="mastered">
+              Stăpânite · Mastered: <b>{mastered.toLocaleString()}</b> / {total.toLocaleString()}
+            </div>
             <div className="sample">
               <span className="dim">Exemplu:</span> {stripHints(sample.en)} = <b>{stripHints(sample.ro)}</b>
             </div>
@@ -371,6 +376,7 @@ function Menu({
           <span>👻 strigoi · long words</span>
           <span>🐉 zmeu · longest words</span>
           <span>🪨 convoi · sentences, left to right</span>
+          <span>🐲 balaur · boss every 5th wave</span>
         </div>
       </div>
     </div>
