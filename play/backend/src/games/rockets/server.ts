@@ -495,6 +495,8 @@ class RocketsGame implements GameServer {
       ],
       map: this.map,
       canSee: (from: Vec3, to: Vec3) => !segmentBoxes(from, to, this.map.boxes),
+      // Rockets in flight, so bots can dodge them.
+      rockets: this.rockets,
     };
   }
 
