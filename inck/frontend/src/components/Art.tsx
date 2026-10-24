@@ -1,19 +1,22 @@
 import { useEffect, useState } from 'react';
 
+// Remembered per page load, so a missing file is tried once, not once per card (and never flashes a broken image).
+const missing = new Set<string>();
+
 /**
  * Decorative illustration from /public/art (see inck/ART.md for the list and prompts).
  * Renders nothing until the file exists, so the site works with or without artwork.
  */
 export default function Art({ name, fallback, className }: { name: string; fallback?: string; className?: string }) {
-  const [src, setSrc] = useState(name);
-  const [missing, setMissing] = useState(false);
+  const resolve = (n: string) => (missing.has(n) ? (fallback && n !== fallback && !missing.has(fallback) ? fallback : null) : n);
+  const [src, setSrc] = useState<string | null>(() => resolve(name));
 
   useEffect(() => {
-    setSrc(name);
-    setMissing(false);
-  }, [name]);
+    setSrc(resolve(name));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, fallback]);
 
-  if (missing) return null;
+  if (!src) return null;
   return (
     <img
       src={`/art/${src}.png`}
@@ -22,7 +25,10 @@ export default function Art({ name, fallback, className }: { name: string; fallb
       className={className}
       draggable={false}
       decoding="async"
-      onError={() => (fallback && src !== fallback ? setSrc(fallback) : setMissing(true))}
+      onError={() => {
+        missing.add(src);
+        setSrc(fallback && src !== fallback && !missing.has(fallback) ? fallback : null);
+      }}
     />
   );
 }
