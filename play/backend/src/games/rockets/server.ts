@@ -828,7 +828,16 @@ class RocketsGame implements GameServer {
             team: p.team,
             allies,
             bases: this.bases,
-            ...(this.flags ? { flags: this.flags.map((f) => ({ state: f.state, pos: f.pos, ...(f.carrier ? { carrier: f.carrier } : {}) })) } : {}),
+            // A carried flag is wherever its carrier is right now (updateFlags only catches up at the end of the step).
+            ...(this.flags
+              ? {
+                  flags: this.flags.map((f) => ({
+                    state: f.state,
+                    pos: (f.carrier && this.players.get(f.carrier)?.body.pos) || f.pos,
+                    ...(f.carrier ? { carrier: f.carrier } : {}),
+                  })),
+                }
+              : {}),
             ...(this.isElim() ? { roundOver: this.round.state === 'over' } : {}),
           }
         : {}),
