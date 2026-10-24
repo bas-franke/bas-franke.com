@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { one, query } from '../db.js';
+import { nextRunAt } from '../scheduler.js';
 import type { Article, Settings } from '../types.js';
 
 export const publicRouter = Router();
@@ -8,13 +9,19 @@ const LIST_COLUMNS = `a.id, a.slug, a.title, a.dek, a.tags, a.hero_image, a.hero
   t.name AS topic_name, t.id AS topic_id`;
 
 publicRouter.get('/site', async (_req, res) => {
-  const settings = await one<Settings>('SELECT site_name, tagline FROM settings WHERE id = 1');
+  const settings = await one<Settings>('SELECT * FROM settings WHERE id = 1');
   const { rows: topics } = await query(
     `SELECT t.id, t.name, t.description, count(a.id)::int AS articles
      FROM topics t LEFT JOIN articles a ON a.topic_id = t.id AND a.status = 'published'
      WHERE t.enabled GROUP BY t.id ORDER BY t.name`,
   );
-  res.json({ site_name: settings.site_name, tagline: settings.tagline, topics });
+  res.json({
+    site_name: settings.site_name,
+    tagline: settings.tagline,
+    interval_minutes: settings.interval_minutes,
+    next_article_at: nextRunAt(settings),
+    topics,
+  });
 });
 
 publicRouter.get('/articles', async (req, res) => {

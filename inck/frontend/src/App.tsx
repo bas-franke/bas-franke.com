@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { api } from './api';
+import { api, timeUntil } from './api';
 import AdminApp from './pages/admin/AdminApp';
 import ArticlePage from './pages/ArticlePage';
 import Home from './pages/Home';
 import type { Site } from './types';
+
+/** "hour", "2 hours", "45 minutes", "day" */
+function cadence(minutes = 60) {
+  if (minutes % 1440 === 0) return minutes === 1440 ? 'day' : `${minutes / 1440} days`;
+  if (minutes % 60 === 0) return minutes === 60 ? 'hour' : `${minutes / 60} hours`;
+  return `${minutes} minutes`;
+}
 
 export default function App() {
   const [site, setSite] = useState<Site | null>(null);
@@ -39,12 +46,25 @@ export default function App() {
       </Routes>
 
       <footer className="site-foot">
-        <p>
-          <strong>{site?.site_name ?? 'inck'}</strong> publishes one AI-written, AI-illustrated article at a time about things worth knowing.
-        </p>
-        <p className="muted">
-          © {new Date().getFullYear()} · <a href="https://bas-franke.com">Bas Franke</a>
-        </p>
+        <div className="foot-main">
+          <Link to="/" className="brand">
+            {site?.site_name ?? 'inck'}
+            <span className="dot">.</span>
+          </Link>
+          <p className="foot-blurb">
+            A magazine written by machines. Every {cadence(site?.interval_minutes)}, one piece worth your time: researched with live web
+            search, charted from real numbers and illustrated on the spot.
+          </p>
+        </div>
+        <div className="foot-meta mono">
+          <span className="foot-next">
+            <span className="foot-pulse" />
+            {site?.next_article_at ? `next article ${timeUntil(site.next_article_at)}` : 'the presses are paused'}
+          </span>
+          <span>
+            built by <a href="https://bas-franke.com">Bas Franke</a>
+          </span>
+        </div>
       </footer>
     </div>
   );

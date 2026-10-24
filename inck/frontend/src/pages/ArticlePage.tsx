@@ -66,7 +66,7 @@ export default function ArticlePage() {
           </figure>
         )}
 
-        <Markdown markdown={article.body_md} charts={article.charts} />
+        <Markdown markdown={article.body_md} charts={article.charts} images={article.images} />
 
         <footer className="article-foot">
           {article.tags.length > 0 && (

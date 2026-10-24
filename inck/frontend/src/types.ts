@@ -22,8 +22,15 @@ export interface Chart {
   note: string;
 }
 
+export interface ArticleImage {
+  file: string;
+  alt: string;
+  caption: string;
+}
+
 export interface Article extends ArticleCard {
   body_md: string;
+  images: ArticleImage[];
   charts: Chart[];
   sources: { title: string; url: string }[];
   model: string | null;
@@ -42,6 +49,8 @@ export interface Topic {
 export interface Site {
   site_name: string;
   tagline: string;
+  interval_minutes: number;
+  next_article_at: string | null;
   topics: Topic[];
 }
 
@@ -56,6 +65,8 @@ export interface Settings {
   image_model: string;
   image_quality: 'low' | 'medium' | 'high';
   images_enabled: boolean;
+  images_min: number;
+  images_max: number;
   charts_enabled: boolean;
   web_search_enabled: boolean;
   language: string;
@@ -107,5 +118,6 @@ export interface AdminArticle {
   model: string | null;
   usage: { input_tokens?: number; output_tokens?: number; images?: number };
   charts: number;
+  images: number;
   topic_name: string | null;
 }

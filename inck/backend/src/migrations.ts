@@ -97,4 +97,20 @@ export const migrations: { name: string; sql: string }[] = [
       UPDATE settings SET image_model = 'gpt-image-2' WHERE image_model = 'gpt-image-1';
     `,
   },
+  {
+    // Several illustrations per article, and the newest cheap text model.
+    name: '003_multi_image',
+    sql: `
+      ALTER TABLE articles ADD COLUMN images jsonb NOT NULL DEFAULT '[]';
+      UPDATE articles SET images = jsonb_build_array(jsonb_build_object(
+        'file', hero_image, 'alt', coalesce(hero_alt, ''), 'caption', '', 'prompt', coalesce(image_prompt, '')))
+      WHERE hero_image IS NOT NULL;
+
+      ALTER TABLE settings
+        ADD COLUMN images_min int NOT NULL DEFAULT 2 CHECK (images_min BETWEEN 1 AND 8),
+        ADD COLUMN images_max int NOT NULL DEFAULT 6 CHECK (images_max BETWEEN 1 AND 8);
+      ALTER TABLE settings ALTER COLUMN text_model SET DEFAULT 'gpt-5.4-mini';
+      UPDATE settings SET text_model = 'gpt-5.4-mini' WHERE text_model = 'gpt-5-mini';
+    `,
+  },
 ];

@@ -16,7 +16,7 @@ function openai() {
 export const ARTICLE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'dek', 'tags', 'body_markdown', 'image_prompt', 'image_alt', 'charts', 'sources'],
+  required: ['title', 'dek', 'tags', 'body_markdown', 'images', 'charts', 'sources'],
   properties: {
     title: { type: 'string', description: 'Specific, intriguing headline. No clickbait, no colon-gimmicks.' },
     dek: { type: 'string', description: 'One-sentence subtitle that makes the reader want the article.' },
@@ -25,13 +25,26 @@ export const ARTICLE_SCHEMA = {
       type: 'string',
       description:
         'The article in Markdown. Use ## headings, short paragraphs, occasional bold for key facts. ' +
-        'Where a chart belongs, put a line containing only [[chart:N]] (N = 1-based index into charts).',
+        'Where a chart belongs, put a line containing only [[chart:N]] (N = 1-based index into charts). ' +
+        'Where an illustration belongs, put a line containing only [[image:N]] (N = 1-based index into images). ' +
+        'Image 1 is the cover and must NOT be placed in the body.',
     },
-    image_prompt: {
-      type: 'string',
-      description: 'Prompt for an editorial illustration of the article. Describe a concrete scene, no text in the image.',
+    images: {
+      type: 'array',
+      description:
+        'Illustrations for the article, in reading order. The first is the cover image. ' +
+        'Each prompt describes one concrete scene or object from the article, visually distinct from the others. No text in images.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['prompt', 'alt', 'caption'],
+        properties: {
+          prompt: { type: 'string', description: 'Detailed visual description for an image model.' },
+          alt: { type: 'string', description: 'Alt text.' },
+          caption: { type: 'string', description: 'Short caption shown under the image (empty for the cover).' },
+        },
+      },
     },
-    image_alt: { type: 'string', description: 'Alt text for that illustration.' },
     charts: {
       type: 'array',
       description: 'Zero to three data charts with REAL, well-known or clearly estimated figures. Empty if nothing worth charting.',
@@ -72,13 +85,18 @@ export const ARTICLE_SCHEMA = {
   },
 } as const;
 
+export interface ImageSpec {
+  prompt: string;
+  alt: string;
+  caption: string;
+}
+
 export interface ArticleDraft {
   title: string;
   dek: string;
   tags: string[];
   body_markdown: string;
-  image_prompt: string;
-  image_alt: string;
+  images: ImageSpec[];
   charts: { type: 'bar' | 'line' | 'area' | 'pie'; title: string; unit: string; labels: string[]; series: { name: string; values: number[] }[]; note: string }[];
   sources: { title: string; url: string }[];
 }
@@ -97,15 +115,20 @@ export async function writeArticle(opts: {
   recentTitles: string[];
 }): Promise<{ draft: ArticleDraft; usage: Usage; model: string }> {
   const { settings, topic } = opts;
+  const imagesWanted = settings.images_enabled
+    ? `Provide between ${settings.images_min} and ${settings.images_max} images, as many as the article genuinely benefits from: ` +
+      'image 1 is the cover (not placed in the body); place each further image with a [[image:N]] line where it illustrates the text.'
+    : 'Provide exactly one image (the cover) and no [[image:N]] markers.';
 
   const instructions = [
     `You write for ${settings.site_name}, a site that publishes one genuinely interesting article at a time.`,
     `Audience: ${settings.audience}. Tone: ${settings.tone}. Language: ${settings.language}.`,
-    `Length: about ${settings.target_words} words.`,
+    `Length: ${settings.target_words} words or more (count only body_markdown). Do not stop early; develop each section properly.`,
     'Pick ONE specific, surprising angle inside the topic, not an overview. Open with the most interesting fact.',
     'Formatting rules for body_markdown: start directly with the opening paragraph (no title, no labels such as "lead" or "intro"); ' +
-      'split the article into 3 to 5 sections, each introduced by a Markdown heading line starting with "## "; ' +
+      'split the article into 3 to 6 sections, each introduced by a Markdown heading line starting with "## "; ' +
       'short paragraphs; **bold** only for a handful of key facts; no bullet lists longer than five items.',
+    imagesWanted,
     'Be accurate. Prefer well-established facts; when numbers are estimates, say so. Never invent studies, quotes or URLs.',
     settings.charts_enabled
       ? 'Include 1 to 3 charts only when there is real quantitative data worth showing, and place [[chart:N]] markers in the body.'
@@ -144,6 +167,9 @@ export async function writeArticle(opts: {
   if (!text) throw new Error('The model returned no text.');
   const draft = JSON.parse(text) as ArticleDraft;
   if (!draft.title || !draft.body_markdown) throw new Error('The model returned an incomplete article.');
+  if (!Array.isArray(draft.images) || !draft.images.length) {
+    draft.images = [{ prompt: `${draft.title}. ${draft.dek}`, alt: draft.title, caption: '' }];
+  }
 
   return {
     draft,
@@ -155,7 +181,7 @@ export async function writeArticle(opts: {
 export async function illustrate(settings: Settings, prompt: string): Promise<Buffer> {
   const style =
     'Editorial illustration for a thoughtful online magazine. Clean, modern, slightly painterly, rich but harmonious colours, ' +
-    'strong single focal point, no text, no letters, no logos, no watermark.';
+    'strong single focal point, no text, no letters, no numbers, no logos, no watermark.';
   const result = await openai().images.generate({
     model: settings.image_model,
     prompt: `${style}\n\nScene: ${prompt}`,

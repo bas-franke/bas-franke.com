@@ -148,9 +148,23 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
           </div>
           <label className="row">
             <input type="checkbox" checked={s.images_enabled} onChange={(e) => set('images_enabled', e.target.checked)} />
-            Generate a hero illustration for every article
+            Illustrate articles (cover image plus inline figures)
           </label>
-          <p className="muted small">Any model name from your OpenAI account works. Reasoning models (gpt-5 family) run with low reasoning effort.</p>
+          <div className="fields">
+            <label>
+              Images per article, at least
+              <input type="number" min={1} max={8} value={s.images_min} onChange={(e) => set('images_min', Number(e.target.value))} />
+            </label>
+            <label>
+              At most
+              <input type="number" min={1} max={8} value={s.images_max} onChange={(e) => set('images_max', Number(e.target.value))} />
+            </label>
+          </div>
+          <p className="muted small">
+            The writer decides how many images each article needs within this range. Every image is one paid image request, so the
+            maximum is the main cost lever. Any model name from your OpenAI account works; the gpt-5.4 mini/nano models are the cheapest
+            current text models.
+          </p>
         </fieldset>
 
         <fieldset className="panel">

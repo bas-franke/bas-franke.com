@@ -1,7 +1,7 @@
 # inck: inck.ai
 
 An automated magazine. Every hour (configurable) it picks a topic, has ChatGPT write a genuinely interesting article with
-data charts, has `gpt-image-2` paint a hero illustration, and publishes it. Everything (settings, topics, articles, run
+data charts, has `gpt-image-2` paint a cover and 2–6 inline illustrations, and publishes it. Everything (settings, topics, articles, run
 history) lives in its own PostgreSQL database on the shared RDS instance. Vite + React frontend, Node.js + Express
 backend on port **3003**.
 
@@ -15,9 +15,9 @@ backend on port **3003**.
 1. The scheduler ticks every 30 s. When `enabled`, the last run is ≥ `interval_minutes` ago, the time is inside the
    active hours and fewer than `max_per_day` articles were made in the last 24 h, it starts a run.
 2. A topic is picked at random, weighted by its `weight` and favouring topics with fewer articles this week.
-3. The text model (default `gpt-5-mini`, with web search on) returns a strict JSON article: title, dek, Markdown body,
-   tags, 0–3 charts with real figures, sources, and an image prompt. `[[chart:N]]` markers in the body say where charts go.
-4. The image model (default `gpt-image-2`) renders the hero illustration (WebP, stored in `/srv/apps/inck/data/images`).
+3. The text model (default `gpt-5.4-mini`, with web search on) returns a strict JSON article: title, dek, Markdown body,
+   tags, 0–3 charts with real figures, sources, and 2–6 image prompts. `[[chart:N]]` and `[[image:N]]` markers in the body say where they go.
+4. The image model (default `gpt-image-2`) renders the illustrations, two at a time (WebP, stored in `/srv/apps/inck/data/images`).
 5. The article is published. Failed runs are logged with their error and shown on the dashboard.
 
 Charts are rendered in the browser from the data (Recharts), so numbers stay readable and the page stays light.
@@ -35,7 +35,7 @@ Everything else (interval, hours, models, tone, topics, site name) is changed in
 After editing `.env`: `pm2 restart inck --update-env`.
 
 **Costs:** each article is one text request (a few thousand tokens, more with web search) plus one image. At hourly
-generation with `gpt-5-mini` and medium-quality images, expect a few dollars per day; the dashboard shows token and
+generation with `gpt-5.4-mini` and up to six medium-quality images, expect several dollars per day; the dashboard shows token and
 image counts. Set a usage limit in your OpenAI account to be safe.
 
 ---

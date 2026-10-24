@@ -42,7 +42,7 @@ export default function Articles({ onLoggedOut }: { onLoggedOut: () => void }) {
 
   const toggle = (a: AdminArticle) =>
     act(a.id, () => api(`/api/admin/articles/${a.id}`, { method: 'PATCH', json: { status: a.status === 'published' ? 'hidden' : 'published' } }));
-  const regenerate = (a: AdminArticle) => act(a.id, () => api(`/api/admin/articles/${a.id}/regenerate-image`, { method: 'POST' }));
+  const regenerate = (a: AdminArticle) => act(a.id, () => api(`/api/admin/articles/${a.id}/regenerate-images`, { method: 'POST' }));
   const remove = (a: AdminArticle) => {
     if (!confirm(`Delete “${a.title}” permanently?`)) return;
     act(a.id, () => api(`/api/admin/articles/${a.id}`, { method: 'DELETE' }));
@@ -74,7 +74,7 @@ export default function Articles({ onLoggedOut }: { onLoggedOut: () => void }) {
                 </Link>
                 <p className="muted small">
                   {a.topic_name ?? 'No topic'} · {formatDate(a.published_at, true)} · {a.read_minutes} min · {compact(a.views)} views · {a.charts}{' '}
-                  {a.charts === 1 ? 'chart' : 'charts'}
+                  {a.charts === 1 ? 'chart' : 'charts'} · {a.images} {a.images === 1 ? 'image' : 'images'}
                   {a.usage.input_tokens ? ` · ${compact((a.usage.input_tokens ?? 0) + (a.usage.output_tokens ?? 0))} tokens` : ''}
                 </p>
               </div>
@@ -83,8 +83,8 @@ export default function Articles({ onLoggedOut }: { onLoggedOut: () => void }) {
                 <button className="btn" onClick={() => toggle(a)} disabled={busy}>
                   {a.status === 'published' ? 'Hide' : 'Publish'}
                 </button>
-                <button className="btn" onClick={() => regenerate(a)} disabled={busy} title="Generate a new hero image">
-                  {busy ? 'Working…' : 'New image'}
+                <button className="btn" onClick={() => regenerate(a)} disabled={busy} title="Re-render all illustrations">
+                  {busy ? 'Working…' : 'New images'}
                 </button>
                 <button className="btn btn-ghost danger" onClick={() => remove(a)} disabled={busy}>
                   Delete

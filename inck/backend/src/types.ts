@@ -10,6 +10,8 @@ export interface Settings {
   image_model: string;
   image_quality: 'low' | 'medium' | 'high';
   images_enabled: boolean;
+  images_min: number;
+  images_max: number;
   charts_enabled: boolean;
   web_search_enabled: boolean;
   language: string;
@@ -32,6 +34,13 @@ export interface Topic {
   created_at: Date;
 }
 
+export interface ArticleImage {
+  file: string;
+  alt: string;
+  caption: string;
+  prompt: string;
+}
+
 export interface Article {
   id: number;
   slug: string;
@@ -43,6 +52,8 @@ export interface Article {
   hero_image: string | null;
   hero_alt: string | null;
   image_prompt: string | null;
+  /** All illustrations; images[0] is the cover (also mirrored in hero_image for lists). */
+  images: ArticleImage[];
   charts: unknown[];
   sources: unknown[];
   model: string | null;

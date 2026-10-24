@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { illustrate, writeArticle, type Usage } from './ai.js';
+import { illustrate, writeArticle, type ImageSpec, type Usage } from './ai.js';
 import { imagesDir } from './config.js';
 import { one, query } from './db.js';
-import type { Article, Run, Settings, Topic } from './types.js';
+import type { Article, ArticleImage, Run, Settings, Topic } from './types.js';
 
 let current: Promise<Run> | undefined;
 
@@ -60,12 +60,72 @@ export async function saveImage(bytes: Buffer) {
   return name;
 }
 
-export async function deleteImage(name: string | null) {
+export async function deleteImage(name: string | null | undefined) {
   if (!name) return;
   await unlink(path.join(imagesDir(), path.basename(name))).catch(() => {});
 }
 
+export const deleteImages = (images: ArticleImage[] | null | undefined) => Promise.all((images ?? []).map((i) => deleteImage(i.file)));
+
 const setStep = (runId: number, step: string) => query('UPDATE runs SET step = $2 WHERE id = $1', [runId, step]);
+
+/**
+ * Renders every requested illustration, two at a time. A failed image is skipped (logged) rather than
+ * failing the article; the remaining ones keep their [[image:N]] numbering via the returned index map.
+ */
+async function renderImages(settings: Settings, specs: ImageSpec[], onProgress: (done: number) => void) {
+  const results: (ArticleImage | undefined)[] = new Array(specs.length);
+  let next = 0;
+  let done = 0;
+  const worker = async () => {
+    while (next < specs.length) {
+      const i = next++;
+      try {
+        const file = await saveImage(await illustrate(settings, specs[i].prompt));
+        results[i] = { file, alt: specs[i].alt, caption: specs[i].caption, prompt: specs[i].prompt };
+      } catch (err) {
+        console.warn(`image ${i + 1}/${specs.length} failed:`, (err as Error).message);
+      }
+      onProgress(++done);
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  return results;
+}
+
+/**
+ * Rewrites [[image:N]] markers after some images failed: the body refers to original indexes, the stored
+ * array only holds the images that exist. Markers for missing images are dropped. The cover (image 1)
+ * is never shown in the body.
+ */
+function remapMarkers(body: string, results: (ArticleImage | undefined)[]) {
+  const newIndex = new Map<number, number>();
+  let n = 0;
+  results.forEach((r, i) => {
+    if (r) newIndex.set(i + 1, ++n);
+  });
+  return body.replace(/^\s*\[\[image:(\d+)\]\]\s*$/gm, (_, num) => {
+    const mapped = newIndex.get(Number(num));
+    return mapped && mapped > 1 ? `[[image:${mapped}]]` : '';
+  });
+}
+
+/** Images the writer forgot to place get a slot before successive "## " headings. */
+function placeUnusedImages(body: string, imageCount: number) {
+  const used = new Set([...body.matchAll(/\[\[image:(\d+)\]\]/g)].map((m) => Number(m[1])));
+  const unplaced = [];
+  for (let i = 2; i <= imageCount; i++) if (!used.has(i)) unplaced.push(i);
+  if (!unplaced.length) return body;
+  const parts = body.split(/^(?=## )/m);
+  // parts[0] is the intro; insert before headings 2, 3, ... (skip the first heading so the opening stays clean).
+  let out = parts[0];
+  for (let i = 1; i < parts.length; i++) {
+    const img = i >= 2 ? unplaced.shift() : undefined;
+    out += (img ? `[[image:${img}]]\n\n` : '') + parts[i];
+  }
+  for (const img of unplaced) out += `\n\n[[image:${img}]]\n`;
+  return out;
+}
 
 /**
  * Generates one article: pick topic → write (JSON) → illustrate → store. Only one generation runs at a time;
@@ -93,37 +153,41 @@ async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise
     const draft = written.draft;
     if (!settings.charts_enabled) draft.charts = [];
 
-    let heroImage: string | null = null;
+    let images: ArticleImage[] = [];
+    let body = draft.body_markdown;
     if (settings.images_enabled) {
-      await setStep(run.id, 'illustrating');
-      try {
-        heroImage = await saveImage(await illustrate(settings, draft.image_prompt));
-        usage.images = 1;
-      } catch (err) {
-        // An article without a picture beats no article; the admin can regenerate the image later.
-        console.warn(`image generation failed for run ${run.id}:`, (err as Error).message);
-      }
+      const specs = draft.images.slice(0, Math.max(1, settings.images_max));
+      await setStep(run.id, `illustrating 0/${specs.length}`);
+      const results = await renderImages(settings, specs, (done) => void setStep(run.id, `illustrating ${done}/${specs.length}`));
+      body = remapMarkers(body, results);
+      images = results.filter((r): r is ArticleImage => Boolean(r));
+      usage.images = images.length;
+      body = placeUnusedImages(body, images.length);
+    } else {
+      body = body.replace(/^\s*\[\[image:\d+\]\]\s*$/gm, '');
     }
+    const cover = images[0];
 
     await setStep(run.id, 'saving');
     const article = await one<Article>(
-      `INSERT INTO articles (slug, title, dek, body_md, topic_id, tags, hero_image, hero_alt, image_prompt, charts, sources, model, usage, read_minutes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+      `INSERT INTO articles (slug, title, dek, body_md, topic_id, tags, hero_image, hero_alt, image_prompt, images, charts, sources, model, usage, read_minutes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
       [
         await uniqueSlug(draft.title),
         draft.title,
         draft.dek,
-        draft.body_markdown,
+        body,
         topic.id,
         draft.tags.slice(0, 6).map((t) => t.toLowerCase().trim()),
-        heroImage,
-        draft.image_alt,
-        draft.image_prompt,
+        cover?.file ?? null,
+        cover?.alt ?? draft.images[0]?.alt ?? null,
+        draft.images[0]?.prompt ?? null,
+        JSON.stringify(images),
         JSON.stringify(draft.charts),
         JSON.stringify(draft.sources),
         written.model,
         JSON.stringify(usage),
-        readMinutes(draft.body_markdown),
+        readMinutes(body),
       ],
     );
     await query('UPDATE settings SET last_run_at = now() WHERE id = 1');
@@ -143,15 +207,28 @@ async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise
   }
 }
 
-/** Re-generates only the hero image of an existing article. */
-export async function regenerateImage(articleId: number) {
+/** Re-renders every illustration of an existing article from its stored prompts (same count, same placement). */
+export async function regenerateImages(articleId: number) {
   const [settings, article] = await Promise.all([
     one<Settings>('SELECT * FROM settings WHERE id = 1'),
     one<Article>('SELECT * FROM articles WHERE id = $1', [articleId]),
   ]);
   if (!article) throw new Error('Article not found.');
-  const prompt = article.image_prompt || `${article.title}. ${article.dek}`;
-  const name = await saveImage(await illustrate(settings, prompt));
-  await deleteImage(article.hero_image);
-  return one<Article>('UPDATE articles SET hero_image = $2 WHERE id = $1 RETURNING *', [articleId, name]);
+  const specs: ImageSpec[] = article.images.length
+    ? article.images.map((i) => ({ prompt: i.prompt || `${article.title}. ${article.dek}`, alt: i.alt, caption: i.caption }))
+    : [{ prompt: article.image_prompt || `${article.title}. ${article.dek}`, alt: article.hero_alt ?? article.title, caption: '' }];
+
+  const results = await renderImages(settings, specs, () => {});
+  // Keep an old image wherever the new one failed, so the article never loses a placed figure.
+  const images = results.map((r, i) => r ?? article.images[i]).filter((r): r is ArticleImage => Boolean(r));
+  const replaced = article.images.filter((old, i) => results[i] && old.file !== results[i]!.file);
+  await deleteImages(replaced);
+  if (article.hero_image && !article.images.length && results[0]) await deleteImage(article.hero_image);
+
+  return one<Article>('UPDATE articles SET images = $2, hero_image = $3, hero_alt = $4 WHERE id = $1 RETURNING *', [
+    articleId,
+    JSON.stringify(images),
+    images[0]?.file ?? article.hero_image,
+    images[0]?.alt ?? article.hero_alt,
+  ]);
 }

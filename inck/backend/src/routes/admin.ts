@@ -3,7 +3,7 @@ import { aiConfigured } from '../ai.js';
 import { login, logout, me, requireAdmin } from '../auth.js';
 import { config } from '../config.js';
 import { dbReady, one, query } from '../db.js';
-import { deleteImage, generate, isGenerating, regenerateImage } from '../generator.js';
+import { deleteImages, generate, isGenerating, regenerateImages } from '../generator.js';
 import { schedulerState } from '../scheduler.js';
 import type { Article, Settings, Topic } from '../types.js';
 
@@ -47,7 +47,7 @@ adminRouter.get('/overview', async (_req, res) => {
 /* Settings */
 const SETTINGS_FIELDS: (keyof Settings)[] = [
   'enabled', 'interval_minutes', 'max_per_day', 'active_hours_start', 'active_hours_end', 'timezone',
-  'text_model', 'image_model', 'image_quality', 'images_enabled', 'charts_enabled', 'web_search_enabled',
+  'text_model', 'image_model', 'image_quality', 'images_enabled', 'images_min', 'images_max', 'charts_enabled', 'web_search_enabled',
   'language', 'tone', 'audience', 'target_words', 'extra_instructions', 'site_name', 'tagline',
 ];
 
@@ -146,7 +146,7 @@ adminRouter.get('/articles', async (req, res) => {
   const [{ rows }, total] = await Promise.all([
     query(
       `SELECT a.id, a.slug, a.title, a.dek, a.status, a.views, a.read_minutes, a.hero_image, a.published_at, a.model, a.usage,
-              jsonb_array_length(a.charts) AS charts, t.name AS topic_name
+              jsonb_array_length(a.charts) AS charts, jsonb_array_length(a.images) AS images, t.name AS topic_name
        FROM articles a LEFT JOIN topics t ON t.id = a.topic_id ORDER BY a.published_at DESC LIMIT $1 OFFSET $2`,
       [limit, (page - 1) * limit],
     ),
@@ -172,16 +172,16 @@ adminRouter.patch('/articles/:id', async (req, res) => {
   }
 });
 
-adminRouter.post('/articles/:id/regenerate-image', async (req, res) => {
+adminRouter.post('/articles/:id/regenerate-images', async (req, res) => {
   try {
-    res.json(await regenerateImage(Number(req.params.id)));
+    res.json(await regenerateImages(Number(req.params.id)));
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
 adminRouter.delete('/articles/:id', async (req, res) => {
-  const row = await one<Article>('DELETE FROM articles WHERE id = $1 RETURNING hero_image', [Number(req.params.id)]);
-  if (row) await deleteImage(row.hero_image);
+  const row = await one<Article>('DELETE FROM articles WHERE id = $1 RETURNING hero_image, images', [Number(req.params.id)]);
+  if (row) await deleteImages(row.images.length ? row.images : row.hero_image ? [{ file: row.hero_image, alt: '', caption: '', prompt: '' }] : []);
   res.json({ ok: true });
 });
