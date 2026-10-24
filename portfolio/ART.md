@@ -88,8 +88,9 @@ Minimal ink-wash illustration on warm off-white paper (#f5f2ec). Thin, confident
 
 Images 1 to 5 and 8 are done (the first ChatGPT batch; its "work-saxo" became `work-binck.webp` and its "work-binck"
 became `work-transparent.webp`). Images 6, 7 and 9 are still to generate. Company marks for the rows live in
-`src/art/logos/<slug>.png` (gohome, transparent, piggy, saxo), 128×128; `binck.png` is still to add. The marks are
-also printed in the PDF résumé, which draws a monogram tile for any company without one.
+`src/art/logos/<slug>.png` (gohome, transparent, piggy, saxo, binck), 128×128; the Binck one is the green asterisk
+from the public-domain wordmark on Wikipedia (File:BinckBank.svg). The marks are also printed in the PDF résumé,
+which draws a monogram tile for any company without one.
 
 The export sizes are roughly 3× the display size, so they stay crisp on high-DPI screens.
 
