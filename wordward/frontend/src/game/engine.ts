@@ -1,11 +1,31 @@
 // Thin wrapper around a three.js renderer: scene, camera, resize handling and a frame loop with a capped dt.
 // A small governor watches frame times and lowers the render resolution when a machine cannot keep up (and raises
 // it again when there is headroom), so the game stays playable everywhere.
+//
+// Colour: sRGB output with ACES filmic tone mapping for the warm dusk library. Glow comes from additive sprites
+// (toon.ts `glowSprite`/`glowBatch`), not a bloom pass. `stats` exposes frame cost and draw calls for the
+// compare/perf tools (dev builds also publish `window.__engine`).
 
 import * as THREE from 'three';
 
 /** Pixel ratios the governor steps through, best first. */
 const QUALITY_STEPS = [1.5, 1.25, 1, 0.85, 0.7];
+
+export interface EngineStats {
+  /** Frames rendered so far. */
+  frames: number;
+  /** JS time of the last frame's update callback and render call, ms. */
+  lastUpdateMs: number;
+  lastRenderMs: number;
+  /** Smoothed versions of the above. */
+  updateMs: number;
+  renderMs: number;
+  /** Draw calls and triangles of the last frame (renderer.info). */
+  calls: number;
+  triangles: number;
+  /** Current pixel ratio picked by the governor. */
+  ratio: number;
+}
 
 export class Engine {
   readonly renderer: THREE.WebGLRenderer;
@@ -13,6 +33,7 @@ export class Engine {
   readonly camera: THREE.PerspectiveCamera;
   /** Smoothed frames per second, for the HUD. */
   fps = 60;
+  readonly stats: EngineStats = { frames: 0, lastUpdateMs: 0, lastRenderMs: 0, updateMs: 0, renderMs: 0, calls: 0, triangles: 0, ratio: 1 };
   private raf = 0;
   private last = 0;
   private onFrame?: (dt: number, now: number) => void;
@@ -34,6 +55,7 @@ export class Engine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
+    this.stats.ratio = QUALITY_STEPS[this.quality];
     if (opts.shadows ?? true) {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -45,6 +67,7 @@ export class Engine {
       this.observer = new ResizeObserver(this.resize);
       this.observer.observe(container);
     } else window.addEventListener('resize', this.resize);
+    if (import.meta.env.DEV) (window as unknown as { __engine?: Engine }).__engine = this;
   }
 
   fit() {
@@ -73,12 +96,14 @@ export class Engine {
       if (this.quality < QUALITY_STEPS.length - 1) {
         this.quality++;
         this.renderer.setPixelRatio(QUALITY_STEPS[this.quality]);
+        this.stats.ratio = QUALITY_STEPS[this.quality];
         this.fit();
       }
     } else if (this.fastFor > 12 && dt < 1 / 70 && this.quality > 0 && QUALITY_STEPS[this.quality - 1] <= (window.devicePixelRatio || 1) + 1e-3) {
       this.fastFor = 0;
       this.quality--;
       this.renderer.setPixelRatio(QUALITY_STEPS[this.quality]);
+      this.stats.ratio = QUALITY_STEPS[this.quality];
       this.fit();
     }
   }
@@ -91,8 +116,7 @@ export class Engine {
       const dt = Math.min(0.1, (now - this.last) / 1000);
       this.last = now;
       this.govern(dt);
-      this.onFrame?.(dt, now / 1000);
-      this.renderer.render(this.scene, this.camera);
+      this.frame(dt, now / 1000);
     };
     this.raf = requestAnimationFrame(loop);
   }
@@ -100,8 +124,24 @@ export class Engine {
   /** Advances the simulation by hand (dev tooling: hidden tabs get no animation frames). */
   step(dt: number) {
     this.simTime += dt;
-    this.onFrame?.(dt, this.simTime);
+    this.frame(dt, this.simTime);
+  }
+
+  /** Runs the frame callback and renders, timing both. */
+  private frame(dt: number, t: number) {
+    const t0 = performance.now();
+    this.onFrame?.(dt, t);
+    const t1 = performance.now();
     this.renderer.render(this.scene, this.camera);
+    const t2 = performance.now();
+    const s = this.stats;
+    s.lastUpdateMs = t1 - t0;
+    s.lastRenderMs = t2 - t1;
+    s.updateMs += (s.lastUpdateMs - s.updateMs) * 0.05;
+    s.renderMs += (s.lastRenderMs - s.renderMs) * 0.05;
+    s.calls = this.renderer.info.render.calls;
+    s.triangles = this.renderer.info.render.triangles;
+    s.frames++;
   }
   private simTime = 0;
 
@@ -112,6 +152,8 @@ export class Engine {
   dispose() {
     this.stop();
     this.observer?.disconnect();
+    const w = window as unknown as { __engine?: Engine };
+    if (w.__engine === this) delete w.__engine;
     window.removeEventListener('resize', this.resize);
     this.scene.traverse((o) => {
       const mesh = o as THREE.Mesh;

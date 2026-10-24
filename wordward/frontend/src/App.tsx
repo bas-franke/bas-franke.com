@@ -270,19 +270,46 @@ export default function App() {
   );
 }
 
-function HpBar({ hp, max }: { hp: number; max: number }) {
-  const frac = hp / max;
-  const tone = frac > 0.5 ? 'good' : frac > 0.2 ? 'warn' : 'bad';
+const HEART = 'M12 21.3l-1.5-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1C13.1 3.8 14.8 3 16.5 3 19.6 3 22 5.4 22 8.5c0 3.8-3.4 6.9-8.5 11.5L12 21.3z';
+
+/** One heart per hit point (at most ten; with more HP each heart holds a share and can be part full). */
+function Hearts({ hp, max }: { hp: number; max: number }) {
+  const n = Math.max(1, Math.min(max, 10));
+  const per = max / n;
   return (
-    <div className="hp">
-      <span className="hp-label">HP</span>
-      <div className="hp-track">
-        <div className={`hp-fill ${tone}`} style={{ width: `${frac * 100}%` }} />
-      </div>
-      <span className="hp-num">
-        {hp}/{max}
-      </span>
+    <div className={`hearts${n > 5 ? ' many' : ''}${hp / max <= 0.2 ? ' low' : ''}`} role="img" aria-label={`HP ${hp}/${max}`} title={`HP ${hp}/${max}`}>
+      {Array.from({ length: n }, (_, i) => {
+        const fill = Math.max(0, Math.min(1, (hp - i * per) / per));
+        return (
+          <span key={i} className={`heart${fill <= 0 ? ' empty' : ''}`}>
+            <svg viewBox="0 0 24 24" className="heart-bg" aria-hidden="true">
+              <path d={HEART} />
+            </svg>
+            <svg viewBox="0 0 24 24" className="heart-fg" aria-hidden="true" style={{ clipPath: `inset(0 ${((1 - fill) * 100).toFixed(0)}% 0 0)` }}>
+              <path d={HEART} />
+              <ellipse cx="7.6" cy="7.6" rx="2.6" ry="1.7" transform="rotate(-35 7.6 7.6)" />
+            </svg>
+          </span>
+        );
+      })}
     </div>
+  );
+}
+
+/** A little leafy sprig for the wave plate; the right one is mirrored in CSS. */
+function Sprig({ right }: { right?: boolean }) {
+  return (
+    <svg className={`sprig${right ? ' right' : ''}`} viewBox="0 0 44 26" aria-hidden="true">
+      <path d="M43 14C33 14 21 12 5 6" />
+      <g>
+        <ellipse cx="9" cy="6" rx="5" ry="2.4" transform="rotate(-18 9 6)" />
+        <ellipse cx="17" cy="13" rx="5" ry="2.3" transform="rotate(32 17 13)" />
+        <ellipse cx="21" cy="5.5" rx="4.6" ry="2.2" transform="rotate(-34 21 5.5)" />
+        <ellipse cx="29" cy="17.5" rx="4.4" ry="2.1" transform="rotate(28 29 17.5)" />
+        <ellipse cx="32" cy="8.5" rx="4" ry="2" transform="rotate(-30 32 8.5)" />
+      </g>
+      <circle cx="5" cy="6" r="1.5" className="berry" />
+    </svg>
   );
 }
 
@@ -304,31 +331,43 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
   const t = state.target;
   const accuracy = state.typed ? Math.round(((state.typed - state.errors) / state.typed) * 100) : 100;
   const lvl = state.run;
+  // The line being typed goes in the input box; the other language (read, waiting or done) sits small above it.
+  const main = t ? (t.lines.find((l) => l.state === 'active') ?? t.lines[t.lines.length - 1]) : undefined;
+  const others = t ? t.lines.filter((l) => l !== main) : [];
   return (
     <>
       <div className="hud top" ref={top}>
-        <div className="panel castle">
-          <div className="panel-head">
-            <span className="name">{lvl ? `${lvl.emoji} M${lvl.n}` : 'Cetatea'}</span>
-            <span className="lvl">
-              Valul {state.wave}
-              {lvl ? `/${lvl.waves}` : ''}
+        <div className="hud-left">
+          <Hearts hp={state.hp} max={state.maxHp} />
+          <div className="hud-meta">
+            {lvl ? `${lvl.emoji} M${lvl.n} · ` : ''}
+            <span className="hp-num">
+              {state.hp}/{state.maxHp}
             </span>
           </div>
-          <HpBar hp={state.hp} max={state.maxHp} />
         </div>
-        <div className="panel score">
-          <div className="big">
-            {state.score.toLocaleString()}
-            {state.multiplier > 1 && <span className="mult">×{state.multiplier}</span>}
-          </div>
-          <div className="tiny">
-            {accuracy}% · combo {state.combo}
-          </div>
+        <div className="wave-ribbon" aria-label={`Valul ${state.wave} · Wave ${state.wave}`}>
+          <Sprig />
+          <span className="wave-plate">
+            Valul {state.wave}
+            {lvl ? <small>/{lvl.waves}</small> : null}
+          </span>
+          <Sprig right />
         </div>
-        <button className="pause" onClick={() => game.pause(true)} aria-label="Pause">
-          ❚❚
-        </button>
+        <div className="hud-right">
+          <div className="score">
+            <div className="score-num">
+              {state.multiplier > 1 && <span className="mult">×{state.multiplier}</span>}
+              {state.score.toLocaleString()}
+            </div>
+            <div className="score-sub">
+              {accuracy}% · combo {state.combo}
+            </div>
+          </div>
+          <button className="pause" onClick={() => game.pause(true)} aria-label="Pause">
+            <span>❚❚</span>
+          </button>
+        </div>
       </div>
       {state.toast && (
         <div className="toast" key={state.toast.n}>
@@ -342,19 +381,30 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
         </div>
       )}
       <div className="hud bottom" ref={bottom}>
-        <div className="dialog">
-          {t ? (
+        <div className={`dialog${main?.shield ? ' shield' : ''}`}>
+          {t && main ? (
             <>
-              <div className="dialog-name">
-                {t.name[0]} <small>{t.name[1]}</small>
+              <div className="dialog-meta">
+                <span className="dialog-name">
+                  {t.name[0]} <small>{t.name[1]}</small>
+                </span>
+                {others.map((line, i) => (
+                  <Line key={i} line={line} />
+                ))}
               </div>
-              {t.lines.map((line, i) => (
-                <Line key={i} line={line} />
-              ))}
+              <div className="dialog-input">
+                <Line line={main} main />
+                <span className="enter" aria-hidden="true">
+                  ↵
+                </span>
+              </div>
             </>
           ) : (
-            <div className="dialog-idle">
-              Liniște… <small>All quiet. Get ready!</small>
+            <div className="dialog-input idle">
+              <span className="dialog-idle">
+                Liniște… <small>All quiet. Get ready!</small>
+              </span>
+              <span className="caret" aria-hidden="true" />
             </div>
           )}
         </div>
@@ -363,12 +413,12 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
   );
 }
 
-function Line({ line }: { line: LineView }) {
-  const icon = line.shield ? '🫧' : line.state === 'info' ? '👀' : '⭐';
+function Line({ line, main }: { line: LineView; main?: boolean }) {
+  const icon = line.shield ? '🫧' : line.state === 'info' ? '👀' : line.state === 'done' ? '✓' : '⭐';
   return (
-    <div className={`dline ${line.state}${line.shield ? ' shield' : ''}`}>
+    <div className={`dline ${line.state}${line.shield ? ' shield' : ''}${main ? ' main' : ''}`}>
       <span className="lang">
-        {icon} {line.lang.toUpperCase()}
+        <i>{icon}</i> {line.lang.toUpperCase()}
       </span>
       <span className="dwords">
         {line.words.map((w, i) => (
@@ -389,9 +439,11 @@ function Word({ word, live, done }: { word: WordView; live: boolean; done: boole
     <span className={`dw${done ? ' done' : ''}${live ? ' live' : ''}`}>
       {word.glyphs.map((g, i) => (
         <span key={i} className={i < word.pos ? 'g done' : live && i === word.pos ? 'g cur' : 'g'}>
+          {live && i === word.pos && <i className="caret" aria-hidden="true" />}
           {word.hidden && i >= word.pos && i > (word.peek ?? -1) && g.typed ? '_' : g.ch}
         </span>
       ))}
+      {live && word.pos >= word.glyphs.length && <i className="caret" aria-hidden="true" />}
       {word.hint && <small className="hint">{word.hint}</small>}
     </span>
   );

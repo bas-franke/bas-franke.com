@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { Engine } from './engine';
 import { Effects } from './effects';
 import { makeBalaurBody, makeBubble, makeModel, tickBubbles, type Bubble, type Kind, type Model } from './enemies';
-import { buildWorld, IMPACT_Y, type World } from './world';
+import { buildWorld, DEFENDER_FRONT, FIELD_HALF, FIELD_LENGTH, fieldZ, IMPACT_Y, LINE_Z, type World } from './world';
 import { sfx } from './audio';
 import { flush as flushProgress, isMastered, record } from './progress';
 import {
@@ -219,11 +219,15 @@ const DIFF = {
 const FALL_TIME: Record<EnemyKind, number> = { bat: 15, meteor: 19, ghost: 21, zmeu: 25, rock: 19, head: 25, convoy: 36, balaur: 65 };
 const POOFS = ['POF!', 'PUF!', 'BRAVO!', 'SUPER!', 'YUPI!', 'TOP!'];
 
-/** The field spans this many world units from the ground to the spawn line when the screen is tall enough. */
-const FIELD_HEIGHT = 24;
+/** The camera always shows at least this much of the field in front of the defence line (world units). */
+const MIN_FIELD = 21;
+/** Camera pitch below the horizon: a high view from in front; tall portrait screens look a little steeper. */
+const PITCH_LANDSCAPE = THREE.MathUtils.degToRad(55);
+const PITCH_PORTRAIT = THREE.MathUtils.degToRad(63);
 /** Creatures are modelled at about 1 m radius and drawn bigger, so faces read on a phone. */
 const CREATURE_SCALE = 1.45;
-const MIN_HALF_WIDTH = 10.5;
+/** Narrow screens show at least this much of the field's width at the defence line. */
+const MIN_HALF_WIDTH = 8.5;
 
 export class Game {
   readonly engine: Engine;
@@ -246,16 +250,17 @@ export class Game {
   private targetId = 0;
   private shake = 0;
   private hurtFlash = 0;
-  private aim = new THREE.Vector3(0, 20, 0);
+  private aim = new THREE.Vector3(0, 1, LINE_Z - 20);
   private zapPitch = 1;
   private halfWidth = 14;
   private top = 26;
-  /** Screen pixels covered by the HUD at the top and the word panel at the bottom; the castle sits above the latter. */
+  /** Screen pixels covered by the HUD at the top and the word panel at the bottom; the defenders sit above the latter. */
   private insets = { top: 0, bottom: 0 };
   private missed = new Map<string, Missed>();
   private listeners = new Set<(s: GameState) => void>();
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
+  private tmpScale = new THREE.Vector3();
 
   state: GameState = {
     phase: 'idle',
@@ -296,7 +301,7 @@ export class Game {
     for (const fn of this.listeners) fn(this.state);
   }
 
-  /** Pixels hidden behind HUD panels; the camera frames the castle just above the bottom one. */
+  /** Pixels hidden behind HUD panels; the camera frames the defenders just above the bottom one. */
   setInsets(top: number, bottom: number) {
     this.insets = { top, bottom };
   }
@@ -860,34 +865,59 @@ export class Game {
     return { x: (p.x * 0.5 + 0.5) * el.clientWidth, y: (-p.y * 0.5 + 0.5) * el.clientHeight };
   }
 
+  /** Height of a slot's creature above its origin, in world units (falls back to its diameter). */
+  private slotHeight(slot: Slot) {
+    if (!slot.model) return slot.radius;
+    const h = (slot.model as { height?: number }).height;
+    return h !== undefined ? h * slot.anchor.getWorldScale(this.tmpScale).y : slot.radius * 2;
+  }
+
+  /** Where beams hit a slot: the middle of its creature's body. */
   private slotPosition(slot: Slot, out: THREE.Vector3) {
-    return slot.anchor.getWorldPosition(out).setZ(0.5);
+    slot.anchor.getWorldPosition(out);
+    out.y += slot.model ? this.slotHeight(slot) * 0.5 : 0.5;
+    return out;
   }
 
   // ---- frame ---------------------------------------------------------------------------------------------------
 
   /**
-   * Frame the play area between the HUD and the word panel: the ground sits right above the bottom panel, the field
-   * is at least FIELD_HEIGHT tall when the screen allows, and at least MIN_HALF_WIDTH wide on narrow phones (tall
-   * portrait screens then get a taller field). When the phone keyboard takes half the screen the field simply gets
-   * shorter (creatures spawn lower).
+   * Frame the field from high above and in front, with a fixed pitch. The camera height is solved so the defenders'
+   * front edge sits right above the word panel, at least MIN_FIELD of the field shows below the HUD and at least
+   * MIN_HALF_WIDTH of its width shows at the defence line (narrow phones then look from higher up). For a pixel row
+   * at NDC v, the ray dips `pitch - atan(v tan(fov/2))` below the horizon and meets the floor `h / tan(dip)` ahead of
+   * the camera, so both constraints are linear in the height h.
    */
   private placeCamera() {
     const cam = this.engine.camera;
     const el = this.engine.renderer.domElement;
     const H = el.clientHeight || 1;
     const W = el.clientWidth || 1;
-    const usable = Math.max(120, H - this.insets.bottom - this.insets.top * 0.4);
-    const ppu = Math.min(usable / FIELD_HEIGHT, W / (2 * MIN_HALF_WIDTH));
-    const halfH = H / (2 * ppu);
-    const bottom = -1.2 - this.insets.bottom / ppu;
-    const centerY = bottom + halfH;
-    const d = halfH / Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
-    cam.position.set(0, centerY + 2, d);
-    cam.lookAt(0, centerY, 0);
-    // Creatures enter just under the HUD, so tall phone screens use their whole height.
-    this.top = Math.max(IMPACT_Y + 12, bottom + halfH * 2 - this.insets.top / ppu - 0.5);
-    this.halfWidth = halfH * cam.aspect;
+    const aspect = W / H;
+    const tanF = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+    const pitch = THREE.MathUtils.lerp(PITCH_PORTRAIT, PITCH_LANDSCAPE, THREE.MathUtils.clamp((aspect - 0.5) / 0.8, 0, 1));
+    const bottomPx = Math.max(H * 0.45, H - this.insets.bottom - 6);
+    const topPx = Math.min(H * 0.3, this.insets.top * 0.55 + 4);
+    const vb = 1 - (2 * bottomPx) / H;
+    const vt = 1 - (2 * topPx) / H;
+    const dipB = pitch - Math.atan(vb * tanF);
+    const dipT = Math.max(0.2, pitch - Math.atan(vt * tanF));
+    const zB = LINE_Z + DEFENDER_FRONT;
+    // Field length visible past the line: (zB - LINE_Z) is lost in front, then h * kL.
+    const kL = 1 / Math.tan(dipT) - 1 / Math.tan(dipB);
+    // Depth of the line point along the view axis: (DEFENDER_FRONT + h / tan(dipB)) cos(pitch) + h sin(pitch).
+    const kD = Math.cos(pitch) / Math.tan(dipB) + Math.sin(pitch);
+    const hLen = (MIN_FIELD + DEFENDER_FRONT) / kL;
+    const hWide = (MIN_HALF_WIDTH / (tanF * aspect) - DEFENDER_FRONT * Math.cos(pitch)) / kD;
+    const h = Math.max(hLen, hWide, 6);
+    cam.position.set(0, h, zB + h / Math.tan(dipB));
+    cam.rotation.set(-pitch, 0, 0);
+    cam.updateMatrixWorld();
+    // Creatures enter just under the HUD (never past the far end of the hall); spawns happen at `top + 2`.
+    const visible = h * kL - DEFENDER_FRONT;
+    this.top = IMPACT_Y + Math.min(FIELD_LENGTH - 4, visible - 1.5) - 2;
+    const lineHalf = (DEFENDER_FRONT * Math.cos(pitch) + h * kD) * tanF * aspect;
+    this.halfWidth = Math.min(FIELD_HALF - 0.6, lineHalf - 0.4);
   }
 
   private frame(dt: number, t: number) {
@@ -926,7 +956,7 @@ export class Game {
       if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 1.0;
       if (e.kind === 'ghost') x += Math.sin(t * 1.2 + e.phase) * 1.4;
       if (e.kind === 'balaur') x = Math.sin(t * 0.5 + e.phase) * Math.max(0, this.halfWidth - 11) * 0.5;
-      e.root.position.set(x, e.y, 0);
+      e.root.position.set(x, 0, fieldZ(e.y));
       for (const s of e.slots) {
         if (s.model && !s.done) s.model.animate(step, t);
         s.bubble?.update(dt, t);
@@ -938,7 +968,7 @@ export class Game {
     this.effects.update(this.state.phase === 'paused' ? 0 : dt);
     if (playing) this.pickTarget();
 
-    // The owl follows the current target.
+    // The robot cannon follows the current target.
     const target = this.enemies.find((e) => e.id === this.targetId);
     if (target) {
       const part = target.parts[target.partIdx] ?? target.parts[0];
@@ -953,6 +983,7 @@ export class Game {
       const s = this.shake * this.shake * 0.6;
       this.engine.camera.position.x += (Math.random() - 0.5) * s;
       this.engine.camera.position.y += (Math.random() - 0.5) * s;
+      this.engine.camera.updateMatrixWorld();
     }
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt);
     this.engine.container.parentElement?.style.setProperty('--hurt', this.hurtFlash.toFixed(3));
@@ -963,7 +994,7 @@ export class Game {
   private impact(e: Enemy) {
     const remaining = e.slots.filter((s) => s.model && !s.done).length;
     const damage = e.kind === 'convoy' ? remaining : e.kind === 'balaur' ? remaining + 1 : e.kind === 'zmeu' ? 2 : 1;
-    const at = this.tmp.set(e.root.position.x, IMPACT_Y, 0.5);
+    const at = this.tmp.set(e.root.position.x, 0.4, LINE_Z);
     this.effects.dust(at, 1.8);
     this.pop(at, 'BONK!', 'pop-bonk');
     sfx.play('bonk');
@@ -981,18 +1012,19 @@ export class Game {
     this.emit();
   }
 
+  /** Word tags float above their creatures like speech bubbles; a convoy's sentence banner floats above the pebbles' tags. */
   private positionTags() {
     const v = this.tmp;
     for (const e of this.enemies) {
       for (const s of e.slots) {
         if (s.done) continue;
         s.anchor.getWorldPosition(v);
-        // Creature tags hang just under the creature (or its bubble); the sentence banner goes under the pebbles' tags.
-        v.y -= s.model ? s.radius * (s.bubble ? 1.45 : 1) + 0.2 : s.radius * 0.6;
+        if (s.model) v.y += Math.max(this.slotHeight(s), s.bubble ? s.radius * 2.6 : 0) + 0.25;
+        else v.y += s.radius * 1.6;
         const p = this.project(v);
         s.sx = p.x;
-        s.sy = p.y + 18;
-        const shift = s.model ? '0' : '2.6em';
+        s.sy = p.y - 18;
+        const shift = s.model ? '-100%' : 'calc(-100% - 2.6em)';
         s.tag.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, ${shift})`;
       }
     }
