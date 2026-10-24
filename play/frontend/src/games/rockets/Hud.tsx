@@ -19,6 +19,8 @@ type HudExtra = {
   armor?: number;
   /** Horizontal speed in metres per second. */
   speed?: number;
+  /** Vertical speed in metres per second while airborne (up is positive). */
+  vspeed?: number;
   /** Clock time (same clock as hitAt) of our last shot; drives the reload ring. */
   firedAt?: number;
   /** Direction of the last attacker relative to the view at hurtAt, radians clockwise from straight ahead. */
@@ -45,6 +47,18 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
   const cfg = useStore(settings);
   const hpPanel = useRef<HTMLDivElement>(null);
   const room = ctx.room();
+  // Once the player has the mouse (or drag-look) and has moved, the controls hints are noise: drop them for good.
+  const engaged = useRef(false);
+  if ((s.locked || s.dragLook) && !s.dead && (s.speed ?? 0) > 0.5) engaged.current = true;
+  // Each (re)spawn: a quick colour fade-in, then a shimmer cue while spawn protection lasts.
+  const wasDead = useRef(true);
+  const spawnedAt = useRef(-Infinity);
+  const spawns = useRef(0);
+  if (wasDead.current && !s.dead && !s.ended) {
+    spawnedAt.current = performance.now() / 1000;
+    spawns.current++;
+  }
+  wasDead.current = s.dead;
   const me = s.scores.find((r) => r.id === ctx.you);
 
   useEffect(() => {
@@ -100,6 +114,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
   const hitOn = now - s.hitAt < 0.25;
   const hurtFlash = now - s.hurtAt < 0.25;
   const arcOn = s.hurtDir !== undefined && Number.isFinite(s.hurtDir) && now - s.hurtAt < 1.1;
+  const shielded = !s.dead && !s.ended && now - spawnedAt.current < RK.spawnProtection;
   const reloading = s.firedAt !== undefined && now - s.firedAt < RK.fireInterval + 0.1;
   const isHost = room.hostId === ctx.you;
   const nameOf = (id: string) => room.players.find((p) => p.id === id)?.name ?? '…';
@@ -116,6 +131,8 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
     <div className={`hud rk ${low ? 'low' : ''} ${cfg.reducedMotion ? 'calm' : ''} ${touchMode ? 'touch-mode' : ''}`}>
       <div className={`flash ${hurtFlash ? 'on' : ''}`} />
       {low && <div className="rk-lowvig" />}
+      {spawns.current > 0 && !s.dead && <div key={spawns.current} className="rk-spawnfade" />}
+      {shielded && alive && <div className="rk-shield">Shielded</div>}
 
       {arcOn && alive && (
         <div className="rk-dmg" style={{ transform: `translate(-50%, -50%) rotate(${s.hurtDir}rad)` }}>
@@ -208,6 +225,12 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
         <div className={`rk-speed ${s.speed > RK.groundSpeed * 1.6 ? 'fast' : s.speed > RK.groundSpeed + 0.5 ? 'gain' : ''}`}>
           <b>{Math.round(s.speed)}</b>
           <span>m/s</span>
+          {s.vspeed !== undefined && Math.abs(s.vspeed) > 2 && (
+            <em className={s.vspeed > 0 ? 'up' : 'down'}>
+              {s.vspeed > 0 ? '▲' : '▼'}
+              {Math.round(Math.abs(s.vspeed))}
+            </em>
+          )}
         </div>
       )}
 
@@ -224,10 +247,16 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
       <div className="corner bc">
         {!touchMode && !s.locked && !s.dragLook && !s.ended && !menu && (
           <span className="hint-bar" onClick={() => client.setPaused(false)}>
-            Click the arena to grab the mouse · <kbd>WASD</kbd> move · <kbd>Space</kbd> jump · click to fire
+            {engaged.current ? (
+              'Click the arena to grab the mouse'
+            ) : (
+              <>
+                Click the arena to grab the mouse · <kbd>WASD</kbd> move · <kbd>Space</kbd> jump · click to fire
+              </>
+            )}
           </span>
         )}
-        {!touchMode && s.dragLook && !s.ended && !menu && (
+        {!touchMode && s.dragLook && !engaged.current && !s.ended && !menu && (
           <span className="hint-bar">
             Pointer lock is unavailable here: drag to look, <kbd>F</kbd> or <kbd>Ctrl</kbd> to fire
           </span>

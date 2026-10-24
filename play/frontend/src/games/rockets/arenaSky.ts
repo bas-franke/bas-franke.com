@@ -1,7 +1,8 @@
 // The sky around a Rockets arena: a banded dome with a haze band over the horizon, a darker zenith, a comic sun and a
 // deeper void below; a ring of inked clouds; two layers of flat comic silhouettes in the map's theme (city, mesas,
-// mountains, floating islands...); and on space maps stars, a ringed planet and drifting asteroids. Nothing here is
-// fogged, and the whole sky draws in five calls.
+// mountains, floating islands...), opaque and tinted toward the horizon colour instead of fogged; and on space maps
+// two parallax star layers, a ringed planet, drifting asteroids and a soft glow under the platforms. Nothing here uses
+// scene fog, and the whole sky draws in a handful of calls.
 
 import * as THREE from 'three';
 import type { MapData } from '@shared/rockets/map';
@@ -30,9 +31,9 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     uniforms: {
       zenith: { value: zenith },
       horizon: { value: horizon },
-      haze: { value: horizon.clone().lerp(new THREE.Color(0xffffff), 0.45) },
+      haze: { value: horizon.clone().lerp(new THREE.Color(0xffffff), 0.22) },
       deep: { value: zenith.clone().multiplyScalar(0.45).lerp(horizon, 0.25) },
-      hazeAmount: { value: space ? 0.3 : 0.8 },
+      hazeAmount: { value: space ? 0.3 : 0.7 },
       sunDir: { value: SUN_DIR },
       sunColor: { value: new THREE.Color(map.id === 'canyon' ? 0xffe27a : 0xfff8dc) },
       sunSize: { value: Math.cos(map.id === 'canyon' ? 0.11 : space ? 0.035 : 0.07) },
@@ -58,15 +59,17 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
         float h = d.y;
         vec3 col;
         if (h >= 0.0) {
-          // Banded rather than smooth, like a printed gradient, darkening again toward the top.
-          float t = floor(smoothstep(0.0, 0.92, h) * 7.0) / 7.0;
+          // Banded like a printed gradient higher up, darkening again toward the top; the lowest stretch is a smooth
+          // ramp out of the horizon colour so no hard step sits right on the skyline.
+          float x = smoothstep(0.0, 0.92, h);
+          float t = mix(x, floor(x * 7.0) / 7.0, smoothstep(0.12, 0.3, x));
           col = mix(horizon, zenith, min(t * 1.7, 1.0));
           col = mix(col, zenith * 0.62, smoothstep(0.55, 1.0, t));
-          // A pale haze band just above the horizon, in three printed steps.
-          float hz = floor((1.0 - smoothstep(0.012, 0.16, h)) * 3.0 + 0.5) / 3.0;
+          // A soft haze lifting off the horizon, smooth on both edges.
+          float hz = smoothstep(0.0, 0.05, h) * (1.0 - smoothstep(0.05, 0.24, h));
           col = mix(col, haze, hz * hazeAmount);
           // Exactly the fog colour at the horizon line, so fogged geometry melts into it.
-          col = mix(horizon, col, smoothstep(0.0, 0.012, h));
+          col = mix(horizon, col, smoothstep(0.0, 0.03, h));
         } else {
           float t = floor(smoothstep(0.0, -0.55, h) * 4.0) / 4.0;
           col = mix(horizon, deep, t);
@@ -113,7 +116,8 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       lit.add(inked(at(g, cx, -30 + rand() * 90, cz, rand() * 3)), new THREE.Color(0x6a5a8a).multiplyScalar(0.8 + rand() * 0.4));
       continue;
     }
-    const cy = 30 + rand() * 45;
+    // Kept below ~18 degrees of elevation so at a level gaze they stay clear of the top HUD panels.
+    const cy = 20 + rand() * 28;
     const blobs = 3 + Math.floor(rand() * 3);
     const tint = new THREE.Color(0xffffff).lerp(horizon, 0.18);
     for (let i = 0; i < blobs; i++) {
@@ -125,24 +129,26 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     }
   }
 
-  // ---- silhouettes: a pale far ring and a darker inked near ring ----
+  // ---- silhouettes: opaque flat rings, each tinted further toward the horizon colour the further away it is ----
   if (theme.skyline !== 'none') {
-    // Atmospheric perspective: the far ring melts into the haze, the near one is a shade deeper than the horizon.
-    const hazeColor = horizon.clone().lerp(new THREE.Color(0xffffff), 0.45);
-    const far = horizon.clone().lerp(hazeColor, 0.35);
-    const near = horizon.clone().lerp(zenith, 0.3).multiplyScalar(0.9);
+    // Atmospheric perspective by colour, not alpha: one deep theme tone, mixed toward the horizon (= fog) colour by
+    // distance. No ink on any ring: thin outlines on distant shapes read as wireframe glitches.
+    const deepTone = horizon.clone().lerp(zenith, 0.5).multiplyScalar(0.5);
+    const tone = (fogK: number) => deepTone.clone().lerp(horizon, fogK);
     const layers = [
-      { r: 205, n: 26, scale: 0.8, color: far, ink: false },
-      { r: 165, n: 18, scale: 0.55, color: near, ink: true },
+      { r: 205, n: 26, scale: 0.8, color: tone(0.72) },
+      { r: 165, n: 18, scale: 0.55, color: tone(0.42) },
     ];
+    // Floating islands get extra depth: a hazy far scatter and a closer, crisper ring.
+    if (theme.skyline === 'islands') layers.unshift({ r: 222, n: 30, scale: 0.45, color: tone(0.86) }), layers.push({ r: 118, n: 9, scale: 0.75, color: tone(0.22) });
     for (const layer of layers) {
       for (let i = 0; i < layer.n; i++) {
         const a = ((i + rand() * 0.6) / layer.n) * Math.PI * 2;
         const d = layer.r + rand() * 14;
-        const color = layer.color.clone().multiplyScalar(0.93 + rand() * 0.12);
+        const color = layer.color.clone().multiplyScalar(0.96 + rand() * 0.08);
         for (const geo of silhouette(theme.skyline, rand, layer.scale)) {
           at(geo.g, Math.cos(a) * d + geo.dx, 0, Math.sin(a) * d + geo.dz, -a);
-          flat.add(layer.ink ? inked(geo.g) : geo.g, geo.glow !== undefined ? new THREE.Color(geo.glow).lerp(color, geo.mix ?? 0) : color);
+          flat.add(geo.g, geo.glow !== undefined ? new THREE.Color(geo.glow).lerp(color, geo.mix ?? 0) : color);
         }
       }
     }
@@ -165,9 +171,31 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     stars.frustumCulled = false;
     sky.add(stars);
     disposables.push(starGeo, starMat);
+    if (space) {
+      // A second, fainter field all round (below too: there is no ground out here) on a smaller shell, so it slides
+      // against the far one as you move and the void gets depth.
+      const n = Math.round(theme.stars * 0.8);
+      const near = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const y = rand() * 2 - 1;
+        const a = rand() * Math.PI * 2;
+        const r = Math.sqrt(1 - y * y);
+        const d = 110 + rand() * 40;
+        near.set([Math.cos(a) * r * d, y * d, Math.sin(a) * r * d], i * 3);
+      }
+      const nearGeo = new THREE.BufferGeometry();
+      nearGeo.setAttribute('position', new THREE.BufferAttribute(near, 3));
+      const nearMat = new THREE.PointsMaterial({ color: 0xc8b8ff, size: 1.5, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.55, depthWrite: false });
+      const nearStars = new THREE.Points(nearGeo, nearMat);
+      nearStars.renderOrder = -9;
+      nearStars.frustumCulled = false;
+      sky.add(nearStars);
+      disposables.push(nearGeo, nearMat);
+    }
   }
   if (theme.planet) {
-    const dir = new THREE.Vector3(-0.75, 0.42, -0.5).normalize().multiplyScalar(200);
+    // Low over the horizon, so the top HUD never hides it.
+    const dir = new THREE.Vector3(-0.85, 0.2, -0.42).normalize().multiplyScalar(200);
     // Latitude bands, printed in three tones.
     const bands = [0xffb35a, 0xff8a4a, 0xffd08a];
     const bandGeo: THREE.BufferGeometry[] = [];
@@ -186,7 +214,19 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     ring.rotateX(Math.PI / 2 + tilt.x).rotateZ(tilt.z);
     lit.add(inked(at(ring, dir.x, dir.y, dir.z)), 0xffe6b0);
     const moon = new THREE.IcosahedronGeometry(9, 1);
-    lit.add(inked(at(moon, 120, 95, 110)), 0xc8c0e0);
+    lit.add(inked(at(moon, 120, 60, 110)), 0xc8c0e0);
+
+    // A soft glow pooled under the platforms, so they float over something instead of flat paint.
+    let lowest = 0;
+    for (const b of map.boxes) lowest = Math.min(lowest, b.min.y);
+    const glowTex = radialGlow();
+    const glowGeo = new THREE.PlaneGeometry(map.half * 3, map.half * 3).rotateX(-Math.PI / 2);
+    const glowMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x8a5aff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.y = lowest - 9;
+    glow.renderOrder = -8;
+    sky.add(glow);
+    disposables.push(glowTex, glowGeo, glowMat);
   }
 
   const litGeo = lit.build();
@@ -211,6 +251,22 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     }
   }
   return sky;
+}
+
+/** A small white-to-clear radial gradient, for additive glows. */
+function radialGlow(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 interface Piece {

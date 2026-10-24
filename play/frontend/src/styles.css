@@ -1873,7 +1873,7 @@ footer.site {
   --rk-yellow: #ffd23f;
   --rk-cyan: #3bd6ff;
   --rk-green: #5cf08a;
-  --rk-panel: rgba(12, 14, 24, 0.68);
+  --rk-panel: rgba(12, 14, 24, 0.86);
   --rk-font: 'Bangers', 'Luckiest Guy', Impact, 'Arial Black', var(--font);
   --rk-outline:
     -2px -2px 0 var(--rk-ink), 2px -2px 0 var(--rk-ink), -2px 2px 0 var(--rk-ink), 2px 2px 0 var(--rk-ink),
@@ -2053,7 +2053,7 @@ footer.site {
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 .rk .rk-line {
   display: inline-flex;
@@ -2223,6 +2223,52 @@ footer.site {
   stroke-linejoin: round;
 }
 
+/* Respawn: a warm colour wash that clears in a moment, then a shimmering tag while spawn protection lasts. */
+.rk .rk-spawnfade {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(255, 248, 224, 0.2) 30%, rgba(255, 210, 90, 0.6) 100%);
+  opacity: 0;
+  animation: rk-spawnfade 0.4s ease-out;
+  pointer-events: none;
+}
+@keyframes rk-spawnfade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.rk .rk-shield {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 64px);
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  font-family: var(--rk-font);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  color: #fff;
+  text-shadow: var(--rk-outline-thin);
+  background: linear-gradient(100deg, rgba(62, 200, 255, 0.25) 30%, rgba(255, 255, 255, 0.75) 50%, rgba(62, 200, 255, 0.25) 70%) 0 0 / 300% 100%;
+  border: 2px solid var(--rk-ink);
+  border-radius: 6px;
+  animation: rk-shimmer 0.6s linear infinite;
+  pointer-events: none;
+}
+@keyframes rk-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+.rk.calm .rk-shield {
+  animation: none;
+}
+
 /* Low health: throbbing red edges with a halftone grain. */
 .rk .rk-lowvig {
   position: absolute;
@@ -2235,30 +2281,42 @@ footer.site {
   animation: rk-throb 0.7s ease-in-out infinite alternate;
 }
 
-/* Speedometer */
+/* Speedometer: a quiet readout just under the crosshair, clear of the launcher and the bottom hints. */
 .rk .rk-speed {
   position: absolute;
   left: 50%;
-  bottom: 84px;
+  top: calc(50% + 30px);
   transform: translateX(-50%);
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 3px;
   color: #fff;
+  opacity: 0.6;
   text-shadow: var(--rk-outline-thin);
+  pointer-events: none;
 }
 .rk .rk-speed b {
   font-family: var(--rk-font);
-  font-size: 30px;
+  font-size: 17px;
   font-weight: 400;
   min-width: 2ch;
   text-align: right;
-  text-shadow: var(--rk-outline);
+  text-shadow: var(--rk-outline-thin);
 }
 .rk .rk-speed span {
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
+}
+.rk .rk-speed em {
+  margin-left: 4px;
+  font-family: var(--rk-font);
+  font-size: 13px;
+  font-style: normal;
+  color: #9fe8ff;
+}
+.rk .rk-speed em.down {
+  color: #ffb08a;
 }
 .rk .rk-speed.gain b {
   color: var(--rk-yellow);
@@ -2370,7 +2428,7 @@ footer.site {
 
 .rk .hint-bar {
   color: #fff;
-  background: rgba(12, 14, 24, 0.8);
+  background: rgba(12, 14, 24, 0.86);
   border: 2px solid var(--rk-ink);
   border-radius: 6px;
   box-shadow: 3px 3px 0 var(--rk-ink);
@@ -2387,9 +2445,6 @@ footer.site {
   right: auto;
   left: 50%;
   transform: translateX(-50%);
-}
-.rk.touch-mode .rk-speed {
-  bottom: 140px;
 }
 
 @keyframes rk-hit {

@@ -108,9 +108,9 @@ function canyon(): MapData {
     accent: 0x3ec8ff,
     name: 'Canyon',
     half,
-    skyColor: 0xff8a4a,
-    fogColor: 0xe07838,
-    tint: { floor: 0xe8b27a, ledge: 0xe8a050, wall: 0x9a3a2a, platform: 0xe0b040, stair: 0xf0c070, tower: 0xc8643c, crate: 0x6a9a4a, pillar: 0xa04a34 },
+    skyColor: 0xf2b878,
+    fogColor: 0xe8a868,
+    tint: { floor: 0xe8b27a, ledge: 0xd8854a, wall: 0x9a3a2a, platform: 0xe0b040, stair: 0xf0c070, tower: 0xc8643c, crate: 0x6a9a4a, pillar: 0xa04a34 },
   });
 }
 
@@ -248,8 +248,8 @@ function pit(): MapData {
     accent: 0xffe03a,
     name: 'The Pit',
     half,
-    skyColor: 0x8a2a5a,
-    fogColor: 0x6a1e4a,
+    skyColor: 0x1d4b5c,
+    fogColor: 0x2e3c5a,
     tint: { floor: 0xb87a5a, platform: 0xa85aa8, wall: 0x9a4ac0, stair: 0xd8946a, crate: 0xffa020, ledge: 0xe8c060, pillar: 0x3ec8ff },
   });
 }
@@ -288,9 +288,9 @@ function twinBases(): MapData {
     accent: 0xff5ea8,
     name: 'Twin Bases',
     half,
-    skyColor: 0x38c0d0,
-    fogColor: 0x2ea2b4,
-    tint: { ledge: 0xe86a4a, tower: 0x4a8ad8, floor: 0xd8e0c8, platform: 0xf2c14e, wall: 0x2a5a7a, crate: 0x6ab04a },
+    skyColor: 0x8ad8f0,
+    fogColor: 0x7ac0dc,
+    tint: { ledge: 0xe86a4a, tower: 0x4a8ad8, floor: 0xd8e0c8, platform: 0xf2c14e, wall: 0x2a3a78, crate: 0x6ab04a },
   });
 }
 
