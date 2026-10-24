@@ -314,66 +314,68 @@ const MOTH_Y = 1.2;
 /** Atlas (512×256): the right-hand wing pair in x 0–256, the banner in x 288–352 (top half), the halo in x 384–512. */
 const mothTex = once(() =>
   canvasTexture(512, 256, (g) => {
-    // The right-hand wing pair, root at the left middle: a big rounded-pointed fore wing and a round hind wing.
+    // The right-hand wing pair, root at the left middle: a big pointed fore wing sweeping up to a sharp tip, and a
+    // smaller round hind wing below it.
     const fore = new Path2D();
-    fore.moveTo(6, 124);
-    fore.bezierCurveTo(26, 60, 100, 6, 186, 10);
-    fore.bezierCurveTo(244, 14, 252, 66, 230, 96);
-    fore.bezierCurveTo(196, 130, 96, 138, 6, 134);
+    fore.moveTo(6, 120);
+    fore.bezierCurveTo(30, 76, 120, 22, 250, 4);
+    fore.bezierCurveTo(240, 46, 214, 92, 168, 114);
+    fore.bezierCurveTo(118, 136, 56, 138, 6, 134);
     fore.closePath();
     const hind = new Path2D();
     hind.moveTo(6, 138);
-    hind.bezierCurveTo(70, 134, 146, 150, 154, 194);
-    hind.bezierCurveTo(162, 238, 118, 252, 88, 238);
-    hind.bezierCurveTo(46, 220, 18, 178, 6, 142);
+    hind.bezierCurveTo(56, 136, 112, 148, 120, 182);
+    hind.bezierCurveTo(128, 214, 96, 226, 74, 216);
+    hind.bezierCurveTo(40, 200, 16, 170, 6, 142);
     hind.closePath();
     for (const path of [hind, fore]) {
-      // Warm amber membrane: deeper and more opaque at the root and rim, lighter and see-through in between.
+      // Parchment cream membrane with a warm golden glow at the root.
       const grad = g.createRadialGradient(8, 130, 8, 8, 130, 250);
-      grad.addColorStop(0, 'rgba(236,150,48,0.95)');
-      grad.addColorStop(0.3, 'rgba(248,186,80,0.86)');
-      grad.addColorStop(0.75, 'rgba(250,204,108,0.76)');
-      grad.addColorStop(1, 'rgba(226,142,46,0.9)');
+      grad.addColorStop(0, 'rgba(255,196,96,0.98)');
+      grad.addColorStop(0.3, 'rgba(248,220,160,0.96)');
+      grad.addColorStop(0.8, 'rgba(243,226,184,0.94)');
+      grad.addColorStop(1, 'rgba(232,206,152,0.96)');
       g.fillStyle = grad;
       g.fill(path);
       g.save();
       g.clip(path);
-      // Veins fanning out from the root, with a few cross veins.
-      g.strokeStyle = 'rgba(122,62,14,0.85)';
-      g.lineWidth = 3;
+      // Brown veins fanning out from the root, with a few cross veins.
+      g.strokeStyle = 'rgba(138,90,42,0.9)';
+      g.lineWidth = 2.5;
       for (let i = 0; i < 8; i++) {
-        const a = -1.2 + i * 0.33;
+        const a = -1.25 + i * 0.33;
         g.beginPath();
         g.moveTo(6, 130);
-        g.quadraticCurveTo(80 * Math.cos(a), 130 + 70 * Math.sin(a), 6 + 260 * Math.cos(a), 130 + 220 * Math.sin(a));
+        g.quadraticCurveTo(80 * Math.cos(a), 130 + 70 * Math.sin(a), 6 + 280 * Math.cos(a), 130 + 240 * Math.sin(a));
         g.stroke();
       }
-      g.lineWidth = 2;
-      for (const rr of [95, 160]) {
+      g.lineWidth = 1.8;
+      for (const rr of [90, 170]) {
         g.beginPath();
         g.arc(6, 130, rr, -1.3, 1.3);
         g.stroke();
       }
       g.restore();
-      g.strokeStyle = 'rgba(150,80,20,1)';
-      g.lineWidth = 7;
+      g.strokeStyle = 'rgba(138,90,42,1)';
+      g.lineWidth = 5;
       g.stroke(path);
     }
-    // Little dark stars on the wings.
+    // Small brown star marks on the wings.
     const star = (x: number, y: number, r: number) => {
       g.beginPath();
       for (let i = 0; i < 8; i++) {
         const a = (i * Math.PI) / 4;
-        const rr = i % 2 ? r * 0.3 : r;
+        const rr = i % 2 ? r * 0.28 : r;
         g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
       }
       g.closePath();
-      g.fillStyle = 'rgba(120,58,14,0.95)';
+      g.fillStyle = 'rgba(138,90,42,0.95)';
       g.fill();
     };
-    star(168, 52, 16);
-    star(108, 80, 11);
-    star(104, 194, 13);
+    star(176, 46, 13);
+    star(116, 84, 9);
+    star(214, 30, 7);
+    star(70, 178, 10);
 
     // The banner, 64×128 at x 288.
     g.save();
@@ -426,15 +428,16 @@ const mothFxMat = once(() => {
   return m;
 });
 
-const WING = 0.95;
+/** Wing card size: the fore wing fills it (1.3× the old one), the hind wing is drawn smaller inside it. */
+const WING = 1.24;
 /** Camera pitch the halo card faces (it hangs at the moth's centre, like the sprite it replaces). */
 const HALO_TILT = -0.98;
 
 /**
- * Wings, halo and banner in one geometry, drawn in that order (the halo brightens the wings behind the body, the
- * banner hangs in front). Morph targets: 0 flaps the wings (base swept down, target swept up; the straight-line
- * blend shortens them a little mid-flap, which reads as the wing turning edge-on), 1 swells the halo, 2 and 3 swing
- * the banner about its rod (x and z).
+ * Floor glow, wings, halo and banner in one geometry, drawn in that order (the glow lies under everything, the halo
+ * brightens the wings behind the body, the banner hangs in front). Morph targets: 0 flaps the wings (base swept
+ * down, target swept up; the straight-line blend shortens them a little mid-flap, which reads as the wing turning
+ * edge-on), 1 swells the halo and the glow, 2 and 3 swing the banner about its rod (x and z).
  */
 const mothFxGeo = once(() => {
   const parts: THREE.BufferGeometry[] = [];
@@ -467,12 +470,19 @@ const mothFxGeo = once(() => {
       g.applyMatrix4(_m.makeScale(s, 1, 1));
       // Tilted back to face the camera above, flapping about the root, set at the shoulder.
       g.applyMatrix4(_m.makeRotationFromEuler(_e.set(-0.55, s * flap, s * 0.12)));
-      g.translate(s * 0.15, 0.08, -0.08);
+      g.translate(s * 0.15, 0.14, -0.08);
       both.push(g);
     }
     return mergeGeometries(both) as THREE.BufferGeometry;
   };
-  part(wings, [0, 0, 0.5, 1], [1, 1, 1, 1]);
+  // A soft pool of light on the floor under the moth (above it by the bob's reach, so it never sinks into it).
+  part(
+    (t) => new THREE.PlaneGeometry(1.5, 1.2).scale(t === 1 ? 1.1 : 1, t === 1 ? 1.1 : 1, 1).rotateX(-Math.PI / 2).translate(0, -MOTH_Y + 0.17, 0.05),
+    [0.75, 0.5, 1, 1],
+    [1, 0.62, 0.2, 0.5],
+  );
+  // A warm tint on the parchment cream, as the lamps (and the moth's own glow) would leave it.
+  part(wings, [0, 0, 0.5, 1], [1, 0.9, 0.74, 1]);
   part(
     (t) => new THREE.PlaneGeometry(1.35, 1.35).scale(t === 1 ? 1.14 : 1, t === 1 ? 1.14 : 1, 1).rotateX(HALO_TILT),
     [0.75, 0.5, 1, 1],
@@ -500,17 +510,17 @@ const mothFxGeo = once(() => {
 
 /** The body glows from within: lamp light from the front left baked in, plus a warm inner glow. */
 const MOTH_LIGHT = new THREE.Vector3(-0.35, 0.8, 0.5).normalize();
-const MOTH_EMIT = new THREE.Color(0xc07a18).multiplyScalar(0.75);
+const MOTH_EMIT = new THREE.Color(0xffb84a).multiplyScalar(0.5);
 
 const mothGeo = once(() => {
   const gold = 0xf2b443;
   const body = new Bake();
   body.light = (c, n) => {
     const d = Math.max(0, n.dot(MOTH_LIGHT));
-    c.multiplyScalar(0.5 + 0.62 * d).add(MOTH_EMIT);
+    c.multiplyScalar(0.38 + 0.45 * d).add(MOTH_EMIT);
   };
   body
-    .add(new THREE.SphereGeometry(0.3, 16, 12), (_x, y) => lerpHex(0xc8761a, 0xffcc58, (y + 0.3) / 0.6), [0, 0, 0], [0, 0, 0], [1, 0.96, 0.94])
+    .add(new THREE.SphereGeometry(0.3, 16, 12), (_x, y) => lerpHex(0x9a4808, 0xf09430, (y + 0.3) / 0.6), [0, 0, 0], [0, 0, 0], [1, 0.96, 0.94])
     // Fuzzy collar and a little tail.
     .add(new THREE.SphereGeometry(0.17, 10, 8), 0xe9a53a, [0, -0.2, -0.12], [0.5, 0, 0], [1, 1.3, 1]);
   for (const s of [-1, 1]) {
@@ -572,63 +582,72 @@ export function makeBat(): Model {
 // Slightly cool greys, so the warm lamp light leaves them charcoal rather than brown.
 const SOOT_DARK = 0x111217;
 const SOOT_TIP = 0x2e3038;
-const FACE_DIR = new THREE.Vector3(0, 0.32, 1).normalize();
+/** The face looks well up, towards the camera above, so it sits in the middle of the ball as seen from there. */
+const FACE_DIR = new THREE.Vector3(0, 0.62, 1).normalize();
+/** Rough direction to the camera (pitched ~55° down): clumps on the far side of the ball are never seen. */
+const VIEW_DIR = new THREE.Vector3(0, 0.82, 0.57).normalize();
+/** Face patch: centre distance from the ball's centre and its half-size (x, y, depth), in core radii. */
+const FACE_AT = 0.76;
+const FACE_SIZE: Vec = [0.43, 0.35, 0.21];
 
-/** A fluffy black ball of fur tufts with a cream face patch, centred at height `c` with core radius `r`. */
-function sootFur(bake: Bake, r: number, c: number, seed: number) {
+/** A round fluffy black ball of soft fur clumps with a small cream face set into it, at height `c`, core radius `r`. */
+function sootFur(bake: Bake, r: number, c: number, seed: number, tome: boolean) {
   const rand = rng(seed);
-  bake.add(new THREE.SphereGeometry(r * 0.86, 12, 9), SOOT_DARK, [0, c, 0], [0, 0, 0], [1, 1.06, 1]);
-  // Chunky clumps rather than fine hair: fewer, wider, five-sided tufts read as fluffy from far away.
-  const n = LOW ? 56 : 84;
+  bake.add(new THREE.SphereGeometry(r * 0.86, 12, 8), SOOT_DARK, [0, c, 0], [0, 0, 0], [1, 1.04, 1]);
+  // Soft rounded clumps (flattened balls), not spikes: a lumpy outline that still reads as one round ball.
+  const n = LOW ? 60 : 84;
   // Fewer clumps on 'low' are wider, so the ball stays covered.
   const fat = Math.sqrt(84 / n);
   const dir = new THREE.Vector3();
   const tilt = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
-    // Fibonacci sphere, so the tufts cover it evenly.
+    // Fibonacci sphere, so the clumps cover it evenly.
     const y = 1 - ((i + 0.5) / n) * 2;
     const ring = Math.sqrt(1 - y * y);
     const a = i * 2.399963;
     dir.set(Math.cos(a) * ring, y, Math.sin(a) * ring);
     const facing = dir.dot(FACE_DIR);
-    if (facing > 0.78 || y < -0.75) continue;
-    const len = r * (0.3 + rand() * 0.16) * (facing > 0.5 ? 0.75 : 1);
-    const wide = r * (0.3 + rand() * 0.08) * fat;
-    // Tufts droop a little under their own weight and splay at random.
-    tilt.copy(dir).addScaledVector(UP, -0.3).add(_v.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(0.5)).normalize();
+    // Leave a hole for the face, and skip the underside and the back the camera never sees.
+    if (facing > 0.9 || y < -0.8 || dir.dot(VIEW_DIR) < -0.5) continue;
+    // The tome carried on the back hides the upper back.
+    if (tome && dir.z < -0.25 && y > 0) continue;
+    // Clumps ringing the face are smaller: a soft collar the face sits in.
+    const rim = facing > 0.68;
+    const w = r * (0.3 + rand() * 0.08) * fat * (rim ? 0.72 : 1);
+    const h = w * (0.66 + rand() * 0.16);
+    // Clumps droop a little under their own weight and splay at random.
+    tilt.copy(dir).addScaledVector(UP, -0.22).add(_v.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(0.4)).normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(UP, tilt);
-    // Lamp light catches the upper tufts: warmer, lighter tips on top, a few frosted ones.
-    const tip = lerpHex(lerpHex(SOOT_TIP, 0x4c4e58, Math.max(0, y) * 0.6), 0x62646e, rand() < 0.12 ? 1 : 0);
-    bake.add(
-      new THREE.ConeGeometry(wide, len, 5, 1, true).translate(0, len / 2, 0),
-      (_x, ly) => lerpHex(SOOT_DARK, tip, (ly / len) * 1.25),
-      [dir.x * r * 0.72, c + dir.y * r * 0.76, dir.z * r * 0.72],
-      q,
-    ).soften(dir, 0.6);
+    // Lamp light catches the upper clumps: lighter crowns on top, a few frosted ones.
+    const tip = lerpHex(lerpHex(SOOT_TIP, 0x50525e, Math.max(0, y) * 0.7), 0x60626e, rand() < 0.12 ? 1 : 0);
+    const out = rim ? 0.82 : 0.8;
+    bake
+      .add(new THREE.SphereGeometry(1, 6, 3), (_x, ly) => lerpHex(0x07080b, tip, ly * 1.1), [dir.x * r * out, c + dir.y * r * out, dir.z * r * out], q, [w, h, w])
+      .soften(dir, 0.2);
   }
-  // The face patch, sitting in the ring of fur, turned a little up towards the camera.
+  // The face patch, recessed into the ring of fur.
   const fq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), FACE_DIR);
-  const fc = FACE_DIR.clone().multiplyScalar(r * 0.8);
-  bake.add(new THREE.SphereGeometry(1, 18, 12), (x, y) => lerpHex(0xf1dfc4, 0xd8bf9c, -y * 0.8 + Math.abs(x) * 0.3), [0, c + fc.y, fc.z], fq, [r * 0.6, r * 0.47, r * 0.24]);
-  // Two little fangs under the mouth.
+  const fc = FACE_DIR.clone().multiplyScalar(r * FACE_AT);
+  bake.add(new THREE.SphereGeometry(1, 14, 9), (x, y) => lerpHex(0xf3e2c6, 0xd6bc98, -y * 0.8 + Math.abs(x) * 0.3), [0, c + fc.y, fc.z], fq, [r * FACE_SIZE[0], r * FACE_SIZE[1], r * FACE_SIZE[2]]);
+  // Two tiny white fangs under the mouth.
   for (const s of [-1, 1]) {
-    const p = new THREE.Vector3(s * r * 0.13, -r * 0.24, r * 0.2).applyQuaternion(fq).add(fc);
-    bake.add(new THREE.ConeGeometry(r * 0.05, r * 0.13, 5).rotateX(Math.PI), 0xfdf8ee, [p.x, c + p.y, p.z], fq);
+    const p = new THREE.Vector3(s * r * 0.085, -r * 0.15, r * 0.18).applyQuaternion(fq).add(fc);
+    bake.add(new THREE.ConeGeometry(r * 0.034, r * 0.085, 4).rotateX(Math.PI), 0xffffff, [p.x, c + p.y, p.z], fq);
   }
 }
 
 /** Eyes and mouth of a soot sprite, relative to the eye centre (returned) so the mesh can blink about it. */
 function sootFace(r: number, c: number): { geo: THREE.BufferGeometry; at: Vec } {
   const fq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), FACE_DIR);
-  const fc = FACE_DIR.clone().multiplyScalar(r * 0.8);
-  const center = new THREE.Vector3(0, r * 0.06, r * 0.22).applyQuaternion(fq).add(fc);
+  const fc = FACE_DIR.clone().multiplyScalar(r * FACE_AT);
+  const center = new THREE.Vector3(0, r * 0.04, r * 0.19).applyQuaternion(fq).add(fc);
   const face = new Bake();
   for (const s of [-1, 1]) {
-    const p = new THREE.Vector3(s * r * 0.22, r * 0.06, r * 0.22).applyQuaternion(fq).add(fc).sub(center);
-    eye(face, [p.x, p.y, p.z], FACE_DIR, r * 0.115);
+    const p = new THREE.Vector3(s * r * 0.17, r * 0.04, r * 0.19).applyQuaternion(fq).add(fc).sub(center);
+    eye(face, [p.x, p.y, p.z], FACE_DIR, r * 0.095);
   }
-  const m = new THREE.Vector3(0, -r * 0.13, r * 0.24).applyQuaternion(fq).add(fc).sub(center);
-  face.add(new THREE.SphereGeometry(r * 0.05, 8, 4), 0x2a1416, [m.x, m.y, m.z], fq, [1.3, 0.4, 0.4]);
+  const m = new THREE.Vector3(0, -r * 0.1, r * 0.21).applyQuaternion(fq).add(fc).sub(center);
+  face.add(new THREE.SphereGeometry(r * 0.035, 8, 4), 0x2a1416, [m.x, m.y, m.z], fq, [1.3, 0.4, 0.4]);
   return { geo: face.build(), at: [0, c + center.y, center.z] };
 }
 
@@ -680,11 +699,11 @@ function book(bake: Bake, w: number, h: number, d: number, cover: number, pos: V
 function sootGeo(r: number, load: 'stack2' | 'stack3' | 'tome') {
   const c = r + 0.18;
   const fur = new Bake();
-  sootFur(fur, r, c, load === 'tome' ? 11 : 7);
+  sootFur(fur, r, c, load === 'tome' ? 11 : 7, load === 'tome');
   const face = sootFace(r, c);
   for (const s of [-1, 1]) {
     fur.tag = { foot: s };
-    fur.add(new THREE.SphereGeometry(r * 0.2, 10, 6), SOOT_DARK, [s * r * 0.42, r * 0.1, r * 0.3], [0, 0, 0], [1, 0.75, 1.35]);
+    fur.add(new THREE.SphereGeometry(r * 0.2, 8, 5), SOOT_DARK, [s * r * 0.42, r * 0.1, r * 0.3], [0, 0, 0], [1, 0.75, 1.35]);
   }
   const top = c + r * 0.98;
   // The load's place: held up behind the head for the tome (tipped back so its cover faces the camera and turned so
@@ -788,131 +807,114 @@ const PAPER = 0xfbf2dc;
 const INK_LINE = 0x5a381e;
 
 /**
- * A rolled-up sheet of parchment: a thick spiral strip around the x axis (seen from the side it is a spiral), with
- * its free end unrolled down to the ground at the back. Vertex colours shade the inner turns; rows of handwriting
- * are thin wavy ink strips lying just above the visible part of the outer turn.
+ * A tightly rolled parchment scroll lying along the x axis: a solid roll of radius `R` (its outer turn written on in
+ * rows of handwriting), end caps with the rolled layers drawn as a spiral on the -x end (the one the three-quarter
+ * turned snail shows the camera), and the free end of the sheet hanging down at the back.
  */
-function scrollGeometry(width: number, outerR: number) {
-  const turns = 2.6;
-  const r0 = 0.09;
-  const tk = 0.04;
-  const tMax = turns * Math.PI * 2;
-  const alpha = tMax - Math.PI / 2;
-  const pts: { p: THREE.Vector2; n: THREE.Vector2; s: number }[] = [];
-  const steps = Math.round(turns * 30);
-  let arc = 0;
-  for (let i = 0; i <= steps; i++) {
-    const th = (i / steps) * tMax;
-    const r = r0 + ((outerR - r0) * th) / tMax;
-    const phi = alpha - th;
-    const p = new THREE.Vector2(r * Math.cos(phi), r * Math.sin(phi)); // (y, z)
-    if (pts.length) arc += p.distanceTo(pts[pts.length - 1].p);
-    pts.push({ p, n: p.clone().normalize(), s: arc });
-  }
-  // The free end: from the back of the roll straight down and slightly out, ending in a little curl.
-  const end = pts[pts.length - 1];
-  for (let i = 1; i <= 5; i++) {
-    const k = i / 5;
-    const p = new THREE.Vector2(end.p.x - k * outerR * 1.05, end.p.y - k * k * 0.22);
-    arc += p.distanceTo(pts[pts.length - 1].p);
-    pts.push({ p, n: new THREE.Vector2(-k * 0.5, -1).normalize(), s: arc });
-  }
+function scrollGeometry(width: number, R: number) {
   const pos: number[] = [];
   const nor: number[] = [];
   const col: number[] = [];
   const paper = new THREE.Color(PAPER);
-  const outerCol = new THREE.Color(0xfff8ea).multiply(paper);
-  const innerCol = new THREE.Color(0xc8b08c).multiply(paper);
-  const edgeCol = new THREE.Color(0xf2e4c4).multiply(paper);
+  const outerCol = new THREE.Color(0xf6e6c4).multiply(paper);
+  const backCol = new THREE.Color(0xe2cfa8).multiply(paper);
+  const capRim = new THREE.Color(0xf2dfb8).multiply(paper);
+  const capCore = new THREE.Color(0xcfb284).multiply(paper);
+  const lineCol = new THREE.Color(0x9a7448);
   const ink = new THREE.Color(INK_LINE);
-  /** Two triangles a b c, b d c (a-b at sample i, c-d at sample i+1), front side along the normal. */
-  const quad = (a: Vec, b: Vec, c: Vec, d: Vec, n1: Vec, n2: Vec, color: THREE.Color) => {
-    for (const [v, n] of [[a, n1], [b, n1], [c, n2], [b, n1], [d, n2], [c, n2]] as [Vec, Vec][]) {
-      pos.push(...v);
-      nor.push(...n);
-      col.push(color.r, color.g, color.b);
+  const ea = new THREE.Vector3();
+  const eb = new THREE.Vector3();
+  const en = new THREE.Vector3();
+  /** One triangle, wound so its front faces along its (summed) vertex normals. */
+  const tri = (v: Vec[], n: Vec[], c: THREE.Color[]) => {
+    ea.set(v[1][0] - v[0][0], v[1][1] - v[0][1], v[1][2] - v[0][2]);
+    eb.set(v[2][0] - v[0][0], v[2][1] - v[0][1], v[2][2] - v[0][2]);
+    en.set(n[0][0] + n[1][0] + n[2][0], n[0][1] + n[1][1] + n[2][1], n[0][2] + n[1][2] + n[2][2]);
+    for (const i of ea.cross(eb).dot(en) >= 0 ? [0, 1, 2] : [0, 2, 1]) {
+      pos.push(...v[i]);
+      nor.push(...n[i]);
+      col.push(c[i].r, c[i].g, c[i].b);
     }
   };
+  /** A quad a b c d (in order around it). */
+  const quad = (v: Vec[], n: Vec[], c: THREE.Color | THREE.Color[]) => {
+    const cc = Array.isArray(c) ? c : [c, c, c, c];
+    tri([v[0], v[1], v[2]], [n[0], n[1], n[2]], [cc[0], cc[1], cc[2]]);
+    tri([v[0], v[2], v[3]], [n[0], n[2], n[3]], [cc[0], cc[2], cc[3]]);
+  };
+  // Angle a around the roll: 0 at the front (+z), π/2 on top, π at the back.
+  const at = (x: number, a: number, r = R): Vec => [x, r * Math.sin(a), r * Math.cos(a)];
+  const nrm = (a: number): Vec => [0, Math.sin(a), Math.cos(a)];
   const w = width / 2;
-  const sOuter = pts[steps].s;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const A = pts[i];
-    const B = pts[i + 1];
-    const oA: Vec = [0, A.p.x, A.p.y];
-    const oB: Vec = [0, B.p.x, B.p.y];
-    const iA: Vec = [0, A.p.x - A.n.x * tk, A.p.y - A.n.y * tk];
-    const iB: Vec = [0, B.p.x - B.n.x * tk, B.p.y - B.n.y * tk];
-    const at = (v: Vec, x: number): Vec => [x, v[1], v[2]];
-    const nA: Vec = [0, A.n.x, A.n.y];
-    const nB: Vec = [0, B.n.x, B.n.y];
-    const last = B.s > sOuter - 4.2;
-    // Inner turns are shaded darker (they sit in the roll's shadow); the outer turn is bright.
-    const shade = innerCol.clone().lerp(outerCol, Math.min(1, (A.s / sOuter) ** 2.2));
-    quad(at(oA, -w), at(oA, w), at(oB, -w), at(oB, w), nA, nB, last ? outerCol : shade);
-    quad(at(iA, w), at(iA, -w), at(iB, w), at(iB, -w), [0, -A.n.x, -A.n.y], [0, -B.n.x, -B.n.y], innerCol);
+
+  // The roll and its end caps.
+  const SEG = 36;
+  for (let i = 0; i < SEG; i++) {
+    const a0 = (i / SEG) * Math.PI * 2;
+    const a1 = ((i + 1) / SEG) * Math.PI * 2;
+    quad([at(-w, a0), at(w, a0), at(w, a1), at(-w, a1)], [nrm(a0), nrm(a0), nrm(a1), nrm(a1)], outerCol);
     for (const s of [-1, 1]) {
-      const x = s * w;
-      const ec = edgeCol.clone().lerp(innerCol, 0.6 * (1 - A.s / B.s) + (1 - Math.min(1, A.s / sOuter)) * 0.35);
-      // Winding flipped on the -x edge so both edges face outwards.
-      if (s > 0) quad(at(oA, x), at(iA, x), at(oB, x), at(iB, x), [s, 0, 0], [s, 0, 0], ec);
-      else quad(at(iA, x), at(oA, x), at(iB, x), at(oB, x), [s, 0, 0], [s, 0, 0], ec);
+      const n: Vec = [s, 0, 0];
+      tri([[s * w, 0, 0], at(s * w, a0), at(s * w, a1)], [n, n, n], [capCore, capRim, capRim]);
+    }
+  }
+  // The rolled layers on the -x cap: a spiral line ending at the back, where the sheet leaves the roll.
+  const turns = 3;
+  const T = turns * Math.PI * 2;
+  const steps = Math.round(turns * 22);
+  const hw = 0.009;
+  const cx = -w - 0.003;
+  const capN: Vec = [-1, 0, 0];
+  for (let i = 0; i < steps; i++) {
+    const p = (k: number) => {
+      const t = (k / steps) * T;
+      return { a: Math.PI - (T - t), r: 0.035 + ((R - hw - 0.035) * t) / T };
+    };
+    const A = p(i);
+    const B = p(i + 1);
+    quad([at(cx, A.a, A.r - hw), at(cx, A.a, A.r + hw), at(cx, B.a, B.r + hw), at(cx, B.a, B.r - hw)], [capN, capN, capN, capN], lineCol);
+  }
+  // The free end of the sheet, hanging down from the back of the roll with a slight outward curl (both sides).
+  const L = R * 0.9;
+  const flap = (k: number): { y: number; z: number; n: [number, number] } => ({ y: -k * L, z: -R - k * k * 0.12, n: [-k * 0.24, -1] });
+  for (let i = 0; i < 4; i++) {
+    const A = flap(i / 4);
+    const B = flap((i + 1) / 4);
+    for (const side of [1, -1]) {
+      const nA: Vec = [0, A.n[0] * side, A.n[1] * side];
+      const nB: Vec = [0, B.n[0] * side, B.n[1] * side];
+      const off = side * 0.006;
+      quad(
+        [[-w, A.y, A.z - off], [w, A.y, A.z - off], [w, B.y, B.z - off], [-w, B.y, B.z - off]],
+        [nA, nA, nB, nB],
+        side > 0 ? outerCol : backCol,
+      );
     }
   }
 
-  // Handwriting on the outer turn, where the camera (above, in front, the snail turned three-quarters) sees it.
-  const sample = (s: number) => {
-    let i = 0;
-    while (i < steps - 1 && pts[i + 1].s < s) i++;
-    const k = (s - pts[i].s) / (pts[i + 1].s - pts[i].s);
-    return {
-      p: pts[i].p.clone().lerp(pts[i + 1].p, k),
-      n: pts[i].n.clone().lerp(pts[i + 1].n, k).normalize(),
-    };
-  };
+  // Rows of handwriting on the outer turn, across the front, over the top and down the back the camera sees.
   const rand = rng(17);
-  // The old texture's layout: 256 px tiles repeating every 1.2 along the arc, writing between u 0.12 and 0.88.
-  const xOf = (px: number) => -w + ((px / 256 - 0.06) / 0.88) * width;
-  const sOf = (k: number, py: number) => 1.2 * (k + 1 - py / 256);
-  const hw = 0.0085;
-  const lift = 0.004;
-  const sStart = pts[Math.round(steps * (1 - 1 / turns))].s;
-  for (let k = Math.floor(sStart / 1.2); 1.2 * k < sOuter; k++)
-    for (let row = 0; row < 9; row++) {
-      const py = 16 + row * 28;
-      const s0 = sOf(k, py);
-      if (s0 < sStart || s0 > sOuter - 0.05) continue;
-      const nn = sample(s0).n;
-      if (0.82 * nn.x + 0.42 * nn.y < -0.12) continue;
-      let x = 34 + rand() * 10;
-      while (x < 222) {
-        const len = 10 + rand() * 26;
-        const segs = len > 22 ? 3 : 2;
-        let prev: { x: number; a: THREE.Vector2; b: THREE.Vector2; n: THREE.Vector2 } | null = null;
-        for (let j = 0; j <= segs; j++) {
-          const kx = (len * j) / segs;
-          const s = sOf(k, py + Math.sin(kx * 0.9 + row) * 3);
-          const lo = sample(s - hw);
-          const hi = sample(s + hw);
-          const cur = {
-            x: xOf(x + kx),
-            a: lo.p.addScaledVector(lo.n, lift),
-            b: hi.p.addScaledVector(hi.n, lift),
-            n: lo.n.add(hi.n).normalize(),
-          };
-          if (prev) {
-            const n1: Vec = [0, prev.n.x, prev.n.y];
-            const n2: Vec = [0, cur.n.x, cur.n.y];
-            // a = (x0, s - hw), b = (x1, s - hw), c = (x0, s + hw), d = (x1, s + hw): faces outwards like the paper.
-            pos.push(prev.x, prev.a.x, prev.a.y, cur.x, cur.a.x, cur.a.y, prev.x, prev.b.x, prev.b.y);
-            pos.push(cur.x, cur.a.x, cur.a.y, cur.x, cur.b.x, cur.b.y, prev.x, prev.b.x, prev.b.y);
-            nor.push(...n1, ...n2, ...n1, ...n2, ...n2, ...n1);
-            for (let v = 0; v < 6; v++) col.push(ink.r, ink.g, ink.b);
-          }
-          prev = cur;
-        }
-        x += len + 6 + rand() * 6;
+  const lift = R + 0.004;
+  const half = 0.0075 / R;
+  for (let row = 0, a = -0.15; a < 2.1; row++, a += 0.16) {
+    let x = -w + 0.05 + rand() * 0.03;
+    while (x < w - 0.08) {
+      const len = Math.min(0.1 + rand() * 0.18, w - 0.05 - x);
+      const segs = len > 0.18 ? 4 : 3;
+      let prev: { x: number; a: number } | null = null;
+      for (let j = 0; j <= segs; j++) {
+        const cur = { x: x + (len * j) / segs, a: a + (Math.sin((x + (len * j) / segs) * 45 + row) * 0.008) / R };
+        if (prev)
+          quad(
+            [at(prev.x, prev.a - half, lift), at(cur.x, cur.a - half, lift), at(cur.x, cur.a + half, lift), at(prev.x, prev.a + half, lift)],
+            [nrm(prev.a), nrm(cur.a), nrm(cur.a), nrm(prev.a)],
+            ink,
+          );
+        prev = cur;
       }
+      x += len + 0.03 + rand() * 0.02;
     }
+  }
 
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -921,7 +923,11 @@ function scrollGeometry(width: number, outerR: number) {
   return g;
 }
 
-const SNAIL_SKIN = 0xf1dcbc;
+/** Warm tan skin and a darker brown foot, so the body stands apart from the cream scroll. */
+const SNAIL_SKIN = 0xc49a6c;
+const SNAIL_FOOT = 0x5e4029;
+/** Eye stalk length. */
+const STALK = 0.63;
 const HEAD = new THREE.Vector3(0, 0.62, 0.8);
 const SHELL_Y = 0.86;
 /** Where the eye stalks sit on the head (they wobble about it). */
@@ -937,18 +943,19 @@ const snailStalkX: Morph = (t, v) => void (t.stalk && rotAbout(v, STALKS, qStalk
 const snailShell: Morph = (t, v) => void (t.shell && rotAbout(v, SHELL_AT, qShell).setY(v.y + 0.015));
 
 const snailGeo = once(() => {
-  const skin = (_x: number, y: number) => lerpHex(0x9a7552, SNAIL_SKIN, (y + 0.4) * 1.6);
+  const skin = (_x: number, y: number) => lerpHex(0x9c7448, SNAIL_SKIN, (y + 0.6) * 0.9);
+  const foot = (_x: number, y: number) => lerpHex(0x3c2818, SNAIL_FOOT, (y + 1) * 0.8);
   const soft = new Bake();
   soft.tag = { crawl: true };
   soft
     // A long low foot, a neck rising to a round head at the front.
-    .add(new THREE.SphereGeometry(1, 14, 9), skin, [0, 0.2, 0.05], [0, 0, 0], [0.42, 0.24, 1.0])
+    .add(new THREE.SphereGeometry(1, 14, 9), foot, [0, 0.2, 0.05], [0, 0, 0], [0.42, 0.24, 1.0])
     .add(new THREE.SphereGeometry(1, 12, 8), skin, [0, 0.38, 0.58], [0.5, 0, 0], [0.34, 0.38, 0.36])
-    .add(new THREE.SphereGeometry(0.36, 14, 10), SNAIL_SKIN, [0, 0.62, 0.8], [0, 0, 0], [1.05, 0.95, 0.95]);
+    .add(new THREE.SphereGeometry(0.36, 14, 10), (_x, y) => lerpHex(0xae8456, 0xd8b386, (y + 0.3) / 0.62), [0, 0.62, 0.8], [0, 0, 0], [1.05, 0.95, 0.95]);
   // A row of soft brown knobs along the foot's rim, like the reference's chunky little feet.
   for (const s of [-1, 1])
     for (const z of [-0.6, -0.15, 0.3, 0.68])
-      soft.add(new THREE.SphereGeometry(0.1, 6, 4), 0x6e5038, [s * 0.34, 0.05, z], [0, 0, 0], [1.2, 0.6, 1.3]);
+      soft.add(new THREE.SphereGeometry(0.1, 6, 4), 0x45301e, [s * 0.34, 0.05, z], [0, 0, 0], [1.2, 0.6, 1.3]);
   // The face sits high on the front of the head, turned up towards the camera.
   const face = new Bake();
   face.tag = { crawl: true };
@@ -972,15 +979,15 @@ const snailGeo = once(() => {
   const look = new THREE.Vector3(0, 0.5, 1).normalize();
   for (const s of [-1, 1]) {
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.05, 0, -s * 0.38));
-    const tip = new THREE.Vector3(0, 0.42, 0).applyQuaternion(q).add(new THREE.Vector3(s * 0.1, 0, 0));
-    soft.add(new THREE.CylinderGeometry(0.035, 0.055, 0.42, 7, 1, true).translate(0, 0.21, 0), SNAIL_SKIN, [s * 0.1, 0, 0], q);
+    const tip = new THREE.Vector3(0, STALK, 0).applyQuaternion(q).add(new THREE.Vector3(s * 0.1, 0, 0));
+    soft.add(new THREE.CylinderGeometry(0.032, 0.052, STALK, 7, 1, true).translate(0, STALK / 2, 0), SNAIL_SKIN, [s * 0.1, 0, 0], q);
     soft.add(new THREE.SphereGeometry(0.11, 9, 6), 0xfaf3e6, [tip.x, tip.y, tip.z]);
     const p = look.clone().multiplyScalar(0.085).add(tip);
     eye(face, [p.x, p.y, p.z], look, 0.07);
   }
   soft.frame = face.frame = null;
   soft.tag = { shell: true };
-  soft.add(scrollGeometry(0.8, 0.64), null, [SHELL_AT.x, SHELL_AT.y, SHELL_AT.z]);
+  soft.add(scrollGeometry(0.86, 0.6), null, [SHELL_AT.x, SHELL_AT.y, SHELL_AT.z]);
   return {
     soft: soft.build([snailStretch, snailStalkZ, snailStalkX, snailShell, still]),
     face: face.build([snailStretch, snailStalkZ, snailStalkX, blinkMorph]),
@@ -1003,7 +1010,7 @@ export function makeGhost(): Model {
   return {
     root,
     radius: 1.1,
-    height: 1.45,
+    height: 1.68,
     color: SNAIL_SKIN,
     hit: sq.hit,
     animate(dt, t) {
