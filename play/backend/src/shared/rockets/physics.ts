@@ -1,7 +1,7 @@
 // Quake-style player movement and rocket sweeps for Rockets. Runs identically on the server (authoritative) and
 // in the client (prediction), so it must be deterministic and must not touch anything outside its arguments.
 
-import { aabbOverlap, hdist, type AABB, type Vec3, yawForward, yawRight } from '../math.js';
+import { aabbOverlap, clamp, hdist, segmentBoxes, type AABB, type Vec3, vnormalize, vsub, yawForward, yawRight } from '../math.js';
 import { RK } from './constants.js';
 import type { MapData } from './map.js';
 
@@ -203,3 +203,26 @@ export function stepBody(b: Body, input: MoveInput, map: MapData, dt = RK.dt): S
 
 export const eyePosition = (pos: Vec3): Vec3 => ({ x: pos.x, y: pos.y + RK.eyeHeight, z: pos.z });
 export const chestPosition = (pos: Vec3): Vec3 => ({ x: pos.x, y: pos.y + RK.height * 0.55, z: pos.z });
+
+/**
+ * Splash knockback on a body with feet at `pos` from an explosion at `at`: the velocity change (before the self
+ * scale) and the damage falloff, or null when out of reach or behind cover. Shared so the client can predict its own
+ * rocket jumps with exactly the server's numbers.
+ */
+export function splashKnock(at: Vec3, pos: Vec3, boxes: readonly AABB[], direct: boolean): { x: number; y: number; z: number; falloff: number } | null {
+  const box = playerAABB(pos);
+  const nx = clamp(at.x, box.min.x, box.max.x) - at.x;
+  const ny = clamp(at.y, box.min.y, box.max.y) - at.y;
+  const nz = clamp(at.z, box.min.z, box.max.z) - at.z;
+  const d = Math.hypot(nx, ny, nz);
+  if (d > RK.splashRadius) return null;
+  const centre = { x: pos.x, y: pos.y + RK.height * 0.5, z: pos.z };
+  if (!direct && segmentBoxes(at, centre, boxes)) return null; // behind cover
+  const falloff = 1 - d / RK.splashRadius;
+  // Away from the blast, with a guaranteed bit of lift so floor hits launch players.
+  const dir = vnormalize(vsub(centre, at));
+  if (dir.y < RK.knockbackLift) dir.y = RK.knockbackLift;
+  const n = vnormalize(dir);
+  const kick = RK.knockback * (direct ? 1 : falloff);
+  return { x: n.x * kick, y: n.y * kick, z: n.z * kick, falloff };
+}

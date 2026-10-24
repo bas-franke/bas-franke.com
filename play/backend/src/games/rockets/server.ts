@@ -11,10 +11,10 @@ import {
   segmentBoxes,
   toTuple,
   type Vec3,
+  type Vec3Tuple,
   v3,
   vadd,
   vdist,
-  vnormalize,
   vscale,
   vsub,
 } from '../../shared/math.js';
@@ -22,7 +22,7 @@ import { RK } from '../../shared/rockets/constants.js';
 import { ITEM, type ItemSpawn, itemRespawn, itemsFor } from '../../shared/rockets/items.js';
 import type { MapData } from '../../shared/rockets/map.js';
 import { MAPS, mapById } from '../../shared/rockets/maps.js';
-import { type Body, eyePosition, playerAABB, stepBody } from '../../shared/rockets/physics.js';
+import { type Body, eyePosition, playerAABB, splashKnock, stepBody } from '../../shared/rockets/physics.js';
 import type { PlayerSnap, RocketSnap, RocketsEvent, RocketsInput, RocketsServerMsg, ScoreRow } from '../../shared/rockets/protocol.js';
 import type { GameClientMsg } from '../../shared/protocol.js';
 import type { GameHost, GamePlayer, GameServer } from '../types.js';
@@ -45,6 +45,8 @@ interface RPlayer extends GamePlayer {
   /** Commands this player may still apply, earned at one per simulation step (anti speed-hack). */
   credit: number;
   nextFire: number;
+  /** First command seq a human may fire on again (reload counted in commands, as the client does). */
+  fireSeq: number;
   queue: RocketsInput[];
   lastInputAt: number;
   frags: number;
@@ -54,7 +56,16 @@ interface RPlayer extends GamePlayer {
   /** Who last hurt this player and when, so a knock into the void still credits the shooter. */
   lastHitBy?: string;
   lastHitAt?: number;
+  /** The pack and item lists last sent to this player; snapshots only carry them when they change. */
+  sentPk?: string;
+  sentIt?: string;
 }
+
+/** Snapshot rounding: 1 cm positions, 0.1 m/s velocities, 0.01 rad angles. Plenty for interpolation. */
+const r2 = (n: number) => Math.round(n * 100) / 100;
+const r1 = (n: number) => Math.round(n * 10) / 10;
+const cm = (a: Vec3): Vec3Tuple => [r2(a.x), r2(a.y), r2(a.z)];
+const dm = (a: Vec3): Vec3Tuple => [r1(a.x), r1(a.y), r1(a.z)];
 
 interface Rocket {
   id: string;
@@ -65,6 +76,11 @@ interface Rocket {
 }
 
 const IDLE: Omit<RocketsInput, 'seq' | 'yaw' | 'pitch'> = { f: 0, s: 0, jump: false, fire: false };
+/** Seconds without commands before the server moves a player on its own (gravity, friction). */
+const IDLE_AFTER = 0.3;
+/** Reload and post-spawn delay in commands (one command = one RK.dt step); the client uses the same numbers. */
+const FIRE_STEPS = Math.round(RK.fireInterval / RK.dt);
+const SPAWN_FIRE_STEPS = Math.round(0.3 / RK.dt);
 
 // Build every map's nav graph once at boot, so the first match on a map does not stall the event loop.
 for (const m of MAPS) navGraphFor(m);
@@ -114,18 +130,35 @@ class RocketsGame implements GameServer {
     // Everyone appears straight away, one after the other so each spawn sees the ones already placed, and stands
     // frozen through the countdown: the match starts with nobody spawning on top of or in front of anybody else.
     for (const p of this.players.values()) this.spawn(p);
-    this.timer = setInterval(() => {
+    this.nextLoopAt = performance.now();
+    this.schedule();
+  }
+
+  private nextLoopAt = 0;
+
+  /**
+   * Self-correcting timer: each loop is aimed at its slot on a fixed 30 Hz grid, so late timers (Windows rounds them
+   * to its 15.6 ms tick, giving 31/47 ms with setInterval) are made up on the next one instead of piling up.
+   */
+  private schedule() {
+    const period = 1000 / RK.loopHz;
+    this.nextLoopAt += period;
+    const now = performance.now();
+    // Far behind (a long GC or a suspended laptop): start the grid again rather than firing a burst of loops.
+    if (this.nextLoopAt < now - period) this.nextLoopAt = now;
+    this.timer = setTimeout(() => {
       try {
         this.loop();
       } catch (err) {
         // One bad room must never take down every other room on the server.
         console.error('rockets loop failed', err);
       }
-    }, 1000 / RK.loopHz);
+      if (this.timer) this.schedule();
+    }, Math.max(0, this.nextLoopAt - now));
   }
 
   stop() {
-    clearInterval(this.timer);
+    clearTimeout(this.timer);
     this.timer = undefined;
   }
 
@@ -145,6 +178,7 @@ class RocketsGame implements GameServer {
       lastQueued: 0,
       credit: 2,
       nextFire: 0,
+      fireSeq: 0,
       queue: [],
       lastInputAt: this.now,
       frags: 0,
@@ -211,7 +245,7 @@ class RocketsGame implements GameServer {
           this.applyInput(p, frozen ? this.holdStill(cmd) : cmd);
         }
       }
-      this.stepRockets(RK.dt);
+      this.stepRockets(RK.dt, null);
       this.updatePacks();
     }
     if (substeps === 0 || this.ended) return;
@@ -219,8 +253,11 @@ class RocketsGame implements GameServer {
     for (const p of this.players.values()) {
       if (p.brain) continue;
       let n = 0;
-      // One command per simulated step plus a little slack for network jitter, capped so nobody banks speed.
-      p.credit = Math.min(p.credit + substeps * 1.15, RK.maxCommandsPerLoop + 2);
+      // One command per simulated step plus a little slack for network jitter, capped so nobody banks speed. While the
+      // queue is empty (a stalled uplink) credit keeps building up to the idle limit, so the commands stuck behind the
+      // stall catch up at once instead of adding latency for seconds.
+      const cap = p.queue.length ? RK.maxCommandsPerLoop + 2 : IDLE_AFTER / RK.dt;
+      p.credit = Math.min(p.credit + substeps * 1.15, Math.max(cap, p.credit));
       while (p.queue.length && p.credit >= 1) {
         p.credit--;
         const cmd = p.queue.shift()!;
@@ -230,7 +267,8 @@ class RocketsGame implements GameServer {
         n++;
       }
       // Nobody at the keyboard (or a stalled connection): keep gravity honest.
-      if (n === 0 && this.now - p.lastInputAt > 0.3) {
+      // Not sooner: every fabricated step is one the client never predicted, so a jittery uplink would mispredict.
+      if (n === 0 && this.now - p.lastInputAt > IDLE_AFTER) {
         for (let i = 0; i < substeps; i++) this.applyInput(p, { ...IDLE, seq: p.lastSeq, yaw: p.yaw, pitch: p.pitch }, true);
       }
     }
@@ -243,6 +281,9 @@ class RocketsGame implements GameServer {
     p.yaw = input.yaw;
     p.pitch = input.pitch;
     if (!idle) p.lastSeq = input.seq;
+    // A human's own rockets fly in that player's command time, one step per command like their body, so the client
+    // predicts exactly when they hit and its rocket jumps (the self knockback) land on the same command.
+    if (!p.bot) this.stepRockets(RK.dt, p);
     if (p.dead) return;
 
     const result = stepBody(p.body, input, this.map);
@@ -252,13 +293,15 @@ class RocketsGame implements GameServer {
       return;
     }
     this.tryPickup(p);
-    if (input.fire && this.now >= p.nextFire) this.fire(p, input.seq);
+    // Humans reload in commands (the client counts the same), so a burst of queued commands fires on the same one.
+    if (input.fire && (p.bot ? this.now >= p.nextFire : input.seq >= p.fireSeq)) this.fire(p, input.seq);
   }
 
   // ---- rockets ------------------------------------------------------------------------------------------------
 
   private fire(p: RPlayer, seq: number) {
     p.nextFire = this.now + RK.fireInterval;
+    p.fireSeq = seq + FIRE_STEPS;
     // Shooting ends spawn protection: nobody gets to attack while invulnerable.
     p.protectedUntil = Math.min(p.protectedUntil, this.now);
     p.shots++;
@@ -271,9 +314,16 @@ class RocketsGame implements GameServer {
     this.events.push({ k: 'fire', id: rocket.id, o: p.id, p: toTuple(rocket.pos), v: toTuple(rocket.vel) });
   }
 
-  private stepRockets(dt: number) {
+  /** Steps the rockets of `owner` (a human, from applyInput), or with null every rocket not owned by a human. */
+  private stepRockets(dt: number, owner: RPlayer | null) {
     const keep: Rocket[] = [];
     for (const r of this.rockets) {
+      const by = this.players.get(r.owner);
+      const step = owner ? by === owner : !by || !!by.bot;
+      if (!step) {
+        keep.push(r);
+        continue;
+      }
       const from = r.pos;
       const to = vadd(r.pos, vscale(r.vel, dt));
       const mapHit = segmentBoxes(from, to, this.map.boxes);
@@ -308,27 +358,19 @@ class RocketsGame implements GameServer {
     const owner = this.players.get(r.owner) ?? null;
     for (const p of this.players.values()) {
       if (p.dead) continue;
-      const box = playerAABB(p.body.pos);
-      const nearest = v3(clamp(at.x, box.min.x, box.max.x), clamp(at.y, box.min.y, box.max.y), clamp(at.z, box.min.z, box.max.z));
-      const d = vdist(at, nearest);
-      if (d > RK.splashRadius) continue;
-      const centre = v3(p.body.pos.x, p.body.pos.y + RK.height * 0.5, p.body.pos.z);
-      if (p !== direct && segmentBoxes(at, centre, this.map.boxes)) continue; // behind cover
+      // Shared with the client, which predicts its own rocket jumps with the same numbers.
+      const knock = splashKnock(at, p.body.pos, this.map.boxes, p === direct);
+      if (!knock) continue;
       const self = owner === p;
       if (!self && this.now < p.protectedUntil) continue; // spawn protection: no damage and no knockback
-      const falloff = 1 - d / RK.splashRadius;
-      let dmg = p === direct ? (this.isAirshot(p) ? RK.airshotDamage : RK.directDamage) : RK.splashDamage * falloff;
+      let dmg = p === direct ? (this.isAirshot(p) ? RK.airshotDamage : RK.directDamage) : RK.splashDamage * knock.falloff;
       if (self) dmg *= RK.selfDamageScale;
 
-      // Knockback: away from the blast, with a guaranteed bit of lift so floor hits launch players.
-      const dir = vnormalize(vsub(centre, at));
-      if (dir.y < RK.knockbackLift) dir.y = RK.knockbackLift;
-      const kick = RK.knockback * (p === direct ? 1 : falloff) * (self ? RK.selfKnockbackScale : 1);
-      const n = vnormalize(dir);
-      p.body.vel.x += n.x * kick;
-      p.body.vel.y += n.y * kick;
-      p.body.vel.z += n.z * kick;
-      if (n.y > 0) p.body.onGround = false;
+      const scale = self ? RK.selfKnockbackScale : 1;
+      p.body.vel.x += knock.x * scale;
+      p.body.vel.y += knock.y * scale;
+      p.body.vel.z += knock.z * scale;
+      if (knock.y > 0) p.body.onGround = false;
 
       this.damage(p, Math.round(dmg), owner);
     }
@@ -411,6 +453,7 @@ class RocketsGame implements GameServer {
     p.dead = false;
     p.protectedUntil = this.now + RK.spawnProtection;
     p.nextFire = this.now + 0.3;
+    p.fireSeq = p.lastSeq + SPAWN_FIRE_STEPS;
     this.events.push({ k: 'spawn', id: p.id, p: toTuple(p.body.pos) });
   }
 
@@ -520,17 +563,17 @@ class RocketsGame implements GameServer {
     for (const p of this.players.values()) {
       pl.push({
         id: p.id,
-        p: toTuple(p.body.pos),
-        v: toTuple(p.body.vel),
-        y: Math.round(p.yaw * 1000) / 1000,
-        pt: Math.round(p.pitch * 1000) / 1000,
+        p: cm(p.body.pos),
+        v: dm(p.body.vel),
+        y: r2(p.yaw),
+        pt: r2(p.pitch),
         hp: p.hp,
         ...(p.armor > 0 ? { ar: p.armor } : {}),
         d: p.dead ? 1 : 0,
         g: p.body.onGround ? 1 : 0,
       });
     }
-    const rk: RocketSnap[] = this.rockets.map((r) => ({ id: r.id, o: r.owner, p: toTuple(r.pos), v: toTuple(r.vel) }));
+    const rk: RocketSnap[] = this.rockets.map((r) => ({ id: r.id, o: r.owner, p: cm(r.pos), v: dm(r.vel) }));
     const pk: number[] = [];
     this.packs.forEach((pack, i) => pack.available && pk.push(i));
     const it: number[] = [];
@@ -540,8 +583,6 @@ class RocketsGame implements GameServer {
       t: Date.now(),
       left: Math.round(this.timeLeft() * 10) / 10,
       rk,
-      pk,
-      it,
       ...(this.frozen() ? { cd: Math.round((RocketsGame.COUNTDOWN - this.now) * 10) / 10 } : {}),
       ...(this.overtime ? { ot: 1 as const } : {}),
     };
@@ -552,8 +593,14 @@ class RocketsGame implements GameServer {
     }
     for (const p of this.players.values()) {
       if (p.bot) continue;
-      const mine = pl.map((s) => (s.id === p.id ? { ...s, seq: p.lastSeq } : s));
-      const msg: RocketsServerMsg = { k: 'snap', s: { ...base, pl: mine } };
+      // Our own entry stays at full precision: prediction replays from it.
+      const mine = pl.map((s) => (s.id === p.id ? { ...s, p: toTuple(p.body.pos), v: toTuple(p.body.vel), seq: p.lastSeq } : s));
+      const pkKey = pk.join();
+      const itKey = it.join();
+      const changes = { ...(pkKey !== p.sentPk ? { pk } : {}), ...(itKey !== p.sentIt ? { it } : {}) };
+      p.sentPk = pkKey;
+      p.sentIt = itKey;
+      const msg: RocketsServerMsg = { k: 'snap', s: { ...base, ...changes, pl: mine } };
       this.host.send(p.id, msg);
     }
   }
