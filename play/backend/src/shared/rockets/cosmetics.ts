@@ -2,8 +2,10 @@
 // customiser, saved in their browser, sent to the room, and shown to everyone. In team modes the body colour is
 // replaced by the team colour; trim, visor, paint pattern and parts stay the player's own.
 
-export const BODY_COLORS = [0xf07a1e, 0xe8392e, 0x3d7bff, 0x2fbf6a, 0x8d4bff, 0xffc83a, 0xf2f2ee, 0x3a3f4a, 0xff6ab0, 0x22c3c3] as const;
-export const TRIM_COLORS = [0xeadcbc, 0xffffff, 0x9aa3b5, 0x1c1e22, 0xffd166, 0x7cf4c9] as const;
+// The robot renders its body and trim to match these swatches on a sunlit face (character.ts compensates for the
+// lighting), so pick them as they should look on screen. Saved looks with a retired colour fall back to the default.
+export const BODY_COLORS = [0xe8661a, 0xe8392e, 0x3d7bff, 0x2fbf6a, 0x8d4bff, 0xffc83a, 0xf2f2ee, 0x3a3f4a, 0xff6ab0, 0x22c3c3] as const;
+export const TRIM_COLORS = [0xead7b0, 0xffffff, 0x9aa3b5, 0x1c1e22, 0xffd166, 0x7cf4c9] as const;
 export const VISOR_COLORS = [0x4ff0ff, 0xff4fd8, 0x9bff4f, 0xffd23f, 0xff4b3a, 0xffffff] as const;
 
 export const HELMETS = ['dome', 'crest', 'antenna', 'horns'] as const;
@@ -48,8 +50,8 @@ export interface Look {
 
 /** The concept-art robot: orange body, cream trim, cyan smile. */
 export const DEFAULT_LOOK: Required<Look> = {
-  body: 0xf07a1e,
-  trim: 0xeadcbc,
+  body: 0xe8661a,
+  trim: 0xead7b0,
   visor: 0x4ff0ff,
   helmet: 'dome',
   face: 'smile',
