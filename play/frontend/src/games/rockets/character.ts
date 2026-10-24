@@ -1,9 +1,10 @@
 // The Rockets player robot, after the concept art: a heroic low-poly biped in sculpted, bevelled orange armour with
 // cream panels, a gunmetal under-suit, a big round helmet with a wide black visor, glowing "^ ^" eyes and cyan-ringed
 // ear pods, wide layered shoulder pads, gauntlet forearms with big hands, thick thighs and big boots with cream toe
-// caps. It holds the launcher with both hands: the right on the main grip, its stock tucked under the arm, the left
-// on the front grip. Every look (colours, paint pattern, helmet, visor, face, ears, shoulders, backpack, boots, emblem) is built
-// from the same parts, here, for the customiser preview and the game alike.
+// caps. The armour is a set of separate plates with the black under-suit and its joints showing between them. It holds
+// the launcher with both hands: the right on the main grip, its stock tucked under the arm, the left on the front grip.
+// Every look (colours, paint pattern, helmet, visor, face, ears, shoulders, chest, gauntlets, backpack, boots, emblem)
+// is built from the same parts, here, for the customiser preview and the game alike.
 //
 // Draw calls are the budget: the whole robot, launcher included, is ONE skinned mesh plus ONE skinned ink hull.
 // Every rigid part is weighted fully to one bone, so a "skin" is just a cheap way to move a dozen parts in one draw.
@@ -18,10 +19,12 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import {
   type Backpack,
   type Boots,
+  type Chest,
   DEFAULT_LOOK,
   type Ears,
   type Emblem,
   type Face,
+  type Gauntlets,
   type Helmet,
   type Look,
   PATTERNS,
@@ -47,7 +50,7 @@ const BODY2 = -4;
 const TRIM2 = -5;
 const SHELL = -6;
 /** Under-suit, joints and the visor glass. */
-const SUIT = 0x30343d;
+const SUIT = 0x272a31;
 const JOINT = 0x1d1f25;
 const GLASS = 0x0b0d12;
 
@@ -510,33 +513,44 @@ function seam(k: Kit, pos: V3, size: V3, rot: V3 | THREE.Quaternion = [0, 0, 0])
   k.add(box(...size), JOINT, pos, rot, undefined, false);
 }
 
-/** Hips: a dark pelvis under a separate orange hip plate, a tapered front plate, a seat plate and round side joints. */
+/** Two parallel cyan slits (`size` each, `gap` apart along the frame's X) in one black recess, facing `out`. */
+function doubleSlit(k: Kit, at: THREE.Vector3, q: THREE.Quaternion, size: V3, gap: number, out: V3) {
+  const o = vec(out);
+  k.add(box(size[0] + gap + 0.016, size[1] + 0.016, size[2] + 0.012), JOINT, local(at, q, tuple(o.clone().multiplyScalar(-0.004))), q, undefined, false);
+  for (const d of [-gap / 2, gap / 2]) k.glow(box(...size), VISOR, local(at, q, tuple(o.clone().multiplyScalar(0.004).add(vec([d, 0, 0])))), q);
+}
+
+/** Hips: a dark pelvis under a separate orange hip plate, a tapered front plate, a seat plate and black ball joints. */
 function hipParts(k: Kit) {
   k.add(loft([[0.78, 0.08, 0.075], [0.87, 0.15, 0.11], [0.99, 0.14, 0.11]]), SUIT);
-  k.add(loft([[0.89, 0.18, 0.13], [0.945, 0.205, 0.15], [0.99, 0.19, 0.135]], 0.42, 0.022), BODY);
-  k.add(loft([[-0.006, 0.208, 0.154], [0.006, 0.208, 0.154]], 0.42, 0), JOINT, [0, 0.925, 0], undefined, undefined, false);
-  k.add(loft([[-0.09, 0.035, 0.028], [0.0, 0.08, 0.04], [0.07, 0.098, 0.04]], 0.35, 0.016), BODY, [0, 0.875, -0.14], [0.1, 0, 0]);
+  k.add(loft([[0.9, 0.17, 0.125], [0.95, 0.19, 0.145], [0.99, 0.18, 0.13]], 0.42, 0.022), BODY);
+  k.add(loft([[-0.006, 0.193, 0.149], [0.006, 0.193, 0.149]], 0.42, 0), JOINT, [0, 0.93, 0], undefined, undefined, false);
+  k.add(loft([[-0.08, 0.03, 0.026], [0.0, 0.062, 0.036], [0.06, 0.075, 0.036]], 0.35, 0.016), BODY, [0, 0.88, -0.136], [0.1, 0, 0]);
   seam(k, [0, 0.865, -0.18], [0.012, 0.08, 0.008], [0.1, 0, 0]);
   k.add(loft([[-0.07, 0.14, 0.035], [0.06, 0.17, 0.045]], 0.35, 0.02), BODY2, [0, 0.875, 0.13], [-0.2, 0, 0]);
   for (const s of [-1, 1]) {
-    k.add(cyl(0.08, 0.08, 0.07, 12), BODY2, [s * 0.205, 0.93, 0], ALONG_X);
-    k.add(cyl(0.048, 0.048, 0.02, 12), JOINT, [s * 0.246, 0.93, 0], ALONG_X, undefined, false);
-    k.add(cyl(0.02, 0.02, 0.02, 8), SUIT, [s * 0.253, 0.93, 0], ALONG_X, undefined, false);
+    k.add(new THREE.SphereGeometry(0.082, 10, 8), JOINT, [s * 0.19, 0.9, 0.0]);
+    k.add(cyl(0.05, 0.05, 0.02, 12), SUIT, [s * 0.262, 0.9, 0], ALONG_X, undefined, false);
+    k.add(cyl(0.022, 0.022, 0.02, 8), JOINT, [s * 0.27, 0.9, 0], ALONG_X, undefined, false);
   }
 }
 
 /**
- * Thigh: dark core under a long orange plate, big at the hip and tapering to the knee, with a cream outer panel and a
- * cream plate on the front corner of the hip end.
+ * Thigh: a black core under a long orange plate, big at the hip and tapering to the knee, with a cream outer panel
+ * carrying two cyan slits and a cream plate on the front corner of the hip end. The core shows above and below.
  */
 function thighParts(k: Kit, s: number) {
   const x = s * LEG_X;
-  k.add(cyl(0.09, 0.072, 0.42, 8), SUIT, [x, 0.71, 0.015]);
-  k.add(loft([[-0.15, 0.08, 0.08], [-0.08, 0.096, 0.098], [0.05, 0.112, 0.112], [0.13, 0.1, 0.1]], 0.38, 0.035), BODY, [x + s * 0.006, 0.73, -0.025]);
-  k.add(loft([[-0.1, 0.012, 0.056], [0.08, 0.012, 0.068]], 0.3, 0.008), TRIM, [x + s * 0.118, 0.75, -0.012], [0, 0, -s * 0.14]);
+  k.add(cyl(0.088, 0.07, 0.42, 8), SUIT, [x, 0.71, 0.015]);
+  k.add(loft([[-0.12, 0.074, 0.076], [-0.06, 0.09, 0.094], [0.04, 0.104, 0.106], [0.11, 0.094, 0.096]], 0.38, 0.032), BODY, [x + s * 0.006, 0.73, -0.025]);
+  const oq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * 0.12));
+  const outer = vec([x + s * 0.106, 0.74, -0.02]);
+  k.add(loft([[-0.09, 0.014, 0.06], [0.07, 0.014, 0.07]], 0.3, 0.008), TRIM, tuple(outer), oq);
+  const sq = oq.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -s * Math.PI / 2, 0)));
+  doubleSlit(k, vec(local(outer, oq, [s * 0.015, -0.01, -0.005])), sq, [0.011, 0.1, 0.008], 0.026, [0, 0, -1]);
   const fq = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.05, -s * 0.55, 0));
-  k.add(loft([[-0.08, 0.042, 0.016], [0.07, 0.05, 0.016]], 0.35, 0.01), TRIM2, [x + s * 0.08, 0.78, -0.128], fq);
-  seam(k, [x + s * 0.03, 0.77, -0.142], [0.01, 0.17, 0.012], [-0.12, 0, 0]);
+  k.add(loft([[-0.07, 0.04, 0.016], [0.06, 0.048, 0.016]], 0.35, 0.01), TRIM2, [x + s * 0.076, 0.775, -0.12], fq);
+  seam(k, [x + s * 0.025, 0.76, -0.132], [0.01, 0.15, 0.012], [-0.12, 0, 0]);
 }
 
 /** A black joint disc on the side of a knee or ankle, with a cyan ring. `s` is the side, `x` its outer face. */
@@ -547,26 +561,27 @@ function jointRing(k: Kit, x: number, y: number, z: number, s: number, r: number
 }
 
 /**
- * Shin: a calf-heavy greave, a raised front plate with a cyan slit in a black recess, a cream plate down its inner
- * side and a cream calf panel, the knee.
+ * Shin: a calf-heavy greave over the black suit, a raised front plate with two cyan slits in a black recess, a cream
+ * plate down its inner side and a cream calf panel; the knee: a black joint with a cyan-ringed disc under two layered
+ * knee plates.
  */
 function shinParts(k: Kit, s: number) {
   const x = s * LEG_X;
-  k.add(cyl(0.074, 0.064, 0.36, 8), SUIT, [x, 0.325, 0.025]);
-  k.add(loft([[-0.14, 0.085, 0.088], [-0.05, 0.1, 0.104], [0.07, 0.112, 0.114], [0.11, 0.102, 0.104]], 0.34, 0.03), BODY2, [x, 0.355, 0.0]);
+  k.add(cyl(0.074, 0.064, 0.38, 8), SUIT, [x, 0.33, 0.025]);
+  k.add(loft([[-0.13, 0.08, 0.084], [-0.05, 0.094, 0.098], [0.05, 0.104, 0.106], [0.09, 0.096, 0.098]], 0.34, 0.03), BODY2, [x, 0.35, 0.0]);
   const fq = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.12, 0, 0));
-  const front = vec([x + s * 0.012, 0.355, -0.116]);
-  k.add(loft([[-0.11, 0.058, 0.02], [0.1, 0.074, 0.02]], 0.3, 0.012), BODY, tuple(front), fq);
-  k.add(block(0.056, 0.16, 0.02, 0.006), JOINT, local(front, fq, [0, 0, -0.014]), fq, undefined, false);
-  k.glow(box(0.02, 0.12, 0.01), VISOR, local(front, fq, [0, 0, -0.022]), fq);
+  const front = vec([x + s * 0.012, 0.35, -0.108]);
+  k.add(loft([[-0.1, 0.056, 0.02], [0.09, 0.07, 0.02]], 0.3, 0.012), BODY, tuple(front), fq);
+  doubleSlit(k, vec(local(front, fq, [0, -0.005, -0.019])), fq, [0.012, 0.11, 0.008], 0.026, [0, 0, -1]);
   const iq = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.1, s * 0.6, 0));
-  k.add(loft([[-0.1, 0.034, 0.016], [0.08, 0.042, 0.016]], 0.35, 0.01), TRIM, [x - s * 0.08, 0.34, -0.106], iq);
-  k.add(loft([[-0.09, 0.012, 0.05], [0.08, 0.012, 0.06]], 0.3, 0.008), TRIM2, [x + s * 0.098, 0.345, 0.04], [0, 0, -s * 0.1]);
-  // Knee: the joint cylinder, a cyan-ringed disc outside and a knee cap with a dark slot.
+  k.add(loft([[-0.1, 0.034, 0.016], [0.08, 0.042, 0.016]], 0.35, 0.01), TRIM, [x - s * 0.076, 0.335, -0.1], iq);
+  k.add(loft([[-0.09, 0.012, 0.05], [0.07, 0.012, 0.06]], 0.3, 0.008), TRIM2, [x + s * 0.092, 0.34, 0.035], [0, 0, -s * 0.1]);
+  // Knee: the black joint, a cyan-ringed disc outside, and two layered plates: a big cap over a smaller lower one.
   k.add(cyl(0.072, 0.072, 0.19, 10), JOINT, [x, 0.52, 0.02], ALONG_X);
   jointRing(k, x + s * 0.092, 0.52, 0.02, s, 0.058);
-  k.add(loft([[-0.06, 0.054, 0.032], [0.03, 0.07, 0.042], [0.065, 0.06, 0.034]], 0.4, 0.018), BODY2, [x, 0.54, -0.094], [0.15, 0, 0]);
-  seam(k, [x, 0.55, -0.138], [0.05, 0.012, 0.012], [0.15, 0, 0]);
+  k.add(loft([[-0.035, 0.044, 0.026], [0.02, 0.05, 0.03]], 0.4, 0.014), BODY, [x, 0.468, -0.104], [0.05, 0, 0]);
+  k.add(loft([[-0.04, 0.05, 0.03], [0.03, 0.066, 0.04], [0.065, 0.056, 0.032]], 0.4, 0.018), BODY2, [x, 0.55, -0.1], [0.2, 0, 0]);
+  seam(k, [x, 0.555, -0.142], [0.05, 0.012, 0.012], [0.2, 0, 0]);
 }
 
 /** An ankle disc with a cyan ring on the outside of the boot. */
@@ -616,26 +631,29 @@ function bootParts(k: Kit, s: number, kind: Boots) {
   ankle(k, x, s, 0.175, 0.142);
 }
 
-/** Torso: a narrow black ribbed belly with cyan side lights under a broad chest of two orange pec plates, a cream sternum plate and a back plate. */
-function torsoParts(k: Kit) {
+/**
+ * Torso: a narrow black ribbed belly with cyan side lights under a layered chest: two orange pec plates, a lower rib
+ * plate on each side with a cyan slit, the chest centre (`chest`) between them, a black collar and a back plate.
+ */
+function torsoParts(k: Kit, chest: Chest) {
   k.add(loft([[1.0, 0.1, 0.085], [1.12, 0.105, 0.09], [1.25, 0.15, 0.115]], 0.35, 0.02), JOINT);
-  for (const [y, hw, hd] of [[1.045, 0.11, 0.096], [1.095, 0.116, 0.102], [1.145, 0.124, 0.108]]) {
-    k.add(loft([[-0.017, hw, hd], [0.017, hw + 0.004, hd + 0.004]], 0.38, 0.008), SUIT, [0, y, 0], undefined, undefined, false);
+  for (const [y, hw, hd] of [[1.035, 0.108, 0.094], [1.075, 0.112, 0.098], [1.115, 0.117, 0.102]]) {
+    k.add(loft([[-0.014, hw, hd], [0.014, hw + 0.004, hd + 0.004]], 0.38, 0.008), SUIT, [0, y, 0]);
   }
-  for (const s of [-1, 1]) k.glow(box(0.012, 0.06, 0.03), VISOR, [s * 0.122, 1.1, -0.045], [0, s * 0.5, 0]);
-  // The chest: a dark core, broadest at the pecs and narrowing into the waist.
-  k.add(loft([[-0.17, 0.13, 0.11], [-0.07, 0.205, 0.15], [0.04, 0.23, 0.17], [0.1, 0.2, 0.15], [0.13, 0.15, 0.11]], 0.35, 0.02), SUIT, [0, 1.29, 0]);
+  for (const s of [-1, 1]) k.glow(box(0.012, 0.05, 0.03), VISOR, [s * 0.119, 1.075, -0.045], [0, s * 0.5, 0]);
+  // The chest: a black core, broadest at the pecs and narrowing into the waist.
+  k.add(loft([[-0.17, 0.13, 0.11], [-0.07, 0.2, 0.145], [0.04, 0.225, 0.165], [0.1, 0.2, 0.15], [0.13, 0.15, 0.11]], 0.35, 0.02), SUIT, [0, 1.29, 0]);
   for (const s of [-1, 1]) {
+    // Upper pec plate.
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -s * 0.15, -s * 0.06));
-    k.add(loft([[-0.14, 0.07, 0.105], [-0.05, 0.114, 0.155], [0.06, 0.122, 0.165], [0.11, 0.1, 0.138], [0.135, 0.074, 0.1]], 0.32, 0.03), BODY, [s * 0.126, 1.29, -0.022], q);
-    slit(k, vec([s * 0.168, 1.22, -0.168]), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.2, -s * 0.5, -s * 0.35)), [0.06, 0.013, 0.01], [0, 0, -1]);
+    k.add(loft([[-0.075, 0.084, 0.118], [-0.02, 0.11, 0.152], [0.06, 0.118, 0.16], [0.11, 0.098, 0.135], [0.135, 0.072, 0.098]], 0.32, 0.028), BODY, [s * 0.128, 1.29, -0.024], q);
+    // Lower rib plate, angled round the side of the chest, with a cyan slit.
+    const rq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.12, -s * 0.42, s * 0.12));
+    const rib = vec([s * 0.112, 1.165, -0.118]);
+    k.add(loft([[-0.04, 0.056, 0.026], [0.035, 0.068, 0.03]], 0.35, 0.014), BODY2, tuple(rib), rq);
+    slit(k, vec(local(rib, rq, [s * 0.006, -0.002, -0.03])), rq.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, s * 0.35))), [0.064, 0.012, 0.01], [0, 0, -1]);
   }
-  // Cream sternum plate over the gap, with a cyan slit; a dark collar plate and a slit above it.
-  k.add(loft([[-0.11, 0.04, 0.028], [-0.02, 0.085, 0.034], [0.07, 0.08, 0.034], [0.1, 0.06, 0.03]], 0.35, 0.018), TRIM, [0, 1.21, -0.168], [0.12, 0, 0]);
-  seam(k, [0, 1.17, -0.203], [0.075, 0.01, 0.01], [0.12, 0, 0]);
-  slit(k, vec([0, 1.275, -0.194]), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.12, 0, 0)), [0.085, 0.014, 0.01], [0, 0, -1]);
-  k.add(block(0.14, 0.06, 0.04, 0.012), JOINT, [0, 1.365, -0.145], [-0.35, 0, 0]);
-  slit(k, vec([0, 1.365, -0.167]), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.35, 0, 0)), [0.09, 0.016, 0.01], [0, 0, -1]);
+  chestCentre(k, chest);
   // The black collar the neck rises from.
   k.add(loft([[1.38, 0.15, 0.11], [1.48, 0.1, 0.085]], 0.35, 0.015), JOINT);
   k.add(loft([[-0.13, 0.15, 0.06], [0.0, 0.2, 0.075], [0.12, 0.175, 0.06]], 0.32, 0.03), BODY, [0, 1.28, 0.145]);
@@ -643,6 +661,42 @@ function torsoParts(k: Kit) {
   seam(k, [0, 1.19, 0.212], [0.26, 0.01, 0.012]);
   // The round shoulder joints the arms hang from.
   for (const s of [-1, 1]) k.add(new THREE.SphereGeometry(0.105, 10, 8), JOINT, [s * SHOULDER_X, SHOULDER_Y, 0]);
+}
+
+/**
+ * The chest centre: a cream sternum plate over the belly with a cyan bar across its top, and up where the pecs meet
+ * the collar (the part the left arm does not hide in the hold) the chosen piece. Standard (the concept): a cyan bar in
+ * a black recess. Reactor: a glowing core in the light colour, in a black housing with a cream rim. Vents: a cream
+ * frame round a grille of black slats with light glowing between them.
+ */
+function chestCentre(k: Kit, kind: Chest) {
+  const tilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.12, 0, 0));
+  k.add(loft([[-0.1, 0.045, 0.028], [-0.03, 0.078, 0.034], [0.05, 0.078, 0.034], [0.075, 0.06, 0.03]], 0.35, 0.018), TRIM, [0, 1.17, -0.162], tilt);
+  seam(k, [0, 1.12, -0.193], [0.075, 0.01, 0.01], tilt);
+  slit(k, vec([0, 1.226, -0.198]), tilt, [0.085, 0.014, 0.01], [0, 0, -1]);
+  const up = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.3, 0, 0));
+  if (kind === 'reactor') {
+    const at = vec([0, 1.335, -0.162]);
+    const face = up.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)));
+    k.add(cyl(0.074, 0.08, 0.06, 8), TRIM, tuple(at), face);
+    k.add(cyl(0.056, 0.056, 0.02, 16), JOINT, local(at, up, [0, 0, -0.026]), face, undefined, false);
+    k.glow(new THREE.TorusGeometry(0.043, 0.009, 4, 16), VISOR, local(at, up, [0, 0, -0.038]), up);
+    k.glow(cyl(0.024, 0.024, 0.012, 8), VISOR, local(at, up, [0, 0, -0.034]), face);
+    for (const r of [0, 1, 2, 3]) {
+      const sq = up.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, (r * Math.PI) / 2 + Math.PI / 4)));
+      k.add(box(0.012, 0.028, 0.012), JOINT, local(at, sq, [0, 0.043, -0.04]), sq, undefined, false);
+    }
+    return;
+  }
+  if (kind === 'vents') {
+    const at = vec([0, 1.345, -0.155]);
+    k.add(block(0.17, 0.11, 0.05, 0.016, [1, 1], [0.85, 1]), TRIM, tuple(at), up);
+    k.glow(box(0.13, 0.075, 0.01), VISOR, local(at, up, [0, 0, -0.022]), up);
+    for (const y of [-0.026, 0, 0.026]) k.add(box(0.136, 0.014, 0.016), JOINT, local(at, up, [0, y, -0.03]), up, undefined, false);
+    return;
+  }
+  k.add(block(0.13, 0.05, 0.04, 0.012), JOINT, [0, 1.37, -0.14], [-0.35, 0, 0]);
+  slit(k, vec([0, 1.37, -0.161]), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.35, 0, 0)), [0.09, 0.016, 0.01], [0, 0, -1]);
 }
 
 /** The backpack on the back plate (torso bone). */
@@ -764,17 +818,17 @@ function emblemParts(k: Kit, kind: Emblem, shoulders: Shoulders) {
 }
 
 /**
- * A segmented upper arm from the shoulder `sh` to the elbow `el`: a dark sleeve showing between an orange band under
- * the shoulder ball and a rounded bicep plate. `s` is the side (-1 left, 1 right).
+ * A segmented upper arm from the shoulder `sh` to the elbow `el`: a black ribbed sleeve under the shoulder ball and
+ * an orange bicep plate. `s` is the side (-1 left, 1 right).
  */
 function upperArm(k: Kit, sh: THREE.Vector3, el: THREE.Vector3, s: number) {
   const q = toward(sh.clone().sub(el));
   const len = sh.distanceTo(el);
   const mid = sh.clone().add(el).multiplyScalar(0.5);
-  k.add(cyl(0.066, 0.06, len, 8), SUIT, tuple(mid), q);
-  k.add(loft([[-0.03, 0.084, 0.086], [0.03, 0.094, 0.096]], 0.35, 0.014), BODY2, local(mid, q, [0, len * 0.5 - 0.085, 0]), q);
-  k.add(loft([[-0.1, 0.086, 0.09], [-0.03, 0.106, 0.108], [0.06, 0.1, 0.102]], 0.35, 0.022), BODY, local(mid, q, [s * 0.006, -len * 0.13, 0]), q);
-  seam(k, local(mid, q, [s * 0.107, -len * 0.13, 0]), [0.01, 0.1, 0.012], q);
+  k.add(cyl(0.062, 0.058, len, 8), SUIT, tuple(mid), q);
+  for (const t of [0.3, 0.38]) k.add(cyl(0.07, 0.07, 0.022, 8), JOINT, local(mid, q, [0, len * t, 0]), q);
+  k.add(loft([[-0.09, 0.08, 0.084], [-0.03, 0.098, 0.1], [0.05, 0.092, 0.095]], 0.35, 0.022), BODY, local(mid, q, [s * 0.006, -len * 0.15, 0]), q);
+  seam(k, local(mid, q, [s * 0.099, -len * 0.15, 0]), [0.01, 0.09, 0.012], q);
 }
 
 /** The left upper arm, hanging at rest (the hold pose comes from IK at runtime). */
@@ -783,17 +837,19 @@ function upperArmL(k: Kit) {
 }
 
 /**
- * A chunky hand: dark palm, an orange back plate, four two-segment fingers (dark, with orange tips) and a thumb.
- * Built hanging down, palm toward +X for the left hand (`s` -1); `curl` bends the fingers in.
+ * A chunky black hand: palm, an orange knuckle plate on the back, four three-segment fingers (black, with orange
+ * tips) and a thumb. Built hanging down, palm toward +X for the left hand (`s` -1); `curl` bends the fingers in.
  */
 function hand(k: Kit, at: THREE.Vector3, q: THREE.Quaternion, s: number, curl: number) {
   k.add(block(0.11, 0.13, 0.14, 0.03), JOINT, tuple(at), q);
-  k.add(loft([[-0.055, 0.022, 0.066], [0.05, 0.022, 0.07]], 0.4, 0.01), BODY, local(at, q, [s * 0.058, 0.005, 0]), q);
-  const fq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * curl)));
-  const tq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * curl * 1.5)));
+  k.add(loft([[-0.04, 0.02, 0.062], [0.035, 0.02, 0.066]], 0.4, 0.01), BODY, local(at, q, [s * 0.058, -0.015, 0]), q);
+  const fq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * curl * 0.7)));
+  const mq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * curl * 1.2)));
+  const tq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * curl * 1.6)));
   for (const z of [-0.054, -0.018, 0.018, 0.054]) {
-    k.add(block(0.04, 0.085, 0.034, 0.01), JOINT, local(at, q, [-s * (0.006 + curl * 0.02), -0.1, z]), fq);
-    k.add(block(0.042, 0.048, 0.036, 0.012), BODY, local(at, q, [-s * (0.01 + curl * 0.065), -0.158, z]), tq, undefined, false);
+    k.add(block(0.04, 0.05, 0.033, 0.01), JOINT, local(at, q, [-s * (0.004 + curl * 0.01), -0.088, z]), fq);
+    k.add(block(0.037, 0.04, 0.03, 0.01), SUIT, local(at, q, [-s * (0.008 + curl * 0.04), -0.126, z]), mq, undefined, false);
+    k.add(block(0.04, 0.042, 0.034, 0.012), BODY, local(at, q, [-s * (0.012 + curl * 0.07), -0.162, z]), tq, undefined, false);
   }
   const thumb = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, 0, -s * 0.5)));
   k.add(block(0.04, 0.09, 0.04, 0.01), JOINT, local(at, q, [-s * 0.05, -0.035, -0.082]), thumb);
@@ -801,32 +857,54 @@ function hand(k: Kit, at: THREE.Vector3, q: THREE.Quaternion, s: number, curl: n
 }
 
 /**
- * A gauntlet forearm from `elbow` to `wrist`: the elbow hinge, a big rounded orange gauntlet swelling toward the
- * wrist, a cream insert along the front, a cyan slit on the outside (`s` side) and a seam ring.
+ * A gauntlet forearm from `elbow` to `wrist`, over the black elbow hinge with a disc on each end (`hinge`, its axis).
+ * Standard (the concept): a big boxy orange gauntlet swelling toward the wrist, a cream panel down the inner side and a
+ * long cyan slit down the outside (`s` side). Heavy: bigger still, with a flared cream cuff, an armour ridge and two
+ * slits. Claw: a slim gauntlet with three cream blades reaching past the wrist along the outside.
  */
-function forearm(k: Kit, elbow: THREE.Vector3, wrist: THREE.Vector3, s: number, hinge: THREE.Vector3) {
+function forearm(k: Kit, elbow: THREE.Vector3, wrist: THREE.Vector3, s: number, hinge: THREE.Vector3, kind: Gauntlets) {
   const q = toward(elbow.clone().sub(wrist));
   const mid = elbow.clone().add(wrist).multiplyScalar(0.5);
   const len = elbow.distanceTo(wrist);
-  k.add(cyl(0.074, 0.074, 0.17, 10), JOINT, tuple(elbow), toward(hinge));
-  k.add(loft([[-len / 2, 0.1, 0.104], [-len / 2 + 0.07, 0.124, 0.13], [len * 0.15, 0.124, 0.13], [len / 2, 0.088, 0.098]], 0.32, 0.03), BODY2, tuple(mid), q);
-  k.add(loft([[-0.016, 0.127, 0.133], [0.016, 0.127, 0.133]], 0.32, 0), JOINT, local(mid, q, [0, len * 0.22, 0]), q, undefined, false);
-  k.add(loft([[-len * 0.4, 0.056, 0.018], [len * 0.22, 0.07, 0.018]], 0.4, 0.012), TRIM2, local(mid, q, [-s * 0.03, -0.01, -0.13]), q);
-  k.add(loft([[-0.03, 0.014, 0.07], [0.04, 0.014, 0.06]], 0.4, 0.01), TRIM2, local(mid, q, [s * 0.116, len * 0.34, 0.03]), q, undefined, false);
-  slit(k, vec(local(mid, q, [s * 0.125, -len * 0.12, -0.01])), q, [0.01, len * 0.36, 0.026], [s, 0, 0]);
+  const hq = toward(hinge);
+  k.add(cyl(0.07, 0.07, 0.17, 10), JOINT, tuple(elbow), hq);
+  for (const e of [-1, 1]) k.add(cyl(0.048, 0.048, 0.02, 10), SUIT, local(elbow, hq, [0, e * 0.088, 0]), hq, undefined, false);
   k.add(cyl(0.06, 0.06, 0.06, 8), JOINT, tuple(wrist), q);
+  if (kind === 'claw') {
+    k.add(loft([[-len / 2, 0.078, 0.082], [-len / 2 + 0.06, 0.094, 0.1], [len * 0.25, 0.09, 0.094], [len / 2 - 0.03, 0.072, 0.076]], 0.3, 0.024), BODY2, tuple(mid), q);
+    k.add(loft([[-len * 0.35, 0.012, 0.05], [len * 0.25, 0.012, 0.05]], 0.4, 0.008), TRIM2, local(mid, q, [-s * 0.092, 0, 0]), q, undefined, false);
+    slit(k, vec(local(mid, q, [s * 0.096, len * 0.02, -0.01])), q, [0.01, len * 0.42, 0.022], [s, 0, 0]);
+    const bq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, s * 0.12)));
+    for (const z of [-0.045, 0, 0.045]) {
+      k.add(block(0.016, 0.24, 0.02, 0.006, [1, 1], [0.15, 0.4]), TRIM, local(mid, q, [s * 0.1, -len / 2 - 0.02 + Math.abs(z) * 0.5, z]), bq);
+    }
+    return;
+  }
+  const w = kind === 'heavy' ? 1.14 : 1;
+  k.add(loft([[-len / 2, 0.094 * w, 0.096 * w], [-len / 2 + 0.06, 0.113 * w, 0.115 * w], [len * 0.2, 0.108 * w, 0.11 * w], [len / 2 - 0.02, 0.08 * w, 0.082 * w]], 0.2, 0.024), BODY2, tuple(mid), q);
+  seam(k, local(mid, q, [0, len * 0.27, -0.11 * w]), [0.14 * w, 0.01, 0.012], q);
+  // The cream panel down the inner side.
+  k.add(loft([[-len * 0.42, 0.013, 0.07 * w], [len * 0.24, 0.013, 0.06 * w]], 0.35, 0.008), TRIM2, local(mid, q, [-s * 0.111 * w, -0.005, 0]), q);
+  if (kind === 'heavy') {
+    k.add(loft([[-0.035, 0.132, 0.134], [0.03, 0.124, 0.126]], 0.2, 0.014), TRIM2, local(mid, q, [0, -len / 2 + 0.03, 0]), q);
+    k.add(block(0.03, len * 0.6, 0.06, 0.01), BODY2, local(mid, q, [s * 0.13, -len * 0.04, 0.05]), q);
+    const sq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, (-s * Math.PI) / 2, 0)));
+    doubleSlit(k, vec(local(mid, q, [s * 0.13, -len * 0.06, -0.045])), sq, [0.01, len * 0.42, 0.01], 0.03, [0, 0, -1]);
+  } else {
+    slit(k, vec(local(mid, q, [s * 0.112, -len * 0.06, -0.01])), q, [0.01, len * 0.5, 0.026], [s, 0, 0]);
+  }
 }
 
 /** Left forearm and hand, hanging at rest. */
-function foreArmL(k: Kit) {
+function foreArmL(k: Kit, kind: Gauntlets) {
   const elbow = vec(PIVOT.foreL);
   const wrist = vec([HAND_L[0] + 0.005, HAND_L[1] + 0.105, -0.005]);
-  forearm(k, elbow, wrist, -1, new THREE.Vector3(1, 0, 0));
+  forearm(k, elbow, wrist, -1, new THREE.Vector3(1, 0, 0), kind);
   hand(k, vec(HAND_L), new THREE.Quaternion(), -1, 0.35);
 }
 
 /** The gun arm in the hold (model space, authored around AIM_HELD), and the launcher in its hand. */
-function gunArmParts(k: Kit) {
+function gunArmParts(k: Kit, kind: Gauntlets) {
   const gun = vec(GUN_AT);
   const s = GUN_SCALE;
   k.graft(buildLauncher(BODY), new THREE.Matrix4().compose(gun, new THREE.Quaternion(), new THREE.Vector3(s, s, s)));
@@ -836,7 +914,7 @@ function gunArmParts(k: Kit) {
   const elbow = solveElbow(AIM_HELD, wrist, 0.31, 0.31, new THREE.Vector3(1, -0.7, 0.4), new THREE.Vector3());
   upperArm(k, AIM_HELD, elbow, 1);
   const hinge = AIM_HELD.clone().sub(elbow).cross(wrist.clone().sub(elbow)).normalize();
-  forearm(k, elbow, wrist, 1, hinge);
+  forearm(k, elbow, wrist, 1, hinge, kind);
   // The hand wraps the grip from the right: palm on the outside, fingers across the front.
   hand(k, palm, toward(wrist.clone().sub(palm)), 1, 1.2);
 }
@@ -864,23 +942,38 @@ function onVisor(x: number, y: number, lift = 0.004): { pos: V3; rot: V3 } {
   return { pos: [x, y, HEAD_C[2] - z * HEAD_S[2]], rot: [Math.asin(ny / r), -Math.asin(nx / r), 0] };
 }
 
-/** Neck, the faceted round helmet shell and a chin guard. */
+/** Neck, the faceted round helmet shell split by a dark seam from ear to ear, and a chin piece. */
 function headParts(k: Kit) {
   k.add(cyl(0.08, 0.09, 0.16), SUIT, [0, 1.4, 0]);
   k.add(new THREE.SphereGeometry(SHELL_R, 14, 10), SHELL, HEAD_C, undefined, HEAD_S);
-  k.add(block(0.25, 0.075, 0.1, 0.034, [1, 1.1], [0.7, 1]), BODY2, [0, 1.4, -0.19], [-0.4, 0, 0]);
-  k.add(box(0.1, 0.018, 0.02), JOINT, [0, 1.414, -0.24], [-0.4, 0, 0], undefined, false);
+  // The seam behind the visor, over the dome from one ear to the other.
+  const dz = 0.07;
+  const r = Math.sqrt(SHELL_R * SHELL_R - dz * dz);
+  k.add(new THREE.TorusGeometry(r + 0.002, 0.008, 3, 24, Math.PI), JOINT, [HEAD_C[0], HEAD_C[1], HEAD_C[2] + dz * HEAD_S[2]], [-0.2, 0, 0], HEAD_S, false);
+  // The chin: a jutting plate under the visor with a black vent slot.
+  k.add(block(0.2, 0.07, 0.1, 0.03, [1, 1.1], [0.7, 1]), BODY2, [0, 1.405, -0.19], [-0.4, 0, 0]);
+  k.add(box(0.1, 0.016, 0.02), JOINT, [0, 1.41, -0.24], [-0.4, 0, 0], undefined, false);
+}
+
+/** The lower visor frame: three orange facets along the bottom edge of the glass, between the corner brackets. */
+function visorFrame(k: Kit, shape: VisorShape) {
+  const y = HEAD_C[1] + Math.cos(VISOR_SPAN[shape][1] + VISOR_SPAN[shape][2]) * VISOR_R * HEAD_S[1] - 0.018;
+  for (const [x, w] of [[-0.11, 0.1], [0, 0.11], [0.11, 0.1]] as const) {
+    const p = onVisor(x, y + Math.abs(x) * 0.1, -0.006);
+    k.add(block(w, 0.032, 0.034, 0.01), BODY2, p.pos, [p.rot[0], p.rot[1], -x * 1.1]);
+  }
 }
 
 /** The black visor glass: wide (ear to ear), split by an orange centre bar, or a rounder, taller window. */
 function visorParts(k: Kit, shape: VisorShape) {
   const [phi, t0, tl] = VISOR_SPAN[shape];
   k.add(new THREE.SphereGeometry(VISOR_R, 20, 6, Math.PI * 1.5 - phi, phi * 2, t0, tl), GLASS, HEAD_C, undefined, HEAD_S, false);
-  // Orange brackets frame the lower corners of the glass.
+  // Orange brackets frame the lower corners of the glass, over a segmented lower frame.
   for (const s of [-1, 1]) {
-    const p = onVisor(s * 0.19, HEAD_C[1] - 0.1, 0.004);
-    k.add(block(0.08, 0.05, 0.05, 0.016), BODY2, p.pos, [p.rot[0], p.rot[1], s * 0.5]);
+    const p = onVisor(s * 0.2, HEAD_C[1] - 0.09, 0.004);
+    k.add(block(0.07, 0.05, 0.05, 0.016), BODY2, p.pos, [p.rot[0], p.rot[1], s * 0.5]);
   }
+  visorFrame(k, shape);
   if (shape === 'split') {
     const top = onVisor(0, HEAD_C[1] + 0.02, 0.01);
     k.add(block(0.04, 0.21, 0.045, 0.012), BODY2, [0, top.pos[1] - 0.015, top.pos[2] + 0.004], [0.08, 0, 0]);
@@ -990,10 +1083,12 @@ function partsFor(look: Look): Part[] {
   const emblem = look.emblem ?? DEFAULT_LOOK.emblem;
   const visorShape = look.visorShape ?? DEFAULT_LOOK.visorShape;
   const ears = look.ears ?? DEFAULT_LOOK.ears;
+  const chest = look.chest ?? DEFAULT_LOOK.chest;
+  const gauntlets = look.gauntlets ?? DEFAULT_LOOK.gauntlets;
   const head = vec(PIVOT.head);
   const list = [
     part('hips', 'hips', hipParts),
-    part('torso', 'torso', torsoParts),
+    part(`torso:${chest}`, 'torso', (k) => torsoParts(k, chest)),
     part(`pads:${look.shoulders}`, 'torso', (k) => padParts(k, look.shoulders)),
     part('head', 'head', headParts, head, HEAD_FIT),
     part(`visor:${visorShape}`, 'head', (k) => visorParts(k, visorShape), head, HEAD_FIT),
@@ -1001,8 +1096,8 @@ function partsFor(look: Look): Part[] {
     part(`helmet:${look.helmet}`, 'head', (k) => helmetParts(k, look.helmet), head, HEAD_FIT),
     part(`face:${look.face}:${faceLift(visorShape)}`, 'head', (k) => faceParts(k, look.face, visorShape), head, HEAD_FIT),
     part('armL', 'armL', upperArmL),
-    part('foreL', 'foreL', foreArmL),
-    part('gun', 'recoil', gunArmParts, AIM_HELD),
+    part(`foreL:${gauntlets}`, 'foreL', (k) => foreArmL(k, gauntlets)),
+    part(`gun:${gauntlets}`, 'recoil', (k) => gunArmParts(k, gauntlets), AIM_HELD),
     part('legL', 'legL', (k) => thighParts(k, -1)),
     part('shinL', 'shinL', (k) => shinParts(k, -1)),
     part(`footL:${boots}`, 'footL', (k) => bootParts(k, -1, boots)),
@@ -1017,7 +1112,7 @@ function partsFor(look: Look): Part[] {
 
 /** Identifies the geometry (template) of a look: everything but the colours and the paint pattern. */
 const variantKey = (look: Look) =>
-  `${look.helmet}|${look.face}|${look.shoulders}|${look.backpack ?? DEFAULT_LOOK.backpack}|${look.boots ?? DEFAULT_LOOK.boots}|${look.emblem ?? DEFAULT_LOOK.emblem}|${look.visorShape ?? DEFAULT_LOOK.visorShape}|${look.ears ?? DEFAULT_LOOK.ears}`;
+  `${look.helmet}|${look.face}|${look.shoulders}|${look.backpack ?? DEFAULT_LOOK.backpack}|${look.boots ?? DEFAULT_LOOK.boots}|${look.emblem ?? DEFAULT_LOOK.emblem}|${look.visorShape ?? DEFAULT_LOOK.visorShape}|${look.ears ?? DEFAULT_LOOK.ears}|${look.chest ?? DEFAULT_LOOK.chest}|${look.gauntlets ?? DEFAULT_LOOK.gauntlets}`;
 /** Identifies the material of a look in `body` (the team colour in team modes). */
 const paintKey = (look: Look, body: number) => `${body}|${look.trim}|${look.visor}|${look.pattern ?? DEFAULT_LOOK.pattern}`;
 const paint = (look: Look, body: number) => lookMaterial(body, look.trim, look.visor, look.pattern ?? DEFAULT_LOOK.pattern);

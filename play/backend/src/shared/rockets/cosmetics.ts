@@ -21,6 +21,10 @@ export const EMBLEMS = ['none', 'star', 'bolt', 'ring', 'diamond', 'cross', 'hea
 export const VISOR_SHAPES = ['wide', 'split', 'round'] as const;
 /** What sits on the sides of the helmet. */
 export const EARS = ['pods', 'fins', 'none'] as const;
+/** The forearms: boxy gauntlets (the concept), oversized heavy ones, or slim ones with blades past the wrist. */
+export const GAUNTLETS = ['standard', 'heavy', 'claw'] as const;
+/** The chest centre: the cream sternum plate, a glowing core in the light colour, or a vent grille. */
+export const CHESTS = ['standard', 'reactor', 'vents'] as const;
 
 export type Helmet = (typeof HELMETS)[number];
 export type Face = (typeof FACES)[number];
@@ -31,6 +35,8 @@ export type Boots = (typeof BOOTS)[number];
 export type Emblem = (typeof EMBLEMS)[number];
 export type VisorShape = (typeof VISOR_SHAPES)[number];
 export type Ears = (typeof EARS)[number];
+export type Gauntlets = (typeof GAUNTLETS)[number];
+export type Chest = (typeof CHESTS)[number];
 
 export interface Look {
   body: number;
@@ -46,6 +52,8 @@ export interface Look {
   emblem?: Emblem;
   visorShape?: VisorShape;
   ears?: Ears;
+  gauntlets?: Gauntlets;
+  chest?: Chest;
 }
 
 /** The concept-art robot: orange body, cream trim, cyan smile. */
@@ -62,6 +70,8 @@ export const DEFAULT_LOOK: Required<Look> = {
   emblem: 'none',
   visorShape: 'wide',
   ears: 'pods',
+  gauntlets: 'standard',
+  chest: 'standard',
 };
 
 const pick = <T>(list: readonly T[], value: unknown, fallback: T): T => (list.includes(value as T) ? (value as T) : fallback);
@@ -82,6 +92,8 @@ export function sanitizeLook(raw: unknown): Required<Look> {
     emblem: pick(EMBLEMS, r.emblem, DEFAULT_LOOK.emblem),
     visorShape: pick(VISOR_SHAPES, r.visorShape, DEFAULT_LOOK.visorShape),
     ears: pick(EARS, r.ears, DEFAULT_LOOK.ears),
+    gauntlets: pick(GAUNTLETS, r.gauntlets, DEFAULT_LOOK.gauntlets),
+    chest: pick(CHESTS, r.chest, DEFAULT_LOOK.chest),
   };
 }
 
@@ -101,5 +113,7 @@ export function randomLook(rand: () => number = Math.random): Required<Look> {
     emblem: any(EMBLEMS),
     visorShape: any(VISOR_SHAPES),
     ears: any(EARS),
+    gauntlets: any(GAUNTLETS),
+    chest: any(CHESTS),
   };
 }
