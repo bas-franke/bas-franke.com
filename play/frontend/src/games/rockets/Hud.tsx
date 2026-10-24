@@ -281,6 +281,12 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
             <p className="sub">Back to the room in a moment.</p>
             <ScoreTable scores={s.ended.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
             <div className="actions">
+              {isHost && (
+                // Restart straight away instead of waiting for the room to come back.
+                <button className="btn primary" onClick={() => (ctx.socket.send({ t: 'stop' }), ctx.socket.send({ t: 'start' }))}>
+                  Play again
+                </button>
+              )}
               <button className="btn ghost" onClick={ctx.leave}>
                 Leave room
               </button>
