@@ -2,29 +2,33 @@
 // else, extrapolated rockets, and a few effects. The server is authoritative; this only predicts and shows.
 
 import * as THREE from 'three';
-import { clamp, fromTuple, hdist, lookDir, type Vec3, v3, vadd, vscale, vsub } from '@shared/math';
+import { clamp, fromTuple, hdist, lookDir, segmentBoxes, type Vec3, v3, vadd, vscale, vsub } from '@shared/math';
 import type { GameServerMsg, RoomView } from '@shared/protocol';
 import { RK } from '@shared/rockets/constants';
+import type { ItemKind, ItemSpawn } from '@shared/rockets/items';
 import type { MapData } from '@shared/rockets/map';
 import { type Body, eyePosition, stepBody } from '@shared/rockets/physics';
 import type { PlayerSnap, RocketsEvent, RocketsInput, RocketsServerMsg, RocketsSnapshot, ScoreRow } from '@shared/rockets/protocol';
 import { sfx } from '../../engine/audio';
-import { Effects, LightPool } from '../../engine/effects';
+import { Effects, LightPool, TRAIL_STEP, nearestSurface } from '../../engine/effects';
 import { Engine, colorHex, makeLabel } from '../../engine/engine';
 import { Input } from '../../engine/input';
-import { INTERP_DELAY, SnapshotBuffer, damp, lerpAngle } from '../../engine/interp';
+import { SnapshotTimeline, damp, lerpAngle } from '../../engine/interp';
 import { INK } from '../../engine/toon';
-import { boxFallback, instantiate, loadModel } from '../../engine/models';
 import { TouchInput } from '../../engine/touch';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { type ArenaView, addArenaLights, buildArena } from './arena';
-import { WARHEAD_REST_Z, buildDroid, buildLauncher, buildRocket } from './models';
+import { type DroidPiece, WARHEAD_REST_Z, buildDroid, buildDroidPieces, buildLauncher, buildPickup, buildRocket, updateDroidPieces } from './models';
 import { QUALITY, type Quality, applyInput, applyQuality, settings, verticalFov } from './settings';
 
 export interface FeedLine {
   id: number;
   text: string;
   at: number;
+  /** Killer and victim ids, for the HUD's coloured kill feed. */
+  by?: string;
+  v?: string;
+  self?: boolean;
 }
 
 export interface RocketsHudState {
@@ -48,12 +52,28 @@ export interface RocketsHudState {
   /** Seconds of start countdown left (players are frozen while it runs). */
   countdown?: number;
   overtime?: boolean;
+  armor?: number;
+  /** Horizontal speed in m/s. */
+  speed?: number;
+  /** this.time of our last shot (reload ring). */
+  firedAt?: number;
+  /** Screen angle (radians, 0 = ahead, clockwise) towards whoever last hurt us. */
+  hurtDir?: number;
 }
 
 interface Remote {
   group: THREE.Group;
+  bobNode: THREE.Object3D | null;
+  torso: THREE.Object3D | null;
+  head: THREE.Object3D | null;
   aim: THREE.Object3D | null;
+  recoil: THREE.Object3D | null;
   thrust: THREE.Object3D | null;
+  /** Fire kick, 1 at a shot and decaying. */
+  kick: number;
+  /** Ground flag and vertical speed from the latest snapshot, for landing dust. */
+  ground: boolean;
+  vy: number;
   label: THREE.Sprite;
   /** Team-coloured arrow over the head of far-away droids, which are only a few pixels tall by then. */
   marker: THREE.Sprite;
@@ -83,9 +103,23 @@ interface RocketView {
   off: Vec3 | null;
   /** Distance travelled since the last trail puff. */
   trail: number;
+  /** Own rocket that reached a wall on our side: parked and hidden until the server's boom arrives. */
+  stopped: boolean;
 }
 
-type Models = Awaited<ReturnType<RocketsClient['loadModels']>>;
+/** A destroyed droid's pieces, flying for a couple of seconds. */
+interface Wreck {
+  pieces: DroidPiece[];
+  floorY: number;
+  life: number;
+}
+
+/** Which model each item kind uses, and its scale. */
+const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; color: number; lift: number }> = {
+  shard: { model: 'armor', scale: 0.45, color: 0xffd23a, lift: 0.35 },
+  armor: { model: 'armor', scale: 1, color: 0xffd23a, lift: 0.55 },
+  mega: { model: 'mega', scale: 1, color: 0xff6fb5, lift: 0.75 },
+};
 
 const ROCKET_COLOR = 0xffa14a;
 /** Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the crosshair. */
@@ -99,8 +133,6 @@ const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.93);
 const VM_ORDER = 100;
 /** How fast a fired rocket's visual offset from its true path fades (seconds). */
 const ROCKET_BLEND = 0.08;
-/** Metres of flight between smoke-trail puffs. */
-const TRAIL_STEP = 0.7;
 
 /** A damped spring for camera and viewmodel motion; kicks add velocity. Substeps so stiff springs stay stable. */
 class Spring {
@@ -187,12 +219,18 @@ export class RocketsClient implements GameClient {
   private effects?: Effects;
   private arena?: ArenaView;
   private map?: MapData;
-  private models: Models | null = null;
-  private readonly snaps = new SnapshotBuffer<RocketsSnapshot>();
+  private readonly snaps = new SnapshotTimeline<RocketsSnapshot>();
   private readonly remotes = new Map<string, Remote>();
   private readonly rockets = new Map<string, RocketView>();
   private readonly packs: THREE.Group[] = [];
   private readonly packBase: number[] = [];
+  private itemSpawns: ItemSpawn[] = [];
+  private readonly items: THREE.Group[] = [];
+  private readonly itemBase: number[] = [];
+  private readonly wrecks: Wreck[] = [];
+  private readonly boomNormal = v3();
+  private readonly nextPos = v3();
+  private viewInk: [THREE.Material, THREE.Material][] = [];
   private viewmodel?: THREE.Group;
   private readonly me = {
     body: { pos: v3(0, 50, 0), vel: v3(), onGround: false } as Body,
@@ -277,13 +315,9 @@ export class RocketsClient implements GameClient {
     this.effects = new Effects(engine.scene);
     this.rocketLights = new LightPool(engine.scene, 3);
     sfx.unlock();
-    void this.loadModels().then((m) => {
-      if (this.disposed) return;
-      this.models = m;
-      this.buildViewmodel();
-      if (this.map) this.buildWorld();
-      this.hud.set({ ready: true });
-    });
+    this.buildViewmodel();
+    if (this.map) this.buildWorld();
+    this.hud.set({ ready: true });
     engine.start((dt, now) => this.frame(dt, now));
     // Dev-only handle for screenshots: __rockets.debugCam = { x, y, z, yaw, pitch } parks the camera there.
     if (import.meta.env.DEV) (window as unknown as { __rockets: RocketsClient }).__rockets = this;
@@ -345,11 +379,6 @@ export class RocketsClient implements GameClient {
     }
   }
 
-  private async loadModels() {
-    const healthpack = await loadModel('healthpack');
-    return { healthpack };
-  }
-
   // ---- messages -----------------------------------------------------------------------------------------------
 
   onMessage(m: GameServerMsg) {
@@ -357,10 +386,11 @@ export class RocketsClient implements GameClient {
     switch (msg.k) {
       case 'init':
         this.map = msg.map;
+        this.itemSpawns = msg.items ?? [];
         this.serverLeft = msg.left;
         this.serverLeftAt = this.time;
         this.hud.set({ scores: msg.scores, left: msg.left, mapName: msg.map.name });
-        if (this.engine && this.models) this.buildWorld();
+        if (this.engine) this.buildWorld();
         break;
       case 'snap':
         this.onSnapshot(msg.s);
@@ -380,7 +410,8 @@ export class RocketsClient implements GameClient {
   }
 
   private onSnapshot(s: RocketsSnapshot) {
-    this.snaps.push(s);
+    // Keyed by simulation time, not arrival time, so network jitter and bursts do not show as stutter.
+    this.snaps.push(s, s.tick * RK.dt);
     this.snaps.trim(1);
     this.serverLeft = s.left;
     this.serverLeftAt = this.time;
@@ -392,10 +423,16 @@ export class RocketsClient implements GameClient {
     if (own) {
       this.reconcile(own);
       const hp = Math.max(0, Math.round(own.hp));
-      if (hp !== this.hud.get().hp) this.hud.set({ hp });
+      const armor = Math.max(0, Math.round(own.ar ?? 0));
+      const h = this.hud.get();
+      if (hp !== h.hp || armor !== h.armor) this.hud.set({ hp, armor });
     }
     for (let i = 0; i < this.packs.length; i++) this.packs[i].visible = s.pk.includes(i);
+    const it = s.it ?? [];
+    for (let i = 0; i < this.items.length; i++) this.items[i].visible = it.includes(i);
     const now = performance.now() / 1000;
+    // Where on our clock this snapshot's moment falls, so remote rockets extrapolate from the right time.
+    const at = this.snaps.toLocal(s.tick * RK.dt);
     const seen = new Set<string>();
     for (const r of s.rk) {
       seen.add(r.id);
@@ -404,11 +441,11 @@ export class RocketsClient implements GameClient {
       if (view.local) continue;
       view.pos = fromTuple(r.p);
       view.vel = fromTuple(r.v);
-      view.at = now;
+      view.at = at;
     }
     for (const [id, view] of this.rockets) {
       if (view.confirmed && !seen.has(id)) this.removeRocket(id);
-      else if (!view.confirmed && now - view.born > 0.6) this.removeRocket(id);
+      else if (!view.confirmed && now - view.born > 1) this.removeRocket(id);
     }
   }
 
@@ -463,9 +500,9 @@ export class RocketsClient implements GameClient {
     for (const i of me.pending) stepBody(me.body, i, this.map);
     const err = vsub(before, me.body.pos);
     const len = Math.hypot(err.x, err.y, err.z);
-    // Small corrections are eased in visually (the in-between-ticks position shifts with the body, the eased offset
-    // takes up the difference); big ones (teleports, knockback) snap.
-    if (len < 2.5) {
+    // Corrections are eased in visually (the in-between-ticks position shifts with the body, the eased offset takes up
+    // the difference). Knockback is not predicted, so a rocket jump at high ping is metres off; only teleports snap.
+    if (len < 8) {
       me.smooth = vadd(me.smooth, err);
       me.prevPos = vsub(me.prevPos, err);
     } else {
@@ -490,14 +527,18 @@ export class RocketsClient implements GameClient {
         const pos = fromTuple(e.p);
         if (!this.rockets.has(e.id)) this.spawnRocket(e.id, pos, fromTuple(e.v), true, false);
         sfx.playAt('fire', pos.x, pos.y, pos.z);
+        const shooter = this.remotes.get(e.o);
+        if (shooter) shooter.kick = 1;
         break;
       }
       case 'boom': {
         const pos = fromTuple(e.p);
         this.removeRocket(e.id);
-        fx?.burst(pos, ROCKET_COLOR, 36, 8, 0.6, 0.5);
-        fx?.burst(pos, 0x4a4450, 18, 3, 0.9, 0.6);
-        fx?.flash(pos, 0xff7a1f, 1.7, 0.45, 30);
+        if (fx) {
+          const n = this.boomNormal;
+          const on = !!this.map && nearestSurface(pos, this.map.boxes, 0.6, n);
+          fx.explode(pos, on ? n : null);
+        }
         const d = dist(pos);
         if (d < 40) fx?.boom(pos, 1.4 + d * 0.04);
         sfx.playAt('boom', pos.x, pos.y, pos.z);
@@ -510,31 +551,40 @@ export class RocketsClient implements GameClient {
       }
       case 'hurt':
         if (e.id === you) {
-          this.hud.set({ hurtAt: this.time, hp: Math.max(0, this.hud.get().hp - e.dmg) });
           sfx.play('hurt', 0, e.dmg / 100);
           this.addTrauma(Math.min(0.45, e.dmg / 160));
-          // Snap the view away from whoever hit us.
+          // Snap the view away from whoever hit us, and point the HUD's damage arc at them.
           const from = e.by !== you ? this.remotes.get(e.by) : undefined;
           let side = Math.random() - 0.5;
+          let hurtDir: number | undefined;
           if (from) {
             const dx = from.group.position.x - eye.x;
             const dz = from.group.position.z - eye.z;
-            side = Math.cos(this.me.yaw) * dx - Math.sin(this.me.yaw) * dz > 0 ? 1 : -1;
+            const yaw = this.me.yaw;
+            const right = Math.cos(yaw) * dx - Math.sin(yaw) * dz;
+            side = right > 0 ? 1 : -1;
+            hurtDir = Math.atan2(right, -Math.sin(yaw) * dx - Math.cos(yaw) * dz);
           }
+          this.hud.set({ hurtAt: this.time, hp: Math.max(0, this.hud.get().hp - e.dmg), hurtDir });
           const k = Math.min(1, e.dmg / 60);
           this.punch(-1.1 * k, side * 1.3 * k);
         } else if (e.by === you) {
           this.hud.set({ hitAt: this.time });
           sfx.play('hit', 0, e.dmg / 100);
           this.hitStop(0.045);
+          const victim = this.remotes.get(e.id);
+          if (victim) {
+            const vp = victim.group.position;
+            fx?.sparks({ x: vp.x, y: vp.y + 1.1, z: vp.z });
+          }
         }
         break;
       case 'kill': {
         const victim = this.name(e.v);
         const text = e.self ? `${victim} blew ${e.v === you ? 'yourself' : 'themselves'} up` : `${this.name(e.by)} rocketed ${victim}`;
-        this.feed(text);
+        this.feed(text, e.by, e.v, e.self);
         const r = this.remotes.get(e.v);
-        if (r) fx?.burst(vadd(r.group.position, v3(0, 1, 0)), r.color, 40, 6, 1, 0.6);
+        if (r && fx && r.group.visible) this.wreck(r, e.self ? undefined : e.by);
         if (e.by === you && !e.self) {
           sfx.play('kill');
           this.hitStop(0.09);
@@ -562,14 +612,29 @@ export class RocketsClient implements GameClient {
         if (pos) fx?.burst(vadd(pos, v3(0, 0.6, 0)), 0x7cf4c9, 20, 3, 0.5, 1);
         if (e.by === you) {
           sfx.play('health');
-          this.hud.set({ hp: Math.min(RK.maxHealth, this.hud.get().hp + RK.healthPackAmount) });
+          this.hud.set({ hp: Math.max(this.hud.get().hp, Math.min(RK.maxHealth, this.hud.get().hp + RK.healthPackAmount)) });
         } else if (pos) sfx.playAt('health', pos.x, pos.y, pos.z);
+        break;
+      }
+      case 'item': {
+        const spawn = this.itemSpawns[e.i];
+        const sound = e.t === 'mega' ? 'mega' : 'armor';
+        if (spawn) {
+          const look = ITEM_LOOK[e.t];
+          fx?.burst({ x: spawn.p.x, y: spawn.p.y + look.lift, z: spawn.p.z }, look.color, e.t === 'shard' ? 10 : 22, 3, 0.5, 1);
+        }
+        if (e.by === you) sfx.play(sound);
+        else if (spawn) sfx.playAt(sound, spawn.p.x, spawn.p.y, spawn.p.z);
         break;
       }
       case 'pad': {
         if (e.id === you) break;
         const r = this.remotes.get(e.id);
-        if (r) sfx.playAt('pad', r.group.position.x, r.group.position.y, r.group.position.z);
+        if (r) {
+          const rp = r.group.position;
+          sfx.playAt('pad', rp.x, rp.y, rp.z);
+          fx?.padBurst(rp, this.map?.accent ?? 0x7cf4ff);
+        }
         break;
       }
     }
@@ -579,25 +644,34 @@ export class RocketsClient implements GameClient {
     return this.ctx.room().players.find((p) => p.id === id)?.name ?? 'someone';
   }
 
-  private feed(text: string) {
-    const line = { id: ++this.feedId, text, at: this.time };
+  private feed(text: string, by?: string, v?: string, self?: boolean) {
+    const line: FeedLine = { id: ++this.feedId, text, at: this.time, by, v, self };
     this.hud.set((s) => ({ feed: [...s.feed.slice(-5), line] }));
   }
 
   // ---- world ---------------------------------------------------------------------------------------------------
 
   private buildWorld() {
-    const { engine, map, models } = this;
-    if (!engine || !map || !models || this.arena) return;
+    const { engine, map } = this;
+    if (!engine || !map || this.arena) return;
     addArenaLights(engine.scene, map);
     this.arena = buildArena(map);
     engine.scene.add(this.arena.group);
     for (const pos of map.packs) {
-      const pack = instantiate(models.healthpack, undefined, () => boxFallback(0x7cf4c9, 0.5));
-      pack.position.set(pos.x, pos.y + 0.3, pos.z);
+      const pack = buildPickup('health');
+      pack.position.set(pos.x, pos.y + 0.55, pos.z);
       engine.scene.add(pack);
       this.packs.push(pack);
-      this.packBase.push(pos.y + 0.3);
+      this.packBase.push(pos.y + 0.55);
+    }
+    for (const spawn of this.itemSpawns) {
+      const look = ITEM_LOOK[spawn.k];
+      const item = buildPickup(look.model);
+      item.scale.setScalar(look.scale);
+      item.position.set(spawn.p.x, spawn.p.y + look.lift, spawn.p.z);
+      engine.scene.add(item);
+      this.items.push(item);
+      this.itemBase.push(spawn.p.y + look.lift);
     }
     this.applyQualityNow(settings.get().quality);
   }
@@ -623,9 +697,12 @@ export class RocketsClient implements GameClient {
       if (!mat) {
         mat = src.clone();
         mat.onBeforeCompile = src.onBeforeCompile;
+        mat.onBeforeRender = src.onBeforeRender;
         mat.customProgramCacheKey = src.customProgramCacheKey;
         mat.transparent = true;
         own.set(src, mat);
+        // Outline copies follow the quality setting's ink switch on the shared originals.
+        if ((src as THREE.MeshBasicMaterial).isMeshBasicMaterial && src.side === THREE.BackSide) this.viewInk.push([src, mat]);
       }
       mesh.material = mat;
     });
@@ -667,22 +744,6 @@ export class RocketsClient implements GameClient {
     const info = this.ctx.room().players.find((p) => p.id === id);
     if (!info || !this.engine) return null;
     const group = buildDroid(info.color);
-    group.rotation.order = 'YXZ';
-    // Shadow budget: one caster per droid (its biggest mesh) is plenty for a blob of shadow under it.
-    let biggest: THREE.Mesh | null = null;
-    let biggestR = 0;
-    group.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh || !mesh.castShadow) return;
-      mesh.castShadow = false;
-      if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
-      const rad = mesh.geometry.boundingSphere!.radius * Math.max(mesh.scale.x, mesh.scale.y, mesh.scale.z);
-      if (rad > biggestR) {
-        biggestR = rad;
-        biggest = mesh;
-      }
-    });
-    if (biggest) (biggest as THREE.Mesh).castShadow = true;
     const label = makeLabel(info.name, colorHex(info.color));
     label.position.y = RK.height + 0.2;
     group.add(label);
@@ -693,8 +754,15 @@ export class RocketsClient implements GameClient {
     this.engine.scene.add(group);
     r = {
       group,
+      bobNode: group.getObjectByName('bob') ?? null,
+      torso: group.getObjectByName('torso') ?? null,
+      head: group.getObjectByName('head') ?? null,
       aim: group.getObjectByName('aim') ?? null,
+      recoil: group.getObjectByName('recoil') ?? null,
       thrust: group.getObjectByName('thrust') ?? null,
+      kick: 0,
+      ground: true,
+      vy: 0,
       label,
       marker,
       labelW: label.scale.x,
@@ -719,6 +787,23 @@ export class RocketsClient implements GameClient {
     this.remotes.delete(id);
   }
 
+  /** Blows a remote droid apart where it stands; the pieces fly away from the killer. */
+  private wreck(r: Remote, by?: string) {
+    const engine = this.engine;
+    if (!engine) return;
+    const at = r.group.position;
+    const from = by === this.ctx.you ? this.me.body.pos : by ? this.remotes.get(by)?.group.position : undefined;
+    let push: THREE.Vector3 | undefined;
+    if (from) {
+      push = new THREE.Vector3(at.x - from.x, 0, at.z - from.z);
+      const len = push.length();
+      if (len > 0.01) push.multiplyScalar(4 / len);
+    }
+    const pieces = buildDroidPieces(r.color, r.group, push);
+    for (const p of pieces) engine.scene.add(p.object);
+    this.wrecks.push({ pieces, floorY: at.y, life: 2.5 });
+  }
+
   private spawnRocket(id: string, pos: Vec3, vel: Vec3, confirmed: boolean, local: boolean): RocketView {
     const group = buildRocket();
     const light = this.rocketLights?.take(ROCKET_COLOR, 8, 7) ?? null;
@@ -728,7 +813,7 @@ export class RocketsClient implements GameClient {
     group.position.set(pos.x, pos.y, pos.z);
     group.lookAt(pos.x + vel.x / len, pos.y + vel.y / len, pos.z + vel.z / len);
     const t = performance.now() / 1000;
-    const view: RocketView = { group, pos, vel, at: t, confirmed, local, born: t, light, flame: group.getObjectByName('flame') ?? null, off: null, trail: 0 };
+    const view: RocketView = { group, pos, vel, at: t, confirmed, local, born: t, light, flame: group.getObjectByName('flame') ?? null, off: null, trail: 0, stopped: false };
     this.rockets.set(id, view);
     return view;
   }
@@ -788,6 +873,13 @@ export class RocketsClient implements GameClient {
       pack.rotation.y += dt;
       pack.position.y = this.packBase[i] + Math.sin(now * 3 + i) * 0.06;
     }
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
+      item.rotation.y += dt * 1.6;
+      item.position.y = this.itemBase[i] + Math.sin(now * 2.5 + i * 1.7) * 0.08;
+    }
+    this.updateWrecks(dt);
+    for (const [src, copy] of this.viewInk) copy.visible = src.visible;
     effects?.update(dt);
 
     if (now - this.lastHud > 0.1) {
@@ -809,6 +901,22 @@ export class RocketsClient implements GameClient {
       }
       const fps = Math.round(engine.fps);
       if (Math.abs(fps - s.fps) >= 2) this.hud.set({ fps });
+      const speed = this.me.dead ? 0 : Math.hypot(this.me.body.vel.x, this.me.body.vel.z);
+      if (s.speed === undefined || Math.abs(s.speed - speed) > 0.3) this.hud.set({ speed });
+    }
+  }
+
+  /** Flying droid pieces: a couple of seconds of tumbling, then gone (they share the droid's geometry and materials). */
+  private updateWrecks(dt: number) {
+    for (let i = this.wrecks.length - 1; i >= 0; i--) {
+      const w = this.wrecks[i];
+      w.life -= dt;
+      if (w.life > 0) {
+        updateDroidPieces(w.pieces, dt, w.floorY);
+        continue;
+      }
+      for (const piece of w.pieces) this.engine?.scene.remove(piece.object);
+      this.wrecks.splice(i, 1);
     }
   }
 
@@ -837,11 +945,15 @@ export class RocketsClient implements GameClient {
       me.prevPos.y = me.body.pos.y;
       me.prevPos.z = me.body.pos.z;
       const res = stepBody(me.body, inp, map);
-      if (res.pad >= 0) sfx.play('pad');
-      else if (inp.jump && wasGround && !me.body.onGround) sfx.play('jump');
+      if (res.pad >= 0) {
+        sfx.play('pad');
+        const pad = map.pads[res.pad];
+        if (pad) this.effects?.padBurst(pad.pos, map.accent ?? 0x7cf4ff);
+      } else if (inp.jump && wasGround && !me.body.onGround) sfx.play('jump');
       // Landing dip, scaled by how hard we came down (a bunny hop barely registers, a long fall thumps).
       if (!wasGround && me.body.onGround && fallSpeed > 3) this.land.v -= 0.25 + Math.min(1, (fallSpeed - 3) / 16) * 1.1;
       if (!wasGround && me.body.onGround && fallSpeed > 4) sfx.play('land', 0, clamp((fallSpeed - 4) / 14, 0, 1));
+      if (!wasGround && me.body.onGround && fallSpeed > 7) this.effects?.dust(me.body.pos, (fallSpeed - 7) / 15);
       if (inp.fire && now >= me.nextFire) {
         me.nextFire = now + RK.fireInterval;
         const dir = lookDir(me.yaw, me.pitch);
@@ -860,6 +972,7 @@ export class RocketsClient implements GameClient {
   private fireFeel(view: RocketView, dir: Vec3) {
     this.recoil = 1;
     this.reload = 0;
+    this.hud.set({ firedAt: this.time });
     const k = settings.get().reducedMotion ? 0.3 : 1;
     this.kickZ.v += 2.4 * k;
     this.kickPitch.v += 4.5 * k;
@@ -1022,7 +1135,7 @@ export class RocketsClient implements GameClient {
   }
 
   private updateRemotes(dt: number, now: number) {
-    const sample = this.snaps.sample(now - INTERP_DELAY);
+    const sample = this.snaps.sample(now);
     const frame = this.frameNo;
     const cam = this.engine?.camera.position;
     if (sample) {
@@ -1042,17 +1155,32 @@ export class RocketsClient implements GameClient {
         const z = sameLife ? pa.p[2] + (pb.p[2] - pa.p[2]) * alpha : pb.p[2];
         const yaw = sameLife ? lerpAngle(pa.y, pb.y, alpha) : pb.y;
         r.bob += dt * 3;
-        r.group.position.set(x, y + (pb.g ? 0 : 0.05) + Math.sin(r.bob) * 0.02, z);
+        r.group.position.set(x, y + (pb.g ? 0 : 0.05), z);
         r.group.rotation.y = yaw;
-        // Lean into the movement direction a little.
+        if (r.bobNode) r.bobNode.position.y = Math.sin(r.bob) * 0.04;
+        // Lean the torso into the movement direction a little; the gun arm and head still aim where they look.
         const vx = pb.v[0];
         const vz = pb.v[2];
         const fwd = -Math.sin(yaw) * vx - Math.cos(yaw) * vz;
         const side = Math.cos(yaw) * vx - Math.sin(yaw) * vz;
-        r.group.rotation.x = clamp(-fwd * 0.02, -0.25, 0.25);
-        r.group.rotation.z = clamp(-side * 0.02, -0.25, 0.25);
-        if (r.aim) r.aim.rotation.x = sameLife ? pa.pt + (pb.pt - pa.pt) * alpha : pb.pt;
+        const leanX = clamp(-fwd * 0.02, -0.25, 0.25);
+        if (r.torso) {
+          r.torso.rotation.x = leanX;
+          r.torso.rotation.z = clamp(-side * 0.02, -0.25, 0.25);
+        }
+        const pitch = sameLife ? pa.pt + (pb.pt - pa.pt) * alpha : pb.pt;
+        if (r.aim) r.aim.rotation.x = pitch - (r.torso ? leanX : 0);
+        if (r.head) r.head.rotation.x = pitch * 0.5;
+        r.kick = Math.max(0, r.kick - dt * 4);
+        if (r.recoil) {
+          r.recoil.position.z = r.kick * 0.12;
+          r.recoil.rotation.x = r.kick * 0.3;
+        }
         if (r.thrust) r.thrust.scale.set(1, (pb.g ? 0.7 : 1.3) + Math.sin(r.bob * 9) * 0.12, 1);
+        // Landing dust, from the older of the two snapshots so it lines up with where the droid is drawn.
+        if (sameLife && pa.g === 1 && !r.ground && r.vy < -7) this.effects?.dust(r.group.position, (-r.vy - 7) / 15);
+        r.ground = pa.g === 1;
+        if (!r.ground) r.vy = pa.v[1];
         // Name tags grow with distance so they stay readable, and only fade out far away.
         if (cam) {
           const d = Math.hypot(x - cam.x, y - cam.y, z - cam.z);
@@ -1087,9 +1215,22 @@ export class RocketsClient implements GameClient {
         y = view.pos.y + v.y * t;
         z = view.pos.z + v.z * t;
       } else {
-        view.pos.x += v.x * dt;
-        view.pos.y += v.y * dt;
-        view.pos.z += v.z * dt;
+        if (view.stopped) continue;
+        // Our rocket runs a round trip ahead of the server's: stop it at the wall and let the boom event remove it,
+        // instead of flying on through for 100+ ms.
+        const next = this.nextPos;
+        next.x = view.pos.x + v.x * dt;
+        next.y = view.pos.y + v.y * dt;
+        next.z = view.pos.z + v.z * dt;
+        if (this.map && segmentBoxes(view.pos, next, this.map.boxes)) {
+          view.stopped = true;
+          view.group.visible = false;
+          if (view.light) view.light.intensity = 0;
+          continue;
+        }
+        view.pos.x = next.x;
+        view.pos.y = next.y;
+        view.pos.z = next.z;
         x = view.pos.x;
         y = view.pos.y;
         z = view.pos.z;
@@ -1116,15 +1257,10 @@ export class RocketsClient implements GameClient {
         while (view.trail >= TRAIL_STEP) {
           view.trail -= TRAIL_STEP;
           scratchV.set(x - forward.x * (view.trail + 0.25), y - forward.y * (view.trail + 0.25), z - forward.z * (view.trail + 0.25));
-          this.trailPuff(scratchV, 1 - Math.min(1, (pnow - view.born) / RK.rocketLife));
+          this.effects?.trail(scratchV, 1 - Math.min(1, (pnow - view.born) / RK.rocketLife));
         }
       }
     }
   }
 
-  /** One smoke-trail puff; `heat` is 1 for a fresh rocket and falls towards 0 with age. Hook for an instanced trail. */
-  private trailPuff(pos: THREE.Vector3, heat: number) {
-    void heat;
-    this.effects?.burst(pos, 0xeeeae2, 1, 0.5, 0.45, 0.1);
-  }
 }

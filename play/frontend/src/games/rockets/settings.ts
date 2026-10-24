@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { sfx } from '../../engine/audio';
 import type { Input } from '../../engine/input';
+import { setInkVisible } from '../../engine/toon';
 import { createStore } from '../types';
 
 export type Quality = 'low' | 'medium' | 'high';
@@ -181,6 +182,8 @@ export function applyInput(input: Input, s = settings.get()) {
  */
 export function applyQuality(scene: THREE.Scene, quality: Quality) {
   const q = QUALITY[quality];
+  // Ink materials are shared and cached, so one switch covers everything, including what gets built later.
+  setInkVisible(q.outlines);
   scene.traverse((o) => {
     if ((o as THREE.DirectionalLight).isDirectionalLight) {
       const light = o as THREE.DirectionalLight;
@@ -193,22 +196,8 @@ export function applyQuality(scene: THREE.Scene, quality: Quality) {
         light.shadow.map?.dispose();
         light.shadow.map = null;
       }
-      return;
     }
-    const mesh = o as THREE.Mesh | THREE.LineSegments;
-    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    if (!mat || Array.isArray(mat)) return;
-    if (isInk(mat)) mat.visible = q.outlines;
   });
-}
-
-/** Ink outlines: black back-face hulls and black crease lines (see engine/toon.ts). */
-function isInk(m: THREE.Material) {
-  const c = (m as THREE.MeshBasicMaterial).color;
-  const dark = !!c && c.r < 0.02 && c.g < 0.02 && c.b < 0.02;
-  if (!dark) return false;
-  if ((m as THREE.MeshBasicMaterial).isMeshBasicMaterial) return m.side === THREE.BackSide;
-  return !!(m as THREE.LineBasicMaterial).isLineBasicMaterial;
 }
 
 /** A readable name for a bound code: `KeyW` → `W`, `Mouse0` → `Mouse 1`. */
