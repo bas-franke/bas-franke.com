@@ -13,10 +13,13 @@ import { Effects, LightPool } from '../../engine/effects';
 import { Engine, colorHex, makeLabel } from '../../engine/engine';
 import { Input } from '../../engine/input';
 import { INTERP_DELAY, SnapshotBuffer, damp, lerpAngle } from '../../engine/interp';
+import { INK } from '../../engine/toon';
 import { boxFallback, instantiate, loadModel } from '../../engine/models';
+import { TouchInput } from '../../engine/touch';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { type ArenaView, addArenaLights, buildArena } from './arena';
 import { WARHEAD_REST_Z, buildDroid, buildLauncher, buildRocket } from './models';
+import { QUALITY, applyInput, applyQuality, settings, verticalFov } from './settings';
 
 export interface FeedLine {
   id: number;
@@ -52,6 +55,8 @@ interface Remote {
   aim: THREE.Object3D | null;
   thrust: THREE.Object3D | null;
   label: THREE.Sprite;
+  /** Team-coloured arrow over the head of far-away droids, which are only a few pixels tall by then. */
+  marker: THREE.Sprite;
   /** The label's scale at 1x, so it can grow with distance. */
   labelW: number;
   labelH: number;
@@ -83,12 +88,11 @@ interface RocketView {
 type Models = Awaited<ReturnType<RocketsClient['loadModels']>>;
 
 const ROCKET_COLOR = 0xffa14a;
-const FOV = 82;
 /** Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the crosshair. */
-const VM_POS = { x: 0.2, y: -0.215, z: -0.34 };
-const VM_YAW = 0.075;
-const VM_PITCH = 0.035;
-const VM_SCALE = 0.6;
+const VM_POS = { x: 0.235, y: -0.24, z: -0.34 };
+const VM_YAW = 0.1;
+const VM_PITCH = 0.06;
+const VM_SCALE = 0.48;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */
 const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.93);
 /** The viewmodel draws last, after a depth clear, so it never pokes into walls. */
@@ -126,6 +130,29 @@ const smoothstep = (t: number) => {
   return c * c * (3 - 2 * c);
 };
 
+/** A downward ink-outlined arrow, white so each droid's marker material can tint it. Shared by all markers. */
+let markerTex: THREE.CanvasTexture | null = null;
+function markerTexture() {
+  if (markerTex) return markerTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.beginPath();
+  g.moveTo(32, 58);
+  g.lineTo(8, 12);
+  g.lineTo(56, 12);
+  g.closePath();
+  g.fillStyle = '#ffffff';
+  g.fill();
+  g.lineJoin = 'round';
+  g.lineWidth = 7;
+  g.strokeStyle = colorHex(INK);
+  g.stroke();
+  markerTex = new THREE.CanvasTexture(c);
+  markerTex.colorSpace = THREE.SRGBColorSpace;
+  return markerTex;
+}
+
 const scratchV = new THREE.Vector3();
 const scratchEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const forward = new THREE.Vector3();
@@ -154,6 +181,9 @@ export class RocketsClient implements GameClient {
 
   private engine?: Engine;
   private input?: Input;
+  /** On-screen sticks and buttons for phones; the HUD mounts its overlay with this. */
+  readonly touch = new TouchInput();
+  private unsubSettings?: () => void;
   private effects?: Effects;
   private arena?: ArenaView;
   private map?: MapData;
@@ -187,7 +217,6 @@ export class RocketsClient implements GameClient {
   private muzzleGlow: THREE.PointLight | null = null;
   private rocketLights?: LightPool;
   // Game feel: all camera and viewmodel motion is visual only and never touches aim or prediction.
-  private reducedMotion = false;
   private bob = 0;
   private bobAmp = 0;
   /** Screen-shake trauma, 0..1; the shake strength is its square so small knocks stay gentle. */
@@ -201,7 +230,7 @@ export class RocketsClient implements GameClient {
   private swayY = 0;
   private airY = 0;
   private roll = 0;
-  private fov = FOV;
+  private fov = verticalFov(settings.get().fov);
   private readonly kickZ = new Spring(260, 22);
   private readonly kickPitch = new Spring(180, 14);
   private readonly punchPitch = new Spring(140, 16);
@@ -230,13 +259,24 @@ export class RocketsClient implements GameClient {
   // ---- lifecycle --------------------------------------------------------------------------------------------
 
   mount(container: HTMLElement) {
-    const engine = new Engine(container, { fov: FOV, near: 0.05, far: 260 });
+    const engine = new Engine(container, { fov: verticalFov(settings.get().fov), near: 0.05, far: 260 });
     this.engine = engine;
     engine.camera.rotation.order = 'YXZ';
     this.input = new Input(engine.renderer.domElement);
+    applyInput(this.input);
+    this.unsubSettings = settings.subscribe(() => {
+      const s = settings.get();
+      if (this.input) applyInput(this.input, s);
+      const eng = this.engine;
+      if (!eng) return;
+      // The frame loop eases from here to the new FOV (plus any speed kick).
+      eng.camera.fov = this.fov = verticalFov(s.fov);
+      eng.camera.updateProjectionMatrix();
+      (eng as Engine & { setMaxPixelRatio?: (r: number) => void }).setMaxPixelRatio?.(QUALITY[s.quality].pixelRatio);
+      applyQuality(eng.scene, s.quality);
+    });
     this.effects = new Effects(engine.scene);
     this.rocketLights = new LightPool(engine.scene, 3);
-    this.reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     sfx.unlock();
     void this.loadModels().then((m) => {
       if (this.disposed) return;
@@ -248,6 +288,11 @@ export class RocketsClient implements GameClient {
     engine.start((dt, now) => this.frame(dt, now));
     // Dev-only handle for screenshots: __rockets.debugCam = { x, y, z, yaw, pitch } parks the camera there.
     if (import.meta.env.DEV) (window as unknown as { __rockets: RocketsClient }).__rockets = this;
+  }
+
+  /** Whether raw (unaccelerated) mouse input works here; null until pointer lock has been tried. */
+  get rawSupported() {
+    return this.input?.rawSupported ?? null;
   }
 
   /** Dev aid: when set, the camera sits here instead of following the player. */
@@ -267,7 +312,7 @@ export class RocketsClient implements GameClient {
 
   /** Knocks the view by a spring impulse (radians per second); it settles back on its own. */
   punch(pitch: number, yaw: number) {
-    const k = this.reducedMotion ? 0.4 : 1;
+    const k = settings.get().reducedMotion ? 0.3 : 1;
     this.punchPitch.v += pitch * k;
     this.punchYaw.v += yaw * k;
   }
@@ -275,6 +320,8 @@ export class RocketsClient implements GameClient {
   unmount() {
     this.disposed = true;
     this.input?.dispose();
+    this.touch.dispose();
+    this.unsubSettings?.();
     this.effects?.dispose();
     this.arena?.dispose();
     this.engine?.dispose();
@@ -288,6 +335,7 @@ export class RocketsClient implements GameClient {
       if (paused) this.input.exitLock();
       this.input.clearOnce();
     }
+    this.touch.enabled = !paused;
     this.hud.set({ paused });
   }
 
@@ -551,6 +599,7 @@ export class RocketsClient implements GameClient {
       this.packs.push(pack);
       this.packBase.push(pos.y + 0.3);
     }
+    applyQuality(engine.scene, settings.get().quality);
   }
 
   private buildViewmodel() {
@@ -590,9 +639,13 @@ export class RocketsClient implements GameClient {
     vm.scale.setScalar(VM_SCALE);
     engine.camera.add(vm);
     engine.scene.add(engine.camera);
+    // The muzzle glow hangs off the camera, not the viewmodel: hiding the viewmodel (death) must never hide a light,
+    // or the light count changes and every lit material recompiles. It only ever changes intensity.
     const glow = new THREE.PointLight(0xffb070, 0, 4, 2);
-    glow.position.set(VM_MUZZLE.x, VM_MUZZLE.y, VM_MUZZLE.z - 0.1);
-    vm.add(glow);
+    vm.updateMatrix();
+    glow.position.copy(VM_MUZZLE).applyMatrix4(vm.matrix);
+    glow.position.z -= 0.08;
+    engine.camera.add(glow);
     this.muzzleGlow = glow;
     this.warhead = vm.getObjectByName('warhead') ?? null;
     this.viewmodel = vm;
@@ -609,12 +662,17 @@ export class RocketsClient implements GameClient {
     const label = makeLabel(info.name, colorHex(info.color));
     label.position.y = RK.height + 0.2;
     group.add(label);
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(), color: info.color, transparent: true, depthWrite: false }));
+    marker.renderOrder = 10;
+    marker.visible = false;
+    group.add(marker);
     this.engine.scene.add(group);
     r = {
       group,
       aim: group.getObjectByName('aim') ?? null,
       thrust: group.getObjectByName('thrust') ?? null,
       label,
+      marker,
       labelW: label.scale.x,
       labelH: label.scale.y,
       color: info.color,
@@ -633,6 +691,7 @@ export class RocketsClient implements GameClient {
     const mat = r.label.material;
     mat.map?.dispose();
     mat.dispose();
+    r.marker.material.dispose();
     this.remotes.delete(id);
   }
 
@@ -669,11 +728,14 @@ export class RocketsClient implements GameClient {
     // Mouse look applies every rendered frame, not per sim tick, so turning is as smooth as the display; the sim
     // ticks just read yaw and pitch. Without a map the deltas are thrown away.
     const look = input.look();
+    const tlook = this.touch.look();
     if (map && !this.paused) {
-      me.yaw -= look.dx;
-      me.pitch = clamp(me.pitch - look.dy, -RK.maxPitch, RK.maxPitch);
-      this.lookDX += look.dx;
-      this.lookDY += look.dy;
+      const dx = look.dx + tlook.dx;
+      const dy = look.dy + tlook.dy;
+      me.yaw -= dx;
+      me.pitch = clamp(me.pitch - dy, -RK.maxPitch, RK.maxPitch);
+      this.lookDX += dx;
+      this.lookDY += dy;
     }
 
     if (map) {
@@ -727,16 +789,16 @@ export class RocketsClient implements GameClient {
   }
 
   private tick(now: number) {
-    const { input, map, me } = this;
+    const { input, map, me, touch } = this;
     if (!input || !map) return;
     // During the start countdown everyone is frozen on the server, so predict standing still.
     const hold = this.paused || this.countdownLeft() > 0;
     const inp: RocketsInput = {
       seq: ++me.seq,
-      f: hold ? 0 : input.axis(['KeyS', 'ArrowDown'], ['KeyW', 'ArrowUp']),
-      s: hold ? 0 : input.axis(['KeyA', 'ArrowLeft'], ['KeyD', 'ArrowRight']),
-      jump: !hold && input.down('Space'),
-      fire: !hold && input.fire() && !this.hud.get().ended,
+      f: hold ? 0 : clamp(input.actionAxis('back', 'forward') + touch.f, -1, 1),
+      s: hold ? 0 : clamp(input.actionAxis('left', 'right') + touch.s, -1, 1),
+      jump: !hold && (input.held('jump') || touch.down('Space')),
+      fire: !hold && (input.fire() || touch.fire()) && !this.hud.get().ended,
       yaw: me.yaw,
       pitch: me.pitch,
     };
@@ -769,8 +831,9 @@ export class RocketsClient implements GameClient {
   private fireFeel(view: RocketView, dir: Vec3) {
     this.recoil = 1;
     this.reload = 0;
-    this.kickZ.v += 2.4;
-    this.kickPitch.v += 4.5;
+    const k = settings.get().reducedMotion ? 0.3 : 1;
+    this.kickZ.v += 2.4 * k;
+    this.kickPitch.v += 4.5 * k;
     this.punch(0.6, (Math.random() - 0.5) * 0.3);
     const vm = this.viewmodel;
     if (!vm || this.debugCam) return;
@@ -789,7 +852,8 @@ export class RocketsClient implements GameClient {
     const { engine, me } = this;
     if (!engine) return;
     const cam = engine.camera;
-    const calm = this.reducedMotion;
+    const prefs = settings.get();
+    const calm = prefs.reducedMotion;
     // Hit-stop: camera and viewmodel motion crawl for a few frames.
     this.freeze = Math.max(0, this.freeze - dt);
     const fdt = this.freeze > 0 ? dt * 0.12 : dt;
@@ -836,7 +900,7 @@ export class RocketsClient implements GameClient {
     // Bob follows distance walked; its size follows speed and fades out in the air, so bunny hops stay steady.
     this.bobAmp = damp(this.bobAmp, grounded ? Math.min(1, speed / RK.groundSpeed) : 0, 8, dt);
     if (grounded) this.bob += fdt * speed * 1.2;
-    const bobAmp = this.bobAmp * (calm ? 0.4 : 1);
+    const bobAmp = calm || !prefs.bob ? 0 : this.bobAmp;
     const bobX = Math.sin(this.bob) * bobAmp;
     const bobY = (Math.cos(this.bob * 2) - 1) * 0.5 * bobAmp;
 
@@ -860,7 +924,7 @@ export class RocketsClient implements GameClient {
     // Shake: smooth layered sines (not per-frame random jitter), scaled by trauma squared and capped small.
     this.trauma = Math.max(0, this.trauma - dt * 1.4);
     if (this.freeze <= 0) this.shakeT += dt;
-    const s = calm ? 0 : this.trauma * this.trauma;
+    const s = this.trauma * this.trauma * (calm ? 0.3 : 1);
     const t = this.shakeT;
     const shPitch = s * 0.03 * (Math.sin(t * 23.1) * 0.6 + Math.sin(t * 41.7 + 1.3) * 0.4);
     const shYaw = s * 0.03 * (Math.sin(t * 19.3 + 2.1) * 0.6 + Math.sin(t * 37.9 + 0.4) * 0.4);
@@ -894,7 +958,7 @@ export class RocketsClient implements GameClient {
 
     // A few degrees of extra FOV at rocket-jump speeds sells the velocity.
     const fast = alive && !calm ? clamp((speed - RK.groundSpeed * 1.15) / 12, 0, 1) : 0;
-    this.fov = damp(this.fov, FOV + fast * 8, 3.5, dt);
+    this.fov = damp(this.fov, verticalFov(prefs.fov) + fast * 8, 3.5, dt);
     if (Math.abs(cam.fov - this.fov) > 0.01) {
       cam.fov = this.fov;
       cam.updateProjectionMatrix();
@@ -966,6 +1030,14 @@ export class RocketsClient implements GameClient {
           const k = clamp(d / 14, 1, 3.5);
           r.label.scale.set(r.labelW * k, r.labelH * k, 1);
           r.label.material.opacity = 1 - clamp((d - 80) / 20, 0, 1);
+          // Past ~25 m a droid is a few pixels tall: fade in a marker of roughly constant screen size over its head.
+          const show = clamp((d - 25) / 10, 0, 1);
+          const size = d * 0.022;
+          r.marker.visible = show > 0;
+          r.marker.material.opacity = show;
+          r.marker.scale.set(size, size, 1);
+          r.marker.position.y = RK.height + 0.15 + size * 0.5;
+          r.label.position.y = RK.height + 0.2 + (show > 0 ? size : 0) + r.labelH * (k - 1) * 0.5;
         }
       }
     }
