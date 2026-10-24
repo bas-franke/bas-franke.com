@@ -9,7 +9,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildLibrary } from './library';
-import { flat, hullGeometry, inkMaterial, toon } from './toon';
+import { detectQuality } from './engine';
+import { flat, flatVertexColorMaterial, hullGeometry, inkMaterial, toon, vertexColorMaterial } from './toon';
 
 /** Game-logic distance (`Enemy.y`) at which a creature reaches the defence line. */
 export const IMPACT_Y = 3.4;
@@ -118,22 +119,30 @@ function rng(seed: number) {
   };
 }
 
-/** Collects geometry per colour and bakes it into one mesh per colour (few draw calls for a whole character). */
+const bakeColor = new THREE.Color();
+/**
+ * Collects coloured geometry and bakes it into ONE vertex-coloured mesh (one draw call for a whole rigid part of a
+ * character). `lit` = the soft toon surface with the warm rim (same look as `toon(color)`), else unlit like `flat()`.
+ */
 class Baker {
-  constructor(private readonly material: (color: number) => THREE.Material = toon) {}
-  private parts = new Map<number, THREE.BufferGeometry[]>();
+  constructor(private readonly lit = true) {}
+  private parts: THREE.BufferGeometry[] = [];
   add(geo: THREE.BufferGeometry, color: number) {
-    let list = this.parts.get(color);
-    if (!list) this.parts.set(color, (list = []));
-    list.push(geo);
+    // Linear working-space colour, as a material's `color` would hold it.
+    bakeColor.setHex(color);
+    const n = geo.attributes.position.count;
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) arr.set([bakeColor.r, bakeColor.g, bakeColor.b], i * 3);
+    geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    this.parts.push(geo);
     return geo;
   }
   bake(parent: THREE.Object3D) {
-    for (const [color, list] of this.parts) {
-      const geo = list.length === 1 ? list[0] : mergeGeometries(list);
-      parent.add(new THREE.Mesh(geo, this.material(color)));
-    }
-    this.parts.clear();
+    if (!this.parts.length) return;
+    const geo = this.parts.length === 1 ? this.parts[0] : mergeGeometries(this.parts)!;
+    if (geo !== this.parts[0]) for (const p of this.parts) p.dispose();
+    parent.add(new THREE.Mesh(geo, this.lit ? vertexColorMaterial(true) : flatVertexColorMaterial()));
+    this.parts = [];
   }
 }
 
@@ -173,19 +182,26 @@ const FLOOR_NEAR = LINE_Z + 14;
 const FLOOR_FAR = LINE_Z - FIELD_LENGTH - 4;
 const TILE = 1.6;
 
+/** Floor texture resolution, texels per world unit: 40 on 'high' (1200×2320), 24 on 'low' (720×1392, 36% the memory). */
+const FLOOR_PX = { high: 40, low: 24 } as const;
+
 /**
  * Paints the whole floor once into one canvas: irregular grey-green flagstones with mortar joints full of moss, faint
  * carved rune circles, a row of golden glyphs along the defence line, darker edges under the shelves. The same canvas
- * doubles as the bump map, so joints and carvings sink in under the low warm light.
+ * doubles as the bump map, so joints and carvings sink in under the low warm light. Everything is drawn
+ * in 40-texels-per-unit coordinates and scaled to `texels`, so both tiers paint the same floor. `candleGlow` bakes the
+ * wizard's candle light into the stones (for the tier that has no real candle light).
  */
-function floorTexture(): THREE.CanvasTexture {
+function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture {
   const PX = 40;
   const W = FLOOR_HALF * 2 * PX;
   const H = (FLOOR_NEAR - FLOOR_FAR) * PX;
+  const k = texels / PX;
   const c = document.createElement('canvas');
-  c.width = W;
-  c.height = H;
+  c.width = Math.round(W * k);
+  c.height = Math.round(H * k);
   const g = c.getContext('2d')!;
+  g.scale(k, k);
   const rnd = rng(1234);
   const X = (x: number) => (x + FLOOR_HALF) * PX;
   const Z = (z: number) => (z - FLOOR_FAR) * PX;
@@ -376,7 +392,7 @@ function floorTexture(): THREE.CanvasTexture {
   }
 
   // Grain: per-pixel noise so the stone does not look like flat vector shapes.
-  const img = g.getImageData(0, 0, W, H);
+  const img = g.getImageData(0, 0, c.width, c.height);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
     const n = (rnd() - 0.5) * 14;
@@ -397,6 +413,17 @@ function floorTexture(): THREE.CanvasTexture {
     pool.addColorStop(1, 'rgba(255,170,90,0)');
     g.fillStyle = pool;
     g.fillRect(0, 0, W, H);
+  }
+  // The wizard's candle, baked: a small warm pool by the defenders (the 'low' tier has no candle point light).
+  if (candleGlow) {
+    const cx = X(CANDLE_X);
+    const cz = Z(CANDLE_Z);
+    const candle = g.createRadialGradient(cx, cz, 0, cx, cz, 4.5 * PX);
+    candle.addColorStop(0, 'rgba(255,170,80,0.34)');
+    candle.addColorStop(0.4, 'rgba(255,160,72,0.14)');
+    candle.addColorStop(1, 'rgba(255,150,60,0)');
+    g.fillStyle = candle;
+    g.fillRect(cx - 4.5 * PX, cz - 4.5 * PX, 9 * PX, 9 * PX);
   }
   // Dusk blue settles into the corners, away from the lamps.
   const dusk = g.createRadialGradient(X(0), Z(LINE_Z - 12), FIELD_HALF * 1.2 * PX, X(0), Z(LINE_Z - 12), FIELD_HALF * 2.6 * PX);
@@ -427,16 +454,73 @@ function floorTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-function buildFloor(scene: THREE.Scene) {
-  const tex = floorTexture();
+/** Where the wizard's candle flame stands (world xz), for the baked candle pool. */
+const CANDLE_X = -0.2;
+const CANDLE_Z = LINE_Z + 2.4;
+
+/**
+ * The floor: one quad, Lambert-lit with the stone canvas as colour and bump map. On 'high' it is lit live (the candle
+ * flickers on it). On 'low' (phones, where the floor is three quarters of the screen) its lighting is baked: `lights`
+ * are static and the floor is flat, so on its first frame the lit floor (bump included) is rendered once from straight
+ * above into a half-float texture, and from then on the floor draws unlit with that texture: the same pixels after
+ * tone mapping and fog, for a fraction of the per-pixel work. Without half-float render targets it stays lit live.
+ */
+function buildFloor(scene: THREE.Scene, quality: 'high' | 'low', lights: THREE.Light[]) {
+  const high = quality === 'high';
+  const tex = floorTexture(FLOOR_PX[quality], !high);
+  if (!high) tex.anisotropy = 4;
   const geo = new THREE.PlaneGeometry(FLOOR_HALF * 2, FLOOR_NEAR - FLOOR_FAR);
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, 0, (FLOOR_NEAR + FLOOR_FAR) / 2);
   const mat = new THREE.MeshLambertMaterial({ map: tex, bumpMap: tex, bumpScale: 0.7 });
   const floor = new THREE.Mesh(geo, mat);
   floor.name = 'floor';
-  floor.renderOrder = -1;
+  // Drawn after the other opaque things (default order 0): the walls, props, creatures and defenders standing on it
+  // fill the depth buffer first, so the floor shades only the pixels that stay visible (measured 4-10% of the frame).
+  floor.renderOrder = 1;
   scene.add(floor);
+  if (!high) bakeFloorOnFirstFrame(floor, lights, tex.image.width, tex.image.height);
+}
+
+function bakeFloorOnFirstFrame(floor: THREE.Mesh, lights: THREE.Light[], w: number, h: number) {
+  let baked: THREE.MeshBasicMaterial | null = null;
+  floor.onBeforeRender = (renderer) => {
+    floor.onBeforeRender = () => {};
+    const ext = renderer.extensions;
+    if (!ext.has('EXT_color_buffer_half_float') && !ext.has('EXT_color_buffer_float')) return;
+    const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, depthBuffer: false });
+    rt.texture.anisotropy = 4;
+    const bake = new THREE.Scene();
+    const copy = new THREE.Mesh(floor.geometry, floor.material);
+    bake.add(copy);
+    for (const l of lights) {
+      const c = l.clone();
+      bake.add(c);
+      if (c instanceof THREE.DirectionalLight) bake.add(c.target);
+    }
+    // Straight down, screen up = far (-z): the render lands exactly on the plane's UVs.
+    const halfZ = (FLOOR_NEAR - FLOOR_FAR) / 2;
+    const cam = new THREE.OrthographicCamera(-FLOOR_HALF, FLOOR_HALF, halfZ, -halfZ, 1, 60);
+    cam.position.set(0, 30, (FLOOR_NEAR + FLOOR_FAR) / 2);
+    cam.up.set(0, 0, -1);
+    cam.lookAt(0, 0, cam.position.z);
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    renderer.render(bake, cam); // no tone mapping or fog into a render target: linear lit colour
+    renderer.setRenderTarget(prev);
+    baked = new THREE.MeshBasicMaterial({ map: rt.texture });
+    baked.addEventListener('dispose', () => rt.dispose());
+  };
+  // Swap after this frame's draw (it already uses the lit material), then free the canvas texture.
+  floor.onAfterRender = () => {
+    if (!baked) return;
+    const old = floor.material as THREE.MeshLambertMaterial;
+    floor.material = baked;
+    baked = null;
+    old.map?.dispose();
+    old.dispose();
+    floor.onAfterRender = () => {};
+  };
 }
 
 /** Cracks in the stones by the defence line, revealed one by one as health drops (one draw call, via drawRange). */
@@ -478,7 +562,7 @@ function buildCracks(scene: THREE.Scene) {
 // ---- defenders ----------------------------------------------------------------------------------------------------
 
 /** The little wizard, seen mostly from behind: pointy green hat, cream scarf, dark green robe, a candle in his hand. */
-function makeWizard() {
+function makeWizard(candleLight: boolean) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -561,9 +645,12 @@ function makeWizard() {
   const halo = glow(0xff9d3a, 2.2);
   halo.position.copy(flame.position);
   arm.add(halo);
-  const light = new THREE.PointLight(0xffa850, 5, 8, 1.6);
-  light.position.set(1.0, 2.6, 0.2);
-  arm.add(light);
+  // The candle's own light on 'high'; 'low' bakes it into the floor (one point light less in every lit shader).
+  const light = candleLight ? new THREE.PointLight(0xffa850, 5, 8, 1.6) : null;
+  if (light) {
+    light.position.set(1.0, 2.6, 0.2);
+    arm.add(light);
+  }
 
   let castT = 0;
   let oopsT = 0;
@@ -594,7 +681,7 @@ function makeWizard() {
       const flick = base * (1 + Math.sin(t * 17) * 0.06 + Math.sin(t * 7.3) * 0.08) + castT * 2.5;
       flame.scale.set(0.8 + flick * 0.2, flick, 0.8 + flick * 0.2);
       halo.scale.setScalar(1.5 + flick * 0.8);
-      light.intensity = 4 * flick;
+      if (light) light.intensity = 4 * flick;
     },
   };
 }
@@ -630,7 +717,7 @@ function makeRobot() {
   face.rotation.x = -0.5;
   body.add(face);
   // Eyes, mouth and blush baked into three unlit meshes (like `cuteEye`, without its six draw calls).
-  const fb = new Baker(flat);
+  const fb = new Baker(false);
   const er = 0.11;
   for (const s of [-1, 1]) {
     const ex = s * 0.24;
@@ -717,8 +804,11 @@ export function buildWorld(scene: THREE.Scene): World {
   scene.background = new THREE.Color(0x150f0a);
   scene.fog = new THREE.Fog(0x1c140d, 75, 190);
 
-  // Dusk lamplight: a warm hemisphere, one warm key light from the upper left, the wizard's candle (a point light).
-  scene.add(new THREE.HemisphereLight(0xd2d8e4, 0x2a2c44, 0.9));
+  // Dusk lamplight: a warm hemisphere, one warm key light from the upper left, the hall's lamp pool, and on 'high' the
+  // wizard's candle (a point light; baked into the floor on 'low'). Four lights at most: each one is a loop iteration
+  // in every lit fragment.
+  const hemi = new THREE.HemisphereLight(0xd2d8e4, 0x2a2c44, 0.9);
+  scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffcc8c, 1.6);
   key.position.set(-14, 26, 12);
   key.target.position.set(0, 0, LINE_Z - 12);
@@ -728,11 +818,12 @@ export function buildWorld(scene: THREE.Scene): World {
   pool.position.set(0, 9, LINE_Z - 9);
   scene.add(pool);
 
-  buildFloor(scene);
+  const quality = detectQuality();
+  buildFloor(scene, quality, [hemi, key, pool]);
   const cracks = buildCracks(scene);
   const library = buildLibrary(scene, { length: FIELD_LENGTH, width: FIELD_HALF * 2, lineZ: LINE_Z });
 
-  const wizard = makeWizard();
+  const wizard = makeWizard(quality === 'high');
   // Faces -z, towards the creatures: we see his back, like the player standing behind him.
   wizard.root.position.set(-1.6, 0, LINE_Z + 2.0);
   wizard.root.name = 'wizard';

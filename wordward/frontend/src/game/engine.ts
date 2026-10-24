@@ -6,11 +6,22 @@
 // mapping for the dusk library. Glow comes from additive sprites
 // (toon.ts `glowSprite`/`glowBatch`), not a bloom pass. `stats` exposes frame cost and draw calls for the
 // compare/perf tools (dev builds also publish `window.__engine`).
+//
+// Quality tier: `detectQuality()` guesses 'high' or 'low' once per page from the device (phones, tablets, few CPU
+// cores or little memory → 'low'); `?quality=low|high` in the URL or localStorage `ww.quality` overrides it. Modules
+// that build heavy content read it at build time (world.ts: floor texture size, bump map, the candle's point light),
+// and can follow `engine.quality` / `engine.onQuality(cb)`: the engine drops a 'high' session to 'low' for good when
+// the governor has to go below pixel ratio 1 to keep up. Only switch cheap things on a change (visibility, counts),
+// never the light set or material defines: those recompile every shader, a long hitch on a phone.
 
 import * as THREE from 'three';
 
 /** Pixel ratios the governor steps through, best first. */
 const QUALITY_STEPS = [1.5, 1.25, 1, 0.85, 0.7];
+/** Highest pixel ratio a 'low' device starts at (the governor may still climb to QUALITY_STEPS[0]). */
+const LOW_START_RATIO = 1.25;
+/** A 'high' session turns 'low' once the governor has to go this low. */
+const LOW_BELOW_RATIO = 0.85;
 
 // ---- colour grade -------------------------------------------------------------------------------------------------
 // A warm "golden lamp light at dusk" grade folded into tone mapping (three's CustomToneMapping slot), so it costs a
@@ -40,6 +51,30 @@ if (THREE.ShaderChunk.tonemapping_pars_fragment.includes(CUSTOM_STUB)) {
   );
 } else console.warn('engine: three tone mapping chunk changed; warm grade skipped');
 
+// ---- quality tier -------------------------------------------------------------------------------------------------
+
+/** 'high': the full look. 'low': phones and weak machines; modules build cheaper content (see the header). */
+export type Quality = 'high' | 'low';
+
+let detected: Quality | null = null;
+/**
+ * The device's quality tier, decided once per page: an override (`?quality=low|high`, localStorage `ww.quality`),
+ * else 'low' on touch-first devices (phones, tablets) and on machines with ≤ 4 cores or ≤ 4 GB of memory.
+ */
+export function detectQuality(): Quality {
+  if (detected) return detected;
+  const pick = (v: string | null | undefined): Quality | null => (v === 'low' || v === 'high' ? v : null);
+  let forced: Quality | null = null;
+  try {
+    forced = pick(new URLSearchParams(location.search).get('quality')) ?? pick(localStorage.getItem('ww.quality'));
+  } catch {}
+  if (forced) return (detected = forced);
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  const touchFirst = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+  const weak = (nav.hardwareConcurrency || 8) <= 4 || (nav.deviceMemory ?? 8) <= 4;
+  return (detected = touchFirst || weak ? 'low' : 'high');
+}
+
 export interface EngineStats {
   /** Frames rendered so far. */
   frames: number;
@@ -49,11 +84,15 @@ export interface EngineStats {
   /** Smoothed versions of the above. */
   updateMs: number;
   renderMs: number;
+  /** Smoothed time between frames (rAF), ms. */
+  frameMs: number;
   /** Draw calls and triangles of the last frame (renderer.info). */
   calls: number;
   triangles: number;
   /** Current pixel ratio picked by the governor. */
   ratio: number;
+  /** Current quality tier. */
+  quality: Quality;
 }
 
 export class Engine {
@@ -62,29 +101,40 @@ export class Engine {
   readonly camera: THREE.PerspectiveCamera;
   /** Smoothed frames per second, for the HUD. */
   fps = 60;
-  readonly stats: EngineStats = { frames: 0, lastUpdateMs: 0, lastRenderMs: 0, updateMs: 0, renderMs: 0, calls: 0, triangles: 0, ratio: 1 };
+  readonly stats: EngineStats;
   private raf = 0;
   private last = 0;
   private onFrame?: (dt: number, now: number) => void;
   private readonly resize = () => this.fit();
   private readonly observer?: ResizeObserver;
-  private quality: number;
+  /** Index into QUALITY_STEPS. */
+  private level: number;
+  /** Lowest index (best ratio) the governor may climb back to; lowered after a failed climb. */
+  private ceiling: number;
   private slowFor = 0;
   private fastFor = 0;
+  /** Seconds since the last step up (a drop soon after one marks that ratio as too much). */
+  private sinceUp = Infinity;
+  private tier: Quality;
+  private readonly qualityListeners = new Set<(q: Quality) => void>();
 
   constructor(
     readonly container: HTMLElement,
     opts: { fov?: number; shadows?: boolean; near?: number; far?: number } = {},
   ) {
+    this.tier = detectQuality();
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    const maxRatio = Math.min(window.devicePixelRatio || 1, QUALITY_STEPS[0]);
-    this.quality = QUALITY_STEPS.findIndex((r) => r <= maxRatio + 1e-3);
-    if (this.quality < 0) this.quality = QUALITY_STEPS.length - 1;
-    this.renderer.setPixelRatio(QUALITY_STEPS[this.quality]);
+    const dpr = window.devicePixelRatio || 1;
+    const maxRatio = Math.min(dpr, QUALITY_STEPS[0]);
+    const startRatio = this.tier === 'low' ? Math.min(maxRatio, LOW_START_RATIO) : maxRatio;
+    this.level = QUALITY_STEPS.findIndex((r) => r <= startRatio + 1e-3);
+    if (this.level < 0) this.level = QUALITY_STEPS.length - 1;
+    this.ceiling = Math.max(0, QUALITY_STEPS.findIndex((r) => r <= maxRatio + 1e-3));
+    this.renderer.setPixelRatio(QUALITY_STEPS[this.level]);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.CustomToneMapping;
     this.renderer.toneMappingExposure = GRADE_EXPOSURE;
-    this.stats.ratio = QUALITY_STEPS[this.quality];
+    this.stats = { frames: 0, lastUpdateMs: 0, lastRenderMs: 0, updateMs: 0, renderMs: 0, frameMs: 16.7, calls: 0, triangles: 0, ratio: QUALITY_STEPS[this.level], quality: this.tier };
     if (opts.shadows ?? true) {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -99,6 +149,25 @@ export class Engine {
     if (import.meta.env.DEV) (window as unknown as { __engine?: Engine }).__engine = this;
   }
 
+  /** The current quality tier ('high' | 'low'); starts at `detectQuality()`. */
+  get quality(): Quality {
+    return this.tier;
+  }
+
+  /** Sets the tier (a settings toggle, or the governor) and tells the listeners. */
+  setQuality(q: Quality) {
+    if (q === this.tier) return;
+    this.tier = q;
+    this.stats.quality = q;
+    for (const cb of this.qualityListeners) cb(q);
+  }
+
+  /** Calls `cb` whenever the tier changes; returns the unsubscribe function. */
+  onQuality(cb: (q: Quality) => void): () => void {
+    this.qualityListeners.add(cb);
+    return () => this.qualityListeners.delete(cb);
+  }
+
   fit() {
     const w = this.container.clientWidth || window.innerWidth;
     const h = this.container.clientHeight || window.innerHeight;
@@ -109,31 +178,45 @@ export class Engine {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Steps render quality down after sustained slow frames, and back up after a long run of fast ones. */
+  private setLevel(level: number) {
+    this.level = level;
+    const ratio = QUALITY_STEPS[level];
+    this.renderer.setPixelRatio(ratio);
+    this.stats.ratio = ratio;
+    this.fit();
+    if (ratio <= LOW_BELOW_RATIO + 1e-3) this.setQuality('low');
+  }
+
+  /**
+   * Steps render resolution down after sustained slow frames (under ~45 fps for 2.5 s), and tries one step up after
+   * a long run of frames at the display's rate (works on 60 Hz screens too). A step up that has to be undone within
+   * 20 s lowers the ceiling, so the governor does not keep bouncing between two ratios.
+   */
   private govern(dt: number) {
     this.fps += (1 / Math.max(dt, 1e-3) - this.fps) * Math.min(1, dt * 2);
+    this.stats.frameMs += (dt * 1000 - this.stats.frameMs) * 0.05;
     if (document.hidden) return;
+    this.sinceUp += dt;
     if (dt > 1 / 45) {
       this.slowFor += dt;
       this.fastFor = 0;
     } else {
-      this.fastFor += dt;
       this.slowFor = Math.max(0, this.slowFor - dt * 0.5);
+      // "Fast" = keeping up with a 60 Hz display or better.
+      if (dt < 1 / 55) this.fastFor += dt;
+      else this.fastFor = 0;
     }
     if (this.slowFor > 2.5) {
       this.slowFor = 0;
-      if (this.quality < QUALITY_STEPS.length - 1) {
-        this.quality++;
-        this.renderer.setPixelRatio(QUALITY_STEPS[this.quality]);
-        this.stats.ratio = QUALITY_STEPS[this.quality];
-        this.fit();
-      }
-    } else if (this.fastFor > 12 && dt < 1 / 70 && this.quality > 0 && QUALITY_STEPS[this.quality - 1] <= (window.devicePixelRatio || 1) + 1e-3) {
       this.fastFor = 0;
-      this.quality--;
-      this.renderer.setPixelRatio(QUALITY_STEPS[this.quality]);
-      this.stats.ratio = QUALITY_STEPS[this.quality];
-      this.fit();
+      if (this.level < QUALITY_STEPS.length - 1) {
+        if (this.sinceUp < 20) this.ceiling = Math.min(QUALITY_STEPS.length - 1, this.level + 1);
+        this.setLevel(this.level + 1);
+      }
+    } else if (this.fastFor > 15 && this.level > this.ceiling) {
+      this.fastFor = 0;
+      this.sinceUp = 0;
+      this.setLevel(this.level - 1);
     }
   }
 
@@ -180,6 +263,7 @@ export class Engine {
 
   dispose() {
     this.stop();
+    this.qualityListeners.clear();
     this.observer?.disconnect();
     const w = window as unknown as { __engine?: Engine };
     if (w.__engine === this) delete w.__engine;

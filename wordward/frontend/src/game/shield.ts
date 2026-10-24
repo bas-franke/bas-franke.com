@@ -141,16 +141,9 @@ function materials() {
           vec2 q = vec2(max(abs(vP.x) - L, 0.0), vP.y);
           float d = length(q) / R;
           float aa = fwidth(d);
-          // Arc length along the stadium outline, clockwise from the front-left corner, for the glyph band.
-          float s;
-          if (abs(vP.x) <= L) s = vP.y > 0.0 ? vP.x + L : 3.0 * L + PI * R - vP.x;
-          else if (vP.x > 0.0) s = 2.0 * L + (0.5 * PI - atan(vP.y, vP.x - L)) * R;
-          else {
-            float a = atan(vP.y, vP.x + L);
-            if (a < 0.0) a += 2.0 * PI;
-            s = 4.0 * L + PI * R + (1.5 * PI - a) * R;
-          }
-          float u = s / (4.0 * L + 2.0 * PI * R) * look.z + time * 0.012;
+          // Outside everything that can light up (the outer glow, or the hit ripple while it runs): skip the rest. Half
+          // the quad's pixels end here, before any atan or texture fetch. (After fwidth, which needs every pixel.)
+          if (d > (flash > 0.01 ? max(1.2, 1.5 - flash * 0.4) : 1.2)) discard;
           float breathe = 0.85 + 0.15 * sin(time * 1.7 + look.y);
           float lit = breathe * (1.0 + flash * 1.1);
           // Two fine rules with the glyphs between them, a soft glow hugging the outer rule, a whisper of fill.
@@ -158,7 +151,19 @@ function materials() {
           // A small circle on screen (a phone) cannot show the glyphs: dim them so they do not smear into a bright band.
           float detail = smoothstep(0.05, 0.016, aa);
           float band = (d - 0.815) / 0.16;
-          if (band > 0.0 && band < 1.0) a += texture2D(runes, vec2(u, band)).r * mix(0.13, 0.26, detail);
+          if (band > 0.0 && band < 1.0) {
+            // Arc length along the stadium outline, clockwise from the front-left corner, for the glyph band.
+            float s;
+            if (abs(vP.x) <= L) s = vP.y > 0.0 ? vP.x + L : 3.0 * L + PI * R - vP.x;
+            else if (vP.x > 0.0) s = 2.0 * L + (0.5 * PI - atan(vP.y, vP.x - L)) * R;
+            else {
+              float ang = atan(vP.y, vP.x + L);
+              if (ang < 0.0) ang += 2.0 * PI;
+              s = 4.0 * L + PI * R + (1.5 * PI - ang) * R;
+            }
+            float u = s / (4.0 * L + 2.0 * PI * R) * look.z + time * 0.012;
+            a += texture2D(runes, vec2(u, band)).r * mix(0.13, 0.26, detail);
+          }
           a += exp(-pow((d - 1.0) / 0.08, 2.0)) * 0.05 + smoothstep(1.0, 0.2, d) * 0.018;
           a *= lit;
           // Hit: a ripple racing outwards from the circle.

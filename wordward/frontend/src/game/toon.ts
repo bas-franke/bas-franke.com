@@ -110,6 +110,9 @@ export const vertexColorMaterial = (rim = false) =>
 /** Unlit flat colour: lenses, details that should not shade. */
 export const flat = (color: number) => cached(`f${color}`, () => new THREE.MeshBasicMaterial({ color }));
 
+/** Unlit, coloured per vertex (`color` attribute, linear RGB): many `flat()` details merged into one draw call. */
+export const flatVertexColorMaterial = () => cached('fv', () => new THREE.MeshBasicMaterial({ vertexColors: true }));
+
 /**
  * A glowing surface: unlit, `intensity` times brighter than `color` before tone mapping, so lamp glass, candle
  * flames and runes read as light sources. Pair with a `glowSprite`/`glowBatch` halo for the bloom.
