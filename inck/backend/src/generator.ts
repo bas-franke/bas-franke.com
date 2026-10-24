@@ -19,6 +19,7 @@ import {
 import { imagesDir } from './config.js';
 import { one, query } from './db.js';
 import { collectSignals, formatSignals } from './signals.js';
+import { tidyBody } from './text.js';
 import { createTopic, ensurePlan, extendPlan, nextPlanItem, pickHotTopic, pickTopic, resolveSection, uniqueSlug, type NextItem } from './topics.js';
 import type { Run, Settings, Story, StoryImage, StoryKind, Topic } from './types.js';
 
@@ -97,21 +98,6 @@ async function renderImages(
     onProgress(i + 1, wanted.length);
   }
   return { images, tokens };
-}
-
-/**
- * Cleans up habits the writer has despite instructions: headings become plain paragraphs, links lose their URL,
- * bare URLs and inline citation numbers are dropped, and horizontal rules vanish.
- */
-export function tidyBody(body: string) {
-  return body
-    .replace(/^#{1,6}\s*(.+)$/gm, '**$1**')
-    .replace(/\[([^\]\n]+)\]\((?:https?:\/\/)[^)\s]+\)/g, '$1')
-    .replace(/(^|[\s(])<?https?:\/\/[^\s<>)]+>?/g, '$1')
-    .replace(/\s?\[\d{1,2}\](?!\()/g, '')
-    .replace(/^\s*(-{3,}|\*{3,}|_{3,})\s*$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 export type GenerateMode = 'auto' | StoryKind;

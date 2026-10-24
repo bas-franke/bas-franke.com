@@ -1,8 +1,12 @@
+import type pg from 'pg';
+import { cleanLine, stripCitations, tidyBody } from './text.js';
+import type { TopicPlan } from './types.js';
+
 /**
  * Schema migrations, applied in order at startup (see db.ts). Never edit an applied
- * migration; add a new one.
+ * migration; add a new one. A migration runs its `sql`, then its `run` function (data fixes), in one transaction.
  */
-export const migrations: { name: string; sql: string }[] = [
+export const migrations: { name: string; sql?: string; run?: (client: pg.PoolClient) => Promise<void> }[] = [
   {
     name: '001_init',
     sql: `
@@ -290,5 +294,46 @@ export const migrations: { name: string; sql: string }[] = [
       ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_kind_check;
       ALTER TABLE runs ADD CONSTRAINT runs_kind_check CHECK (kind IN ('planned','trending','plan','radar'));
     `,
+  },
+  {
+    // Web search left inline citations ("([site.com](https://…))") in intros, reasons and stories written before the
+    // text was cleaned at generation time. Strip them from what is already stored.
+    name: '009_strip_citations',
+    run: async (client) => {
+      const { rows: topics } = await client.query<{ id: number; description: string; heat_reason: string; plan: TopicPlan | null }>(
+        'SELECT id, description, heat_reason, plan FROM topics',
+      );
+      for (const t of topics) {
+        const plan = t.plan && {
+          intro: stripCitations(t.plan.intro ?? ''),
+          sections: (t.plan.sections ?? []).map((s) => ({
+            ...s,
+            name: cleanLine(s.name, 40),
+            blurb: cleanLine(s.blurb),
+            items: (s.items ?? []).map((i) => ({ title: cleanLine(i.title, 90), brief: cleanLine(i.brief) })),
+          })),
+        };
+        await client.query('UPDATE topics SET description = $2, heat_reason = $3, plan = $4 WHERE id = $1', [
+          t.id,
+          cleanLine(t.description),
+          cleanLine(t.heat_reason),
+          plan ? JSON.stringify(plan) : null,
+        ]);
+      }
+      const { rows: stories } = await client.query<{ id: number; title: string; hook: string; takeaway: string; body_md: string; section_name: string; plan_item: string | null }>(
+        'SELECT id, title, hook, takeaway, body_md, section_name, plan_item FROM stories',
+      );
+      for (const s of stories) {
+        await client.query('UPDATE stories SET title = $2, hook = $3, takeaway = $4, body_md = $5, section_name = $6, plan_item = $7 WHERE id = $1', [
+          s.id,
+          cleanLine(s.title, 90) || s.title,
+          cleanLine(s.hook, 200),
+          cleanLine(s.takeaway, 300),
+          tidyBody(s.body_md) || s.body_md,
+          cleanLine(s.section_name, 40),
+          s.plan_item === null ? null : cleanLine(s.plan_item, 90),
+        ]);
+      }
+    },
   },
 ];

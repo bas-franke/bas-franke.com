@@ -2143,3 +2143,52 @@ fieldset.panel {
   color: var(--accent);
   font-size: 0.72rem;
 }
+
+/* ---------- Fixes: long words never escape their box, open sources drop below the meta row ---------- */
+.prose,
+.story-title,
+.story-hook,
+.story-why,
+.story-takeaway,
+.deeper-link,
+.rail-hot,
+.rail-link,
+.hub-intro,
+.hot-banner,
+.tcard-intro,
+.tcard-latest,
+.tcard-title,
+.story-row,
+.hub-section-head p,
+.coming li,
+.trend-list li,
+.nav-trend {
+  overflow-wrap: anywhere;
+}
+
+.story-meta .sources {
+  min-width: 0;
+}
+
+.story-meta details[open].sources {
+  flex-basis: 100%;
+  order: 10;
+}
+
+/* The strip scrolls sideways; fade the edge so it reads as "more to the right". */
+.trend-strip {
+  mask-image: linear-gradient(to right, black calc(100% - 40px), transparent);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 40px), transparent);
+  padding-right: 40px;
+}
+
+/* With the trending strip on screen, the "newer stories" pill sits below it instead of on top of it. */
+.feed-has-strip .before-pill {
+  top: 100px;
+}
+
+@media (min-width: 1100px) {
+  .feed-has-strip .before-pill {
+    top: 14px;
+  }
+}

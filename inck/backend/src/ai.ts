@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { config } from './config.js';
+import { cleanLine, stripCitations } from './text.js';
 import type { Category, PlanSection, Settings, Source, Topic, TopicKind, TopicPlan } from './types.js';
 
 let client: OpenAI | undefined;
@@ -73,7 +74,11 @@ const PLAN_SCHEMA: Schema = {
   additionalProperties: false,
   required: ['intro', 'sections'],
   properties: {
-    intro: { type: 'string', description: 'Two or three plain sentences: what this topic is and why someone would want to understand it.' },
+    intro: {
+      type: 'string',
+      description:
+        'Two or three plain sentences written for readers: what this topic is and why it matters to them. Never describe the curriculum, sections, a learning path or this site.',
+    },
     sections: {
       type: 'array',
       items: {
@@ -122,7 +127,7 @@ export async function planTopic(settings: Settings, topic: Topic): Promise<{ pla
     webSearch: settings.web_search_enabled && topic.kind === 'event',
   });
   if (!data.sections?.length) throw new Error('The planner returned no sections.');
-  return { plan: { intro: data.intro, sections: data.sections.map(cleanSection) }, usage };
+  return { plan: { intro: stripCitations(data.intro ?? ''), sections: data.sections.map(cleanSection) }, usage };
 }
 
 /** Adds new sections/items to an exhausted plan; the model sees what exists and what was written. */
@@ -151,14 +156,14 @@ export async function extendTopicPlan(settings: Settings, topic: Topic, plan: To
       sections.splice(live === -1 ? sections.length : live, 0, { ...incoming, items: fresh });
     }
   }
-  return { plan: { intro: plan.intro || data.intro, sections }, usage };
+  return { plan: { intro: plan.intro || stripCitations(data.intro ?? ''), sections }, usage };
 }
 
 function cleanSection(s: PlanSection): PlanSection {
   return {
-    name: s.name.trim().slice(0, 40),
-    blurb: s.blurb.trim(),
-    items: (s.items ?? []).filter((i) => i.title?.trim()).map((i) => ({ title: i.title.trim().slice(0, 90), brief: i.brief?.trim() ?? '' })),
+    name: cleanLine(s.name, 40),
+    blurb: cleanLine(s.blurb),
+    items: (s.items ?? []).filter((i) => i.title?.trim()).map((i) => ({ title: cleanLine(i.title, 90), brief: cleanLine(i.brief) })),
   };
 }
 
@@ -225,7 +230,15 @@ export async function scanTrends(opts: {
     `LIVE SIGNALS\n\n${opts.signals}\n\n` +
     `EXISTING TOPICS (slug: name)\n${opts.topics.map((t) => `- ${t.slug}: ${t.name} (${t.kind}, ${t.category}${t.heat ? `, currently hot ${t.heat}/5` : ''})`).join('\n')}`;
   const { data, usage } = await structured<{ trends: Trend[] }>({ settings, name: 'radar', schema: RADAR_SCHEMA, instructions, input, webSearch: settings.web_search_enabled });
-  const trends = (data.trends ?? []).filter((t) => t.name?.trim()).map((t) => ({ ...t, name: t.name.trim().slice(0, 60), heat: Math.min(5, Math.max(1, Math.round(Number(t.heat) || 1))) }));
+  const trends = (data.trends ?? [])
+    .filter((t) => t.name?.trim())
+    .map((t) => ({
+      ...t,
+      name: cleanLine(t.name, 60),
+      why_now: cleanLine(t.why_now),
+      description: cleanLine(t.description),
+      heat: Math.min(5, Math.max(1, Math.round(Number(t.heat) || 1))),
+    }));
   if (!trends.length) throw new Error('The radar found no trends.');
   return { trends, usage };
 }
@@ -326,7 +339,14 @@ export async function scoutTrends(opts: {
 
   const { data, usage } = await structured<{ pick: TrendPick }>({ settings, name: 'scout', schema: SCOUT_SCHEMA, instructions, input, webSearch: settings.web_search_enabled });
   if (!data.pick?.subject) throw new Error('The scout picked no subject.');
-  return { pick: data.pick, usage };
+  const pick: TrendPick = {
+    ...data.pick,
+    subject: cleanLine(data.pick.subject, 200),
+    angle: cleanLine(data.pick.angle, 400),
+    why_now: cleanLine(data.pick.why_now),
+    new_topic: data.pick.new_topic && { ...data.pick.new_topic, name: cleanLine(data.pick.new_topic.name, 60), description: cleanLine(data.pick.new_topic.description) },
+  };
+  return { pick, usage };
 }
 
 /* ------------------------------------------------------------------ writing */
@@ -456,7 +476,16 @@ export async function writeStory(opts: {
   const webSearch = settings.web_search_enabled && (Boolean(opts.trend) || topic.kind === 'event');
   const { data, usage, model } = await structured<StoryDraft>({ settings, name: 'story', schema: STORY_SCHEMA, instructions, input, webSearch, effort: 'medium' });
   if (!data.title || !data.body_markdown) throw new Error('The model returned an incomplete story.');
-  return { draft: data, usage, model };
+  const draft: StoryDraft = {
+    ...data,
+    title: cleanLine(data.title, 90) || data.title,
+    hook: cleanLine(data.hook, 200),
+    takeaway: cleanLine(data.takeaway, 300),
+    section: cleanLine(data.section, 40),
+    tags: (data.tags ?? []).map((t) => cleanLine(t, 40)),
+    images: (data.images ?? []).map((i) => ({ ...i, alt: cleanLine(i.alt, 200), caption: cleanLine(i.caption, 200) })),
+  };
+  return { draft, usage, model };
 }
 
 /* ------------------------------------------------------------------ pictures */

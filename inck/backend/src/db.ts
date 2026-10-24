@@ -36,7 +36,8 @@ export async function migrate() {
       console.log(`applying migration ${m.name}`);
       await client.query('BEGIN');
       try {
-        await client.query(m.sql);
+        if (m.sql) await client.query(m.sql);
+        if (m.run) await m.run(client);
         await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [m.name]);
         await client.query('COMMIT');
       } catch (err) {

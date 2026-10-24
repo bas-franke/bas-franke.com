@@ -29,10 +29,13 @@ const STORY_COLUMNS = `s.id, s.slug, s.title, s.hook, s.body_md, s.takeaway, s.k
 
 const COMPACT_COLUMNS = `r.slug, r.title, r.hook, r.read_seconds, r.kind, r.difficulty, rt.slug AS topic_slug, rt.name AS topic_name`;
 
-/** Up to two neighbours on the topic's path plus up to two stories elsewhere that share tags: the "go deeper" links. */
+/**
+ * The "go deeper" links: up to two neighbours on the topic's path, up to two stories elsewhere that share tags,
+ * and, while the site is small, the latest stories of the hottest other topics so the row is never empty.
+ */
 async function related(s: FeedRow) {
   const position = s.section_index * 10000 + Math.min(s.plan_index, 9999);
-  const { rows } = await query(
+  const { rows } = await query<{ slug: string; same_topic: boolean }>(
     `(SELECT ${COMPACT_COLUMNS}, true AS same_topic FROM stories r JOIN topics rt ON rt.id = r.topic_id
       WHERE r.status = 'published' AND r.id <> $1 AND r.topic_id = $2
       ORDER BY abs((r.section_index * 10000 + least(r.plan_index, 9999)) - $3) ASC, r.published_at DESC LIMIT 2)
@@ -42,7 +45,18 @@ async function related(s: FeedRow) {
       ORDER BY cardinality(ARRAY(SELECT unnest(r.tags) INTERSECT SELECT unnest($4::text[]))) DESC, r.published_at DESC LIMIT 2)`,
     [s.id, s.topic_id, position, s.tags],
   );
-  return rows;
+  if (rows.length >= 3) return rows;
+  const { rows: more } = await query(
+    `SELECT DISTINCT ON (rt.id) ${COMPACT_COLUMNS}, false AS same_topic FROM stories r JOIN topics rt ON rt.id = r.topic_id
+     WHERE r.status = 'published' AND r.id <> $1 AND r.topic_id <> $2 AND NOT (r.slug = ANY($3::text[]))
+     ORDER BY rt.id, r.published_at DESC`,
+    [s.id, s.topic_id, rows.map((r) => r.slug)],
+  );
+  // One per topic, hottest topics first, then newest.
+  const { rows: heat } = await query<{ slug: string; heat: number }>('SELECT slug, heat FROM topics');
+  const heatOf = new Map(heat.map((h) => [h.slug, h.heat]));
+  more.sort((a, b) => (heatOf.get(b.topic_slug) ?? 0) - (heatOf.get(a.topic_slug) ?? 0));
+  return [...rows, ...more.slice(0, 4 - rows.length)];
 }
 
 async function present(rows: FeedRow[]) {
@@ -117,13 +131,14 @@ publicRouter.get('/feed', async (req, res) => {
   if (topic) params.push(topic.id), where.push(`s.topic_id = $${params.length}`);
   const op = after ? (topic ? '>' : '<') : topic ? '>=' : '<=';
   if (anchor) {
-    if (topic) {
-      params.push(anchor.section_index, anchor.plan_index, anchor.published_at, anchor.id);
-      where.push(`(s.section_index, s.plan_index, s.published_at, s.id) ${op} ($${params.length - 3}, $${params.length - 2}, $${params.length - 1}, $${params.length})`);
-    } else {
-      params.push(anchor.published_at, anchor.id);
-      where.push(`(s.published_at, s.id) ${op} ($${params.length - 1}, $${params.length})`);
-    }
+    // Compare against the stored row rather than a JavaScript Date: timestamps keep microseconds in Postgres and
+    // only milliseconds in JS, so a round-tripped value would skip the anchor itself.
+    params.push(anchor.id);
+    where.push(
+      topic
+        ? `(s.section_index, s.plan_index, s.published_at, s.id) ${op} (SELECT a.section_index, a.plan_index, a.published_at, a.id FROM stories a WHERE a.id = $${params.length})`
+        : `(s.published_at, s.id) ${op} (SELECT a.published_at, a.id FROM stories a WHERE a.id = $${params.length})`,
+    );
   }
   params.push(limit + 1);
   const { rows } = await query<FeedRow>(
@@ -139,10 +154,11 @@ publicRouter.get('/feed', async (req, res) => {
     const first = page[0];
     const before = topic
       ? await one(
-          `SELECT 1 FROM stories WHERE status = 'published' AND topic_id = $1 AND (section_index, plan_index, published_at, id) < ($2, $3, $4, $5) LIMIT 1`,
-          [topic.id, first.section_index, first.plan_index, first.published_at, first.id],
+          `SELECT 1 FROM stories WHERE status = 'published' AND topic_id = $1
+             AND (section_index, plan_index, published_at, id) < (SELECT a.section_index, a.plan_index, a.published_at, a.id FROM stories a WHERE a.id = $2) LIMIT 1`,
+          [topic.id, first.id],
         )
-      : await one(`SELECT 1 FROM stories WHERE status = 'published' AND (published_at, id) > ($1, $2) LIMIT 1`, [first.published_at, first.id]);
+      : await one(`SELECT 1 FROM stories WHERE status = 'published' AND (published_at, id) > (SELECT a.published_at, a.id FROM stories a WHERE a.id = $1) LIMIT 1`, [first.id]);
     hasBefore = Boolean(before);
   }
 
