@@ -114,9 +114,9 @@ function runeTexture(): THREE.CanvasTexture {
  * Ring strength (1 = the old full-bright circle) for shields that are not the current target and for the target; a
  * sentence stadium's (calm, target); the sparks' (calm, target). GLSL float literals.
  */
-const CALM = '0.2';
+const CALM = '0.06';
 const FOCUS = '0.55';
-const WIDE = ['0.2', '0.28'];
+const WIDE = ['0.1', '0.28'];
 const SPARK = ['0.45', '0.65'];
 
 /** How far the floor quad reaches beyond the circle, in shield radii (room for the hit ripple). */

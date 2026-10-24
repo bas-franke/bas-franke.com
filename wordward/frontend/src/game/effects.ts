@@ -256,7 +256,7 @@ function buildAtlas() {
     g.fillStyle = wet;
     g.fillRect(-h, -h, h * 2, h * 2);
   });
-  // Golden letters: a thin regular-weight serif letter (opaque: pale gold-white body over a hairline amber outline)
+  // Golden letters: a thin regular-weight serif letter (opaque: bright amber-gold body over a dark brown outline)
   // inside a soft warm halo. The glow batch draws alpha > ~0.5 as solid and the halo as added light. The halo is
   // drawn on a scratch canvas and its alpha capped under the solid threshold, so a brighter halo never turns into an
   // opaque blob around the letter.
@@ -274,9 +274,9 @@ function buildAtlas() {
     hg.textBaseline = 'middle';
     hg.font = font;
     hg.shadowColor = 'rgba(255,140,25,0.9)';
-    hg.fillStyle = 'rgba(255,170,50,0.5)';
+    hg.fillStyle = 'rgba(255,170,50,0.3)';
     // A tight bright edge glow plus a wider soft one, so the letter shape still reads through its halo.
-    hg.shadowBlur = 14;
+    hg.shadowBlur = 22;
     hg.fillText(ch, 0, y);
     hg.shadowBlur = 5;
     hg.fillText(ch, 0, y);
@@ -284,7 +284,7 @@ function buildAtlas() {
     hg.restore();
     const img = hg.getImageData(0, 0, CELL, CELL);
     const d = img.data;
-    for (let k = 3; k < d.length; k += 4) if (d[k] > 100) d[k] = 100; // ≤ 0.39: stays light, never solid
+    for (let k = 3; k < d.length; k += 4) if (d[k] > 55) d[k] = 55; // ≤ 0.22: a soft glow, never solid
     hg.putImageData(img, 0, 0);
     inCell(g, C_LETTER + i, (g) => {
       g.drawImage(halo, -CELL / 2, -CELL / 2);
@@ -292,13 +292,12 @@ function buildAtlas() {
       g.textBaseline = 'middle';
       g.font = font;
       g.lineJoin = 'round';
-      g.lineWidth = 1;
-      g.strokeStyle = '#c86e10';
+      g.lineWidth = 1.5;
+      g.strokeStyle = '#7a3a00';
       g.strokeText(ch, 0, y);
       const fill = g.createLinearGradient(0, -h * 0.5, 0, h * 0.5);
-      fill.addColorStop(0, '#fff6d8');
-      fill.addColorStop(0.5, '#ffe9a8');
-      fill.addColorStop(1, '#ffc657');
+      fill.addColorStop(0, '#ffe08a');
+      fill.addColorStop(1, '#ff9e2c');
       g.fillStyle = fill;
       g.fillText(ch, 0, y);
     });
