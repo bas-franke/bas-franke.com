@@ -14,7 +14,6 @@ import { makeBalaurBody, makeBubble, makeModel, tickBubbles, type Bubble, type K
 import { buildWorld, IMPACT_Y, type World } from './world';
 import { sfx } from './audio';
 import { flush as flushProgress, isMastered, record } from './progress';
-import { recordStars, type Level } from './levels';
 import {
   ENTRIES,
   glyphs,
@@ -43,14 +42,51 @@ export interface Settings {
   lenient: boolean;
   /** Type the word you read first, to pop the creature's bubble shield. */
   shields: boolean;
-  /** Adventure mode: the level overrides topics, mode and length, and the round can be won. */
-  level?: Level;
+  /** Adventure mode: the mission run overrides topics, mode and length, and the round can be won. */
+  run?: RunConfig;
+}
+
+/** One adventure mission in one variant, as the game plays it (built by `runFor` in campaign.ts). */
+export interface RunConfig {
+  missionId: string;
+  variant: string;
+  /** Position on the path. */
+  n: number;
+  emoji: string;
+  ro: string;
+  en: string;
+  /** Shown under the title on the first wave, e.g. "🧠 Din memorie · From memory". */
+  label?: string;
+  /** Empty: every topic. */
+  categories: string[];
+  mix: Mix;
+  waves: number;
+  /** Fall speed multiplier. */
+  speed: number;
+  /** Only sentences of at most this many words. */
+  maxWords?: number;
+  /** Heads on the boss; 0 = no boss. Normally on the last wave only. */
+  boss: number;
+  bossEveryWave?: boolean;
+  /** Castle health (default 10). */
+  hp?: number;
+  /** The translation is hidden until typed. */
+  memory?: boolean;
+  /** Typos allowed before the mission fails. */
+  maxErrors?: number;
+  /** Play exactly these entries (review missions). */
+  entries?: string[];
+  /** Play in this direction instead of the player's (reversed variant). */
+  direction?: Direction;
 }
 
 export interface WordView {
   glyphs: Glyph[];
   pos: number;
   hint?: string;
+  /** From-memory mode: letters after `pos` are hidden, except up to `peek` (revealed after two misses). */
+  hidden?: boolean;
+  peek?: number;
 }
 
 export interface LineView {
@@ -76,10 +112,12 @@ export interface Missed {
 
 export interface GameState {
   phase: 'idle' | 'playing' | 'paused' | 'over' | 'won';
-  /** The adventure level being played, or null in free play. */
-  level: Level | null;
-  /** Stars earned when a level is won (1–3). */
+  /** The adventure mission being played, or null in free play. */
+  run: RunConfig | null;
+  /** Stars earned when a mission is won (1–3). */
   stars: number;
+  /** Why a mission ended early (too many typos), for the game-over screen. */
+  failReason: string | null;
   hp: number;
   maxHp: number;
   score: number;
@@ -123,6 +161,10 @@ interface WordPart {
   mistakes: number;
   slot: Slot;
   done: boolean;
+  /** From-memory mode: hidden until typed; `peek` is the last letter shown as a hint, `missAt` misses on this letter. */
+  hidden: boolean;
+  peek: number;
+  missAt: number;
 }
 
 interface Enemy {
@@ -217,8 +259,9 @@ export class Game {
 
   state: GameState = {
     phase: 'idle',
-    level: null,
+    run: null,
     stars: 0,
+    failReason: null,
     hp: MAX_HP,
     maxHp: MAX_HP,
     score: 0,
@@ -266,16 +309,25 @@ export class Game {
   // ---- rounds --------------------------------------------------------------------------------------------------
 
   start(input: Settings) {
-    const { level } = input;
-    // A level picks the topics, the mode and the waves; difficulty, direction and toggles stay the player's.
-    const settings: Settings = level
-      ? { ...input, categories: level.categories.length ? level.categories : ENTRIES.map((e) => e.category), mix: level.mix }
+    const { run } = input;
+    // A mission picks the topics, the mode and the waves (and maybe the direction); difficulty and toggles stay the
+    // player's.
+    const settings: Settings = run
+      ? {
+          ...input,
+          direction: run.direction ?? input.direction,
+          categories: run.categories.length ? run.categories : [...new Set(ENTRIES.map((e) => e.category))],
+          mix: run.mix,
+        }
       : input;
     this.settings = settings;
     this.clearEnemies();
     this.effects.clear();
     const words = (e: Entry) => stripHints(e[targetLang(settings.direction)]).split(' ').length;
-    const pool = ENTRIES.filter((e) => settings.categories.includes(e.category) && (!level?.maxWords || !e.sentence || words(e) <= level.maxWords));
+    const only = run?.entries?.length ? new Set(run.entries) : null;
+    const pool = ENTRIES.filter(
+      (e) => (only ? only.has(e.id) : settings.categories.includes(e.category)) && (!run?.maxWords || !e.sentence || words(e) <= run.maxWords),
+    );
     // Draws come from the end of a deck, so words not yet mastered go last and are served first.
     const order = (list: Entry[]) => {
       const mastered = list.filter((e) => isMastered(e.id, settings.direction));
@@ -294,9 +346,11 @@ export class Game {
     this.state = {
       ...this.state,
       phase: 'playing',
-      level: level ?? null,
+      run: run ?? null,
       stars: 0,
-      hp: MAX_HP,
+      failReason: null,
+      hp: run?.hp ?? MAX_HP,
+      maxHp: run?.hp ?? MAX_HP,
       score: 0,
       wave: 0,
       combo: 0,
@@ -328,20 +382,20 @@ export class Game {
   private nextWave() {
     const wave = this.state.wave + 1;
     if (wave > 1) flushProgress();
-    const level = this.settings.level;
-    if (level && wave > level.waves) {
+    const run = this.settings.run;
+    if (run && wave > run.waves) {
       this.win();
       return;
     }
-    // Free play: a balaur every 5th wave. Adventure: on the level's last wave.
-    const boss = level ? wave === level.waves && level.boss > 0 : wave % 5 === 0 && this.settings.mix !== 'sentences';
+    // Free play: a balaur every 5th wave. Adventure: on the mission's last wave, or every wave for a boss mission.
+    const boss = run ? run.boss > 0 && (run.bossEveryWave || wave === run.waves) : wave % 5 === 0 && this.settings.mix !== 'sentences';
     this.bossPending = boss;
-    // Levels count waves from the level's own difficulty, so a later level starts busier.
-    const busy = level ? wave + Math.floor(level.n / 6) : wave;
+    // Missions count waves from their place on the path, so later missions start busier.
+    const busy = run ? wave + Math.floor(run.n / 8) : wave;
     this.waveLeft = Math.max(3, Math.min(30, 4 + busy * 2) - (boss ? 6 : 0));
     this.waveBreak = 2.6;
     this.spawnTimer = 0;
-    const heal = wave > 1 && this.state.hp < MAX_HP;
+    const heal = wave > 1 && this.state.hp < this.state.maxHp;
     if (heal) sfx.play('heal');
     this.state = {
       ...this.state,
@@ -349,29 +403,28 @@ export class Game {
       hp: heal ? this.state.hp + 1 : this.state.hp,
       banner: boss
         ? { text: 'Balaurul!', sub: `Valul ${wave} · Wave ${wave} · boss${heal ? ' · +1 ♥' : ''}`, n: wave }
-        : level && wave === 1
-          ? { text: `${level.emoji} ${level.ro}`, sub: `Nivelul ${level.n} · Level ${level.n} · ${level.en}`, n: wave }
-          : { text: `Valul ${wave}`, sub: wave === 1 ? 'Apără cetatea! · Defend the castle!' : `Wave ${wave}${level ? `/${level.waves}` : ''}${heal ? ' · +1 ♥' : ''}`, n: wave },
+        : run && wave === 1
+          ? { text: `${run.emoji} ${run.ro}`, sub: run.label ?? run.en, n: wave }
+          : { text: `Valul ${wave}`, sub: wave === 1 ? 'Apără cetatea! · Defend the castle!' : `Wave ${wave}${run ? `/${run.waves}` : ''}${heal ? ' · +1 ♥' : ''}`, n: wave },
     };
-    this.world.setDamage(this.state.hp / MAX_HP);
+    this.world.setDamage(this.state.hp / this.state.maxHp);
     if (wave > 1) sfx.play('wave');
     this.emit();
   }
 
-  /** All waves of the level cleared: stars for health left and accuracy, and the next level opens. */
+  /** All waves of the mission cleared: stars for health left and accuracy (the app records them). */
   private win() {
-    const { hp, typed, errors } = this.state;
+    const { hp, maxHp, typed, errors } = this.state;
     const accuracy = typed ? (typed - errors) / typed : 1;
-    const stars = hp >= 8 && accuracy >= 0.9 ? 3 : hp >= 4 && accuracy >= 0.75 ? 2 : 1;
-    const level = this.settings.level!;
-    recordStars(this.settings.direction, level.id, stars);
+    const health = hp / maxHp;
+    const stars = health >= 0.8 && accuracy >= 0.9 ? 3 : health >= 0.4 && accuracy >= 0.75 ? 2 : 1;
     flushProgress();
     sfx.play('bigpoof');
     this.state = { ...this.state, phase: 'won', stars, banner: null, toast: null };
     this.emit();
   }
 
-  private gameOver() {
+  private gameOver(reason: string | null = null) {
     flushProgress();
     sfx.play('lose');
     // Everything still in the air poofs away with the game.
@@ -379,7 +432,7 @@ export class Game {
       this.effects.poof(e.root.position, 1.2, 0xffffff);
       this.remove(e);
     }
-    this.state = { ...this.state, phase: 'over', hp: 0, banner: null, toast: null };
+    this.state = { ...this.state, phase: 'over', hp: reason ? this.state.hp : 0, banner: null, toast: null, failReason: reason };
     this.world.setDamage(0);
     this.emit();
   }
@@ -423,7 +476,8 @@ export class Game {
 
   /** The balaur: one head per word (3 at wave 5, one more every 5 waves, at most 5), short words only. */
   private spawnBoss() {
-    const heads = this.settings.level?.boss || Math.min(5, 2 + Math.floor(this.state.wave / 5));
+    const run = this.settings.run;
+    const heads = run?.boss ? Math.min(5, run.boss + (run.bossEveryWave ? this.state.wave - 1 : 0)) : Math.min(5, 2 + Math.floor(this.state.wave / 5));
     const entries: Entry[] = [];
     for (let tries = 0; entries.length < heads && tries < 40; tries++) {
       const e = this.draw(false);
@@ -459,6 +513,9 @@ export class Game {
         mistakes: 0,
         slot,
         done: false,
+        hidden: layer === 'core' && !!this.settings.run?.memory,
+        peek: -1,
+        missAt: 0,
       };
       skipUntyped(part);
       slot.parts.push(part);
@@ -537,7 +594,7 @@ export class Game {
     const waveFactor = Math.min(2.3, 1 + (this.state.wave - 1) * 0.08);
     // Never faster than a learner at this difficulty can type it, plus a few seconds to read.
     const typeTime = letters / diff.cps + (parts.length > 2 ? 6 : 3);
-    const levelSpeed = this.settings.level?.speed ?? 1;
+    const levelSpeed = this.settings.run?.speed ?? 1;
     const time = Math.max((FALL_TIME[kind] * diff.time) / (kind === 'balaur' ? levelSpeed : waveFactor * levelSpeed), typeTime);
     const startY = this.top + (kind === 'balaur' ? 5 : 2);
     const enemy: Enemy = {
@@ -628,12 +685,20 @@ export class Game {
       part.slot.tag.classList.remove('wrong');
       void part.slot.tag.offsetWidth;
       part.slot.tag.classList.add('wrong');
+      if (part.hidden && ++part.missAt >= 2) part.peek = part.pos;
+      this.renderTag(enemy, part.slot);
       this.state = { ...this.state, combo: 0, multiplier: 1, typed, errors };
+      const limit = this.settings.run?.maxErrors;
+      if (limit !== undefined && errors >= limit) {
+        this.gameOver('Prea multe greșeli · Too many typos');
+        return;
+      }
       this.emit();
       return;
     }
 
     part.pos++;
+    part.missAt = 0;
     skipUntyped(part);
     combo++;
     const multiplier = Math.min(5, 1 + Math.floor(combo / 12));
@@ -749,7 +814,7 @@ export class Game {
       if (state === 'active') open = true;
       out.push({
         lang: ps[0].lang,
-        words: ps.map((p) => ({ glyphs: p.glyphs, pos: p.pos, hint: p.hint })),
+        words: ps.map((p) => ({ glyphs: p.glyphs, pos: p.pos, hint: p.hint, hidden: p.hidden, peek: p.peek })),
         state,
         current: current ? ps.indexOf(current) : -1,
         shield: layer === 'shield',
@@ -776,7 +841,10 @@ export class Game {
         const words = line.words.map((w, wi) => {
           const live = line.state === 'active' && wi === line.current;
           const chars = w.glyphs
-            .map((g, i) => `<span class="${i < w.pos ? 'done' : live && i === w.pos ? 'cur' : ''}">${escape(g.ch)}</span>`)
+            .map((g, i) => {
+              const ch = w.hidden && i >= w.pos && i > (w.peek ?? -1) && g.typed ? '_' : g.ch;
+              return `<span class="${i < w.pos ? 'done' : live && i === w.pos ? 'cur' : ''}">${escape(ch)}</span>`;
+            })
             .join('');
           const hint = w.hint ? `<small>${escape(w.hint)}</small>` : '';
           return `<span class="w">${chars}${hint}</span>`;
@@ -905,7 +973,7 @@ export class Game {
     this.remove(e);
     const hp = Math.max(0, this.state.hp - damage);
     this.state = { ...this.state, hp, combo: 0, multiplier: 1 };
-    this.world.setDamage(hp / MAX_HP);
+    this.world.setDamage(hp / this.state.maxHp);
     if (hp <= 0) {
       this.gameOver();
       return;

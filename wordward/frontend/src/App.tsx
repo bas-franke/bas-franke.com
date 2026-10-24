@@ -1,9 +1,29 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Game, type Difficulty, type GameState, type LineView, type Mix, type Settings, type WordView } from './game/Game';
+import { Game, type Difficulty, type GameState, type LineView, type Mix, type RunConfig, type Settings, type WordView } from './game/Game';
 import { sfx } from './game/audio';
 import { masteredCount } from './game/progress';
-import { isUnlocked, LEVELS, starsFor, totalStars, type Level } from './game/levels';
+import {
+  CHAPTERS,
+  chapterScore,
+  describe,
+  isOpen,
+  maxChapterStars,
+  maxStars,
+  missionById,
+  MISSIONS,
+  nextMission,
+  recordStars,
+  requirementMet,
+  runFor,
+  starsFor,
+  totalStars,
+  VARIANTS,
+  variantOpen,
+  type Mission,
+  type Variant,
+} from './game/campaign';
 import { save, update } from './game/save';
+import { AccountError, accountState, authenticate, deleteAccount, initAccount, logout, onAccount, type AccountState } from './game/account';
 import { CATEGORIES, countIn, ENTRIES, stripHints, type Direction } from './vocab';
 
 const DEFAULTS: Settings = {
@@ -22,7 +42,7 @@ function loadSettings(): Settings {
   const seen = new Set(s.knownCategories.length ? s.knownCategories : s.categories);
   const fresh = s.knownCategories.length ? CATEGORIES.map((c) => c.id).filter((id) => !seen.has(id)) : [];
   const categories = [...s.categories.filter((c) => known.has(c)), ...fresh];
-  const { knownCategories: _, level: __, ...rest } = s;
+  const { knownCategories: _, run: __, ...rest } = s;
   return { ...rest, categories: categories.length ? categories : DEFAULTS.categories };
 }
 
@@ -55,7 +75,7 @@ function useVisualViewport(el: React.RefObject<HTMLDivElement | null>) {
   }, [el]);
 }
 
-const bestKeyFor = (s: Settings, level: Level | null) => (level ? `${s.direction}:L:${level.id}` : `${s.direction}:${s.difficulty}`);
+const bestKeyFor = (s: Settings, run: RunConfig | null) => (run ? `${s.direction}:M:${run.missionId}:${run.variant}` : `${s.direction}:${s.difficulty}`);
 
 export default function App() {
   const app = useRef<HTMLDivElement>(null);
@@ -67,8 +87,11 @@ export default function App() {
   const [state, setState] = useState<GameState | null>(null);
   const [focused, setFocused] = useState(false);
   const [screen, setScreen] = useState<'home' | 'map'>('home');
+  /** The mission whose details sheet is open on the map. */
+  const [sheet, setSheet] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [, refresh] = useState(0);
+  const [accountOpen, setAccountOpen] = useState(false);
   useVisualViewport(app);
 
   useEffect(() => {
@@ -82,6 +105,18 @@ export default function App() {
     };
   }, []);
 
+  // Accounts: ask the server who we are once; logging in or out swaps the save, so re-read the settings then.
+  useEffect(() => {
+    void initAccount().then(() => {
+      setSettings(loadSettings());
+      refresh((n) => n + 1);
+    });
+  }, []);
+  const accountChanged = () => {
+    setSettings(loadSettings());
+    refresh((n) => n + 1);
+  };
+
   useEffect(() => {
     update((d) => {
       d.settings = { ...settings, knownCategories: CATEGORIES.map((c) => c.id) };
@@ -89,30 +124,38 @@ export default function App() {
   }, [settings]);
 
   const phase = state?.phase ?? 'idle';
-  const level = state?.level ?? null;
-  const bestKey = bestKeyFor(settings, level);
+  const run = state?.run ?? null;
+  const bestKey = bestKeyFor(settings, run);
   const best = save().best[bestKey] ?? 0;
 
-  // Record a new best when a round ends (won or lost).
+  // Record a new best when a round ends (won or lost), and the stars of a won mission.
   useEffect(() => {
     if ((phase !== 'over' && phase !== 'won') || !state) return;
     if ((save().best[bestKey] ?? 0) < state.score) update((d) => void (d.best[bestKey] = state.score));
+    if (phase === 'won' && state.run) recordStars(settings.direction, state.run.missionId, state.run.variant as Variant, state.stars);
     refresh((n) => n + 1);
   }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const focusInput = () => input.current?.focus({ preventScroll: true });
 
-  const play = (lvl?: Level) => {
+  const play = (r?: RunConfig) => {
     if (!game) return;
-    if (!lvl && !settings.categories.length) return;
+    if (!r && !settings.categories.length) return;
     sfx.unlock();
-    game.start({ ...settings, level: lvl });
+    setSheet(null);
+    game.start({ ...settings, run: r });
     focusInput();
   };
-  const replay = () => play(level ?? undefined);
-  const nextLevel = level ? LEVELS[level.n] : undefined;
+  const playMission = (m: Mission, v: Variant) => play(runFor(settings.direction, m, v));
+  // Replaying rebuilds the run, so a review mission picks fresh weak words.
+  const replay = () => {
+    const m = run && missionById(run.missionId);
+    if (m) playMission(m, run.variant as Variant);
+    else play();
+  };
+  const next = phase === 'won' ? nextMission(settings.direction) : undefined;
   const toMenu = () => {
-    setScreen(level ? 'map' : 'home');
+    setScreen(run ? 'map' : 'home');
     game?.quit();
   };
 
@@ -125,7 +168,10 @@ export default function App() {
         else if (phase === 'paused') game.pause(false);
       } else if (e.key === 'Enter') {
         if (phase === 'over') replay();
-        else if (phase === 'won') play(nextLevel ?? level ?? undefined);
+        else if (phase === 'won') {
+          if (next) playMission(next, 'std');
+          else toMenu();
+        }
         else if (phase === 'idle' && screen === 'home') play();
       }
     };
@@ -192,11 +238,13 @@ export default function App() {
           ⌨️ Atinge ca să scrii <small>Tap to type</small>
         </button>
       )}
+      {phase === 'idle' && accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} onChanged={accountChanged} />}
       {phase === 'idle' && screen === 'home' && (
-        <Home settings={settings} setSettings={setSettings} best={save().best[bestKeyFor(settings, null)] ?? 0} onFree={() => play()} onAdventure={() => setScreen('map')} />
+        <Home
+          onAccount={() => setAccountOpen(true)} settings={settings} setSettings={setSettings} best={save().best[bestKeyFor(settings, null)] ?? 0} onFree={() => play()} onAdventure={() => setScreen('map')} />
       )}
       {phase === 'idle' && screen === 'map' && (
-        <LevelMap settings={settings} setSettings={setSettings} onPlay={play} onBack={() => setScreen('home')} />
+        <CampaignMap onAccount={() => setAccountOpen(true)} settings={settings} setSettings={setSettings} sheet={sheet} setSheet={setSheet} onPlay={playMission} onBack={() => setScreen('home')} />
       )}
       {phase === 'paused' && (
         <div className="overlay">
@@ -208,15 +256,15 @@ export default function App() {
                 Continuă <small>Resume</small>
               </button>
               <button className="btn" onClick={toMenu}>
-                {level ? 'Hartă' : 'Meniu'} <small>{level ? 'Map' : 'Menu'}</small>
+                {run ? 'Hartă' : 'Meniu'} <small>{run ? 'Map' : 'Menu'}</small>
               </button>
             </div>
           </div>
         </div>
       )}
       {phase === 'over' && state && <GameOver state={state} settings={settings} best={best} onAgain={replay} onMenu={toMenu} />}
-      {phase === 'won' && state && level && (
-        <Won state={state} level={level} best={best} next={nextLevel} onNext={() => nextLevel && play(nextLevel)} onAgain={replay} onMap={toMenu} />
+      {phase === 'won' && state && run && (
+        <Won state={state} run={run} best={best} next={next} onNext={() => next && playMission(next, 'std')} onAgain={replay} onMap={toMenu} />
       )}
     </div>
   );
@@ -255,13 +303,13 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
   }, [game]);
   const t = state.target;
   const accuracy = state.typed ? Math.round(((state.typed - state.errors) / state.typed) * 100) : 100;
-  const lvl = state.level;
+  const lvl = state.run;
   return (
     <>
       <div className="hud top" ref={top}>
         <div className="panel castle">
           <div className="panel-head">
-            <span className="name">{lvl ? `${lvl.emoji} Nv. ${lvl.n}` : 'Cetatea'}</span>
+            <span className="name">{lvl ? `${lvl.emoji} M${lvl.n}` : 'Cetatea'}</span>
             <span className="lvl">
               Valul {state.wave}
               {lvl ? `/${lvl.waves}` : ''}
@@ -341,7 +389,7 @@ function Word({ word, live, done }: { word: WordView; live: boolean; done: boole
     <span className={`dw${done ? ' done' : ''}${live ? ' live' : ''}`}>
       {word.glyphs.map((g, i) => (
         <span key={i} className={i < word.pos ? 'g done' : live && i === word.pos ? 'g cur' : 'g'}>
-          {g.ch}
+          {word.hidden && i >= word.pos && i > (word.peek ?? -1) && g.typed ? '_' : g.ch}
         </span>
       ))}
       {word.hint && <small className="hint">{word.hint}</small>}
@@ -423,8 +471,174 @@ function CommonOptions({ settings, setSettings }: { settings: Settings; setSetti
 }
 
 function SaveNote() {
-  return <p className="save-note">🍪 Progresul se salvează în cookie-uri pe acest dispozitiv · Progress is saved in cookies on this device.</p>;
+  const acc = useAccount();
+  return (
+    <p className="save-note">
+      {acc.user
+        ? `☁️ Progresul lui ${acc.user.displayName} se salvează în cont și în cookie-uri · Progress is saved to your account and in cookies.`
+        : '🍪 Progresul se salvează în cookie-uri pe acest dispozitiv · Progress is saved in cookies on this device.'}
+      {!acc.user && acc.enabled && ' Fă-ți un cont ca să-l ai peste tot · Make an account to take it anywhere.'}
+    </p>
+  );
 }
+
+function useAccount() {
+  const [acc, setAcc] = useState<AccountState>(accountState);
+  useEffect(() => onAccount(setAcc), []);
+  return acc;
+}
+
+/** The little "who am I" chip in the corner of the menus. Hidden when the server has no accounts. */
+function AccountChip({ onOpen }: { onOpen: () => void }) {
+  const acc = useAccount();
+  if (!acc.enabled) return null;
+  return (
+    <button className={`account-chip${acc.user ? ' in' : ''}`} onClick={onOpen}>
+      {acc.user ? (
+        <>
+          👤 {acc.user.displayName}
+          <small>{acc.sync === 'error' ? ' ⚠️' : acc.sync === 'pending' ? ' ⏳' : ' ☁️'}</small>
+        </>
+      ) : (
+        <>
+          👤 Cont <small>Log in / sign up</small>
+        </>
+      )}
+    </button>
+  );
+}
+
+function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const acc = useAccount();
+  const [mode, setMode] = useState<'login' | 'register'>('register');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<{ text: string; field?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      if (deleting) await deleteAccount(password);
+      else await authenticate(mode, username.trim(), password);
+      setPassword('');
+      setDeleting(false);
+      onChanged();
+    } catch (err) {
+      setError({ text: err instanceof AccountError ? err.message : 'Serverul nu răspunde · The server did not answer', field: err instanceof AccountError ? err.field : undefined });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const out = async () => {
+    setBusy(true);
+    await logout();
+    setBusy(false);
+    onChanged();
+  };
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet account-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Account">
+        <button className="sheet-close" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+        {acc.user && !deleting ? (
+          <>
+            <div className="sheet-head">
+              <span className="sheet-emoji">🦉</span>
+              <div>
+                <div className="chapter-n">Contul tău · Your account</div>
+                <h3>{acc.user.displayName}</h3>
+              </div>
+            </div>
+            <p className="sheet-topics">
+              {acc.sync === 'error'
+                ? '⚠️ Nu am putut salva pe server; reîncercăm la următoarea schimbare · Could not reach the server; we retry on the next change.'
+                : '☁️ Progresul tău se salvează pe server: intră de pe orice dispozitiv · Your progress is saved on the server: log in on any device.'}
+            </p>
+            <div className="row">
+              <button className="btn" onClick={out} disabled={busy}>
+                Ieși <small>Log out</small>
+              </button>
+              <button className="btn danger" onClick={() => setDeleting(true)}>
+                Șterge contul <small>Delete account</small>
+              </button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submit} className="account-form">
+            <div className="sheet-head">
+              <span className="sheet-emoji">{deleting ? '🗑️' : '🦉'}</span>
+              <div>
+                <div className="chapter-n">{deleting ? 'Șterge contul · Delete account' : 'Cont · Account'}</div>
+                <h3>{deleting ? 'Ești sigur?' : mode === 'register' ? 'Cont nou' : 'Intră'}</h3>
+                <div className="dim">{deleting ? 'This removes your account and its saved progress.' : mode === 'register' ? 'Create an account' : 'Log in'}</div>
+              </div>
+            </div>
+            {!deleting && (
+              <>
+                <div className="seg small-seg account-tabs">
+                  <button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => setMode('register')}>
+                    <b>Cont nou</b>
+                  </button>
+                  <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>
+                    <b>Am cont</b>
+                  </button>
+                </div>
+                <p className="sheet-topics">
+                  {mode === 'register'
+                    ? '🎈 Fără email. Alege un nume și o parolă; progresul de pe acest dispozitiv vine cu tine · No email needed. Your progress on this device comes along.'
+                    : '🔑 Progresul de pe acest dispozitiv se adaugă la cont · Progress on this device is added to your account.'}
+                </p>
+                <label className={`input${error?.field === 'username' ? ' bad' : ''}`}>
+                  <span>Nume · Username</span>
+                  <input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    maxLength={20}
+                    required
+                  />
+                </label>
+              </>
+            )}
+            <label className={`input${error?.field === 'password' ? ' bad' : ''}`}>
+              <span>Parolă · Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={mode === 'register' && !deleting ? 'new-password' : 'current-password'}
+                minLength={deleting ? 1 : 6}
+                required
+              />
+            </label>
+            {error && <p className="form-error">{error.text}</p>}
+            <div className="row">
+              <button className={`btn ${deleting ? 'danger' : 'primary'}`} type="submit" disabled={busy}>
+                {busy ? '…' : deleting ? 'Șterge definitiv · Delete' : mode === 'register' ? 'Creează contul · Sign up' : 'Intră · Log in'}
+              </button>
+              {deleting && (
+                <button className="btn" type="button" onClick={() => setDeleting(false)}>
+                  Înapoi <small>Back</small>
+                </button>
+              )}
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 function Home({
   settings,
@@ -432,7 +646,9 @@ function Home({
   best,
   onFree,
   onAdventure,
+  onAccount,
 }: {
+  onAccount: () => void;
   settings: Settings;
   setSettings: SetSettings;
   best: number;
@@ -452,7 +668,10 @@ function Home({
   return (
     <div className="overlay menu">
       <div className="card">
-        <h1 className="logo">Wordward</h1>
+        <div className="card-top">
+          <h1 className="logo">Wordward</h1>
+          <AccountChip onOpen={onAccount} />
+        </div>
         <p className="tagline">
           Apără cetatea cu vorbe! <span className="dim">Defend the castle with words.</span>
         </p>
@@ -473,7 +692,7 @@ function Home({
             <span>
               <b>Aventură</b> <small>Adventure</small>
               <span className="mode-sub">
-                {LEVELS.length} niveluri · ⭐ {stars}/{LEVELS.length * 3}
+                {MISSIONS.length} misiuni · ⭐ {stars}/{maxStars}
               </span>
             </span>
           </button>
@@ -564,23 +783,34 @@ function Stars({ n, of = 3 }: { n: number; of?: number }) {
   );
 }
 
-function LevelMap({
+/** Horizontal position (percent) of the n-th node on a chapter's winding path. */
+const PATH_X = [50, 78, 50, 22];
+const ROW = 112;
+
+function CampaignMap({
   settings,
   setSettings,
+  sheet,
+  setSheet,
   onPlay,
   onBack,
+  onAccount,
 }: {
+  onAccount: () => void;
   settings: Settings;
   setSettings: SetSettings;
-  onPlay: (l: Level) => void;
+  sheet: string | null;
+  setSheet: (id: string | null) => void;
+  onPlay: (m: Mission, v: Variant) => void;
   onBack: () => void;
 }) {
   const dir = settings.direction;
-  const current = LEVELS.find((l) => isUnlocked(dir, l) && starsFor(dir, l.id) === 0);
+  const current = nextMission(dir);
   const currentRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     currentRef.current?.scrollIntoView({ block: 'center' });
   }, []);
+  const open = sheet ? missionById(sheet) : undefined;
   return (
     <div className="overlay menu">
       <div className="card map-card">
@@ -591,7 +821,7 @@ function LevelMap({
           <div>
             <h2>Aventură</h2>
             <p className="dim">
-              Adventure · ⭐ {totalStars(dir)}/{LEVELS.length * 3}
+              Adventure · ⭐ {totalStars(dir)}/{maxStars}
             </p>
           </div>
           <div className="seg small-seg">
@@ -601,37 +831,170 @@ function LevelMap({
               </button>
             ))}
           </div>
+          <AccountChip onOpen={onAccount} />
         </div>
-        <div className="levels">
-          {LEVELS.map((l) => {
-            const open = isUnlocked(dir, l);
-            const stars = starsFor(dir, l.id);
+        {CHAPTERS.map((ch) => {
+          const score = chapterScore(dir, ch);
+          const reachable = isOpen(dir, ch.missions[0]);
+          const rows = ch.missions.length;
+          const points = ch.missions.map((_, i) => `${PATH_X[i % 4]},${i * ROW + 46}`).join(' ');
+          return (
+            <section key={ch.n} className={`chapter${reachable ? '' : ' far'}`}>
+              <div className="chapter-head">
+                <span className="chapter-emoji">{ch.emoji}</span>
+                <div>
+                  <div className="chapter-n">Capitolul {ch.n} · Chapter {ch.n}</div>
+                  <b>{ch.ro}</b> <span className="dim">{ch.en}</span>
+                </div>
+                <span className="chapter-stars">
+                  ⭐ {score.stars}/{maxChapterStars(ch)}
+                </span>
+              </div>
+              <div className="path" style={{ height: rows * ROW }}>
+                <svg className="trail" viewBox={`0 0 100 ${rows * ROW}`} preserveAspectRatio="none" aria-hidden="true">
+                  <polyline points={points} />
+                </svg>
+                {ch.missions.map((m, i) => {
+                  const unlocked = isOpen(dir, m);
+                  const stars = starsFor(dir, m.id);
+                  const variantsWon = m.variants.filter((v) => v !== 'std' && starsFor(dir, m.id, v) > 0).length;
+                  return (
+                    <div key={m.id} className="node-wrap" style={{ left: `${PATH_X[i % 4]}%`, top: i * ROW }}>
+                      <button
+                        ref={m === current ? currentRef : undefined}
+                        className={`node ${m.kind}${unlocked ? '' : ' locked'}${stars ? ' cleared' : ''}${m === current ? ' current' : ''}`}
+                        onClick={() => setSheet(m.id)}
+                        aria-label={`${m.ro}: ${unlocked ? `${stars} stars` : 'locked'}`}
+                      >
+                        <span className="node-emoji">{unlocked ? m.emoji : '🔒'}</span>
+                        <span className="node-n">{m.n}</span>
+                        {m.variants.length > 1 && (
+                          <span className="node-variants">
+                            {m.variants
+                              .filter((v) => v !== 'std')
+                              .map((v) => (
+                                <i key={v} className={starsFor(dir, m.id, v) ? 'won' : ''}>
+                                  {VARIANTS[v].emoji}
+                                </i>
+                              ))}
+                          </span>
+                        )}
+                      </button>
+                      <span className="node-label">
+                        {m.ro}
+                        {stars > 0 && <Stars n={stars} />}
+                        {stars > 0 && variantsWon < m.variants.length - 1 && <small className="node-more">+{m.variants.length - 1 - variantsWon} variante</small>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+        <SaveNote />
+      </div>
+      {open && <MissionSheet mission={open} dir={dir} onPlay={onPlay} onGo={setSheet} onClose={() => setSheet(null)} />}
+    </div>
+  );
+}
+
+function MissionSheet({
+  mission,
+  dir,
+  onPlay,
+  onGo,
+  onClose,
+}: {
+  mission: Mission;
+  dir: Direction;
+  onPlay: (m: Mission, v: Variant) => void;
+  onGo: (id: string) => void;
+  onClose: () => void;
+}) {
+  const unlocked = isOpen(dir, mission);
+  const prev = MISSIONS[mission.n - 2];
+  const topics = mission.categories.length
+    ? mission.categories.map((id) => CATEGORIES.find((c) => c.id === id)?.ro ?? id).join(', ')
+    : 'toate temele · every topic';
+  const chapter = CHAPTERS[mission.chapter - 1];
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={mission.ro}>
+        <button className="sheet-close" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+        <div className="sheet-head">
+          <span className="sheet-emoji">{mission.emoji}</span>
+          <div>
+            <div className="chapter-n">
+              Misiunea {mission.n} · {chapter.emoji} {chapter.ro}
+              {mission.kind === 'review' ? ' · recapitulare' : mission.kind === 'boss' ? ' · boss' : ''}
+            </div>
+            <h3>{mission.ro}</h3>
+            <div className="dim">{mission.en}</div>
+          </div>
+        </div>
+        <p className="sheet-topics">
+          {mission.kind === 'review'
+            ? '🔁 Cuvintele pe care încă nu le știi din capitol · the words of this chapter you have not mastered yet'
+            : `📚 ${topics} · ${mission.waves} valuri${mission.kind === 'boss' ? ', balaur în fiecare val' : ''}`}
+        </p>
+        {!unlocked && (
+          <div className="reqs">
+            <div className="field-label">🔒 Încuiat · Locked: ai nevoie de · you need</div>
+            {prev && (
+              <Req ok={starsFor(dir, prev.id) > 0} text={`⭐ ${prev.ro} · ${VARIANTS.std.ro}`} onGo={() => onGo(prev.id)} />
+            )}
+            {mission.requires.map((r, i) => {
+              const d = describe(dir, mission, r);
+              return <Req key={i} ok={requirementMet(dir, mission, r)} text={d.text} progress={d.progress} onGo={d.goto ? () => onGo(d.goto!) : undefined} />;
+            })}
+          </div>
+        )}
+        <div className="variants">
+          {mission.variants.map((v) => {
+            const info = VARIANTS[v];
+            const can = variantOpen(dir, mission, v);
+            const stars = starsFor(dir, mission.id, v);
             return (
-              <button
-                key={l.id}
-                ref={l === current ? currentRef : undefined}
-                className={`level${open ? '' : ' locked'}${stars ? ' cleared' : ''}${l === current ? ' current' : ''}`}
-                disabled={!open}
-                onClick={() => onPlay(l)}
-              >
-                <span className="level-n">{l.n}</span>
-                <span className="level-emoji">{open ? l.emoji : '🔒'}</span>
-                <span className="level-name">{l.ro}</span>
-                <span className="level-en">{l.en}</span>
+              <div key={v} className={`variant${can ? '' : ' locked'}`}>
+                <span className="variant-emoji">{info.emoji}</span>
+                <div className="variant-text">
+                  <b>{info.ro}</b> <span className="dim">{info.en}</span>
+                  <div className="variant-desc">{can || v === 'std' ? info.desc : 'Câștigă întâi varianta normală · Win the standard run first.'}</div>
+                </div>
                 <Stars n={stars} />
-              </button>
+                <button className="btn primary play" disabled={!can} onClick={() => onPlay(mission, v)}>
+                  {stars ? 'Din nou' : 'Joacă'}
+                </button>
+              </div>
             );
           })}
         </div>
-        <SaveNote />
       </div>
+    </div>
+  );
+}
+
+function Req({ ok, text, progress, onGo }: { ok: boolean; text: string; progress?: string; onGo?: () => void }) {
+  return (
+    <div className={`req${ok ? ' ok' : ''}`}>
+      <span className="req-mark">{ok ? '✓' : '✗'}</span>
+      <span className="req-text">{text}</span>
+      {progress && <span className="req-progress">{progress}</span>}
+      {!ok && onGo && (
+        <button className="link" onClick={onGo}>
+          mergi →
+        </button>
+      )}
     </div>
   );
 }
 
 function Won({
   state,
-  level,
+  run,
   best,
   next,
   onNext,
@@ -639,21 +1002,22 @@ function Won({
   onMap,
 }: {
   state: GameState;
-  level: Level;
+  run: RunConfig;
   best: number;
-  next?: Level;
+  next?: Mission;
   onNext: () => void;
   onAgain: () => void;
   onMap: () => void;
 }) {
   const accuracy = state.typed ? Math.round(((state.typed - state.errors) / state.typed) * 100) : 100;
+  const variant = VARIANTS[run.variant as Variant];
   return (
     <div className="overlay">
       <div className="card won">
-        <div className="won-emoji">{level.emoji}</div>
-        <h2>Nivel complet!</h2>
+        <div className="won-emoji">{run.emoji}</div>
+        <h2>Misiune completă!</h2>
         <p className="dim">
-          Level {level.n} cleared · {level.ro} · {level.en}
+          {run.ro} · {run.en} · {variant.emoji} {variant.ro}
         </p>
         <div className="won-stars">
           <Stars n={state.stars} />
@@ -678,11 +1042,11 @@ function Won({
             <span>Precizie · Accuracy</span>
           </div>
         </div>
-        {state.stars < 3 && <p className="hint-line">⭐⭐⭐ = 8+ HP and 90%+ accuracy</p>}
+        {state.stars < 3 && <p className="hint-line">⭐⭐⭐ = 80%+ HP left and 90%+ accuracy</p>}
         <div className="row">
           {next && (
             <button className="btn primary" onClick={onNext}>
-              Nivelul {next.n} {next.emoji} <small>Next · Enter</small>
+              {next.emoji} {next.ro} <small>Next · Enter</small>
             </button>
           )}
           <button className="btn" onClick={onAgain}>
@@ -718,7 +1082,8 @@ function GameOver({
       <div className="card">
         <h2 className="over-title">Cetatea a obosit!</h2>
         <p className="dim">
-          {state.level ? `Level ${state.level.n} · ${state.level.en}. ` : ''}The castle needs a nap. Great effort, try again!
+          {state.failReason ? `${state.failReason}. ` : ''}
+          {state.run ? `${state.run.emoji} ${state.run.ro} · ${state.run.en}. ` : ''}The castle needs a nap. Great effort, try again!
         </p>
         <div className="stats">
           <div>
@@ -757,7 +1122,7 @@ function GameOver({
             Din nou! <small>Play again · Enter</small>
           </button>
           <button className="btn" onClick={onMenu}>
-            {state.level ? 'Hartă' : 'Meniu'} <small>{state.level ? 'Map' : 'Menu'}</small>
+            {state.run ? 'Hartă' : 'Meniu'} <small>{state.run ? 'Map' : 'Menu'}</small>
           </button>
         </div>
       </div>

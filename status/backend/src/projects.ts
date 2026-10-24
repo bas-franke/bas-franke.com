@@ -7,5 +7,5 @@ export const projects: Project[] = [
   { name: 'status', domains: ['status.bas-franke.com'], port: 3002, database: true },
   { name: 'inck', domains: ['inck.ai', 'www.inck.ai'], port: 3003, database: true, registrar: 'name.com' },
   { name: 'play', domains: ['play.bas-franke.com'], port: 3004, database: false, websocket: '/api/ws' },
-  { name: 'wordward', domains: ['wordward.bas-franke.com'], port: 3005, database: false },
+  { name: 'wordward', domains: ['wordward.bas-franke.com'], port: 3005, database: true },
 ];

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { GAMES, colorHex } from '@shared/protocol';
+import { GAMES, type GameMode, type Team, colorHex } from '@shared/protocol';
 import { RK } from '@shared/rockets/constants';
-import type { ScoreRow } from '@shared/rockets/protocol';
+import { ELIM, MODES, TEAMS } from '@shared/rockets/modes';
+import type { FlagSnap, ScoreRow } from '@shared/rockets/protocol';
 import { type ClientContext, useStore } from '../types';
 import type { FeedLine, RocketsClient, RocketsHudState } from './client';
 import { SettingsPanel } from './SettingsPanel';
@@ -33,7 +34,13 @@ const LOW_HP = 30;
 /** Comic sound words for the kill feed, picked per line so a line keeps its word. */
 const BLAMS = ['BLAM!', 'KA-BOOM!', 'WHAM!', 'POW!', 'KRAK!', 'BOOM!', 'SPLAT!'];
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
-const sortScores = (scores: ScoreRow[]) => [...scores].sort((a, b) => b.frags - a.frags || a.deaths - b.deaths);
+const sortScores = (scores: ScoreRow[]) => [...scores].sort((a, b) => (b.caps ?? 0) - (a.caps ?? 0) || b.frags - a.frags || a.deaths - b.deaths);
+const TEAM_IDS: Team[] = [0, 1];
+const otherTeam = (t: Team): Team => (t === 0 ? 1 : 0);
+/** What the team score counts, for the score bar and the scoreboard subtitle. */
+const GOAL_WORD = { frags: 'frags', captures: 'captures', rounds: 'rounds' } as const;
+/** How long a big comic callout stays up. */
+const CALLOUT_SECONDS = 2.4;
 
 export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: ClientContext }) {
   const s = useStore(client.hud) as RocketsHudState & HudExtra;
@@ -108,7 +115,14 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
     el.animate(frames, { duration: 360, easing: 'ease-out' });
   }, [s.hurtAt]);
 
-  const hp = Math.max(0, Math.min(RK.maxHealth, Math.round(s.hp)));
+  const mode = s.mode ?? room.mode ?? 'ffa';
+  const rules = MODES[mode];
+  const teams = rules.teams;
+  const myTeam = s.myTeam;
+  // Elimination starts everyone on more health; the bar fills against that.
+  const hpMax = mode === 'elim' ? ELIM.health : RK.maxHealth;
+  const hp = Math.max(0, Math.round(s.hp));
+  const hpPct = Math.min(100, (hp / hpMax) * 100);
   const low = hp <= LOW_HP && !s.dead;
   const alive = !s.dead && !s.ended;
   const hitOn = now - s.hitAt < 0.25;
@@ -118,7 +132,21 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
   const reloading = s.firedAt !== undefined && now - s.firedAt < RK.fireInterval + 0.1;
   const isHost = room.hostId === ctx.you;
   const nameOf = (id: string) => room.players.find((p) => p.id === id)?.name ?? '…';
-  const colorOf = (id: string) => colorHex(room.players.find((p) => p.id === id)?.color ?? 0xffffff);
+  const teamOfId = (id: string): Team | undefined => (teams ? (room.players.find((p) => p.id === id)?.team ?? s.scores.find((r) => r.id === id)?.team) : undefined);
+  // Names read in team colours in team modes, so the feed and boards say at a glance who is on which side.
+  const colorOf = (id: string) => {
+    const t = teamOfId(id);
+    return t !== undefined ? TEAMS[t].css : colorHex(room.players.find((p) => p.id === id)?.color ?? 0xffffff);
+  };
+  const callout = s.callout && now - s.callout.at < CALLOUT_SECONDS ? s.callout : null;
+  const round = mode === 'elim' ? s.round : undefined;
+  const intermission = round?.state === 'over';
+  const enemyFlag = myTeam !== undefined ? s.flags?.[otherTeam(myTeam)] : undefined;
+  const carrying = mode === 'ctf' && enemyFlag?.s === 1 && enemyFlag.by === ctx.you;
+  const ts = s.ts ?? [0, 0];
+  const scoreTable = (scores: ScoreRow[]) => (
+    <ScoreTable scores={scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} teams={teams ? ts : undefined} caps={mode === 'ctf'} teamOf={teamOfId} />
+  );
 
   const sorted = sortScores(s.scores);
   const place = Math.max(1, sorted.findIndex((r) => r.id === ctx.you) + 1);
@@ -181,8 +209,8 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
           <div className="row">
             <span className="big">{hp}</span>
             <div className="rk-bar hp">
-              <i className="ghost" style={{ width: `${hp}%` }} />
-              <i className="fill" style={{ width: `${hp}%` }} />
+              <i className="ghost" style={{ width: `${hpPct}%` }} />
+              <i className="fill" style={{ width: `${hpPct}%` }} />
             </div>
           </div>
           {s.armor !== undefined && (
@@ -198,17 +226,59 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
       </div>
 
       <div className="corner tc">
-        <span className={`rk-panel timer ${s.left <= 30 && !s.ended ? 'hurry' : ''}`}>{fmt(s.left)}</span>
+        {teams ? (
+          <TeamBar
+            mode={mode}
+            ts={ts}
+            myTeam={myTeam}
+            left={s.left}
+            hurry={s.left <= 30 && !s.ended}
+            overtime={!!s.overtime}
+            flags={mode === 'ctf' ? s.flags : undefined}
+            flagReturn={s.flagReturn}
+            alive={round?.alive}
+            roundNo={round?.n}
+            roundLeft={round && round.state === 'play' ? round.left : undefined}
+            nameOf={(id) => (id === ctx.you ? 'You' : nameOf(id))}
+          />
+        ) : (
+          <span className={`rk-panel timer ${s.left <= 30 && !s.ended ? 'hurry' : ''}`}>{fmt(s.left)}</span>
+        )}
       </div>
+
+      {callout && !s.ended && (
+        <div key={callout.id} className="rk-callout" style={callout.team !== undefined ? { ['--team' as string]: TEAMS[callout.team].css } : undefined}>
+          {callout.text}
+        </div>
+      )}
+      {intermission && round && !s.ended && (
+        <div className="rk-intermission">
+          <span className="label">Round {round.n} over</span>
+          <b>
+            Next round in <em key={Math.ceil(round.left)}>{Math.max(1, Math.ceil(round.left))}</em>
+          </b>
+        </div>
+      )}
+      {carrying && alive && myTeam !== undefined && (
+        <div className="rk-carry" style={{ ['--team' as string]: TEAMS[otherTeam(myTeam)].css }}>
+          You have the {TEAMS[otherTeam(myTeam)].name} flag! Bring it home
+        </div>
+      )}
 
       <div className="corner tr">
         <div className="rk-panel rk-frags">
-          <span className="label">Frags</span>
+          <span className="label">{mode === 'ctf' ? 'Frags · caps' : 'Frags'}</span>
           <div className="row">
             <span className="big">{me?.frags ?? 0}</span>
-            <span className="of">/{RK.fragLimit}</span>
+            {mode === 'ffa' && <span className="of">/{rules.limit}</span>}
+            {mode === 'ctf' && <span className="of">· {me?.caps ?? 0}</span>}
           </div>
-          {s.scores.length > 1 && (
+          {teams && myTeam !== undefined && (
+            <div className="rk-place" style={{ color: TEAMS[myTeam].css }}>
+              Team {TEAMS[myTeam].name}
+            </div>
+          )}
+          {!teams && s.scores.length > 1 && (
             <div className={`rk-place ${place === 1 ? 'first' : ''}`}>
               {ordinal(place)} · {lead > 0 ? `+${lead}` : lead === 0 ? 'tied' : lead}
             </div>
@@ -234,7 +304,21 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
         </div>
       )}
 
-      {s.dead && !s.ended && (
+      {s.dead && !s.ended && mode === 'elim' && !intermission && (
+        <div className="rk-respawn rk-spectate">
+          <h2>Out for this round</h2>
+          <p>
+            {s.spectating ? (
+              <>
+                Watching <span style={{ color: colorOf(s.spectating) }}>{nameOf(s.spectating)}</span> · click or Space for the next teammate
+              </>
+            ) : (
+              'Waiting for the next round'
+            )}
+          </p>
+        </div>
+      )}
+      {s.dead && !s.ended && mode !== 'elim' && (
         <div className="rk-respawn">
           <div className="burst">SPLAT!</div>
           <h2>{killer?.by && !killer.self ? `${nameOf(killer.by)} got you` : 'You got rocketed'}</h2>
@@ -274,12 +358,25 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
       {s.ended && (
         <div className="overlay-center" style={{ pointerEvents: 'auto' }}>
           <div className="scoreboard end">
-            <div className={`burst ${s.ended.winner === ctx.you ? 'win' : ''}`}>
-              {s.ended.winner === ctx.you ? 'Victory!' : s.ended.winner ? 'Defeat!' : 'Draw!'}
-            </div>
-            <h2>{s.ended.winner ? `${nameOf(s.ended.winner)} wins` : 'Nobody wins'}</h2>
+            {teams && s.ended.winnerTeam !== undefined ? (
+              <>
+                <div className={`burst ${s.ended.winnerTeam !== null && s.ended.winnerTeam === myTeam ? 'win' : ''}`}>
+                  {s.ended.winnerTeam === null ? 'Draw!' : s.ended.winnerTeam === myTeam ? 'Victory!' : 'Defeat!'}
+                </div>
+                <h2 className="rk-teamwin" style={s.ended.winnerTeam !== null ? { color: TEAMS[s.ended.winnerTeam].css } : undefined}>
+                  {s.ended.winnerTeam === null ? 'Nobody wins' : `${TEAMS[s.ended.winnerTeam].name} wins`}
+                </h2>
+              </>
+            ) : (
+              <>
+                <div className={`burst ${s.ended.winner === ctx.you ? 'win' : ''}`}>
+                  {s.ended.winner === ctx.you ? 'Victory!' : s.ended.winner ? 'Defeat!' : 'Draw!'}
+                </div>
+                <h2>{s.ended.winner ? `${nameOf(s.ended.winner)} wins` : 'Nobody wins'}</h2>
+              </>
+            )}
             <p className="sub">Back to the room in a moment.</p>
-            <ScoreTable scores={s.ended.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
+            {scoreTable(s.ended.scores)}
             <div className="actions">
               {isHost && (
                 // Restart straight away instead of waiting for the room to come back.
@@ -299,8 +396,8 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
         <div className="overlay-center" style={{ pointerEvents: 'none' }}>
           <div className="scoreboard">
             <h2>{GAMES.rockets.name}</h2>
-            <p className="sub">{`${s.mapName} · ${fmt(s.left)} left · first to ${RK.fragLimit} frags`}</p>
-            <ScoreTable scores={s.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
+            <p className="sub">{`${rules.name} · ${s.mapName} · ${fmt(s.left)} left · first to ${rules.limit} ${teams ? GOAL_WORD[rules.goal] : 'frags'}`}</p>
+            {scoreTable(s.scores)}
           </div>
         </div>
       )}
@@ -312,8 +409,14 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
             <p className="sub">
               The match keeps running on {s.mapName}. Room code {room.code}.
             </p>
-            <ScoreTable scores={s.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
+            {scoreTable(s.scores)}
             <div className="actions">
+              {teams && myTeam !== undefined && (
+                // The server kills us without penalty and we respawn on the other side.
+                <button className="btn rk-switch" style={{ ['--team' as string]: TEAMS[otherTeam(myTeam)].css }} onClick={() => (client.switchTeam(otherTeam(myTeam)), setMenu(false))}>
+                  Switch to {TEAMS[otherTeam(myTeam)].name}
+                </button>
+              )}
               {isHost && (
                 <button className="btn danger" onClick={() => ctx.socket.send({ t: 'stop' })}>
                   End match for everyone
@@ -373,31 +476,146 @@ function FeedRow({ line, you, nameOf, colorOf }: { line: RichFeedLine; you: stri
   );
 }
 
-function ScoreTable({ scores, you, nameOf, colorOf }: { scores: ScoreRow[]; you: string; nameOf: (id: string) => string; colorOf: (id: string) => string }) {
+/** Top-centre bar in team modes: Red score, the clock and the goal, Blue score; flag states (CTF) or alive counts (elim). */
+function TeamBar({
+  mode,
+  ts,
+  myTeam,
+  left,
+  hurry,
+  overtime,
+  flags,
+  flagReturn,
+  alive,
+  roundNo,
+  roundLeft,
+  nameOf,
+}: {
+  mode: GameMode;
+  ts: [number, number];
+  myTeam?: Team;
+  left: number;
+  hurry: boolean;
+  overtime: boolean;
+  flags?: [FlagSnap, FlagSnap];
+  flagReturn?: [number, number];
+  alive?: [number, number];
+  roundNo?: number;
+  roundLeft?: number;
+  nameOf: (id: string) => string;
+}) {
+  const rules = MODES[mode];
+  const side = (t: Team) => (
+    <div className={`rk-team t${t} ${t === myTeam ? 'mine' : ''} ${ts[t] > ts[otherTeam(t)] ? 'ahead' : ''}`} style={{ ['--team' as string]: TEAMS[t].css }}>
+      <span className="name">{TEAMS[t].name}</span>
+      <b key={ts[t]}>{ts[t]}</b>
+      {flags && <FlagStatus flag={flags[t]} team={t} returnIn={flagReturn?.[t] ?? 0} nameOf={nameOf} />}
+      {alive && (
+        <span className="rk-alive" title="Alive">
+          {Array.from({ length: Math.min(8, Math.max(alive[t], 0)) }, (_, i) => (
+            <i key={i} />
+          ))}
+          <em>{alive[t]} up</em>
+        </span>
+      )}
+    </div>
+  );
+  return (
+    <div className="rk-teambar">
+      {side(0)}
+      <div className="mid">
+        <span className={`timer ${hurry ? 'hurry' : ''}`}>{fmt(roundLeft ?? left)}</span>
+        <span className="goal">
+          {overtime ? 'Sudden death' : roundNo ? `Round ${roundNo} · first to ${rules.limit}` : `First to ${rules.limit} ${GOAL_WORD[rules.goal]}`}
+        </span>
+      </div>
+      {side(1)}
+    </div>
+  );
+}
+
+/** A little ink-outlined flag: upright at base, tilted and pulsing when taken, on its side when dropped. */
+function FlagStatus({ flag, team, returnIn, nameOf }: { flag: FlagSnap; team: Team; returnIn: number; nameOf: (id: string) => string }) {
+  const state = flag.s === 0 ? 'base' : flag.s === 1 ? 'taken' : 'dropped';
+  const text = flag.s === 0 ? 'At base' : flag.s === 1 ? (flag.by ? `${nameOf(flag.by)}!` : 'Taken!') : `Dropped · ${returnIn}s`;
+  return (
+    <span className={`rk-flag ${state}`}>
+      <svg viewBox="0 0 24 24" aria-hidden>
+        <path className="pole" d="M6 3 V22" />
+        <path className="cloth" d="M7 4 C11 2.5 14 6 19 4.5 V12 C14 13.5 11 10 7 11.5 Z" style={{ fill: TEAMS[team].css }} />
+      </svg>
+      <span>{text}</span>
+    </span>
+  );
+}
+
+function ScoreTable({
+  scores,
+  you,
+  nameOf,
+  colorOf,
+  teams,
+  caps,
+  teamOf,
+}: {
+  scores: ScoreRow[];
+  you: string;
+  nameOf: (id: string) => string;
+  colorOf: (id: string) => string;
+  /** Team modes: team scores; rows are grouped under a header per team. */
+  teams?: [number, number];
+  /** Show the captures column (CTF). */
+  caps?: boolean;
+  teamOf?: (id: string) => Team | undefined;
+}) {
   const sorted = sortScores(scores);
+  const cols = caps ? 5 : 4;
+  const row = (r: ScoreRow, i: number) => (
+    <tr key={r.id} className={`${r.id === you ? 'me' : ''} ${i === 0 && (r.frags > 0 || (r.caps ?? 0) > 0) ? 'top' : ''}`}>
+      <td className="rank">{i + 1}</td>
+      <td>
+        <span className="swatch" style={{ background: colorOf(r.id) }} />
+        {nameOf(r.id)}
+      </td>
+      {caps && <td className="num">{r.caps ?? 0}</td>}
+      <td className="num">{r.frags}</td>
+      <td className="num">{r.deaths}</td>
+    </tr>
+  );
   return (
     <table>
       <thead>
         <tr>
           <th style={{ width: 36 }}>#</th>
           <th>Player</th>
+          {caps && <th style={{ textAlign: 'right' }}>Caps</th>}
           <th style={{ textAlign: 'right' }}>Frags</th>
           <th style={{ textAlign: 'right' }}>Deaths</th>
         </tr>
       </thead>
-      <tbody>
-        {sorted.map((r, i) => (
-          <tr key={r.id} className={`${r.id === you ? 'me' : ''} ${i === 0 && r.frags > 0 ? 'top' : ''}`}>
-            <td className="rank">{i + 1}</td>
-            <td>
-              <span className="swatch" style={{ background: colorOf(r.id) }} />
-              {nameOf(r.id)}
-            </td>
-            <td className="num">{r.frags}</td>
-            <td className="num">{r.deaths}</td>
-          </tr>
-        ))}
-      </tbody>
+      {teams ? (
+        TEAM_IDS.map((t) => {
+          const rows = sorted.filter((r) => (r.team ?? teamOf?.(r.id)) === t);
+          const frags = rows.reduce((n, r) => n + r.frags, 0);
+          return (
+            <tbody key={t} className="rk-teamrows" style={{ ['--team' as string]: TEAMS[t].css }}>
+              <tr className="team-head">
+                <td colSpan={cols}>
+                  <span className="tname">{TEAMS[t].name}</span>
+                  <b>{teams[t]}</b>
+                  <span className="tsub">
+                    {rows.length} {rows.length === 1 ? 'player' : 'players'} · {frags} frags
+                  </span>
+                </td>
+              </tr>
+              {rows.map(row)}
+            </tbody>
+          );
+        })
+      ) : (
+        <tbody>{sorted.map(row)}</tbody>
+      )}
     </table>
   );
 }
+

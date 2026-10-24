@@ -10,10 +10,16 @@ player's device (mirrored to `localStorage`).
 
 ## How it plays
 
-- **Adventure:** 35 themed levels on a map, from *Salut!* (first words) through food, animals, town, verbs, school,
-  holidays and science to *Maestru* (everything). A level is 3–8 waves of its topics, ends with the balaur (3–5 heads;
-  not on sentence-only levels) and gets a little faster than the one before. Clearing it gives 1–3 stars
-  (★★★ = 8+ HP and 90%+ accuracy) and opens the next level. Stars are kept per direction. Defined in `game/levels.ts`.
+- **Adventure (campaign):** a winding path through 8 chapters (village → forest → home → town → school → fair →
+  mountains → citadel), 54 missions in all (`game/campaign.ts`). Every chapter has 3–6 missions, a **review** mission
+  built from that chapter's words you have not mastered yet, and a **boss** mission (a balaur every wave).
+  - **Variants:** every mission has a standard run plus two of: 🧠 *din memorie* (the translation is hidden; two
+    misses on a letter reveal it), 🔄 *invers* (the other direction), ⚡ *viteză* (much faster, 5 HP), 🎯 *fără
+    greșeli* (three typos ends the mission). Variants open once the standard run is won.
+  - **Going back:** some missions only open after a variant of an earlier one (e.g. *Familia* needs *Salut!* from
+    memory; *Bucătărie* needs *La masă* at speed), and each boss needs a number of stars and variant wins from its
+    chapter, so you replay missions to earn them. The mission sheet lists what is missing with a link to it.
+  - Stars (1–3: ★★★ = 80%+ HP left and 90%+ accuracy) are kept per mission, variant and direction.
 - **Free play:** endless waves from the topics you pick, with a balaur every 5th wave.
 
 - **Directions:** EN → RO (read English, type Romanian) or RO → EN.
@@ -34,6 +40,21 @@ player's device (mirrored to `localStorage`).
   practise. Progress is kept per word and direction (`game/progress.ts`): two typo-free wins = mastered, and
   unmastered words are served first. The menu shows how many words of the chosen topics you have mastered.
 - **Castle:** 10 HP (Pokémon-style bar), +1 at the start of every wave. Cottages puff smoke as it takes damage.
+
+## Accounts
+
+Optional. Guests play with progress saved on the device (below). With an account (username + password, **no email**,
+so children can sign up) the same save is also kept on the server and follows the player to any device:
+
+- `backend/src/accounts.ts`: `GET /api/account` (who am I + save; `enabled: false` when there is no database),
+  `POST /api/account/register | login | logout | delete`, `PUT /api/account/save`.
+- Passwords are scrypt-hashed; the session is a random token in an `HttpOnly` cookie `wws` scoped to `Path=/api`
+  (so it never rides along with page and asset requests), 1 year; only its SHA-256 is stored. Login and sign-up are
+  rate limited per IP (`AUTH_ATTEMPTS`, `SIGNUPS_PER_HOUR`).
+- Saves are merged, never overwritten (`backend/src/saves.ts`, same rules as the client): best stars/scores/word
+  progress of every device, settings from the newest. The client uploads ~3 s after each change and adopts the merged
+  result; on login this device's progress is merged into the account; logging out clears the device's progress.
+- Without `DATABASE_URL` the backend still runs (health check, guest mode) and the account button is hidden.
 
 ## Saving (cookies)
 
@@ -64,7 +85,7 @@ frontend/src/
 │   ├── world.ts     banded sky, smiling sun, clouds, pastel mountains, hills, the castle and the owl guardian
 │   ├── enemies.ts   procedural creatures (bat, rock buddy, ghost, baby dragon, pebble, balaur) and bubbles
 │   ├── progress.ts  per-word learning progress (mastered after two typo-free wins)
-│   ├── levels.ts    the adventure levels, stars and unlocking
+│   ├── campaign.ts  chapters, missions, variants, requirements, stars; builds the run config for a mission
 │   ├── save.ts      the save: cookies (budgeted) + localStorage
 │   ├── effects.ts   pooled star beams, sparkles, poof clouds, bubble pops, dust
 │   ├── toon.ts      toon shader look-dev patch, cached materials, ink outlines (copied from play/)
@@ -83,9 +104,27 @@ frontend/src/
 About 3,250 words and phrases in 62 topics plus ~500 sentences. To add vocabulary, add `english|romanian` lines to a category block (or a new block plus an entry in `CATEGORIES`).
 Verbs are written `(to) eat|(a) mânca` so the infinitive marker is shown but not typed.
 
-## Configuration
+## Configuration: `/srv/apps/wordward/.env` on the server
 
-Nothing. `/srv/apps/wordward/.env` exists (created by the workflow) but no variable is read except `PORT`/`HOST`.
+| Variable           | Default | Purpose                                                      |
+|--------------------|---------|--------------------------------------------------------------|
+| `DATABASE_URL`     | —       | PostgreSQL for accounts; without it: guest mode only         |
+| `AUTH_ATTEMPTS`    | `20`    | Login/sign-up attempts per IP per 10 minutes                 |
+| `SIGNUPS_PER_HOUR` | `5`     | New accounts per IP per hour                                 |
+
+### Database (one time, for accounts)
+
+On the server (`psql` is installed), as the RDS master user:
+
+```sql
+CREATE USER wordward WITH PASSWORD '<strong-password>';
+CREATE DATABASE wordward OWNER wordward;
+REVOKE ALL ON DATABASE wordward FROM PUBLIC;
+```
+
+Then add `DATABASE_URL=postgres://wordward:<password>@<rds-endpoint>:5432/wordward?sslmode=require` to
+`/srv/apps/wordward/.env` and run `pm2 restart wordward --update-env` (or push any change). Tables are created by the
+migrations at startup. Locally, `npm --prefix backend run dev:db` starts an embedded PostgreSQL on port 5435.
 
 ---
 

@@ -3,12 +3,13 @@
 
 import * as THREE from 'three';
 import { clamp, fromTuple, hdist, lookDir, segmentBoxes, type Vec3, v3, vadd, vscale, vsub } from '@shared/math';
-import type { GameServerMsg, RoomView } from '@shared/protocol';
+import type { GameMode, GameServerMsg, PlayerInfo, RoomView, Team } from '@shared/protocol';
 import { RK } from '@shared/rockets/constants';
 import type { ItemKind, ItemSpawn } from '@shared/rockets/items';
 import type { MapData } from '@shared/rockets/map';
+import { CTF, ELIM, MODES, TEAMS, teamBases } from '@shared/rockets/modes';
 import { type Body, eyePosition, splashKnock, stepBody } from '@shared/rockets/physics';
-import type { PlayerSnap, RocketsEvent, RocketsInput, RocketsServerMsg, RocketsSnapshot, ScoreRow } from '@shared/rockets/protocol';
+import type { FlagSnap, PlayerSnap, RocketsEvent, RocketsInput, RocketsServerMsg, RocketsSnapshot, RoundSnap, ScoreRow } from '@shared/rockets/protocol';
 import { sfx } from '../../engine/audio';
 import { Effects, LightPool, TRAIL_STEP, nearestSurface } from '../../engine/effects';
 import { Engine, colorHex, makeLabel } from '../../engine/engine';
@@ -18,6 +19,7 @@ import { INK } from '../../engine/toon';
 import { TouchInput } from '../../engine/touch';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { type ArenaView, addArenaLights, buildArena } from './arena';
+import { buildFlag, buildFlagStand, buildReturnRing, updateFlagTime } from './flags';
 import { type DroidPiece, WARHEAD_REST_Z, buildDroid, buildDroidPieces, buildLauncher, buildPickup, buildRocket, updateDroidPieces, warmupModels } from './models';
 import { QUALITY, type Quality, applyInput, applyQuality, settings, verticalFov } from './settings';
 
@@ -47,8 +49,24 @@ export interface RocketsHudState {
   locked: boolean;
   dragLook: boolean;
   paused: boolean;
-  ended: { scores: ScoreRow[]; winner: string | null } | null;
+  ended: { scores: ScoreRow[]; winner: string | null; winnerTeam?: Team | null } | null;
   message: string;
+  /** Game mode of this match (from init). */
+  mode?: GameMode;
+  /** Our team in team modes. */
+  myTeam?: Team;
+  /** Team modes: team scores [red, blue]. */
+  ts?: [number, number];
+  /** CTF: each team's flag (index = team). */
+  flags?: [FlagSnap, FlagSnap];
+  /** CTF: seconds until each dropped flag goes home by itself (0 when not dropped). */
+  flagReturn?: [number, number];
+  /** Elimination round state. */
+  round?: RoundSnap;
+  /** Big comic callout (flag events, rounds); `id` changes per callout so the HUD can replay its pop-in. */
+  callout?: { id: number; text: string; team?: Team; at: number };
+  /** Elimination: the teammate whose view we are watching while dead. */
+  spectating?: string | null;
   /** Seconds of start countdown left (players are frozen while it runs). */
   countdown?: number;
   overtime?: boolean;
@@ -79,6 +97,11 @@ interface Remote {
   label: THREE.Sprite;
   /** Team-coloured arrow over the head of far-away droids, which are only a few pixels tall by then. */
   marker: THREE.Sprite;
+  /** Team modes: a diamond over teammates, seen through walls, so you know whom not to shoot. */
+  ally: THREE.Sprite | null;
+  team?: Team;
+  /** The colour the model is painted in (the team colour in team modes, else the player colour). */
+  paint: number;
   /** The label's scale at 1x, so it can grow with distance. */
   labelW: number;
   labelH: number;
@@ -200,10 +223,57 @@ function markerTexture() {
   return markerTex;
 }
 
+/** The teammate marker: an ink-outlined diamond with a white pip, tinted per team. Shared by all ally markers. */
+let allyTex: THREE.CanvasTexture | null = null;
+function allyTexture() {
+  if (allyTex) return allyTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const diamond = (r: number) => {
+    g.beginPath();
+    g.moveTo(32, 32 - r);
+    g.lineTo(32 + r * 0.8, 32);
+    g.lineTo(32, 32 + r);
+    g.lineTo(32 - r * 0.8, 32);
+    g.closePath();
+  };
+  diamond(26);
+  g.fillStyle = '#ffffff';
+  g.fill();
+  g.lineJoin = 'round';
+  g.lineWidth = 6;
+  g.strokeStyle = colorHex(INK);
+  g.stroke();
+  diamond(9);
+  g.fillStyle = colorHex(INK);
+  g.fill();
+  allyTex = new THREE.CanvasTexture(c);
+  allyTex.colorSpace = THREE.SRGBColorSpace;
+  return allyTex;
+}
+
+/** One CTF flag in the world: the stand at its base, the flag itself, and the ring and label shown while dropped. */
+interface FlagView {
+  team: Team;
+  base: Vec3;
+  stand: THREE.Group;
+  flag: THREE.Group;
+  ring: THREE.Mesh;
+  label: THREE.Sprite | null;
+  /** Whole seconds the label shows, so it is only redrawn once a second. */
+  labelN: number;
+  state: 0 | 1 | 2;
+  /** this.time when it was dropped (for the return ring). */
+  droppedAt: number;
+}
+
 const scratchV = new THREE.Vector3();
 const scratchEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const forward = new THREE.Vector3();
 const scratchTo = v3();
+const specFrom = v3();
+const specTo = v3();
 /** Reload in commands; the server counts the same for humans. */
 const FIRE_STEPS = Math.round(RK.fireInterval / RK.dt);
 
@@ -313,6 +383,21 @@ export class RocketsClient implements GameClient {
   private serverLeft: number = RK.matchSeconds;
   private serverLeftAt = 0;
   private disposed = false;
+  // ---- modes and teams ----
+  private mode: GameMode = 'ffa';
+  private bases: [Vec3, Vec3] | null = null;
+  private flagViews: FlagView[] = [];
+  private lastFlags: [FlagSnap, FlagSnap] | null = null;
+  private lastRound: RoundSnap | null = null;
+  private calloutId = 0;
+  /** Elimination spectator: whose view we follow while dead, and the eased camera. */
+  private specId: string | null = null;
+  private readonly specCam = v3();
+  private specYaw = 0;
+  private specPitch = 0;
+  private specFresh = true;
+  /** Dev aid: fields merged into every incoming snapshot, to preview mode HUDs against a server without them. */
+  debugSnap: Partial<RocketsSnapshot> | null = null;
 
   constructor(private readonly ctx: ClientContext) {}
 
@@ -397,8 +482,50 @@ export class RocketsClient implements GameClient {
   onRoom(room: RoomView) {
     for (const [id, r] of this.remotes) {
       const p = room.players.find((q) => q.id === id);
-      if (!p || r.name !== p.name || r.color !== p.color) this.removeRemote(id);
+      // A team switch repaints the droid and its label: rebuild it.
+      if (!p || r.name !== p.name || r.color !== p.color || r.team !== this.teamOfInfo(p)) this.removeRemote(id);
     }
+    const myTeam = this.teamOf(this.ctx.you);
+    if (myTeam !== this.hud.get().myTeam) this.hud.set({ myTeam });
+  }
+
+  /** Dev aid for screenshots before the server speaks a mode: switch the client's mode (and CTF flags) in place. */
+  debugMode(mode: GameMode) {
+    this.setMode(mode);
+    for (const id of [...this.remotes.keys()]) this.removeRemote(id);
+  }
+
+  private setMode(mode: GameMode) {
+    this.mode = mode;
+    this.hud.set({ mode, myTeam: this.teamOf(this.ctx.you) });
+    this.buildFlags();
+  }
+
+  private get teamMode() {
+    return MODES[this.mode].teams;
+  }
+
+  private teamOfInfo(p: PlayerInfo | undefined): Team | undefined {
+    if (!this.teamMode || !p) return undefined;
+    return p.team ?? this.hud.get().scores.find((r) => r.id === p.id)?.team;
+  }
+
+  /** A player's team in team modes (from the room, else the scoreboard); undefined in free for all. */
+  teamOf(id: string): Team | undefined {
+    if (!this.teamMode) return undefined;
+    const p = this.ctx.room().players.find((q) => q.id === id);
+    return p?.team ?? this.hud.get().scores.find((r) => r.id === id)?.team;
+  }
+
+  /** Sends a team switch; the server kills us without penalty and respawns us on the new side. */
+  switchTeam(team?: Team) {
+    const mine = this.teamOf(this.ctx.you);
+    const to: Team = team ?? (mine === 0 ? 1 : 0);
+    this.ctx.socket.send({ t: 'setTeam', team: to });
+  }
+
+  private callout(text: string, team?: Team) {
+    this.hud.set({ callout: { id: ++this.calloutId, text, team, at: this.time } });
   }
 
   // ---- messages -----------------------------------------------------------------------------------------------
@@ -412,6 +539,9 @@ export class RocketsClient implements GameClient {
         this.serverLeft = msg.left;
         this.serverLeftAt = this.time;
         this.hud.set({ scores: msg.scores, left: msg.left, mapName: msg.map.name });
+        this.bases = msg.bases ? [fromTuple(msg.bases[0]), fromTuple(msg.bases[1])] : null;
+        this.mode = msg.mode ?? this.ctx.room().mode ?? 'ffa';
+        this.hud.set({ mode: this.mode, myTeam: this.teamOf(this.ctx.you) });
         if (this.engine) this.buildWorld();
         break;
       case 'snap':
@@ -424,14 +554,19 @@ export class RocketsClient implements GameClient {
         this.hud.set({ scores: msg.scores });
         break;
       case 'end':
-        this.hud.set({ ended: { scores: msg.scores, winner: msg.winner }, scores: msg.scores });
+        this.hud.set({ ended: { scores: msg.scores, winner: msg.winner, winnerTeam: msg.winnerTeam }, scores: msg.scores });
         this.input?.exitLock();
-        if (msg.winner === this.ctx.you) sfx.play('win');
+        if (this.teamMode && msg.winnerTeam !== undefined) {
+          if (msg.winnerTeam !== null && msg.winnerTeam === this.teamOf(this.ctx.you)) sfx.play('win');
+          else if (msg.winnerTeam !== null) sfx.play('out');
+        } else if (msg.winner === this.ctx.you) sfx.play('win');
         break;
     }
   }
 
   private onSnapshot(s: RocketsSnapshot) {
+    if (import.meta.env.DEV && this.debugSnap) s = { ...s, ...this.debugSnap };
+    this.modeSnapshot(s);
     // Keyed by simulation time, not arrival time, so network jitter and bursts do not show as stutter.
     this.snaps.push(s, s.tick * RK.dt);
     this.snaps.trim(1);
@@ -471,6 +606,36 @@ export class RocketsClient implements GameClient {
       if (view.confirmed && !seen.has(id)) this.removeRocket(id);
       else if (!view.confirmed && now - view.born > 1) this.removeRocket(id);
     }
+  }
+
+  /** Team scores, flags and rounds from a snapshot into the HUD (only what changed) and the flag props. */
+  private modeSnapshot(s: RocketsSnapshot) {
+    const h = this.hud.get();
+    const patch: Partial<RocketsHudState> = {};
+    if (s.ts && (!h.ts || h.ts[0] !== s.ts[0] || h.ts[1] !== s.ts[1])) patch.ts = s.ts;
+    if (s.fl) {
+      const prev = this.lastFlags;
+      if (!prev || prev[0].s !== s.fl[0].s || prev[1].s !== s.fl[1].s || prev[0].by !== s.fl[0].by || prev[1].by !== s.fl[1].by) patch.flags = s.fl;
+      for (const f of this.flagViews) {
+        const snap = s.fl[f.team];
+        if (snap.s === 2 && f.state !== 2) f.droppedAt = this.time;
+        f.state = snap.s;
+      }
+      this.lastFlags = s.fl;
+    }
+    const rd = s.rd;
+    if (rd) {
+      const was = this.lastRound;
+      // A new round starting (or the first one we see): banner and a go sound.
+      if (rd.state === 'play' && (!was || was.n !== rd.n || was.state !== 'play')) {
+        this.callout(`Round ${rd.n}`);
+        sfx.play('go');
+        this.specId = null;
+      }
+      if (!was || was.n !== rd.n || was.state !== rd.state || was.alive[0] !== rd.alive[0] || was.alive[1] !== rd.alive[1] || Math.abs(was.left - rd.left) >= 1) patch.round = rd;
+      this.lastRound = rd;
+    }
+    if (Object.keys(patch).length) this.hud.set(patch);
   }
 
   /**
@@ -640,7 +805,7 @@ export class RocketsClient implements GameClient {
         if (e.id !== you) fx?.burst(vadd(pos, v3(0, 1, 0)), 0xffffff, 25, 3, 0.6, 0.8);
         if (e.id === you) {
           sfx.play('spawn');
-          this.hud.set({ dead: false, hp: RK.maxHealth });
+          this.hud.set({ dead: false, hp: this.mode === 'elim' ? ELIM.health : RK.maxHealth, spectating: null });
         } else sfx.playAt('spawn', pos.x, pos.y, pos.z);
         break;
       }
@@ -674,6 +839,58 @@ export class RocketsClient implements GameClient {
         }
         break;
       }
+      case 'flag':
+        this.onFlagEvent(e.team, e.a, e.by);
+        break;
+      case 'round': {
+        const mine = this.teamOf(you);
+        if (e.winner === null) this.callout(`Round ${e.n} drawn`);
+        else this.callout(`${TEAMS[e.winner].name} takes round ${e.n}!`, e.winner);
+        sfx.play(e.winner !== null && e.winner === mine ? 'win' : 'out');
+        break;
+      }
+      case 'team': {
+        const who = e.id === you ? 'You' : this.name(e.id);
+        this.feed(`${who} joined ${TEAMS[e.team].name}`);
+        break;
+      }
+    }
+  }
+
+  /** Comic callouts and sounds for a CTF flag changing hands. `team` is the flag's team. */
+  private onFlagEvent(team: Team, a: 'take' | 'drop' | 'return' | 'capture', by: string) {
+    const mine = this.teamOf(this.ctx.you);
+    const flag = TEAMS[team].name;
+    const other = (team === 0 ? 1 : 0) as Team;
+    const who = by === this.ctx.you ? 'You' : this.name(by);
+    const at = this.flagViews[team]?.flag.position;
+    const sound = (name: Parameters<typeof sfx.play>[0]) => {
+      if (by === this.ctx.you || !at) sfx.play(name);
+      else sfx.playAt(name, at.x, at.y, at.z);
+    };
+    switch (a) {
+      case 'take':
+        this.callout(`${flag} flag taken!`, team);
+        this.feed(`${who} took the ${flag} flag`);
+        // Our flag going is an alarm everywhere on the map; taking theirs is a pickup.
+        if (team === mine) sfx.play('crack');
+        else sound('mega');
+        if (by === this.ctx.you) this.addTrauma(0.15);
+        break;
+      case 'drop':
+        this.callout(`${flag} flag dropped!`, team);
+        sound('out');
+        break;
+      case 'return':
+        this.callout(`${flag} flag returned`, team);
+        sound('coin');
+        break;
+      case 'capture':
+        this.callout(`${TEAMS[other].name} scores!`, other);
+        this.feed(`${who} captured the ${flag} flag`);
+        sfx.play(other === mine ? 'win' : 'out');
+        if (this.effects && at) this.effects.burst(vadd(at, v3(0, 1.5, 0)), TEAMS[other].color, 40, 6, 0.8, 1.2);
+        break;
     }
   }
 
@@ -710,8 +927,38 @@ export class RocketsClient implements GameClient {
       this.items.push(item);
       this.itemBase.push(spawn.p.y + look.lift);
     }
+    this.buildFlags();
     this.applyQualityNow(settings.get().quality);
     engine.warmup(warmupModels());
+  }
+
+  /** CTF: a stand and a flag at each base (built once the map and mode are known; removed in other modes). */
+  private buildFlags() {
+    const { engine, map } = this;
+    for (const f of this.flagViews) {
+      engine?.scene.remove(f.stand, f.flag, f.ring);
+      if (f.label) {
+        engine?.scene.remove(f.label);
+        f.label.material.map?.dispose();
+        f.label.material.dispose();
+      }
+    }
+    this.flagViews = [];
+    if (!engine || !map || this.mode !== 'ctf') return;
+    const bases = this.bases ?? teamBases(map);
+    for (const team of [0, 1] as Team[]) {
+      const base = bases[team];
+      const stand = buildFlagStand(team);
+      stand.position.set(base.x, base.y, base.z);
+      const flag = buildFlag(team);
+      // Yaw first, then tilt and lie down around the flag's own axes.
+      flag.rotation.order = 'YXZ';
+      flag.position.set(base.x, base.y + 0.2, base.z);
+      const ring = buildReturnRing(team);
+      ring.visible = false;
+      engine.scene.add(stand, flag, ring);
+      this.flagViews.push({ team, base, stand, flag, ring, label: null, labelN: -1, state: 0, droppedAt: 0 });
+    }
   }
 
   private buildViewmodel() {
@@ -781,14 +1028,23 @@ export class RocketsClient implements GameClient {
     if (r) return r;
     const info = this.ctx.room().players.find((p) => p.id === id);
     if (!info || !this.engine) return null;
-    const group = buildDroid(info.color);
-    const label = makeLabel(info.name, colorHex(info.color));
+    const team = this.teamOfInfo(info);
+    const paint = team !== undefined ? TEAMS[team].color : info.color;
+    const group = this.makeRemoteModel(info, paint);
+    const label = makeLabel(info.name, colorHex(paint));
     label.position.y = RK.height + 0.2;
     group.add(label);
-    const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(), color: info.color, transparent: true, depthWrite: false }));
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(), color: paint, transparent: true, depthWrite: false }));
     marker.renderOrder = 10;
     marker.visible = false;
     group.add(marker);
+    let ally: THREE.Sprite | null = null;
+    if (team !== undefined && team === this.teamOf(this.ctx.you)) {
+      // Teammates show through walls; enemies never do.
+      ally = new THREE.Sprite(new THREE.SpriteMaterial({ map: allyTexture(), color: paint, transparent: true, depthWrite: false, depthTest: false }));
+      ally.renderOrder = 11;
+      group.add(ally);
+    }
     this.engine.scene.add(group);
     r = {
       group,
@@ -803,6 +1059,9 @@ export class RocketsClient implements GameClient {
       vy: 0,
       label,
       marker,
+      ally,
+      team,
+      paint,
       labelW: label.scale.x,
       labelH: label.scale.y,
       color: info.color,
@@ -822,7 +1081,17 @@ export class RocketsClient implements GameClient {
     mat.map?.dispose();
     mat.dispose();
     r.marker.material.dispose();
+    r.ally?.material.dispose();
     this.remotes.delete(id);
+  }
+
+  /**
+   * The 3D model for another player, painted `paint` (team colour in team modes). The seam for other character
+   * models: whatever this returns is driven by animateRemote through the named hooks it finds (see remote()).
+   */
+  private makeRemoteModel(info: PlayerInfo, paint: number): THREE.Group {
+    void info;
+    return buildDroid(paint);
   }
 
   /** Blows a remote droid apart where it stands; the pieces fly away from the killer. */
@@ -837,7 +1106,7 @@ export class RocketsClient implements GameClient {
       const len = push.length();
       if (len > 0.01) push.multiplyScalar(4 / len);
     }
-    const pieces = buildDroidPieces(r.color, r.group, push);
+    const pieces = buildDroidPieces(r.paint, r.group, push);
     for (const p of pieces) engine.scene.add(p.object);
     this.wrecks.push({ pieces, floorY: at.y, life: 2.5 });
   }
@@ -927,12 +1196,15 @@ export class RocketsClient implements GameClient {
       }
     }
 
+    // Elimination spectators flip between living teammates with a click or Space.
+    if (this.mode === 'elim' && me.dead && !this.paused && (input.clicked() || input.once('Space'))) this.cycleSpectate();
     this.updateCamera(dt, now);
     const cam = engine.camera;
     sfx.listen(cam.position.x, cam.position.y, cam.position.z, cam.rotation.y);
     sfx.heartbeat(this.me.dead ? 0 : this.hud.get().hp, RK.maxHealth);
     this.updateRemotes(dt, now);
     this.updateRockets(dt, now);
+    this.updateFlags(now);
     if (this.arena) for (const ring of this.arena.padRings) ring.rotation.z += dt * 1.5;
     for (let i = 0; i < this.packs.length; i++) {
       const pack = this.packs[i];
@@ -964,6 +1236,17 @@ export class RocketsClient implements GameClient {
         s.overtime !== this.overtime
       ) {
         this.hud.set({ left, locked: input.locked, dragLook: input.dragLook, dead: this.me.dead, respawnIn, countdown, overtime: this.overtime });
+      }
+      const spectating = this.me.dead && this.mode === 'elim' ? this.specId : null;
+      if ((s.spectating ?? null) !== spectating) this.hud.set({ spectating });
+      if (this.flagViews.length) {
+        const ret = (team: Team) => {
+          const f = this.flagViews[team];
+          return f.state === 2 ? Math.ceil(Math.max(0, CTF.returnSeconds - (now - f.droppedAt))) : 0;
+        };
+        const r0 = ret(0);
+        const r1 = ret(1);
+        if (!s.flagReturn || s.flagReturn[0] !== r0 || s.flagReturn[1] !== r1) this.hud.set({ flagReturn: [r0, r1] });
       }
       const fps = Math.round(engine.fps);
       if (Math.abs(fps - s.fps) >= 2) this.hud.set({ fps });
@@ -1112,6 +1395,9 @@ export class RocketsClient implements GameClient {
     me.smooth.z = damp(me.smooth.z, 0, 20, dt);
 
     if (me.dead && !this.wasDead) {
+      // Presses from the last life must not flip the spectator camera straight away.
+      this.input?.clearOnce();
+      this.specFresh = true;
       this.deathT = 0;
       this.deathYaw = me.yaw;
       this.deathPitch = me.pitch;
@@ -1186,7 +1472,18 @@ export class RocketsClient implements GameClient {
     let yaw = me.yaw;
     let pitch = me.pitch;
     let roll = this.roll;
-    if (me.dead) {
+    const spec = me.dead && this.mode === 'elim' && this.deathT > 1.2 ? this.spectateTarget() : null;
+    if (spec) {
+      // Elimination: once the death beat has played, ride along behind a living teammate.
+      this.deathT += dt;
+      this.chaseCam(spec, dt);
+      ex = this.specCam.x;
+      ey = this.specCam.y;
+      ez = this.specCam.z;
+      yaw = this.specYaw;
+      pitch = this.specPitch;
+      roll = 0;
+    } else if (me.dead) {
       // Death camera: pull up and back from the body, tip a little and turn to face whoever got us.
       this.deathT += dt;
       const k = smoothstep(this.deathT / 0.9);
@@ -1245,6 +1542,74 @@ export class RocketsClient implements GameClient {
     void now;
   }
 
+  /** The teammate we spectate: the current pick while they live, else the first living teammate. */
+  private spectateTarget(): Remote | null {
+    const mine = this.teamOf(this.ctx.you);
+    if (this.specId) {
+      const r = this.remotes.get(this.specId);
+      if (r && r.group.visible && r.team === mine) return r;
+    }
+    for (const [id, r] of this.remotes) {
+      if (r.group.visible && r.team === mine) {
+        this.specId = id;
+        this.specFresh = true;
+        return r;
+      }
+    }
+    this.specId = null;
+    return null;
+  }
+
+  private cycleSpectate() {
+    const mine = this.teamOf(this.ctx.you);
+    const ids = [...this.remotes].filter(([, r]) => r.group.visible && r.team === mine).map(([id]) => id);
+    if (!ids.length) return;
+    const i = this.specId ? ids.indexOf(this.specId) : -1;
+    this.specId = ids[(i + 1) % ids.length];
+    this.specFresh = true;
+  }
+
+  /** Over-the-shoulder camera 3 m behind and above `r`, pulled in where a wall is in the way, looking at its head. */
+  private chaseCam(r: Remote, dt: number) {
+    const p = r.group.position;
+    const yaw = r.group.rotation.y;
+    specFrom.x = p.x;
+    specFrom.y = p.y + RK.eyeHeight;
+    specFrom.z = p.z;
+    const back = 3.2;
+    specTo.x = p.x + Math.sin(yaw) * back;
+    specTo.y = specFrom.y + 0.9;
+    specTo.z = p.z + Math.cos(yaw) * back;
+    const hit = this.map ? segmentBoxes(specFrom, specTo, this.map.boxes) : null;
+    const t = hit ? Math.max(0.15, hit.t - 0.12) : 1;
+    const tx = specFrom.x + (specTo.x - specFrom.x) * t;
+    const ty = specFrom.y + (specTo.y - specFrom.y) * t;
+    const tz = specFrom.z + (specTo.z - specFrom.z) * t;
+    const c = this.specCam;
+    if (this.specFresh) {
+      c.x = tx;
+      c.y = ty;
+      c.z = tz;
+    } else {
+      c.x = damp(c.x, tx, 10, dt);
+      c.y = damp(c.y, ty, 10, dt);
+      c.z = damp(c.z, tz, 10, dt);
+    }
+    const dx = p.x - c.x;
+    const dz = p.z - c.z;
+    const dy = specFrom.y - c.y;
+    const wantYaw = Math.atan2(-dx, -dz);
+    const wantPitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -0.9, 0.6);
+    if (this.specFresh) {
+      this.specYaw = wantYaw;
+      this.specPitch = wantPitch;
+      this.specFresh = false;
+    } else {
+      this.specYaw = lerpAngle(this.specYaw, wantYaw, 1 - Math.exp(-12 * dt));
+      this.specPitch = damp(this.specPitch, wantPitch, 12, dt);
+    }
+  }
+
   /**
    * The death camera's resting spot: up to 2 m above the eye, then up to 3.5 m back along the line from the killer
    * (or behind the view without one). Each leg is traced against the map and stops short of whatever it hits, so the
@@ -1295,29 +1660,9 @@ export class RocketsClient implements GameClient {
         const y = sameLife ? pa.p[1] + (pb.p[1] - pa.p[1]) * alpha : pb.p[1];
         const z = sameLife ? pa.p[2] + (pb.p[2] - pa.p[2]) * alpha : pb.p[2];
         const yaw = sameLife ? lerpAngle(pa.y, pb.y, alpha) : pb.y;
-        r.bob += dt * 3;
         r.group.position.set(x, y + (pb.g ? 0 : 0.05), z);
         r.group.rotation.y = yaw;
-        if (r.bobNode) r.bobNode.position.y = Math.sin(r.bob) * 0.04;
-        // Lean the torso into the movement direction a little; the gun arm and head still aim where they look.
-        const vx = pb.v[0];
-        const vz = pb.v[2];
-        const fwd = -Math.sin(yaw) * vx - Math.cos(yaw) * vz;
-        const side = Math.cos(yaw) * vx - Math.sin(yaw) * vz;
-        const leanX = clamp(-fwd * 0.02, -0.25, 0.25);
-        if (r.torso) {
-          r.torso.rotation.x = leanX;
-          r.torso.rotation.z = clamp(-side * 0.02, -0.25, 0.25);
-        }
-        const pitch = sameLife ? pa.pt + (pb.pt - pa.pt) * alpha : pb.pt;
-        if (r.aim) r.aim.rotation.x = pitch - (r.torso ? leanX : 0);
-        if (r.head) r.head.rotation.x = pitch * 0.5;
-        r.kick = Math.max(0, r.kick - dt * 4);
-        if (r.recoil) {
-          r.recoil.position.z = r.kick * 0.12;
-          r.recoil.rotation.x = r.kick * 0.3;
-        }
-        if (r.thrust) r.thrust.scale.set(1, (pb.g ? 0.7 : 1.3) + Math.sin(r.bob * 9) * 0.12, 1);
+        this.animateRemote(r, pa, pb, sameLife ? alpha : 1, yaw, dt);
         // Landing dust, from the older of the two snapshots so it lines up with where the droid is drawn.
         if (sameLife && pa.g === 1 && !r.ground && r.vy < -7) this.effects?.dust(r.group.position, (-r.vy - 7) / 15);
         r.ground = pa.g === 1;
@@ -1331,15 +1676,112 @@ export class RocketsClient implements GameClient {
           // Past ~25 m a droid is a few pixels tall: fade in a marker of roughly constant screen size over its head.
           const show = clamp((d - 25) / 10, 0, 1);
           const size = d * 0.022;
-          r.marker.visible = show > 0;
+          r.marker.visible = show > 0 && !r.ally;
           r.marker.material.opacity = show;
           r.marker.scale.set(size, size, 1);
           r.marker.position.y = RK.height + 0.15 + size * 0.5;
-          r.label.position.y = RK.height + 0.2 + (show > 0 ? size : 0) + r.labelH * (k - 1) * 0.5;
+          const top = RK.height + 0.2 + (show > 0 ? size : 0) + r.labelH * (k - 1) * 0.5;
+          r.label.position.y = top;
+          if (r.ally) {
+            // Teammates: the diamond sits above the name at a steady screen size (never smaller than up close).
+            const a = Math.max(0.24, d * 0.02);
+            r.ally.scale.set(a, a, 1);
+            r.ally.position.y = top + r.labelH * k * 0.5 + a * 0.6;
+          }
         }
       }
     }
     for (const r of this.remotes.values()) if (r.seen !== frame) r.group.visible = false;
+  }
+
+  /**
+   * CTF flags: on the stand at base, on the carrier's back (pole tilted, cloth streaming behind), or lying where it
+   * fell with a ring that shrinks as its auto-return runs out.
+   */
+  private updateFlags(now: number) {
+    if (!this.flagViews.length) return;
+    updateFlagTime(now);
+    const fl = this.lastFlags;
+    for (const f of this.flagViews) {
+      const snap = fl?.[f.team];
+      const g = f.flag;
+      const state = snap?.s ?? 0;
+      f.ring.visible = state === 2;
+      if (f.label) f.label.visible = state === 2;
+      if (state === 0 || !snap) {
+        g.visible = true;
+        g.position.set(f.base.x, f.base.y + 0.2, f.base.z);
+        g.rotation.set(0, now * 0.15, 0);
+        g.scale.setScalar(1);
+        continue;
+      }
+      if (state === 1) {
+        // Our own carried flag is not drawn in first person (it would fill the screen); the HUD says we have it.
+        const carrier = snap.by && snap.by !== this.ctx.you ? this.remotes.get(snap.by) : undefined;
+        g.visible = snap.by !== this.ctx.you && (!carrier || carrier.group.visible);
+        if (carrier) {
+          const cp = carrier.group.position;
+          const yaw = carrier.group.rotation.y;
+          g.position.set(cp.x + Math.sin(yaw) * 0.32, cp.y + 0.45, cp.z + Math.cos(yaw) * 0.32);
+          g.rotation.set(0, yaw - Math.PI / 2, -0.32);
+        } else {
+          g.position.set(snap.p[0], snap.p[1] + 0.45, snap.p[2]);
+          g.rotation.set(0, 0, -0.32);
+        }
+        g.scale.setScalar(0.62);
+        continue;
+      }
+      // Dropped: the flag lies on its side, the ring and a countdown over it.
+      g.visible = true;
+      const lie = f.team * 1.7 + 0.6;
+      g.position.set(snap.p[0], snap.p[1] + 0.15, snap.p[2]);
+      g.rotation.set(1.45, lie, 0);
+      g.scale.setScalar(0.85);
+      // Ring and countdown centre on the lying flag, a metre along the pole.
+      const cx = snap.p[0] + Math.sin(lie) * 1.1;
+      const cz = snap.p[2] + Math.cos(lie) * 1.1;
+      const left = Math.max(0, CTF.returnSeconds - (this.time - f.droppedAt));
+      const k = Math.max(0.05, left / CTF.returnSeconds);
+      f.ring.position.set(cx, snap.p[1] + 0.04, cz);
+      f.ring.scale.set(k, 1, k);
+      const n = Math.ceil(left);
+      if (n !== f.labelN) {
+        f.labelN = n;
+        if (f.label) {
+          this.engine?.scene.remove(f.label);
+          f.label.material.map?.dispose();
+          f.label.material.dispose();
+        }
+        f.label = makeLabel(`Back in ${n}s`, TEAMS[f.team].css);
+        this.engine?.scene.add(f.label);
+      }
+      f.label?.position.set(cx, snap.p[1] + 1.3, cz);
+    }
+  }
+
+  /** Poses a remote model between two snapshots: hover bob, lean, aim, recoil and thruster (the droid's hooks). */
+  private animateRemote(r: Remote, pa: PlayerSnap, pb: PlayerSnap, alpha: number, yaw: number, dt: number) {
+    r.bob += dt * 3;
+    if (r.bobNode) r.bobNode.position.y = Math.sin(r.bob) * 0.04;
+    // Lean the torso into the movement direction a little; the gun arm and head still aim where they look.
+    const vx = pb.v[0];
+    const vz = pb.v[2];
+    const fwd = -Math.sin(yaw) * vx - Math.cos(yaw) * vz;
+    const side = Math.cos(yaw) * vx - Math.sin(yaw) * vz;
+    const leanX = clamp(-fwd * 0.02, -0.25, 0.25);
+    if (r.torso) {
+      r.torso.rotation.x = leanX;
+      r.torso.rotation.z = clamp(-side * 0.02, -0.25, 0.25);
+    }
+    const pitch = pa.pt + (pb.pt - pa.pt) * alpha;
+    if (r.aim) r.aim.rotation.x = pitch - (r.torso ? leanX : 0);
+    if (r.head) r.head.rotation.x = pitch * 0.5;
+    r.kick = Math.max(0, r.kick - dt * 4);
+    if (r.recoil) {
+      r.recoil.position.z = r.kick * 0.12;
+      r.recoil.rotation.x = r.kick * 0.3;
+    }
+    if (r.thrust) r.thrust.scale.set(1, (pb.g ? 0.7 : 1.3) + Math.sin(r.bob * 9) * 0.12, 1);
   }
 
   private updateRockets(dt: number, now: number) {
