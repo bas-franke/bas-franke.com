@@ -1,0 +1,74 @@
+name: Deploy status
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'status/**'
+      - '.github/workflows/deploy-status.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-status
+  cancel-in-progress: false
+
+env:
+  PROJECT: status
+  BACKEND_PORT: 3002
+  NODE_VERSION: '24'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            ${{ env.PROJECT }}/frontend/package-lock.json
+            ${{ env.PROJECT }}/backend/package-lock.json
+
+      - name: Build frontend
+        working-directory: ${{ env.PROJECT }}/frontend
+        run: npm ci && npm run build
+
+      - name: Build backend
+        working-directory: ${{ env.PROJECT }}/backend
+        run: npm ci && npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+          printf 'Host server\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n' "$EC2_HOST" "$EC2_USER" > ~/.ssh/config
+
+      - name: Upload files
+        run: |
+          ssh server "mkdir -p /var/www/$PROJECT/frontend /srv/apps/$PROJECT/backend"
+          rsync -az --delete "$PROJECT/frontend/dist/" "server:/var/www/$PROJECT/frontend/"
+          rsync -az --delete --exclude node_modules \
+            "$PROJECT/backend/dist" \
+            "$PROJECT/backend/package.json" \
+            "$PROJECT/backend/package-lock.json" \
+            "$PROJECT/deploy/ecosystem.config.cjs" \
+            "server:/srv/apps/$PROJECT/backend/"
+
+      - name: Install and restart backend
+        run: |
+          ssh server "cd /srv/apps/$PROJECT/backend \
+            && npm ci --omit=dev --no-audit --no-fund \
+            && pm2 startOrReload ecosystem.config.cjs --update-env \
+            && pm2 save"
+
+      - name: Health check
+        run: |
+          ssh server "for i in \$(seq 1 15); do curl -fsS http://127.0.0.1:$BACKEND_PORT/api/health && exit 0; sleep 2; done; pm2 logs $PROJECT --lines 50 --nostream; exit 1"
