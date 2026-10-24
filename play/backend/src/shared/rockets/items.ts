@@ -38,25 +38,25 @@ const quad = (k: ItemKind, x: number, y: number, z: number): ItemSpawn[] => [0, 
 
 const ITEMS: Record<string, ItemSpawn[]> = {
   // Mega on top of a pillar: rocket-jump for it. Armor on the central platform, shards on the floor and the ledges.
-  foundry: [...one('mega', 11.5, 7, 11.5), ...pair('armor', -5, 3, 5), ...quad('shard', 0, 0, 20), ...pair('shard', 30.25, 4, 6), ...pair('shard', 30.25, 4, -6)],
+  foundry: [...one('mega', 11.5, 9, 11.5), ...pair('armor', -5, 3, 5), ...quad('shard', 0, 0, 20), ...pair('shard', 30.25, 4, 6), ...pair('shard', 30.25, 4, -6)],
   // Mega on the hub next to the health; armor out on the high bridges; shards on the outer islands.
   skyway: [...one('mega', 2.4, 2, -2.4), ...pair('armor', 16, 5, 25), ...quad('shard', 26, 0, 4.5), ...quad('shard', 26, 0, -4.5)],
   // Mega down on the canyon floor between both plateaus; armor up top; shards across the bridges.
   canyon: [...one('mega', 0, 0, 5), ...pair('armor', 24, 6, -12), ...pair('shard', 8, 6, 20), ...pair('shard', -8, 6, 20)],
   // Mega on the second tier of the pyramid; armor on the open floor; shards round the first tier.
-  ziggurat: [...one('mega', 6, 4, 6), ...pair('armor', 20, 0, 0), ...quad('shard', 10, 2, -5)],
+  ziggurat: [...one('mega', 6, 4, 6), ...pair('armor', 20, 2.2, 0), ...quad('shard', 10, 2, -5)],
   // Mega on the central spire next to its launch pad; armor on two pad-only spires; shards on the low towers.
   spires: [...one('mega', 2.5, 5, 2.5), ...pair('armor', 8, 5, 28), ...quad('shard', 10, 3, 10), ...quad('shard', 24, 7, 6.5)],
   // Mega up on the battlements; armor on two corner bunkers; shards outside each doorway.
-  fortress: [...one('mega', 6, 5, 11.25), ...pair('armor', 31, 3, 25), ...quad('shard', 0, 0, 16)],
+  fortress: [...one('mega', 6, 5, 11.25), ...pair('armor', 31, 3, 25), ...quad('shard', 0, 1.3, 16)],
   // Mega on the raised walkway; armor on the far ring; shards round the ring near the edge of the pit.
   pit: [...one('mega', 12, 5, 29.5), ...pair('armor', 16, 0, -19), ...quad('shard', 12, 0, -14)],
   // Mega in the middle of the long bridge, in view of both bases; armor on the base towers; shards under the bridge.
-  twin: [...one('mega', 0, 4, 0), ...pair('armor', 0, 8, 30), ...pair('shard', 5, 0, 14), ...pair('shard', -5, 0, 14)],
+  twin: [...one('mega', 0, 9, 0), ...pair('armor', 0, 8, 30), ...pair('shard', 5, 0, 14), ...pair('shard', -5, 0, 14)],
   // Mega on a rooftop; armor on two low roofs; shards on the streets.
-  downtown: [...one('mega', 25, 7, 7), ...pair('armor', 9, 2.5, 25), ...quad('shard', 0, 0, 17)],
+  downtown: [...one('mega', 25, 7, 7), ...pair('armor', 9, 2.5, 25), ...quad('shard', 0, 1.4, 17)],
   // Mega on top of the central pillar: rocket-jump for it. Armor on two inner platforms; shards on the outer ring.
-  orbit: [...one('mega', 0, 5, 0), ...pair('armor', 10.3, 3, 10.3), ...quad('shard', 26, 6, -2)],
+  orbit: [...one('mega', 0, 6, 0), ...pair('armor', 13.5, 3, 13.5), ...quad('shard', 26, 7, -2)],
 };
 
 /** Item layout for a map (empty for a map without one). */

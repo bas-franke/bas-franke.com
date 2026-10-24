@@ -493,13 +493,14 @@ class RocketsGame implements GameServer {
       enemies,
       // Items count as packs for the bots' pickup routing, so they contest armor and mega health too.
       packs: [
-        ...this.map.packs.map((pos, i) => ({ pos, available: this.packs[i].available })),
-        ...this.items.map((it, i) => ({ pos: it.p, available: this.itemState[i].available })),
+        ...this.map.packs.map((pos, i) => ({ pos, available: this.packs[i].available, item: false })),
+        ...this.items.map((it, i) => ({ pos: it.p, available: this.itemState[i].available, item: true })),
       ],
       map: this.map,
       canSee: (from: Vec3, to: Vec3) => !segmentBoxes(from, to, this.map.boxes),
       // Rockets in flight, so bots can dodge them.
       rockets: this.rockets,
+      frozen: this.frozen(),
     };
   }
 
