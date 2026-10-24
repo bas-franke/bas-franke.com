@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from './config.js';
-import { cleanLine, stripCitations } from './text.js';
+import { cleanLine, completeDates, stripCitations } from './text.js';
 import type { Category, PlanSection, Settings, Source, Topic, TopicKind, TopicPlan } from './types.js';
 
 let client: OpenAI | undefined;
@@ -34,7 +34,11 @@ export const addUsage = (total: Usage, part: Partial<Usage>) => {
   return total;
 };
 
-const isReasoningModel = (model: string) => /^(gpt-5|o\d)/.test(model);
+const isReasoningModel = (model: string) => /^(gpt-[5-9]|o\d)/.test(model);
+
+/** "Saturday, 24 October 2026": the writer's anchor for turning "on Sunday" into a full date. */
+export const longDate = (date: Date, timeZone = 'UTC') =>
+  date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone });
 
 type Schema = Record<string, unknown>;
 
@@ -195,7 +199,7 @@ const RADAR_SCHEMA: Schema = {
             type: 'integer',
             description: '5 = everyone worldwide is talking about it, 3 = big in several countries or communities, 1 = notable in one. National subjects: how hot it is inside that country.',
           },
-          why_now: { type: 'string', description: 'One sentence for readers: what is happening and why people care today.' },
+          why_now: { type: 'string', description: 'One sentence for readers: what is happening and why people care. Any date in full with the year (\"Sunday, 25 October 2026\"); never \"this weekend\", \"on Saturday\", \"days before\" or another relative time.' },
           description: { type: 'string', description: 'One sentence on what the topic covers, for the planner.' },
         },
       },
@@ -227,7 +231,7 @@ export async function scanTrends(opts: {
   const { settings } = opts;
   const local = settings.local_countries ?? [];
   const instructions = [
-    `You are the trend radar for ${settings.site_name}, a learning feed that explains complicated things to anyone. Today is ${new Date().toISOString().slice(0, 10)}.`,
+    `You are the trend radar for ${settings.site_name}, a learning feed that explains complicated things to anyone. Today is ${longDate(new Date(), settings.timezone || 'UTC')}.`,
     'Discover, on your own, the 6 to 10 subjects the world is talking about and trying to UNDERSTAND right now, hottest first. Use the live signals as evidence of attention and use web search to confirm what is actually happening and to find big stories the signals miss (other regions, markets, science, technology).',
     'Good: wars and conflicts, elections and political crises, market crashes and rallies, inflation and rate decisions, bankruptcies and trade disputes, disasters and their causes, scientific results, technology everyone suddenly uses, cultural moments with substance behind them.',
     'Skip: celebrity gossip and scandals, individual crime cases, sports results, unverified rumours, anything where the only story is graphic detail.',
@@ -286,7 +290,7 @@ const SCOUT_SCHEMA: Schema = {
       properties: {
         subject: { type: 'string', description: 'The chosen subject.' },
         angle: { type: 'string', description: 'The ONE thing a 200-word story should make the reader understand about it.' },
-        why_now: { type: 'string', description: 'One sentence for readers: why this is in the air today.' },
+        why_now: { type: 'string', description: 'One sentence for readers: why this is in the air. Any date in full with the year (\"Sunday, 25 October 2026\"); never \"this weekend\", \"on Saturday\", \"days before\" or another relative time.' },
         topic_slug: { type: 'string', description: 'Slug of the existing topic this belongs to, or empty when a new topic is needed.' },
         new_topic: {
           anyOf: [
@@ -332,7 +336,7 @@ export async function scoutTrends(opts: {
 }): Promise<{ pick: TrendPick; usage: Usage }> {
   const { settings } = opts;
   const instructions = [
-    `You are the trend scout for ${settings.site_name}, a learning feed of very short stories that explain complicated things to anyone. Today is ${new Date().toISOString().slice(0, 10)}.`,
+    `You are the trend scout for ${settings.site_name}, a learning feed of very short stories that explain complicated things to anyone. Today is ${longDate(new Date(), settings.timezone || 'UTC')}.`,
     opts.focus
       ? `The topic "${opts.focus.name}" is trending (${opts.focus.heat_reason || 'in the news'}). Pick the ONE thing about it that most people would want to understand today: the newest development, a mechanism behind it, a term everyone is using, or a piece of history that explains the present. Use web search to get the current facts. Return topic_slug "${opts.focus.slug}" and no new topic.`
       : 'Find what many people are trying to UNDERSTAND right now and pick ONE subject. Good: wars and conflicts, elections and political crises, market crashes and rallies, inflation and rate decisions, bankruptcies, trade disputes, disasters and their causes, scientific results, technology everyone suddenly uses, cultural moments with substance behind them.',
@@ -372,12 +376,12 @@ const STORY_SCHEMA: Schema = {
   required: ['title', 'hook', 'body_markdown', 'takeaway', 'section', 'difficulty', 'tags', 'images', 'sources'],
   properties: {
     title: { type: 'string', description: 'At most 60 characters. Concrete and curiosity-making; no clickbait, no colon gimmicks.' },
-    hook: { type: 'string', description: 'One sentence, at most 140 characters, saying what the reader will understand.' },
+    hook: { type: 'string', description: 'One sentence, at most 140 characters, saying what the reader will understand. Any date in full with the year.' },
     body_markdown: {
       type: 'string',
       description: 'The story in Markdown: short paragraphs only, no headings, no links, no citation numbers, **bold** on the 1-3 terms to remember.',
     },
-    takeaway: { type: 'string', description: 'One plain sentence stating the idea, as a line the reader could repeat to a friend.' },
+    takeaway: { type: 'string', description: 'One plain sentence stating the key fact or idea, as a line the reader could repeat to a friend. Any date in full with the year.' },
     section: { type: 'string', description: 'The name of the topic section this story belongs to, chosen from the list given.' },
     difficulty: { type: 'integer', description: '1 = anyone, 2 = everyday knowledge helps, 3 = a detail inside the topic. Still fully standalone.' },
     tags: { type: 'array', items: { type: 'string' }, description: '3 to 5 short lowercase tags.' },
@@ -465,14 +469,16 @@ export async function writeStory(opts: {
 
   const instructions = [
     `You write for ${settings.site_name}, a learning feed: people scroll through very short stories, and each one makes a single complicated idea click.`,
+    `Today is ${longDate(new Date(), settings.timezone || 'UTC')}.`,
     `Audience: ${settings.audience}. Tone: ${settings.tone}. Language: ${settings.language}.`,
-    `THE STORY. About ${settings.target_words} words in body_markdown, never more than ${maxWords}. Paragraphs of one to three sentences. No headings, no lists longer than three items, no links, no URLs, no citation numbers.`,
+    `THE STORY. About ${settings.target_words} words in body_markdown: never fewer than ${Math.round(settings.target_words * 0.75)}, never more than ${maxWords}. Paragraphs of one to three sentences. No headings, no lists longer than three items, no links, no URLs, no citation numbers.`,
     'Fully standalone: assume the reader has never heard of the topic and has read nothing else here. Define every term the moment you use it, in plain words. Never refer to other stories ("as we saw", "in the previous part").',
-    'Tell it as a story, not a lecture: open with a concrete scene, person, moment or question (first sentence at most fifteen words), explain the mechanism or the why with one strong, everyday analogy, then land on why it matters to the reader.',
-    'Bold (**like this**) the one to three terms a reader should remember. Use numbers only when they really help, rounded and with context.',
-    'Be accurate. Prefer well-established facts; say "roughly" for estimates; never invent studies, quotes, figures or URLs.',
-    'On contested matters (wars, politics, economics): be neutral and fair, attribute claims to who makes them, describe what each side says and what is known, no advocacy.',
-    `Title: at most 60 characters, concrete, no clickbait. Hook: one sentence, at most 140 characters. Takeaway: the idea in one plain sentence. tags: 3 to 5 lowercase. Sources: 1 to 4 pages you relied on (in the sources field only).`,
+    'SHAPE. The page shows the title, then the hook, then the body, then the takeaway, so the body never repeats the title or hook: its first sentence carries the next fact. Lead with what matters most: what happened or what is true, with who, where and when (at most twenty words). Then the mechanism or the why, then the concrete consequence. Every sentence states a checkable fact or explains one, and adds something new: no closing summary, no lesson, moral or "that is why it matters". Deliver everything the title and hook promise, then stop after the last new fact.',
+    'FACTS. Use the handful of facts that matter most and that your sources state clearly; leave out side details, small disputed figures and anything only one source mentions. Never invent studies, quotes, figures or URLs, and never invent people, names, scenes or details for colour ("A nurse checks her gloves"); a made-up example is allowed only outside the news and plainly hypothetical ("Imagine you…"). At most one short analogy, and only an accurate one. Keep the sources’ qualifiers ("at least", "preliminary", "said"), say "roughly" for estimates and say plainly what is unknown. Name who reported a disputed number or claim ("the Associated Press"), never "reports say".',
+    'PEOPLE AND PLACES. Introduce every person by role, every organisation by full name and what it does, every place for a newcomer ("Hebron, a city in the Israeli-occupied West Bank"). Jobs change: give a title only when a source from the last few weeks confirms it, otherwise describe the person without one ("Aleksandar Vučić, who has led Serbian politics since 2012").',
+    `DATES. Stories are read months or years later, so in title, hook, body and takeaway every date is written in full with the year, every time ("Sunday, 25 October 2026", never "October 25" or "on 4 October"). Never "today", "tonight", "yesterday", "tomorrow", "this weekend", "last week", "now", "currently", "recently", "so far", "not yet", "days away", or a weekday without its full date ("Sunday’s vote" included). A recent event or statement gets its date when it first comes up; older background needs only the year. Tolls, counts, forecasts, warnings and unresolved matters say when they were true ("as of 24 October 2026"). Spans become start dates: "since 2012", not "for 14 years".`,
+    'Bold (**like this**) the one to three terms a reader should remember. On contested matters (wars, politics, economics): neutral and fair, claims attributed to who makes them, what each side says and what is known, no advocacy.',
+    `Title: at most 60 characters, concrete, no clickbait; title and hook are literally true and claim no more than the body shows. Hook: one sentence, at most 140 characters. Takeaway: the key fact or idea in one plain sentence. tags: 3 to 5 lowercase. Sources: 1 to 4 pages you relied on (in the sources field only).`,
     pictureRules,
     opts.trend
       ? `THIS STORY is about something happening right now. Subject: ${opts.trend.subject}. The one thing to make click: ${opts.trend.angle}. Why people care today: ${opts.trend.why_now}. ` +
@@ -494,8 +500,8 @@ export async function writeStory(opts: {
   const draft: StoryDraft = {
     ...data,
     title: cleanLine(data.title, 90) || data.title,
-    hook: cleanLine(data.hook, 200),
-    takeaway: cleanLine(data.takeaway, 300),
+    hook: completeDates(cleanLine(data.hook, 200)),
+    takeaway: completeDates(cleanLine(data.takeaway, 300)),
     section: cleanLine(data.section, 40),
     tags: (data.tags ?? []).map((t) => cleanLine(t, 40)),
     images: (data.images ?? []).map((i) => ({ ...i, alt: cleanLine(i.alt, 200), caption: cleanLine(i.caption, 200) })),

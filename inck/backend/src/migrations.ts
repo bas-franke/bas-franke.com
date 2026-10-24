@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import { cleanLine, stripCitations, tidyBody } from './text.js';
+import { cleanLine, completeDates, stripCitations, tidyBody } from './text.js';
 import type { TopicPlan } from './types.js';
 
 /**
@@ -358,5 +358,28 @@ export const migrations: { name: string; sql?: string; run?: (client: pg.PoolCli
       ALTER TABLE settings ALTER COLUMN interval_minutes SET DEFAULT 60;
       UPDATE settings SET interval_minutes = 60;
     `,
+  },
+  {
+    // Stories written before the writer knew the date: "Saturday, 24 October" gets its year (worked out from when the
+    // story was published), and bare-domain or cut-off citations such as "(investing.com)" are removed.
+    name: '011_complete_dates',
+    run: async (client) => {
+      const { rows: stories } = await client.query<{ id: number; hook: string; takeaway: string; body_md: string; why_now: string | null; published_at: Date }>(
+        'SELECT id, hook, takeaway, body_md, why_now, published_at FROM stories',
+      );
+      for (const s of stories) {
+        await client.query('UPDATE stories SET hook = $2, takeaway = $3, body_md = $4, why_now = $5 WHERE id = $1', [
+          s.id,
+          completeDates(cleanLine(s.hook, 200), s.published_at),
+          completeDates(cleanLine(s.takeaway, 300), s.published_at),
+          tidyBody(s.body_md, s.published_at) || s.body_md,
+          s.why_now === null ? null : completeDates(cleanLine(s.why_now, 300), s.published_at),
+        ]);
+      }
+      const { rows: topics } = await client.query<{ id: number; heat_reason: string; heat_at: Date | null }>('SELECT id, heat_reason, heat_at FROM topics');
+      for (const t of topics) {
+        await client.query('UPDATE topics SET heat_reason = $2 WHERE id = $1', [t.id, completeDates(cleanLine(t.heat_reason), t.heat_at ?? new Date())]);
+      }
+    },
   },
 ];
