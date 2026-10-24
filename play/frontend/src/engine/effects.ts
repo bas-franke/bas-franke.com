@@ -1,13 +1,18 @@
 // Comic-book effects: particle bursts pooled in one Points object so explosions cost next to nothing, inked toon smoke
-// puffs and debris on instanced meshes (two draw calls each: fill and outline), solid inked fireballs, shockwave rings,
-// scorch decals and pop-art "BOOM!" words. Everything is pooled up front, so nothing allocates per frame or per event,
-// and lights come from a fixed pool so the shader light count never changes.
+// puffs and debris on instanced meshes (two draw calls each: fill and outline), solid inked fireballs and shockwave
+// rings (instanced too, so any number of blasts costs the same few draws), scorch decals and pop-art "BOOM!" words.
+// Everything is pooled up front, so nothing allocates per frame or per event, and lights come from a fixed pool so the
+// shader light count never changes.
+//
+// Live particles, puffs and chunks are kept packed at the front of their pools, so a draw covers exactly the live
+// ones and an idle pool draws nothing. Effects that go off right at the camera (your own rocket jump) back off: they
+// shrink and fade instead of filling the screen.
 
 import * as THREE from 'three';
 import { hullGeometry, INK, inkMaterial, toonRamp } from './toon';
 
 const MAX = 1500;
-/** Smoke puffs (rocket trails, explosion clouds, dust). A ring buffer: the oldest puff is reused when full. */
+/** Smoke puffs (rocket trails, explosion clouds, dust). When full, slots are reused in turn. */
 const PUFFS = 384;
 const DEBRIS = 96;
 const DECALS = 32;
@@ -19,6 +24,12 @@ const DECAL_LIFE = 9;
 const DECAL_FADE = 3;
 /** Distance between trail puffs for `trailSegment`. */
 export const TRAIL_STEP = 0.4;
+/** Blasts closer to the camera than their radius plus this fade out (metres). */
+const NEAR_BLAST = 3;
+/** Comic words fade out from this distance to NEAR_WORD - NEAR_WORD_RANGE, and never get taller than this share of their distance. */
+const NEAR_WORD = 5;
+const NEAR_WORD_RANGE = 2;
+const WORD_MAX_HEIGHT = 0.6;
 
 type P3 = { x: number; y: number; z: number };
 
@@ -99,9 +110,8 @@ export function nearestSurface(pos: P3, boxes: readonly { min: P3; max: P3 }[], 
 }
 
 interface Fireball {
-  group: THREE.Group;
-  outer: THREE.MeshBasicMaterial;
-  inner: THREE.MeshBasicMaterial;
+  pos: THREE.Vector3;
+  quat: THREE.Quaternion;
   light: THREE.PointLight | null;
   life: number;
   max: number;
@@ -117,8 +127,8 @@ interface Word {
 }
 
 interface Ring {
-  mesh: THREE.Mesh;
-  material: THREE.MeshBasicMaterial;
+  pos: THREE.Vector3;
+  quat: THREE.Quaternion;
   life: number;
   max: number;
   radius: number;
@@ -289,6 +299,21 @@ function fadeDecalMaterial(map: THREE.Texture): THREE.MeshBasicMaterial {
   return m;
 }
 
+/** Unlit and alpha blended, with a per-instance `alpha` attribute (times the instance colour, when there is one). */
+function instancedAlphaMaterial(color: number, side: THREE.Side = THREE.FrontSide, depthWrite = true): THREE.MeshBasicMaterial {
+  const m = new THREE.MeshBasicMaterial({ color, transparent: true, side, depthWrite });
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float alpha;\nvarying float vAlpha;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vAlpha = alpha;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vAlpha;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.a *= vAlpha;');
+  };
+  m.customProgramCacheKey = () => 'fx-alpha';
+  return m;
+}
+
 /** Writes position, rotation and uniform scale into a column-major 4x4 at `o`, the same as Matrix4.compose. */
 function writeTRS(a: Float32Array, o: number, x: number, y: number, z: number, qx: number, qy: number, qz: number, qw: number, s: number) {
   const x2 = qx + qx;
@@ -334,6 +359,18 @@ function randomQuat(q: Float32Array, o: number) {
   q[o + 3] = b * Math.cos(w);
 }
 
+/** Copies item `from` over item `to` in an array of `size`-float items. */
+function move(a: Float32Array, size: number, from: number, to: number) {
+  a.copyWithin(to * size, from * size, from * size + size);
+}
+
+/** Uploads only the first `count` items of an attribute this frame. */
+function upload(attr: THREE.BufferAttribute, count: number) {
+  attr.clearUpdateRanges();
+  attr.addUpdateRange(0, count * attr.itemSize);
+  attr.needsUpdate = true;
+}
+
 /** Smoke colour ramp, by phase 0..1: flash yellow, orange, cream smoke, grey. */
 const RAMP_AT = [0, 0.14, 0.4, 1];
 const RAMP = [new THREE.Color(0xffd21f), new THREE.Color(0xff7a1f), new THREE.Color(0xf4ead2), new THREE.Color(0x8a8592)];
@@ -363,21 +400,20 @@ export class Effects {
   private readonly colors = new Float32Array(MAX * 3);
   private readonly velocities = new Float32Array(MAX * 3);
   private readonly life = new Float32Array(MAX);
-  private readonly maxLife = new Float32Array(MAX);
   private readonly points: THREE.Points;
   private readonly geometry: THREE.BufferGeometry;
   private readonly dot = dotTexture();
   private next = 0;
   private liveDots = 0;
-  private readonly fireballs: Fireball[] = [];
   private readonly words: Word[] = [];
-  private readonly ballGeo = new THREE.IcosahedronGeometry(1, 1);
-  private readonly ballHull = hullGeometry(this.ballGeo);
   private readonly wordTextures: THREE.CanvasTexture[];
   private readonly lights: LightPool;
   gravity = 12;
+  /** Where the camera was at the last render (captured in scene.onBeforeRender), so blasts at the camera can back off. */
+  private readonly cam = new THREE.Vector3(0, -1e4, 0);
+  private readonly sceneBeforeRender: THREE.Scene['onBeforeRender'];
 
-  // Smoke puffs: fill and ink share one instanceMatrix.
+  // Smoke puffs: fill and ink share one instanceMatrix. Live puffs are slots 0..livePuffs-1.
   private readonly puffGeo = new THREE.IcosahedronGeometry(1, 1);
   private readonly puffHull = hullGeometry(this.puffGeo);
   private readonly toonMat = glowToonMaterial();
@@ -393,10 +429,12 @@ export class Effects {
   private readonly pSize = new Float32Array(PUFFS);
   private readonly pHeat = new Float32Array(PUFFS);
   private readonly pRise = new Float32Array(PUFFS);
+  /** 1 for rocket-trail puffs: they shrink away sooner, so a trail reads as a line rather than a cloud. */
+  private readonly pTrail = new Float32Array(PUFFS);
   private nextPuff = 0;
   private livePuffs = 0;
 
-  // Debris chunks: same materials, their own instanced pair.
+  // Debris chunks: same materials, their own instanced pair. Live chunks are slots 0..liveChunks-1.
   private readonly chunkGeo = new THREE.TetrahedronGeometry(1, 0);
   private readonly chunkHull = hullGeometry(this.chunkGeo);
   private readonly chunks: THREE.InstancedMesh;
@@ -423,8 +461,26 @@ export class Effects {
   private readonly decalLife = new Float32Array(DECALS);
   private nextDecal = 0;
 
+  // Shockwave rings: one instanced draw, per-instance colour and alpha.
   private readonly ringGeo = new THREE.RingGeometry(0.8, 1, 32);
+  private readonly ringMat = instancedAlphaMaterial(0xffffff, THREE.DoubleSide, false);
+  private readonly ringAlpha = new Float32Array(RINGS);
+  private readonly ringMesh: THREE.InstancedMesh;
   private readonly rings: Ring[] = [];
+
+  // Fireballs: a hot core, a coloured shell and an ink hull, each one instanced draw for all of them.
+  private readonly ballGeo = new THREE.IcosahedronGeometry(1, 1);
+  private readonly coreGeo = this.ballGeo.clone();
+  private readonly ballHull = hullGeometry(this.ballGeo);
+  private readonly shellMat = instancedAlphaMaterial(0xffffff);
+  private readonly coreMat = instancedAlphaMaterial(0xfff3b0);
+  private readonly shellAlpha = new Float32Array(FIREBALLS);
+  private readonly coreAlpha = new Float32Array(FIREBALLS);
+  private readonly cores: THREE.InstancedMesh;
+  private readonly shells: THREE.InstancedMesh;
+  private readonly ballInk: THREE.InstancedMesh;
+  private readonly fireballs: Fireball[] = [];
+
   private readonly wordSprites: THREE.Sprite[] = [];
   private nextWord = 0;
   private nextFireball = 0;
@@ -435,8 +491,9 @@ export class Effects {
   ) {
     this.lights = new LightPool(scene, flashLights);
     this.geometry = new THREE.BufferGeometry();
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setDrawRange(0, 0);
     const material = new THREE.PointsMaterial({
       size: 0.22,
       map: this.dot,
@@ -450,8 +507,7 @@ export class Effects {
     };
     this.points = new THREE.Points(this.geometry, material);
     this.points.frustumCulled = false;
-    this.life.fill(0);
-    for (let i = 0; i < MAX; i++) this.positions[i * 3 + 1] = -1000;
+    this.points.visible = false;
     scene.add(this.points);
 
     [this.puffs, this.puffInk] = this.instancedPair(this.puffGeo, this.puffHull, this.puffGlow, PUFFS);
@@ -466,41 +522,44 @@ export class Effects {
     for (let i = 0; i < DECALS; i++) this.decals.setMatrixAt(i, _m);
     scene.add(this.decals);
 
-    for (let i = 0; i < RINGS; i++) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xfff3d0, transparent: true, side: THREE.DoubleSide, depthWrite: false });
-      const mesh = new THREE.Mesh(this.ringGeo, mat);
-      mesh.visible = false;
-      mesh.renderOrder = 2;
-      scene.add(mesh);
-      this.rings.push({ mesh, material: mat, life: 0, max: 1, radius: 1 });
-    }
+    this.ringMesh = this.instancedAlpha(this.ringGeo, this.ringMat, this.ringAlpha, RINGS, true);
+    this.ringMesh.renderOrder = 2;
+    for (let i = 0; i < RINGS; i++) this.rings.push({ pos: new THREE.Vector3(), quat: new THREE.Quaternion(), life: 0, max: 1, radius: 1 });
 
-    for (let i = 0; i < FIREBALLS; i++) {
-      const outer = new THREE.MeshBasicMaterial({ color: 0xff7a1f, transparent: true });
-      const inner = new THREE.MeshBasicMaterial({ color: 0xfff3b0, transparent: true });
-      const group = new THREE.Group();
-      const innerMesh = new THREE.Mesh(this.ballGeo, inner);
-      innerMesh.scale.setScalar(0.62);
-      innerMesh.position.y = 0.08;
-      group.add(new THREE.Mesh(this.ballGeo, outer), innerMesh, new THREE.Mesh(this.ballHull, inkMaterial()));
-      group.visible = false;
-      scene.add(group);
-      this.fireballs.push({ group, outer, inner, light: null, life: 0, max: 1, radius: 1, intensity: 0 });
-    }
+    // The core draws first so it shows through the shell as the shell fades.
+    this.cores = this.instancedAlpha(this.coreGeo, this.coreMat, this.coreAlpha, FIREBALLS, false);
+    this.shells = this.instancedAlpha(this.ballGeo, this.shellMat, this.shellAlpha, FIREBALLS, true);
+    this.ballInk = new THREE.InstancedMesh(this.ballHull, inkMaterial(), FIREBALLS);
+    this.ballInk.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    _m.makeScale(0, 0, 0);
+    for (let i = 0; i < FIREBALLS; i++) this.ballInk.setMatrixAt(i, _m);
+    this.ballInk.frustumCulled = false;
+    this.ballInk.visible = false;
+    scene.add(this.ballInk);
+    for (let i = 0; i < FIREBALLS; i++) this.fireballs.push({ pos: new THREE.Vector3(), quat: new THREE.Quaternion(), light: null, life: 0, max: 1, radius: 1, intensity: 0 });
 
-    // Built up front: drawing five canvases on the first explosion caused a visible hitch.
+    // Built up front: drawing five canvases on the first explosion caused a visible hitch. Each sprite starts out
+    // with a texture, so the shader variant and every texture upload happen during warmup, not on the first boom.
     this.wordTextures = WORDS.map((w, i) => wordTexture(w, ['#ffe14d', '#ffffff', '#ffe14d', '#7cf4ff', '#ffb0d8'][i], ['#ff4b2e', '#2e7bff', '#ff8a1f', '#e8392e', '#8d4bff'][i]));
     for (let i = 0; i < WORD_SPRITES; i++) {
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.wordTextures[i % this.wordTextures.length], transparent: true, depthTest: false }));
       sprite.renderOrder = 20;
       sprite.visible = false;
       scene.add(sprite);
       this.wordSprites.push(sprite);
       this.words.push({ sprite, life: 0, max: 0.6, size: 1 });
     }
+
+    this.sceneBeforeRender = scene.onBeforeRender;
+    const before = this.sceneBeforeRender;
+    const cam = this.cam;
+    scene.onBeforeRender = function (this: THREE.Scene, ...args) {
+      before.apply(this, args);
+      cam.setFromMatrixPosition(args[2].matrixWorld);
+    };
   }
 
-  /** A toon fill mesh and an ink hull mesh drawing the same instances. */
+  /** A toon fill mesh and an ink hull mesh drawing the same instances. Hidden until something is alive. */
   private instancedPair(geo: THREE.BufferGeometry, hull: THREE.BufferGeometry, glow: Float32Array, count: number): [THREE.InstancedMesh, THREE.InstancedMesh] {
     geo.setAttribute('glow', new THREE.InstancedBufferAttribute(glow, 1).setUsage(THREE.DynamicDrawUsage));
     const fill = new THREE.InstancedMesh(geo, this.toonMat, count);
@@ -515,17 +574,45 @@ export class Effects {
     const ink = new THREE.InstancedMesh(hull, this.inkMat, count);
     ink.instanceMatrix = fill.instanceMatrix;
     fill.frustumCulled = ink.frustumCulled = false;
+    fill.count = ink.count = 0;
+    fill.visible = ink.visible = false;
     this.scene.add(fill, ink);
     return [fill, ink];
+  }
+
+  /** An instanced mesh with a per-instance `alpha` (and colour when `colored`), all instances parked at scale 0. */
+  private instancedAlpha(geo: THREE.BufferGeometry, mat: THREE.Material, alpha: Float32Array, count: number, colored: boolean): THREE.InstancedMesh {
+    geo.setAttribute('alpha', new THREE.InstancedBufferAttribute(alpha, 1).setUsage(THREE.DynamicDrawUsage));
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    _m.makeScale(0, 0, 0);
+    _c.setRGB(1, 1, 1);
+    for (let i = 0; i < count; i++) {
+      mesh.setMatrixAt(i, _m);
+      if (colored) mesh.setColorAt(i, _c);
+    }
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    this.scene.add(mesh);
+    return mesh;
+  }
+
+  /** 0 when the camera is within `inner` metres of the point, rising to 1 at `inner + range`. */
+  private nearCamera(x: number, y: number, z: number, inner: number, range: number) {
+    const d = Math.hypot(x - this.cam.x, y - this.cam.y, z - this.cam.z);
+    return Math.min(1, Math.max(0, (d - inner) / range));
   }
 
   burst(pos: THREE.Vector3 | P3, color: number, count = 40, speed = 7, lifetime = 0.7, up = 0.4) {
     if (document.hidden) return;
     const c = _c.setHex(color);
     for (let n = 0; n < count; n++) {
-      const i = this.next;
-      this.next = (this.next + 1) % MAX;
-      if (this.life[i] <= 0) this.liveDots++;
+      let i: number;
+      if (this.liveDots < MAX) i = this.liveDots++;
+      else {
+        i = this.next;
+        this.next = (this.next + 1) % MAX;
+      }
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       const s = speed * (0.3 + Math.random() * 0.7);
@@ -539,9 +626,9 @@ export class Effects {
       this.colors[i * 3] = Math.min(1, c.r * tint);
       this.colors[i * 3 + 1] = Math.min(1, c.g * tint);
       this.colors[i * 3 + 2] = Math.min(1, c.b * tint);
-      this.life[i] = this.maxLife[i] = lifetime * (0.6 + Math.random() * 0.6);
+      this.life[i] = lifetime * (0.6 + Math.random() * 0.6);
     }
-    (this.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+    upload(this.geometry.attributes.color as THREE.BufferAttribute, this.liveDots);
   }
 
   /**
@@ -549,10 +636,19 @@ export class Effects {
    * drifts with `vel` and rises. `heat` 1 starts as a yellow flash and cools through orange; 0 starts as cream smoke.
    */
   smoke(pos: P3, size = 0.5, life = 1.2, vel?: P3, heat = 0) {
-    if (document.hidden) return;
-    const i = this.nextPuff;
-    this.nextPuff = (i + 1) % PUFFS;
-    if (this.pLife[i] <= 0) this.livePuffs++;
+    this.puff(pos, size, life, vel, heat);
+  }
+
+  /** smoke(), returning the slot (or -1 when hidden). */
+  private puff(pos: P3, size: number, life: number, vel: P3 | undefined, heat: number): number {
+    if (document.hidden) return -1;
+    let i: number;
+    if (this.livePuffs < PUFFS) i = this.livePuffs++;
+    else {
+      // Full: reuse slots in turn, which takes roughly the oldest.
+      i = this.nextPuff;
+      this.nextPuff = (i + 1) % PUFFS;
+    }
     this.pPos[i * 3] = pos.x;
     this.pPos[i * 3 + 1] = pos.y;
     this.pPos[i * 3 + 2] = pos.z;
@@ -564,18 +660,21 @@ export class Effects {
     this.pSize[i] = size;
     this.pHeat[i] = heat;
     this.pRise[i] = 0.6 + Math.random() * 0.6;
+    this.pTrail[i] = 0;
+    return i;
   }
 
   /** One rocket-trail puff at `pos`. Call it every TRAIL_STEP metres of travel (or use trailSegment). */
   trail(pos: P3, heat = 1) {
     _v.set((Math.random() - 0.5) * 0.4, 0.15 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4);
-    this.smoke(
+    const i = this.puff(
       { x: pos.x + (Math.random() - 0.5) * 0.08, y: pos.y + (Math.random() - 0.5) * 0.08, z: pos.z + (Math.random() - 0.5) * 0.08 },
       0.2 + Math.random() * 0.1,
-      0.75 + Math.random() * 0.35,
+      0.52 + Math.random() * 0.25,
       _v,
       heat,
     );
+    if (i >= 0) this.pTrail[i] = 1;
   }
 
   /**
@@ -606,9 +705,12 @@ export class Effects {
   debris(pos: P3, normal: P3 = UP, count = 10, speed = 8, floorY = -Infinity) {
     if (document.hidden) return;
     for (let n = 0; n < count; n++) {
-      const i = this.nextChunk;
-      this.nextChunk = (i + 1) % DEBRIS;
-      if (this.dLife[i] <= 0) this.liveChunks++;
+      let i: number;
+      if (this.liveChunks < DEBRIS) i = this.liveChunks++;
+      else {
+        i = this.nextChunk;
+        this.nextChunk = (i + 1) % DEBRIS;
+      }
       // Random direction in the hemisphere around the normal, biased outward.
       let x = Math.random() * 2 - 1;
       let y = Math.random() * 2 - 1;
@@ -641,22 +743,21 @@ export class Effects {
       this.dHot[i] = hot ? 1 : 0;
       this.chunks.setColorAt(i, DEBRIS_COLORS[hot ? 3 : Math.floor(Math.random() * 3)]);
     }
-    this.chunks.instanceColor!.needsUpdate = true;
+    upload(this.chunks.instanceColor!, this.liveChunks);
   }
 
   /** A flat ring that races outward from `pos`, facing `normal`. */
   shockwave(pos: P3, normal: P3 = UP, radius = 3, color = 0xfff3d0, duration = 0.32) {
     if (document.hidden) return;
-    let ring = this.rings[0];
-    for (const r of this.rings) if (r.life < ring.life) ring = r;
+    let k = 0;
+    for (let i = 1; i < RINGS; i++) if (this.rings[i].life < this.rings[k].life) k = i;
+    const ring = this.rings[k];
     ring.life = ring.max = duration;
     ring.radius = radius;
-    ring.material.color.setHex(color);
-    ring.material.opacity = 1;
-    ring.mesh.position.set(pos.x + normal.x * 0.08, pos.y + normal.y * 0.08, pos.z + normal.z * 0.08);
-    alignZ(ring.mesh.quaternion, normal, 0);
-    ring.mesh.scale.setScalar(radius * 0.15);
-    ring.mesh.visible = true;
+    ring.pos.set(pos.x + normal.x * 0.08, pos.y + normal.y * 0.08, pos.z + normal.z * 0.08);
+    alignZ(ring.quat, normal, 0);
+    this.ringMesh.setColorAt(k, _c.setHex(color));
+    this.ringMesh.instanceColor!.needsUpdate = true;
   }
 
   /** An ink-splat scorch mark on the surface at `pos` facing `normal`; fades after a while. Oldest is reused. */
@@ -749,17 +850,16 @@ export class Effects {
   /** A solid, inked fireball that swells to `radius` and shrinks away, with a pooled light while it lasts. */
   flash(pos: P3, color: number, radius = 1, duration = 0.35, intensity = 20) {
     if (document.hidden) return;
-    const f = this.fireballs[this.nextFireball];
-    this.nextFireball = (this.nextFireball + 1) % FIREBALLS;
+    const i = this.nextFireball;
+    const f = this.fireballs[i];
+    this.nextFireball = (i + 1) % FIREBALLS;
     if (f.light) this.lights.give(f.light);
     f.light = this.lights.take(color, intensity, radius * 8);
     f.light?.position.set(pos.x, pos.y, pos.z);
-    f.outer.color.setHex(color);
-    f.outer.opacity = f.inner.opacity = 1;
-    f.group.position.set(pos.x, pos.y, pos.z);
-    f.group.rotation.set(Math.random() * 3, Math.random() * 3, 0);
-    f.group.scale.setScalar(radius * 0.3);
-    f.group.visible = true;
+    this.shells.setColorAt(i, _c.setHex(color));
+    this.shells.instanceColor!.needsUpdate = true;
+    f.pos.set(pos.x, pos.y, pos.z);
+    f.quat.setFromEuler(_e.set(Math.random() * 3, Math.random() * 3, 0));
     f.life = f.max = duration;
     f.radius = radius;
     f.intensity = intensity;
@@ -786,38 +886,8 @@ export class Effects {
     this.updatePuffs(dt);
     this.updateDebris(dt);
     this.updateDecals(dt);
-
-    for (const r of this.rings) {
-      if (r.life <= 0) continue;
-      r.life -= dt;
-      if (r.life <= 0) {
-        r.mesh.visible = false;
-        continue;
-      }
-      const t = 1 - r.life / r.max;
-      const e = 1 - (1 - t) * (1 - t) * (1 - t);
-      r.mesh.scale.setScalar(r.radius * (0.15 + 0.85 * e));
-      r.material.opacity = 1 - t * t;
-    }
-
-    for (const f of this.fireballs) {
-      if (f.life <= 0) continue;
-      f.life -= dt;
-      if (f.life <= 0) {
-        f.group.visible = false;
-        if (f.light) this.lights.give(f.light);
-        f.light = null;
-        continue;
-      }
-      const t = 1 - f.life / f.max;
-      // Pop out fast, then sag and shrink: reads as a cartoon explosion rather than a glow.
-      const s = t < 0.3 ? 0.3 + (t / 0.3) * 0.75 : 1.05 - (t - 0.3) * 0.9;
-      f.group.scale.setScalar(f.radius * s);
-      const fade = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
-      f.outer.opacity = fade;
-      f.inner.opacity = fade;
-      if (f.light) f.light.intensity = f.intensity * (1 - t) * (1 - t);
-    }
+    this.updateRings(dt);
+    this.updateFireballs(dt);
 
     for (const w of this.words) {
       if (w.life <= 0) continue;
@@ -828,32 +898,66 @@ export class Effects {
       }
       const t = 1 - w.life / w.max;
       const pop = t < 0.15 ? (t / 0.15) * 1.15 : t < 0.25 ? 1.15 - ((t - 0.15) / 0.1) * 0.15 : 1;
-      w.sprite.scale.set(w.size * pop * 1.6, w.size * pop, 1);
       w.sprite.position.y += dt * 0.6;
-      w.sprite.material.opacity = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
+      // Never taller than a share of its distance, and gone when it is right at the camera (a blast on yourself).
+      const p = w.sprite.position;
+      const d = Math.hypot(p.x - this.cam.x, p.y - this.cam.y, p.z - this.cam.z);
+      const h = Math.min(w.size * pop, d * WORD_MAX_HEIGHT);
+      w.sprite.scale.set(h * 1.6, h, 1);
+      const near = Math.min(1, Math.max(0, (d - (NEAR_WORD - NEAR_WORD_RANGE)) / NEAR_WORD_RANGE));
+      w.sprite.material.opacity = (t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3) * near;
     }
   }
 
   private updateDots(dt: number) {
     const p = this.positions;
     const v = this.velocities;
-    for (let i = 0; i < MAX; i++) {
-      if (this.life[i] <= 0) continue;
+    const col = this.colors;
+    const drag = 1 - 1.5 * dt;
+    let n = this.liveDots;
+    let moved = false;
+    let i = 0;
+    while (i < n) {
       this.life[i] -= dt;
       if (this.life[i] <= 0) {
-        p[i * 3 + 1] = -1000;
-        this.liveDots--;
+        // Keep the live ones packed: the last one takes this slot (and gets its step on the next pass).
+        n--;
+        if (i < n) {
+          move(p, 3, n, i);
+          move(v, 3, n, i);
+          move(col, 3, n, i);
+          this.life[i] = this.life[n];
+          moved = true;
+        }
+        this.life[n] = 0;
         continue;
       }
       v[i * 3 + 1] -= this.gravity * dt;
-      const drag = 1 - 1.5 * dt;
       v[i * 3] *= drag;
       v[i * 3 + 2] *= drag;
       p[i * 3] += v[i * 3] * dt;
       p[i * 3 + 1] += v[i * 3 + 1] * dt;
       p[i * 3 + 2] += v[i * 3 + 2] * dt;
+      i++;
     }
-    (this.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    this.liveDots = n;
+    if (this.next >= n) this.next = 0;
+    this.geometry.setDrawRange(0, n);
+    this.points.visible = n > 0;
+    upload(this.geometry.attributes.position as THREE.BufferAttribute, n);
+    if (moved) upload(this.geometry.attributes.color as THREE.BufferAttribute, n);
+  }
+
+  private movePuff(from: number, to: number) {
+    move(this.pPos, 3, from, to);
+    move(this.pVel, 3, from, to);
+    move(this.pQuat, 4, from, to);
+    this.pLife[to] = this.pLife[from];
+    this.pMax[to] = this.pMax[from];
+    this.pSize[to] = this.pSize[from];
+    this.pHeat[to] = this.pHeat[from];
+    this.pRise[to] = this.pRise[from];
+    this.pTrail[to] = this.pTrail[from];
   }
 
   private updatePuffs(dt: number) {
@@ -863,13 +967,16 @@ export class Effects {
     const pos = this.pPos;
     const vel = this.pVel;
     const q = this.pQuat;
+    const cam = this.cam;
     const drag = Math.max(0, 1 - 2.2 * dt);
-    for (let i = 0; i < PUFFS; i++) {
-      if (this.pLife[i] <= 0) continue;
+    let n = this.livePuffs;
+    let i = 0;
+    while (i < n) {
       this.pLife[i] -= dt;
       if (this.pLife[i] <= 0) {
-        writeTRS(m, i * 16, 0, -1000, 0, 0, 0, 0, 1, 0);
-        this.livePuffs--;
+        n--;
+        if (i < n) this.movePuff(n, i);
+        this.pLife[n] = 0;
         continue;
       }
       const t = 1 - this.pLife[i] / this.pMax[i];
@@ -879,14 +986,20 @@ export class Effects {
       pos[i * 3] += vel[i * 3] * dt;
       pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
       pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
-      // Pop out, keep billowing a little, then shrink away at the end: opaque comic smoke that never needs alpha sorting.
+      // Pop out, keep billowing a little, then shrink away at the end: opaque comic smoke that never needs alpha
+      // sorting. Trail puffs shrink sooner, so a trail stays a clean line.
       let s: number;
       if (t < 0.18) s = 0.35 + 0.65 * (t / 0.18);
       else {
         const k = (t - 0.18) / 0.82;
-        s = (1 + 0.25 * k) * (1 - k * k * k);
+        s = this.pTrail[i] ? (1 + 0.1 * k) * (1 - k * k) : (1 + 0.25 * k) * (1 - k * k * k);
       }
-      writeTRS(m, i * 16, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], q[i * 4], q[i * 4 + 1], q[i * 4 + 2], q[i * 4 + 3], s * this.pSize[i]);
+      let r = s * this.pSize[i];
+      // A puff never swallows the camera (its ink hull would black out the screen): it stays clear of the eye.
+      const d = Math.hypot(pos[i * 3] - cam.x, pos[i * 3 + 1] - cam.y, pos[i * 3 + 2] - cam.z);
+      const room = (d - 0.4) * 0.4;
+      if (r > room) r = Math.max(0, room);
+      writeTRS(m, i * 16, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], q[i * 4], q[i * 4 + 1], q[i * 4 + 2], q[i * 4 + 3], r);
       // Colour phase: hot puffs run the whole ramp, cool ones start at cream.
       const heat = this.pHeat[i];
       const c = Math.min(1, t * (0.7 + heat * 0.3) + (1 - heat) * RAMP_AT[2]);
@@ -899,10 +1012,28 @@ export class Effects {
       col[i * 3 + 1] = a.g + (b.g - a.g) * f;
       col[i * 3 + 2] = a.b + (b.b - a.b) * f;
       this.puffGlow[i] = c < RAMP_AT[2] ? (1 - c / RAMP_AT[2]) * 1.4 : 0;
+      i++;
     }
-    this.puffs.instanceMatrix.needsUpdate = true;
-    this.puffs.instanceColor!.needsUpdate = true;
-    (this.puffGeo.attributes.glow as THREE.InstancedBufferAttribute).needsUpdate = true;
+    this.livePuffs = n;
+    if (this.nextPuff >= n) this.nextPuff = 0;
+    this.puffs.count = this.puffInk.count = n;
+    this.puffs.visible = this.puffInk.visible = n > 0;
+    upload(this.puffs.instanceMatrix, n);
+    upload(this.puffs.instanceColor!, n);
+    upload(this.puffGeo.attributes.glow as THREE.InstancedBufferAttribute, n);
+  }
+
+  private moveChunk(from: number, to: number) {
+    move(this.dPos, 3, from, to);
+    move(this.dVel, 3, from, to);
+    move(this.dRot, 3, from, to);
+    move(this.dSpin, 3, from, to);
+    move(this.chunks.instanceColor!.array as Float32Array, 3, from, to);
+    this.dLife[to] = this.dLife[from];
+    this.dMax[to] = this.dMax[from];
+    this.dSize[to] = this.dSize[from];
+    this.dFloor[to] = this.dFloor[from];
+    this.dHot[to] = this.dHot[from];
   }
 
   private updateDebris(dt: number) {
@@ -911,12 +1042,18 @@ export class Effects {
     const pos = this.dPos;
     const vel = this.dVel;
     const rot = this.dRot;
-    for (let i = 0; i < DEBRIS; i++) {
-      if (this.dLife[i] <= 0) continue;
+    let n = this.liveChunks;
+    let moved = false;
+    let i = 0;
+    while (i < n) {
       this.dLife[i] -= dt;
       if (this.dLife[i] <= 0) {
-        writeTRS(m, i * 16, 0, -1000, 0, 0, 0, 0, 1, 0);
-        this.liveChunks--;
+        n--;
+        if (i < n) {
+          this.moveChunk(n, i);
+          moved = true;
+        }
+        this.dLife[n] = 0;
         continue;
       }
       vel[i * 3 + 1] -= 18 * dt;
@@ -937,9 +1074,15 @@ export class Effects {
       const s = this.dSize[i] * (t < 0.75 ? 1 : 1 - (t - 0.75) / 0.25);
       writeTRS(m, i * 16, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], _q.x, _q.y, _q.z, _q.w, s);
       this.chunkGlow[i] = this.dHot[i] * Math.max(0, 1 - t * 2.5);
+      i++;
     }
-    this.chunks.instanceMatrix.needsUpdate = true;
-    (this.chunkGeo.attributes.glow as THREE.InstancedBufferAttribute).needsUpdate = true;
+    this.liveChunks = n;
+    if (this.nextChunk >= n) this.nextChunk = 0;
+    this.chunks.count = this.chunkInk.count = n;
+    this.chunks.visible = this.chunkInk.visible = n > 0;
+    upload(this.chunks.instanceMatrix, n);
+    upload(this.chunkGeo.attributes.glow as THREE.InstancedBufferAttribute, n);
+    if (moved) upload(this.chunks.instanceColor!, n);
   }
 
   private updateDecals(dt: number) {
@@ -956,35 +1099,91 @@ export class Effects {
     if (changed) (this.decalGeo.attributes.fade as THREE.InstancedBufferAttribute).needsUpdate = true;
   }
 
+  private updateRings(dt: number) {
+    if (!this.ringMesh.visible && this.rings.every((r) => r.life <= 0)) return;
+    const m = this.ringMesh.instanceMatrix.array as Float32Array;
+    let live = 0;
+    for (let i = 0; i < RINGS; i++) {
+      const r = this.rings[i];
+      if (r.life <= 0) continue;
+      r.life -= dt;
+      if (r.life <= 0) {
+        writeTRS(m, i * 16, 0, 0, 0, 0, 0, 0, 1, 0);
+        continue;
+      }
+      live++;
+      const t = 1 - r.life / r.max;
+      const e = 1 - (1 - t) * (1 - t) * (1 - t);
+      const p = r.pos;
+      writeTRS(m, i * 16, p.x, p.y, p.z, r.quat.x, r.quat.y, r.quat.z, r.quat.w, r.radius * (0.15 + 0.85 * e));
+      // A ring going off at your own feet fades out instead of sweeping across the view.
+      this.ringAlpha[i] = (1 - t * t) * this.nearCamera(p.x, p.y, p.z, 1, 2.5);
+    }
+    this.ringMesh.visible = live > 0;
+    this.ringMesh.instanceMatrix.needsUpdate = true;
+    (this.ringGeo.attributes.alpha as THREE.InstancedBufferAttribute).needsUpdate = true;
+  }
+
+  private updateFireballs(dt: number) {
+    if (!this.shells.visible && this.fireballs.every((f) => f.life <= 0)) return;
+    const shell = this.shells.instanceMatrix.array as Float32Array;
+    const core = this.cores.instanceMatrix.array as Float32Array;
+    const ink = this.ballInk.instanceMatrix.array as Float32Array;
+    let live = 0;
+    for (let i = 0; i < FIREBALLS; i++) {
+      const f = this.fireballs[i];
+      if (f.life <= 0) continue;
+      f.life -= dt;
+      if (f.life <= 0) {
+        writeTRS(shell, i * 16, 0, 0, 0, 0, 0, 0, 1, 0);
+        writeTRS(core, i * 16, 0, 0, 0, 0, 0, 0, 1, 0);
+        writeTRS(ink, i * 16, 0, 0, 0, 0, 0, 0, 1, 0);
+        if (f.light) this.lights.give(f.light);
+        f.light = null;
+        continue;
+      }
+      live++;
+      const t = 1 - f.life / f.max;
+      // Pop out fast, then sag and shrink: reads as a cartoon explosion rather than a glow.
+      let s = f.radius * (t < 0.3 ? 0.3 + (t / 0.3) * 0.75 : 1.05 - (t - 0.3) * 0.9);
+      const fade = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
+      // Right at the camera (your own rocket jump) it shrinks and fades fast, and the hot core goes first.
+      const p = f.pos;
+      const near = this.nearCamera(p.x, p.y, p.z, s, NEAR_BLAST);
+      s *= 0.5 + 0.5 * near;
+      const q = f.quat;
+      writeTRS(shell, i * 16, p.x, p.y, p.z, q.x, q.y, q.z, q.w, s);
+      // An opaque outline cannot fade, so it goes once the shell is see-through.
+      writeTRS(ink, i * 16, p.x, p.y, p.z, q.x, q.y, q.z, q.w, near < 0.7 ? 0 : s);
+      _v.set(0, 0.08 * s, 0).applyQuaternion(q);
+      writeTRS(core, i * 16, p.x + _v.x, p.y + _v.y, p.z + _v.z, q.x, q.y, q.z, q.w, s * 0.62);
+      this.shellAlpha[i] = fade * near;
+      this.coreAlpha[i] = fade * near * near;
+      if (f.light) f.light.intensity = f.intensity * (1 - t) * (1 - t);
+    }
+    this.shells.visible = this.cores.visible = this.ballInk.visible = live > 0;
+    this.shells.instanceMatrix.needsUpdate = true;
+    this.cores.instanceMatrix.needsUpdate = true;
+    this.ballInk.instanceMatrix.needsUpdate = true;
+    (this.ballGeo.attributes.alpha as THREE.InstancedBufferAttribute).needsUpdate = true;
+    (this.coreGeo.attributes.alpha as THREE.InstancedBufferAttribute).needsUpdate = true;
+  }
+
   dispose() {
-    this.scene.remove(this.points, this.puffs, this.puffInk, this.chunks, this.chunkInk, this.decals);
+    this.scene.onBeforeRender = this.sceneBeforeRender;
+    this.scene.remove(this.points, this.puffs, this.puffInk, this.chunks, this.chunkInk, this.decals, this.ringMesh, this.cores, this.shells, this.ballInk);
     this.geometry.dispose();
     (this.points.material as THREE.Material).dispose();
     this.dot.dispose();
-    for (const f of this.fireballs) {
-      this.scene.remove(f.group);
-      if (f.light) this.lights.give(f.light);
-      f.outer.dispose();
-      f.inner.dispose();
-    }
+    for (const f of this.fireballs) if (f.light) this.lights.give(f.light);
     for (const w of this.words) {
       this.scene.remove(w.sprite);
       w.sprite.material.dispose();
     }
-    for (const r of this.rings) {
-      this.scene.remove(r.mesh);
-      r.material.dispose();
-    }
     for (const t of this.wordTextures) t.dispose();
-    for (const g of [this.ballGeo, this.ballHull, this.puffGeo, this.puffHull, this.chunkGeo, this.chunkHull, this.decalGeo, this.ringGeo]) g.dispose();
-    this.puffs.dispose();
-    this.puffInk.dispose();
-    this.chunks.dispose();
-    this.chunkInk.dispose();
-    this.decals.dispose();
-    this.toonMat.dispose();
-    this.inkMat.dispose();
-    this.decalMat.dispose();
+    for (const g of [this.ballGeo, this.coreGeo, this.ballHull, this.puffGeo, this.puffHull, this.chunkGeo, this.chunkHull, this.decalGeo, this.ringGeo]) g.dispose();
+    for (const m of [this.puffs, this.puffInk, this.chunks, this.chunkInk, this.decals, this.ringMesh, this.cores, this.shells, this.ballInk]) m.dispose();
+    for (const m of [this.toonMat, this.inkMat, this.decalMat, this.ringMat, this.shellMat, this.coreMat]) m.dispose();
     this.scorchTex.dispose();
   }
 }
