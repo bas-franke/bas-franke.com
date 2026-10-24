@@ -1,6 +1,8 @@
 // Rockets bots: navigate the arena on the nav graph, fight whoever they can see, dodge incoming rockets, grab health
 // when low, and (on normal/hard) rocket-jump to the high ground or after a target. Rocket jumps are planned by
 // simulating them with the real movement code first, so a bot only commits to a jump that lands where it wants.
+// In team modes bots never shoot through teammates and stay near them; in CTF they split into attackers and
+// defenders per team, and in elimination they move as a group, use cover and back off when hurt.
 
 import {
   clamp,
@@ -22,7 +24,7 @@ import {
   yawForward,
   yawRight,
 } from '../../shared/math.js';
-import type { BotDifficulty } from '../../shared/protocol.js';
+import type { BotDifficulty, GameMode, Team } from '../../shared/protocol.js';
 import { RK } from '../../shared/rockets/constants.js';
 import type { MapData } from '../../shared/rockets/map.js';
 import { chestPosition, eyePosition, playerAABB, stepBody, type Body } from '../../shared/rockets/physics.js';
@@ -142,9 +144,47 @@ export interface BotView {
   canSee(from: Vec3, to: Vec3): boolean;
   /** The match countdown: nobody can move or fire yet. */
   frozen?: boolean;
+  mode?: GameMode;
+  team?: Team;
+  /** Living teammates (never targets). The server already leaves teammates out of `enemies`. */
+  allies?: { id: string; pos: Vec3 }[];
+  /** CTF: index = team. state 0 base, 1 carried, 2 dropped. carrier = player id. */
+  flags?: { state: 0 | 1 | 2; pos: Vec3; carrier?: string }[];
+  /** Team modes: [red base, blue base]. */
+  bases?: [Vec3, Vec3];
+  /** Elim: true during the intermission (bots idle). */
+  roundOver?: boolean;
 }
 
-type Mode = 'roam' | 'fight' | 'heal';
+/** `obj`: heading for what the team mode asks of us (a flag, home, the enemy carrier, the group). */
+type Mode = 'roam' | 'fight' | 'heal' | 'obj';
+
+/**
+ * Team-mode objectives. CTF: carry the flag home, return our dropped flag, chase the enemy carrier, attack their flag,
+ * escort our carrier, or (defenders) get back to the base. Elimination: regroup with the team (and advance together), retreat when hurt.
+ */
+type ObjKind = 'carry' | 'return' | 'chase' | 'attack' | 'escort' | 'guard' | 'regroup' | 'retreat';
+interface Objective {
+  kind: ObjKind;
+  pos: Vec3;
+  /** chase: the carrier's id. */
+  id?: string;
+}
+
+/** Stable per-id hash (FNV-1a) for the CTF role split. */
+function idHash(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** Which team's half a point is on, from the two bases (same rule as `sideOf` in modes.ts). */
+function sideFrom(bases: [Vec3, Vec3], p: Vec3): Team {
+  return p.x * bases[0].x + p.z * bases[0].z >= 0 ? 0 : 1;
+}
 
 /** A planned rocket jump: jump, fire straight down `fireAt` steps later, then steer toward `dest` in the air. */
 interface RocketJump {
@@ -251,6 +291,15 @@ export class RocketsBot {
   private lastHp = 0;
   private readonly rockets = new Map<string, { at: number; react: boolean }>();
   private seq = 0;
+  /** Team modes: teammates seen lately (id, last seen), for the CTF role split and to ignore their rockets. */
+  private readonly mates = new Map<string, number>();
+  /** What the team mode wants from us right now (null: fight and roam as usual). */
+  private obj: Objective | null = null;
+  /** CTF role, split per team by id hash. */
+  role: 'attack' | 'defend' | null = null;
+  /** Elimination: a nearby spot out of the target's sight to duck into while reloading. */
+  private cover: Vec3 | null = null;
+  private coverAt = 0;
   /** Per-bot quirks so a room of bots does not move in lockstep. */
   private readonly style: { range: number; strafeMin: number; strafeSpan: number; hop: number; aim: number; rjChance: number };
   /** Counters for tuning scripts. */
@@ -293,8 +342,8 @@ export class RocketsBot {
     }
 
     const body = self.body;
-    if (view.frozen) {
-      // Countdown: nothing to plan yet (a rocket jump or a stuck check now would only misfire).
+    if (view.frozen || view.roundOver) {
+      // Countdown or the pause between rounds: nothing to plan yet (a rocket jump or a stuck check now would only misfire).
       this.rj = null;
       this.rjWant = null;
       this.stuck.reset();
@@ -320,7 +369,7 @@ export class RocketsBot {
 
     const target = this.targetId ? view.enemies.find((e) => e.id === this.targetId) : undefined;
     const visible = !!target && now - this.targetSeenAt < 0.15;
-    const engaged = !!target && (this.mode === 'fight' || (this.mode === 'heal' && visible));
+    const engaged = !!target && (this.mode === 'fight' || ((this.mode === 'heal' || this.mode === 'obj') && visible));
 
     // --- movement ------------------------------------------------------------------------------------------
     let moveDir: Vec3 | null = null;
@@ -333,9 +382,13 @@ export class RocketsBot {
       const toTarget = vsub(target.pos, self.body.pos);
       toTarget.y = 0;
       const away = vscale(toTarget, -1);
-      // Hurt and nowhere to heal: keep the distance and make them come to us.
-      const range = self.hp < this.params.healAt ? this.style.range + 5 : this.style.range;
-      if (!visible && this.lastSeenPos) {
+      // Hurt and nowhere to heal: keep the distance and make them come to us. Elimination has no second life: stand off.
+      const range = (self.hp < this.params.healAt ? this.style.range + 5 : this.style.range) + (view.mode === 'elim' ? 3 : 0);
+      const cover = this.cover;
+      if (cover && visible && view.mode === 'elim' && now < self.nextFire - 0.15 && hdist(cover, body.pos) > 0.4) {
+        // Reloading: duck behind cover; once out of sight the chase below brings us back round the corner to peek.
+        moveDir = v3(cover.x - body.pos.x, 0, cover.z - body.pos.z);
+      } else if (!visible && this.lastSeenPos) {
         moveDir = this.followPath(view) ?? vsub(this.lastSeenPos, self.body.pos);
         onPath = this.path.length > 0;
       } else if (dist > range + 7) {
@@ -363,9 +416,10 @@ export class RocketsBot {
       moveDir = this.followPath(view);
       onPath = moveDir !== null;
       if (engaged) faceMove = false;
-      // The nav node next to a pack can be further away than the pickup radius: walk the last metres straight.
-      const pk = this.pickup;
-      if (!moveDir && pk && this.mode === 'heal' && hdist(pk, body.pos) < 3.5 && Math.abs(pk.y - body.pos.y) < 1.5) {
+      // The nav node next to a pack (or a flag, or the base) can be further away than the touch radius: walk the last
+      // metres straight.
+      const pk = this.mode === 'heal' ? this.pickup : this.mode === 'obj' ? (this.obj?.pos ?? null) : null;
+      if (!moveDir && pk && hdist(pk, body.pos) < 3.5 && Math.abs(pk.y - body.pos.y) < 1.5) {
         moveDir = v3(pk.x - body.pos.x, 0, pk.z - body.pos.z);
         if (Math.hypot(moveDir.x, moveDir.z) < 0.3) moveDir = null;
       }
@@ -500,12 +554,29 @@ export class RocketsBot {
     }
     const eye = eyePosition(self.body.pos);
 
+    // Team modes: remember who is on our side, and work out what the mode wants from us.
+    if (view.allies) for (const a of view.allies) this.mates.set(a.id, now);
+    for (const [id, at] of this.mates) if (now - at > 20) this.mates.delete(id);
+    const team = view.team;
+    const ctf = view.mode === 'ctf' && team !== undefined && !!view.flags && !!view.bases;
+    this.obj = ctf ? this.ctfObjective(view) : null;
+    if (!ctf) this.role = null;
+    const ownFlag = ctf ? view.flags![team!] : undefined;
+    const carrierId = ownFlag?.state === 1 ? ownFlag.carrier : undefined;
+    const carrying = this.obj?.kind === 'carry';
+    // A CTF defender with nothing urgent guards the base: only enemies near it are worth a fight.
+    const guardAt = ctf && this.role === 'defend' && !this.obj ? view.bases![team!] : null;
+
     let best: BotEnemy | null = null;
     let bestD = Infinity;
     for (const e of view.enemies) {
       const d = hdist(self.body.pos, e.pos);
+      // The carrier runs: it only shoots back at whoever gets close.
+      if (carrying && d > 14) continue;
+      if (guardAt && e.id !== carrierId && hdist(e.pos, guardAt) > 26) continue;
       // Stick with the current target a little: switching every time someone is a metre closer looks twitchy.
-      const score = e.id === this.targetId ? d - 4 : d;
+      // Our flag's carrier comes first.
+      const score = (e.id === this.targetId ? d - 4 : d) - (e.id === carrierId ? 12 : 0);
       if (score < bestD && d < 45 && view.canSee(eye, chestPosition(e.pos))) {
         best = e;
         bestD = score;
@@ -519,31 +590,64 @@ export class RocketsBot {
       this.targetId = best.id;
       this.targetSeenAt = now;
       this.lastSeenPos = { ...best.pos };
-    } else if (now - this.targetSeenAt > 3) {
+    } else if (now - this.targetSeenAt > 3 || (guardAt && this.lastSeenPos && this.targetId !== carrierId && hdist(this.lastSeenPos, guardAt) > 26)) {
+      // Lost them (a defender also lets them go once they are far from the base).
       this.targetId = null;
       this.lastSeenPos = null;
     }
+    if (view.mode === 'elim') this.obj = this.elimObjective(view);
+    // A defender drawn away from the base walks back, shooting on the way, instead of chasing further.
+    else if (guardAt && hdist(self.body.pos, guardAt) > 12) this.obj = { kind: 'guard', pos: guardAt };
 
     // Forget rockets that are long gone.
     for (const [id, r] of this.rockets) if (now - r.at > RK.rocketLife + 1) this.rockets.delete(id);
 
     let mode: Mode = this.targetId ? 'fight' : 'roam';
+    const obj = this.obj;
+    if (obj) {
+      switch (obj.kind) {
+        case 'carry':
+        case 'return':
+        case 'retreat':
+        case 'guard':
+          mode = 'obj';
+          break;
+        case 'chase':
+          mode = best && best.id === obj.id ? 'fight' : 'obj';
+          break;
+        case 'attack':
+          // Fight whoever is in the way when it is close and we are healthy; otherwise keep going and shoot on the run.
+          mode = best && hdist(self.body.pos, best.pos) < this.style.range && self.hp >= this.params.healAt ? 'fight' : 'obj';
+          break;
+        case 'escort':
+        case 'regroup':
+          if (!this.targetId) mode = 'obj';
+          break;
+      }
+    }
     const here = nearestNode(this.graph, self.body.pos, 2.5);
     if (!here) {
       this.mode = mode;
       return;
     }
+    const objGoal = mode === 'obj' ? nearestNode(this.graph, obj!.pos, obj!.kind === 'regroup' || obj!.kind === 'retreat' ? 8 : 3) : null;
+    if (mode === 'obj' && !objGoal) mode = this.targetId ? 'fight' : 'roam';
 
     // Health and items: badly hurt, any pack a walk away; a bit hurt, a nearby one; calm, now and then an item.
-    if (this.pickup && !view.packs.some((p) => p.available && p.pos === this.pickup)) this.pickup = null;
-    if (now >= this.pickupAt || (!this.pickup && self.hp < this.params.healAt)) {
-      this.pickupAt = now + 1;
-      this.choosePickup(view, here, mode === 'roam');
-    }
-    if (this.pickup && this.pickupNode) {
-      const goal = this.pickupNode;
-      if (goal !== this.goal || (now > this.repathAt && this.path.length === 0 && hdist(self.body.pos, goal.pos) > 1)) this.setGoal(here, goal, now);
-      mode = 'heal';
+    // Not while carrying, returning or chasing a flag, and elimination has no pickups at all.
+    const busy = !!obj && (obj.kind === 'carry' || obj.kind === 'return' || obj.kind === 'chase');
+    if (busy || view.mode === 'elim') this.pickup = null;
+    else {
+      if (this.pickup && !view.packs.some((p) => p.available && p.pos === this.pickup)) this.pickup = null;
+      if (now >= this.pickupAt || (!this.pickup && self.hp < this.params.healAt)) {
+        this.pickupAt = now + 1;
+        this.choosePickup(view, here, mode === 'roam', guardAt);
+      }
+      if (this.pickup && this.pickupNode) {
+        const goal = this.pickupNode;
+        if (goal !== this.goal || (now > this.repathAt && this.path.length === 0 && hdist(self.body.pos, goal.pos) > 1)) this.setGoal(here, goal, now);
+        mode = 'heal';
+      }
     }
 
     // Stuck watchdog: no real progress for 3 s while not busy shooting at someone (a dead-end alley, a lip the
@@ -566,7 +670,8 @@ export class RocketsBot {
       if (!best) {
         this.targetId = null;
         this.lastSeenPos = null;
-        mode = 'roam';
+        // An objective stays an objective: try again next decision (by rocket jump if the walk keeps failing).
+        if (mode !== 'obj') mode = 'roam';
       }
       const up = this.nearbyHighNode(self.body.pos);
       if (up) {
@@ -577,9 +682,28 @@ export class RocketsBot {
 
     const wasMode = this.mode;
     this.mode = mode;
+    // Elimination: keep a spot in mind to duck behind while reloading.
+    if (mode === 'fight' && view.mode === 'elim' && best) {
+      if (now >= this.coverAt) {
+        this.coverAt = now + 0.6;
+        this.cover = this.findCover(view, best);
+      }
+    } else this.cover = null;
 
     if (mode === 'heal') {
       // Goal and path were set above.
+    } else if (mode === 'obj') {
+      const goal = objGoal!;
+      // A moving objective (a carrier, the group) changes node often: repath at most twice a second for it.
+      if ((goal !== this.goal && (now > this.repathAt - 1 || !this.path.length)) || now > this.repathAt) {
+        const reachable = this.setGoal(here, goal, now);
+        // The flag (or home) is up a tower or across a gap and the walk is long: rocket-jump there.
+        const d = hdist(goal.pos, self.body.pos);
+        const jumpy = obj!.kind === 'attack' || obj!.kind === 'carry' || obj!.kind === 'return';
+        if (jumpy && d > 5 && d < 24 && (!reachable || this.pathLonger(self.body.pos, goal, 1.8))) {
+          this.tryRocketJump(view, goal.pos, obj!.kind === 'carry' ? 0.5 : this.style.rjChance);
+        }
+      }
     } else if (mode === 'fight') {
       if (!best && this.lastSeenPos) {
         const goal = nearestNode(this.graph, this.lastSeenPos, 3);
@@ -598,15 +722,9 @@ export class RocketsBot {
     } else {
       const reached = this.path.length === 0;
       if ((wasMode !== 'roam' || reached || !this.goal || now > this.repathAt + 4) && now >= this.roamRetryAt) {
-        const nodes = this.graph.nodes;
         // A few tries per decision; when nothing is reachable from here, back off instead of searching every step.
         for (let attempt = 0; attempt < 3; attempt++) {
-          let goal: NavNode = nodes[Math.floor(this.rng() * nodes.length)];
-          // Prefer the high ground.
-          for (let i = 0; i < 4; i++) {
-            const candidate = nodes[Math.floor(this.rng() * nodes.length)];
-            if (candidate.pos.y > goal.pos.y && hdist(candidate.pos, self.body.pos) > 6) goal = candidate;
-          }
+          const goal = this.roamGoal(view);
           if ((this.banned.get(goal.id) ?? 0) > now) continue;
           const reachable = this.setGoal(here, goal, now);
           // Unreachable on foot or a long way round: try to rocket-jump up there instead.
@@ -618,6 +736,137 @@ export class RocketsBot {
         }
       }
     }
+  }
+
+  /** A random node to roam to, preferring the high ground. */
+  private highNode(pos: Vec3): NavNode {
+    const nodes = this.graph.nodes;
+    let goal: NavNode = nodes[Math.floor(this.rng() * nodes.length)];
+    for (let i = 0; i < 4; i++) {
+      const candidate = nodes[Math.floor(this.rng() * nodes.length)];
+      if (candidate.pos.y > goal.pos.y && hdist(candidate.pos, pos) > 6) goal = candidate;
+    }
+    return goal;
+  }
+
+  /** A random node within `r` metres (horizontally) of `centre` and a few metres of its height, or null. */
+  private nodeNear(centre: Vec3, r: number, maxDy: number): NavNode | null {
+    const near: NavNode[] = [];
+    for (const n of this.graph.nodes) if (hdist(n.pos, centre) < r && Math.abs(n.pos.y - centre.y) < maxDy) near.push(n);
+    return near.length ? near[Math.floor(this.rng() * near.length)] : null;
+  }
+
+  /**
+   * Where to roam. FFA: anywhere, preferring the high ground. Team modes: often near a teammate, otherwise mostly on
+   * our own half. A CTF defender stays around its base.
+   */
+  private roamGoal(view: BotView): NavNode {
+    const pos = view.self.body.pos;
+    const { team, bases } = view;
+    if (team === undefined || !bases) return this.highNode(pos);
+    if (view.mode === 'ctf' && this.role === 'defend') {
+      const n = this.nodeNear(bases[team], 13, 5);
+      if (n) return n;
+    }
+    if (view.allies?.length && this.rng() < 0.55) {
+      const a = view.allies[Math.floor(this.rng() * view.allies.length)];
+      const n = hdist(a.pos, pos) > 5 ? this.nodeNear(a.pos, 6, 2) : null;
+      if (n) return n;
+    }
+    let goal = this.highNode(pos);
+    for (let i = 0; i < 3 && sideFrom(bases, goal.pos) !== team && this.rng() < 0.6; i++) goal = this.highNode(pos);
+    return goal;
+  }
+
+  /** CTF: what this bot should do about the flags right now; null means guard (defenders) or fight as usual. */
+  private ctfObjective(view: BotView): Objective | null {
+    const team = view.team!;
+    const flags = view.flags!;
+    const bases = view.bases!;
+    const self = view.self;
+    const mine = flags[team];
+    const theirs = flags[1 - team];
+    if (!mine || !theirs) return null;
+    // Roles by id hash over the team (teammates seen lately): about 40% defend, at least one once there are two.
+    const ids = [self.id, ...this.mates.keys()].sort((a, b) => idHash(a) - idHash(b) || (a < b ? -1 : 1));
+    const defenders = ids.length < 2 ? 0 : Math.max(1, Math.floor(ids.length * 0.4));
+    this.role = ids.indexOf(self.id) < defenders ? 'defend' : 'attack';
+
+    if (theirs.state === 1 && theirs.carrier === self.id) return { kind: 'carry', pos: bases[team] };
+    if (mine.state === 2 && (this.role === 'defend' || hdist(mine.pos, self.body.pos) < 22)) return { kind: 'return', pos: mine.pos };
+    // Our flag is on the run: defenders hunt the carrier, and so does everyone once both flags are out.
+    if (mine.state === 1 && (this.role === 'defend' || theirs.state === 1)) return { kind: 'chase', pos: mine.pos, id: mine.carrier };
+    if (this.role === 'defend') return null;
+    if (theirs.state === 1) return { kind: 'escort', pos: theirs.pos };
+    return { kind: 'attack', pos: theirs.pos };
+  }
+
+  /** Elimination: back off when hurt, and with nobody in sight move as a group toward the nearest enemy. */
+  private elimObjective(view: BotView): Objective | null {
+    const pos = view.self.body.pos;
+    const allies = view.allies ?? [];
+    if (view.self.hp < 70 && this.targetId && this.lastSeenPos) {
+      // Hurt: fall back on the nearest teammate, or just away from the shooter, shooting on the way.
+      let ally: Vec3 | null = null;
+      let allyD = 30;
+      for (const a of allies) {
+        const d = hdist(a.pos, pos);
+        if (d > 4 && d < allyD) {
+          allyD = d;
+          ally = a.pos;
+        }
+      }
+      if (ally) return { kind: 'retreat', pos: ally };
+      const ax = pos.x - this.lastSeenPos.x;
+      const az = pos.z - this.lastSeenPos.z;
+      const l = Math.hypot(ax, az) || 1;
+      return { kind: 'retreat', pos: v3(pos.x + (ax / l) * 10, pos.y, pos.z + (az / l) * 10) };
+    }
+    if (this.targetId) return null;
+    let cx = pos.x;
+    let cy = pos.y;
+    let cz = pos.z;
+    for (const a of allies) {
+      cx += a.pos.x;
+      cy += a.pos.y;
+      cz += a.pos.z;
+    }
+    const n = allies.length + 1;
+    cx /= n;
+    cy /= n;
+    cz /= n;
+    let enemy: Vec3 | null = null;
+    let enemyD = Infinity;
+    for (const e of view.enemies) {
+      const d = Math.hypot(e.pos.x - cx, e.pos.z - cz);
+      if (d < enemyD) {
+        enemyD = d;
+        enemy = e.pos;
+      }
+    }
+    if (!enemy) return null;
+    // The group's centre, a few metres toward the enemy: everyone closes up, and the group creeps forward.
+    const step = Math.min(6, enemyD);
+    return { kind: 'regroup', pos: v3(cx + ((enemy.x - cx) / (enemyD || 1)) * step, cy, cz + ((enemy.z - cz) / (enemyD || 1)) * step) };
+  }
+
+  /** The closest nav node a few metres away from which `target` cannot see us. */
+  private findCover(view: BotView, target: BotEnemy): Vec3 | null {
+    const pos = view.self.body.pos;
+    const chest = chestPosition(target.pos);
+    let best: Vec3 | null = null;
+    let bestD = Infinity;
+    let tries = 0;
+    for (const n of this.graph.nodes) {
+      const d = hdist(n.pos, pos);
+      if (d < 1.5 || d > 4.5 || d >= bestD || Math.abs(n.pos.y - pos.y) > 1) continue;
+      if (!view.canSee(eyePosition(n.pos), chest)) {
+        best = n.pos;
+        bestD = d;
+      }
+      if (++tries >= 10) break;
+    }
+    return best;
   }
 
   /** Plans a path to the goal; false when the graph has no route there (the caller picks something else). */
@@ -666,7 +915,7 @@ export class RocketsBot {
    * Picks the pack or item to head for (or none), by walking distance: up to 40 m when badly hurt, 16 m when a bit
    * hurt, and when calm, sometimes an item within 25 m. Ones out of reach on foot but above us get a rocket jump.
    */
-  private choosePickup(view: BotView, here: NavNode, calm: boolean) {
+  private choosePickup(view: BotView, here: NavNode, calm: boolean, guardAt: Vec3 | null) {
     const { self, now } = view;
     const hp = self.hp;
     let maxWalk = hp < this.params.healAt ? 40 : hp <= 70 ? 16 : 0;
@@ -674,7 +923,7 @@ export class RocketsBot {
     if (maxWalk === 0) {
       // Keep a calm-time item target until it is taken; roll for a new one every few seconds.
       if (this.pickup && calm) return;
-      if (!calm || now < this.calmAt) {
+      if (!calm || now < this.calmAt || guardAt) {
         this.pickup = null;
         return;
       }
@@ -685,7 +934,8 @@ export class RocketsBot {
     }
     const pos = self.body.pos;
     const candidates = view.packs
-      .filter((p) => p.available && (!itemsOnly || p.item !== false) && hdist(p.pos, pos) < maxWalk)
+      // A CTF defender only takes what lies near its base.
+      .filter((p) => p.available && (!itemsOnly || p.item !== false) && hdist(p.pos, pos) < maxWalk && (!guardAt || hdist(p.pos, guardAt) < 20))
       .map((p) => ({ p, d: hdist(p.pos, pos) + Math.abs(p.pos.y - pos.y) * 2 }))
       .sort((a, b) => a.d - b.d)
       .slice(0, 3);
@@ -937,6 +1187,16 @@ export class RocketsBot {
     const direct = !!body && body.t < t;
     if (direct) t = body!.t;
     const at = vadd(eye, vscale(vsub(end, eye), t));
+    if (view.allies?.length) {
+      // No friendly fire, but no wasted rockets either: a teammate in the line of fire would eat it, and a blast
+      // that only reaches a teammate does nothing.
+      const reachesTarget = direct || vdist(at, chestPosition(target.pos)) < RK.splashRadius;
+      for (const a of view.allies) {
+        const hit = segmentAABB(eye, end, expandAABB(playerAABB(a.pos), RK.rocketRadius));
+        if (hit && hit.t < t) return false;
+        if (!reachesTarget && vdist(at, chestPosition(a.pos)) < RK.splashRadius) return false;
+      }
+    }
     const box = playerAABB(self.body.pos);
     const nearest = v3(clamp(at.x, box.min.x, box.max.x), clamp(at.y, box.min.y, box.max.y), clamp(at.z, box.min.z, box.max.z));
     const d = vdist(at, nearest);
@@ -956,7 +1216,8 @@ export class RocketsBot {
     let urgent = Infinity;
     let threat: { danger: Vec3; vel: Vec3 } | null = null;
     for (const r of view.rockets) {
-      if (r.owner === self.id) continue;
+      // Our own rockets are not aimed at us, and a teammate's cannot hurt us.
+      if (r.owner === self.id || this.mates.has(r.owner)) continue;
       let seen = this.rockets.get(r.id);
       if (!seen) {
         seen = { at: now, react: this.rng() < this.params.dodge };
@@ -1000,6 +1261,8 @@ export class RocketsBot {
   private tryRocketJump(view: BotView, dest: Vec3, chance: number) {
     const { self, now } = view;
     if (!this.params.rocketJump || this.rj || now < this.rjTryAt || self.hp < 60) return;
+    // Elimination has no health to win back: only jump to get unstuck.
+    if (view.mode === 'elim' && chance < 1) return;
     this.rjTryAt = now + 1.2;
     if (this.rng() < chance) this.rjWant = { dest, until: now + 0.6 };
   }
