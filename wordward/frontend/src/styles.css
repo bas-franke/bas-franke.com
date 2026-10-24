@@ -130,14 +130,14 @@ input {
 }
 
 .tag {
-  --tag-bg: #f7efdc;
-  --tag-edge: rgba(120, 84, 46, 0.45);
+  --tag-bg: #f6ecd9;
+  --tag-edge: rgba(120, 84, 46, 0.5);
   position: absolute;
   left: 0;
   top: 0;
   padding: 1px 9px 2px;
   background: var(--tag-bg);
-  background-image: linear-gradient(180deg, #fffbf0, var(--tag-bg));
+  background-image: linear-gradient(180deg, #fcf4e4, var(--tag-bg));
   border: 1px solid var(--tag-edge);
   border-radius: 10px;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 2px 4px rgba(20, 10, 2, 0.4);
@@ -146,7 +146,7 @@ input {
   text-align: center;
   white-space: nowrap;
   line-height: 1.15;
-  opacity: 0.92;
+  opacity: 0.95;
   will-change: transform;
   font-size: 12px;
 }
@@ -1384,8 +1384,9 @@ input {
     padding-right: 22px;
     padding-top: max(18px, env(safe-area-inset-top));
   }
+  /* The reference keeps the input pill well clear of the bottom edge (~48px at 1024 high). */
   .hud.bottom {
-    padding-bottom: 16px;
+    padding-bottom: clamp(16px, 4.7vh, 48px);
   }
   .heart {
     width: 32px;
@@ -1433,14 +1434,14 @@ input {
     font-size: 19px;
   }
   .dialog {
-    width: clamp(440px, 34vw, 600px);
+    width: 400px;
   }
   .dline.main .dwords {
-    font-size: 30px;
+    font-size: 28px;
   }
   .dialog-input {
-    min-height: 54px;
-    padding: 0 22px 0 30px;
+    min-height: 52px;
+    padding: 0 20px 0 26px;
   }
   .enter {
     font-size: 26px;
@@ -1569,6 +1570,84 @@ input {
   }
   .tap-to-type {
     top: 50%;
+  }
+}
+
+/* Phones: no separate strip above the pill (it covered the defenders). The other language rides inside the pill as
+   one small ink line along its top edge, the creature's name is dropped (the tag above it says enough). */
+@media (max-width: 639px) {
+  .dialog {
+    display: grid;
+    gap: 0;
+  }
+  .dialog > * {
+    grid-area: 1 / 1;
+  }
+  .dialog-meta {
+    z-index: 1;
+    align-self: start;
+    justify-self: center;
+    max-width: calc(100% - 70px);
+    margin-top: 4px;
+    padding: 0;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    white-space: nowrap;
+    background: none;
+    color: var(--ink-soft);
+    text-shadow: none;
+    font-size: 10px;
+    line-height: 1.15;
+    pointer-events: none;
+  }
+  .dialog-name {
+    display: none;
+  }
+  .dialog-meta .dline {
+    line-height: 1.15;
+  }
+  .dialog-meta .dline .lang {
+    font-size: 8px;
+    color: var(--dim);
+  }
+  .dialog-meta .dwords {
+    flex-wrap: nowrap;
+    font-size: 10.5px;
+    gap: 0 5px;
+  }
+  .dialog-meta .dline.done .dwords,
+  .dialog-meta .dline.info .dwords {
+    color: var(--ink-soft);
+  }
+  .dialog-meta .dline.shield .dwords,
+  .dialog-meta .dline .dw .g.done {
+    color: var(--gold-ink);
+  }
+  .dialog-meta .dw .hint {
+    color: var(--dim);
+  }
+  .dialog-meta + .dialog-input {
+    min-height: 50px;
+    padding-top: 12px;
+  }
+  .dialog-meta + .dialog-input .dline.main .dwords {
+    font-size: 22px;
+  }
+}
+@media (max-width: 639px) and (max-height: 520px) {
+  .dialog-meta {
+    margin-top: 2px;
+    font-size: 9px;
+  }
+  .dialog-meta .dwords {
+    font-size: 9.5px;
+  }
+  .dialog-meta + .dialog-input {
+    min-height: 40px;
+    padding-top: 11px;
+  }
+  .dialog-meta + .dialog-input .dline.main .dwords {
+    font-size: 18px;
   }
 }
 
