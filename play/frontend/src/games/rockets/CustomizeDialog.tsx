@@ -5,6 +5,7 @@ import {
   BODY_COLORS,
   BOOTS,
   DEFAULT_LOOK,
+  EARS,
   EMBLEMS,
   FACES,
   HELMETS,
@@ -13,6 +14,7 @@ import {
   SHOULDERS,
   TRIM_COLORS,
   VISOR_COLORS,
+  VISOR_SHAPES,
   randomLook,
 } from '@shared/rockets/cosmetics';
 import { Modal } from '../../ui/Modal';
@@ -23,11 +25,13 @@ import './customize.css';
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 const label = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace('-', ' ');
 
-type Choice = 'helmet' | 'face' | 'shoulders' | 'pattern' | 'backpack' | 'boots' | 'emblem';
+type Choice = 'helmet' | 'visorShape' | 'face' | 'ears' | 'shoulders' | 'pattern' | 'backpack' | 'boots' | 'emblem';
 /** The part pickers, in order, with their headings. */
 const CHOICES: [Choice, string, readonly string[]][] = [
   ['helmet', 'Helmet', HELMETS],
+  ['visorShape', 'Visor', VISOR_SHAPES],
   ['face', 'Face', FACES],
+  ['ears', 'Ears', EARS],
   ['shoulders', 'Shoulders', SHOULDERS],
   ['pattern', 'Paint', PATTERNS],
   ['backpack', 'Backpack', BACKPACKS],

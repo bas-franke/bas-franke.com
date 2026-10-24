@@ -15,6 +15,10 @@ export const BACKPACKS = ['none', 'thrusters', 'antenna-pack', 'tank'] as const;
 export const BOOTS = ['standard', 'heavy', 'spring'] as const;
 /** A small decal on the left shoulder pad. */
 export const EMBLEMS = ['none', 'star', 'bolt', 'ring', 'diamond', 'cross', 'heart'] as const;
+/** The visor glass: ear to ear, split by a centre bar, or a rounder window. */
+export const VISOR_SHAPES = ['wide', 'split', 'round'] as const;
+/** What sits on the sides of the helmet. */
+export const EARS = ['pods', 'fins', 'none'] as const;
 
 export type Helmet = (typeof HELMETS)[number];
 export type Face = (typeof FACES)[number];
@@ -23,6 +27,8 @@ export type Pattern = (typeof PATTERNS)[number];
 export type Backpack = (typeof BACKPACKS)[number];
 export type Boots = (typeof BOOTS)[number];
 export type Emblem = (typeof EMBLEMS)[number];
+export type VisorShape = (typeof VISOR_SHAPES)[number];
+export type Ears = (typeof EARS)[number];
 
 export interface Look {
   body: number;
@@ -36,6 +42,8 @@ export interface Look {
   backpack?: Backpack;
   boots?: Boots;
   emblem?: Emblem;
+  visorShape?: VisorShape;
+  ears?: Ears;
 }
 
 /** The concept-art robot: orange body, cream trim, cyan smile. */
@@ -50,6 +58,8 @@ export const DEFAULT_LOOK: Required<Look> = {
   backpack: 'none',
   boots: 'standard',
   emblem: 'none',
+  visorShape: 'wide',
+  ears: 'pods',
 };
 
 const pick = <T>(list: readonly T[], value: unknown, fallback: T): T => (list.includes(value as T) ? (value as T) : fallback);
@@ -68,6 +78,8 @@ export function sanitizeLook(raw: unknown): Required<Look> {
     backpack: pick(BACKPACKS, r.backpack, DEFAULT_LOOK.backpack),
     boots: pick(BOOTS, r.boots, DEFAULT_LOOK.boots),
     emblem: pick(EMBLEMS, r.emblem, DEFAULT_LOOK.emblem),
+    visorShape: pick(VISOR_SHAPES, r.visorShape, DEFAULT_LOOK.visorShape),
+    ears: pick(EARS, r.ears, DEFAULT_LOOK.ears),
   };
 }
 
@@ -85,5 +97,7 @@ export function randomLook(rand: () => number = Math.random): Required<Look> {
     backpack: any(BACKPACKS),
     boots: any(BOOTS),
     emblem: any(EMBLEMS),
+    visorShape: any(VISOR_SHAPES),
+    ears: any(EARS),
   };
 }
