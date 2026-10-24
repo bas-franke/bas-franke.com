@@ -16,7 +16,16 @@ const text = async (url: string, headers: Record<string, string> = {}) => {
   return res.text();
 };
 
-const decode = (s: string) => s.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").trim();
+const decode = (s: string) =>
+  s
+    .replace(/<!\[CDATA\[|\]\]>/g, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
 
 /** Google Trends daily trending searches (RSS), with approximate search volume. */
 export async function googleTrends(geo = 'US'): Promise<Signal> {
@@ -52,8 +61,28 @@ export async function hackerNews(): Promise<Signal> {
   return { source: 'Hacker News front page', items };
 }
 
+/** Headlines from a news RSS feed: what newsrooms consider the biggest stories right now. */
+export async function newsFeed(url: string, source: string, max = 15): Promise<Signal> {
+  const xml = await text(url);
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, max).map((m) => {
+    const title = decode(m[1].match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '');
+    const description = decode(m[1].match(/<description>([\s\S]*?)<\/description>/)?.[1] ?? '').slice(0, 160);
+    return description ? `${title}: ${description}` : title;
+  });
+  return { source, items: items.filter(Boolean) };
+}
+
 export async function collectSignals(): Promise<Signal[]> {
-  const results = await Promise.allSettled([googleTrends('US'), googleTrends('GB'), wikipediaTop(), hackerNews()]);
+  const results = await Promise.allSettled([
+    newsFeed('https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC News, world headlines'),
+    newsFeed('https://feeds.bbci.co.uk/news/business/rss.xml', 'BBC News, business headlines', 10),
+    newsFeed('https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', 'BBC News, science headlines', 8),
+    newsFeed('https://rss.nytimes.com/services/xml/rss/nyt/World.xml', 'New York Times, world headlines'),
+    googleTrends('US'),
+    googleTrends('GB'),
+    wikipediaTop(),
+    hackerNews(),
+  ]);
   return results.flatMap((r) => {
     if (r.status === 'fulfilled' && r.value.items.length) return [r.value];
     if (r.status === 'rejected') console.warn('trend signal failed:', (r.reason as Error).message);

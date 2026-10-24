@@ -1,3 +1,30 @@
+export type Category = 'technology' | 'science' | 'money' | 'world' | 'society';
+export const CATEGORIES: Category[] = ['technology', 'science', 'money', 'world', 'society'];
+
+/** A field is a lasting subject (AI, quantum computing); an event is something happening in the world (a war, a crash). */
+export type TopicKind = 'field' | 'event';
+
+export interface PlanItem {
+  /** The one idea a story makes click, phrased as a title. */
+  title: string;
+  /** One sentence on what the story must explain. */
+  brief: string;
+}
+
+export interface PlanSection {
+  name: string;
+  blurb: string;
+  items: PlanItem[];
+  /** The automatic "Latest" section: "right now" stories land here, nothing is planned for it. */
+  live?: boolean;
+}
+
+/** The curriculum of a topic, generated once and extended when every item has been written. */
+export interface TopicPlan {
+  intro: string;
+  sections: PlanSection[];
+}
+
 export interface Settings {
   id: 1;
   enabled: boolean;
@@ -8,23 +35,20 @@ export interface Settings {
   timezone: string;
   text_model: string;
   image_model: string;
-  /** Quality of the cover image (shown on cards and above the article). */
   image_quality: 'low' | 'medium' | 'high';
-  /** Quality of inline figures; "low" is about a ninth of the price of "medium" and still looks good. */
-  figure_quality: 'low' | 'medium' | 'high';
   images_enabled: boolean;
-  images_min: number;
+  /** 0–2: the writer may ask for up to this many pictures, and only when they help. */
   images_max: number;
-  charts_enabled: boolean;
   web_search_enabled: boolean;
   language: string;
   tone: string;
   audience: string;
+  /** Target length of a story body in words. */
   target_words: number;
   extra_instructions: string;
-  /** Percentage of articles that should be "right now" pieces about what is interesting today. */
+  /** Percentage of stories that follow what is happening in the world right now. */
   trending_share: number;
-  /** Extra rules for the trend scout (what counts as lightweight). */
+  /** Extra rules for the trend scout. */
   trending_guidance: string;
   site_name: string;
   tagline: string;
@@ -34,61 +58,77 @@ export interface Settings {
 
 export interface Topic {
   id: number;
+  slug: string;
   name: string;
   description: string;
+  category: Category;
+  kind: TopicKind;
   weight: number;
   enabled: boolean;
-  /** The one system topic that holds "right now" pieces; never picked for evergreen articles. */
-  is_trending: boolean;
+  plan: TopicPlan | null;
+  planned_at: Date | null;
   created_at: Date;
+  updated_at: Date;
 }
 
-export type ArticleKind = 'evergreen' | 'trending';
+/** planned: a curriculum item of its topic; trending: picked by the scout from what is happening now. */
+export type StoryKind = 'planned' | 'trending';
 
-export interface ArticleImage {
+export interface StoryImage {
   file: string;
   alt: string;
   caption: string;
   prompt: string;
 }
 
-export interface Article {
+export interface Source {
+  title: string;
+  url: string;
+}
+
+export interface Story {
   id: number;
   slug: string;
+  topic_id: number;
   title: string;
-  dek: string;
+  hook: string;
   body_md: string;
-  topic_id: number | null;
-  kind: ArticleKind;
-  /** For trending pieces: one sentence on why the subject is in the air today. */
+  takeaway: string;
+  kind: StoryKind;
+  /** Trending stories: one sentence on why the subject is in the air today. */
   why_now: string | null;
+  /** Position in the topic's curriculum: section, then item within the section (trending items sort after planned ones). */
+  section_index: number;
+  plan_index: number;
+  section_name: string;
+  /** The plan item this story fulfilled (its title), null for trending stories. */
+  plan_item: string | null;
+  /** 1 = anyone, 2 = everyday knowledge helps, 3 = a detail inside the topic. Every story is still standalone. */
+  difficulty: number;
   tags: string[];
-  hero_image: string | null;
-  hero_alt: string | null;
-  image_prompt: string | null;
-  /** All illustrations; images[0] is the cover (also mirrored in hero_image for lists). */
-  images: ArticleImage[];
-  charts: unknown[];
-  sources: unknown[];
+  images: StoryImage[];
+  sources: Source[];
   model: string | null;
   usage: Record<string, number>;
-  read_minutes: number;
+  read_seconds: number;
   views: number;
   status: 'published' | 'hidden';
   published_at: Date;
   created_at: Date;
 }
 
+export type RunKind = StoryKind | 'plan';
+
 export interface Run {
   id: number;
   trigger: 'schedule' | 'manual';
   status: 'running' | 'succeeded' | 'failed';
   step: string;
-  kind: ArticleKind;
-  /** Trending runs: the subject the scout picked. */
+  kind: RunKind;
+  /** Trending runs: the subject the scout picked; planned runs: the plan item. */
   detail: string | null;
   topic_id: number | null;
-  article_id: number | null;
+  story_id: number | null;
   error: string | null;
   usage: Record<string, number>;
   started_at: Date;

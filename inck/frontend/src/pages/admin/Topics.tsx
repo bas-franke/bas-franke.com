@@ -1,33 +1,40 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api';
-import type { Topic } from '../../types';
+import { CATEGORY_LABEL, CATEGORY_ORDER, type AdminTopic, type Category, type TopicKind } from '../../types';
 import { useAdminCall } from './AdminApp';
 
 export default function Topics({ onLoggedOut }: { onLoggedOut: () => void }) {
   const call = useAdminCall(onLoggedOut);
-  const [topics, setTopics] = useState<Topic[]>([]);
+  const [topics, setTopics] = useState<AdminTopic[]>([]);
   const [error, setError] = useState<string>();
-  const [draft, setDraft] = useState({ name: '', description: '' });
+  const [busyId, setBusyId] = useState<number>();
+  const [draft, setDraft] = useState({ name: '', description: '', category: 'world' as Category, kind: 'field' as TopicKind });
 
-  const load = useCallback(() => call(() => api<Topic[]>('/api/admin/topics')).then((t) => t && setTopics(t)).catch((e) => setError(e.message)), [call]);
+  const load = useCallback(() => call(() => api<AdminTopic[]>('/api/admin/topics')).then((t) => t && setTopics(t)).catch((e) => setError(e.message)), [call]);
   useEffect(() => {
     load();
   }, [load]);
 
-  const update = async (id: number, patch: Partial<Topic>) => {
+  const act = async (id: number, fn: () => Promise<unknown>) => {
+    setBusyId(id);
     setError(undefined);
     try {
-      await call(() => api(`/api/admin/topics/${id}`, { method: 'PATCH', json: patch }));
-      load();
+      await call(fn);
+      await load();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusyId(undefined);
     }
   };
 
-  const remove = async (t: Topic) => {
-    if (!confirm(`Delete topic “${t.name}”? Its ${t.articles} article(s) stay but lose their topic.`)) return;
-    await call(() => api(`/api/admin/topics/${t.id}`, { method: 'DELETE' })).catch((e) => setError(e.message));
-    load();
+  const update = (id: number, patch: Partial<AdminTopic>) => act(id, () => api(`/api/admin/topics/${id}`, { method: 'PATCH', json: patch }));
+  const plan = (t: AdminTopic) => act(t.id, () => api(`/api/admin/topics/${t.id}/plan`, { method: 'POST', json: { extend: t.sections > 0 } }));
+  const writeNext = (t: AdminTopic) => act(t.id, () => api('/api/admin/generate', { method: 'POST', json: { topic_id: t.id } }));
+  const remove = (t: AdminTopic) => {
+    if (!confirm(`Delete “${t.name}” and its ${t.stories} ${t.stories === 1 ? 'story' : 'stories'}? This cannot be undone.`)) return;
+    act(t.id, () => api(`/api/admin/topics/${t.id}`, { method: 'DELETE' }));
   };
 
   const add = async (e: FormEvent) => {
@@ -35,7 +42,7 @@ export default function Topics({ onLoggedOut }: { onLoggedOut: () => void }) {
     setError(undefined);
     try {
       await call(() => api('/api/admin/topics', { method: 'POST', json: draft }));
-      setDraft({ name: '', description: '' });
+      setDraft({ name: '', description: '', category: 'world', kind: 'field' });
       load();
     } catch (err) {
       setError((err as Error).message);
@@ -47,15 +54,30 @@ export default function Topics({ onLoggedOut }: { onLoggedOut: () => void }) {
       <header className="admin-head">
         <div>
           <h1>Topics</h1>
-          <p className="muted">The scheduler picks a random enabled topic, weighted, favouring ones that had fewer articles this week.</p>
+          <p className="muted">
+            Each topic gets a generated curriculum (sections of short standalone stories, from zero to deeper). The scheduler writes the next
+            unwritten item of a random enabled topic, weighted and favouring topics with fewer stories; “right now” stories are filed into
+            whichever topic fits, or a new one.
+          </p>
         </div>
       </header>
 
       {error && <p className="form-error">{error}</p>}
 
-      <form onSubmit={add} className="panel add-row">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="New topic, e.g. Ocean science" required />
-        <input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Notes for the writer (optional)" />
+      <form onSubmit={add} className="panel add-row add-row-topic">
+        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="New topic, e.g. The Sudan civil war" required />
+        <input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="One line for the planner (optional)" />
+        <select value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value as Category })} aria-label="Category">
+          {CATEGORY_ORDER.map((c) => (
+            <option key={c} value={c}>
+              {CATEGORY_LABEL[c]}
+            </option>
+          ))}
+        </select>
+        <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as TopicKind })} aria-label="Kind">
+          <option value="field">Field (lasting subject)</option>
+          <option value="event">Event (happening now)</option>
+        </select>
         <button className="btn btn-primary" type="submit">
           Add topic
         </button>
@@ -63,14 +85,36 @@ export default function Topics({ onLoggedOut }: { onLoggedOut: () => void }) {
 
       <div className="topic-list">
         {topics.map((t) => (
-          <TopicRow key={t.id} topic={t} onChange={(patch) => update(t.id, patch)} onDelete={() => remove(t)} />
+          <TopicRow
+            key={t.id}
+            topic={t}
+            busy={busyId === t.id}
+            onChange={(patch) => update(t.id, patch)}
+            onPlan={() => plan(t)}
+            onWrite={() => writeNext(t)}
+            onDelete={() => remove(t)}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function TopicRow({ topic, onChange, onDelete }: { topic: Topic; onChange: (p: Partial<Topic>) => void; onDelete: () => void }) {
+function TopicRow({
+  topic,
+  busy,
+  onChange,
+  onPlan,
+  onWrite,
+  onDelete,
+}: {
+  topic: AdminTopic;
+  busy: boolean;
+  onChange: (p: Partial<AdminTopic>) => void;
+  onPlan: () => void;
+  onWrite: () => void;
+  onDelete: () => void;
+}) {
   const [name, setName] = useState(topic.name);
   const [description, setDescription] = useState(topic.description);
   useEffect(() => {
@@ -87,29 +131,49 @@ function TopicRow({ topic, onChange, onDelete }: { topic: Topic; onChange: (p: P
       </label>
       <div className="topic-fields">
         <input className="topic-name" value={name} onChange={(e) => setName(e.target.value)} />
-        <input className="topic-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Notes for the writer" />
+        <input className="topic-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Notes for the planner" />
+        <div className="topic-selects">
+          <select value={topic.category} onChange={(e) => onChange({ category: e.target.value as Category })} aria-label="Category">
+            {CATEGORY_ORDER.map((c) => (
+              <option key={c} value={c}>
+                {CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </select>
+          <select value={topic.kind} onChange={(e) => onChange({ kind: e.target.value as TopicKind })} aria-label="Kind">
+            <option value="field">Field</option>
+            <option value="event">Event</option>
+          </select>
+          <Link to={`/t/${topic.slug}`} className="small">
+            view hub →
+          </Link>
+        </div>
       </div>
-      {topic.is_trending ? (
-        <span className="muted small">share set in Settings</span>
-      ) : (
       <label className="topic-weight" title="Relative chance of being picked">
         Weight
         <input type="range" min={0} max={10} value={topic.weight} onChange={(e) => onChange({ weight: Number(e.target.value) })} />
         <span className="mono">{topic.weight}</span>
       </label>
-      )}
-      <span className="muted small topic-count">{topic.articles} articles</span>
+      <span className="muted small topic-count">
+        {topic.stories} {topic.stories === 1 ? 'story' : 'stories'}
+        <br />
+        {topic.sections ? `${topic.written}/${topic.planned} planned written` : 'no curriculum yet'}
+      </span>
       <div className="topic-actions">
         {dirty && (
-          <button className="btn btn-primary" onClick={() => onChange({ name, description })}>
+          <button className="btn btn-primary" onClick={() => onChange({ name, description })} disabled={busy}>
             Save
           </button>
         )}
-        {!topic.is_trending && (
-          <button className="btn btn-ghost danger" onClick={onDelete} aria-label={`Delete ${topic.name}`}>
-            Delete
-          </button>
-        )}
+        <button className="btn" onClick={onPlan} disabled={busy} title={topic.sections ? 'Add new sections and items to the curriculum' : 'Generate the curriculum'}>
+          {busy ? 'Working…' : topic.sections ? 'Extend plan' : 'Plan'}
+        </button>
+        <button className="btn" onClick={onWrite} disabled={busy} title="Write the next unwritten item now">
+          Write next
+        </button>
+        <button className="btn btn-ghost danger" onClick={onDelete} disabled={busy} aria-label={`Delete ${topic.name}`}>
+          Delete
+        </button>
       </div>
     </div>
   );

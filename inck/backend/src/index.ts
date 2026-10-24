@@ -3,6 +3,7 @@ import express, { type ErrorRequestHandler } from 'express';
 import { aiConfigured } from './ai.js';
 import { config, imagesDir } from './config.js';
 import { dbReady, migrate } from './db.js';
+import { sweepOrphanImages } from './generator.js';
 import { adminRouter } from './routes/admin.js';
 import { publicRouter } from './routes/public.js';
 import { startScheduler } from './scheduler.js';
@@ -24,7 +25,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: problems.length ? 'degraded' : 'ok', problems, uptime: Math.round(process.uptime()) });
 });
 
-// Generated illustrations. Filenames are random, so long caching is safe.
+// Generated pictures. Filenames are random, so long caching is safe.
 app.use('/api/media', express.static(imagesDir(), { maxAge: '365d', immutable: true, index: false, fallthrough: true }));
 
 // Everything below needs the database.
@@ -65,5 +66,9 @@ app.listen(config.port, config.host, async () => {
   await mkdir(imagesDir(), { recursive: true }).catch((err) => console.error('cannot create data dir', err));
   await connectDb();
   setInterval(async () => (dbUp = await dbReady()), 60_000);
+  // Pictures of deleted stories (and of the old magazine's articles) are removed at startup and once a day.
+  const sweep = () => sweepOrphanImages().catch((err) => console.error('image sweep failed', err));
+  sweep();
+  setInterval(sweep, 24 * 60 * 60_000);
   startScheduler();
 });

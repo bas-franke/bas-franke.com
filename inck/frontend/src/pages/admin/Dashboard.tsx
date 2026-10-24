@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, compact, formatDate, timeAgo, timeUntil } from '../../api';
-import type { Overview, Run, Topic } from '../../types';
+import type { AdminTopic, Overview, Run } from '../../types';
 import { useAdminCall } from './AdminApp';
 
 export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) {
   const call = useAdminCall(onLoggedOut);
   const [data, setData] = useState<Overview>();
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [topicId, setTopicId] = useState('');
+  const [topics, setTopics] = useState<AdminTopic[]>([]);
+  const [choice, setChoice] = useState('');
   const [error, setError] = useState<string>();
   const [, tick] = useState(0);
 
@@ -16,7 +16,7 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
 
   useEffect(() => {
     load();
-    call(() => api<Topic[]>('/api/admin/topics')).then((t) => t && setTopics(t)).catch(() => {});
+    call(() => api<AdminTopic[]>('/api/admin/topics')).then((t) => t && setTopics(t)).catch(() => {});
   }, [load, call]);
 
   // Poll faster while a run is in progress so the step updates live.
@@ -31,13 +31,9 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
 
   async function generateNow() {
     setError(undefined);
+    const body = choice === 'trending' ? { mode: 'trending' } : choice === 'planned' ? { mode: 'planned' } : choice ? { topic_id: Number(choice) } : { mode: 'auto' };
     try {
-      await call(() =>
-        api('/api/admin/generate', {
-          method: 'POST',
-          json: topicId === 'trending' ? { mode: 'trending' } : { topic_id: topicId || undefined, mode: topicId ? 'evergreen' : 'auto' },
-        }),
-      );
+      await call(() => api('/api/admin/generate', { method: 'POST', json: body }));
       setTimeout(load, 500);
     } catch (e) {
       setError((e as Error).message);
@@ -54,23 +50,24 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
         <div>
           <h1>Dashboard</h1>
           <p className="muted">
-            {data.counts.published} published · {compact(data.counts.views)} views · {data.published_24h}/{data.settings.max_per_day} in the last 24 h
+            {data.counts.published} stories in {data.counts.topics} topics · {compact(data.counts.views)} views · {data.published_24h}/{data.settings.max_per_day} in the last 24 h
           </p>
         </div>
         <div className="generate">
-          <select value={topicId} onChange={(e) => setTopicId(e.target.value)} aria-label="Topic for the next article">
-            <option value="">Auto (evergreen or right now)</option>
-            <option value="trending">Right now (what is interesting today)</option>
+          <select value={choice} onChange={(e) => setChoice(e.target.value)} aria-label="What to write next">
+            <option value="">Auto (curriculum or right now)</option>
+            <option value="trending">Right now (what is happening)</option>
+            <option value="planned">Curriculum (any topic)</option>
             {topics
               .filter((t) => t.enabled)
               .map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name}
+                  Next in: {t.name}
                 </option>
               ))}
           </select>
           <button className="btn btn-primary" onClick={generateNow} disabled={data.generating || !data.env.openai || !data.env.database}>
-            {data.generating ? 'Generating…' : 'Generate now'}
+            {data.generating ? 'Writing…' : 'Write now'}
           </button>
         </div>
       </header>
@@ -82,18 +79,18 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
           <h2>Scheduler</h2>
           {running ? (
             <p className="big">
-              <span className="spinner" /> Writing now: <em>{running.step}</em>
+              <span className="spinner" /> Working: <em>{running.step}</em>
             </p>
           ) : data.next_run_at ? (
             <p className="big">
-              Next article {timeUntil(data.next_run_at)}
+              Next story {timeUntil(data.next_run_at)}
               <span className="muted small"> ({formatDate(data.next_run_at, true)})</span>
             </p>
           ) : (
             <p className="big muted">Paused</p>
           )}
           <p className="muted small">
-            Every {data.settings.interval_minutes} min, max {data.settings.max_per_day}/24 h
+            Every {data.settings.interval_minutes} min, max {data.settings.max_per_day}/24 h, {data.settings.trending_share}% right now
             {data.settings.active_hours_start !== null && data.settings.active_hours_end !== null
               ? `, ${data.settings.active_hours_start}:00–${data.settings.active_hours_end}:00 ${data.settings.timezone}`
               : ''}
@@ -115,7 +112,7 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
             <Check ok={data.env.openai} label="OpenAI key configured" fix="Set OPENAI_API_KEY in /srv/apps/inck/.env" />
             <Check ok={data.env.admin_password} label="Admin password set" />
           </ul>
-          <p className="muted small mono">images: {data.env.data_dir}/images</p>
+          <p className="muted small mono">pictures: {data.env.data_dir}/images</p>
         </div>
 
         <div className="panel">
@@ -130,8 +127,12 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
               <dd>{compact(data.tokens.output)}</dd>
             </div>
             <div>
-              <dt>Images</dt>
+              <dt>Pictures</dt>
               <dd>{data.tokens.images}</dd>
+            </div>
+            <div>
+              <dt>Searches</dt>
+              <dd>{data.tokens.searches}</dd>
             </div>
             <div>
               <dt>Failed runs</dt>
@@ -142,12 +143,11 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
             ≈ ${data.cost.last_24h_usd.toFixed(2)} <span className="muted small">last 24 h</span>
             <span className="muted small">
               {' '}
-              · ${data.cost.per_article_usd.toFixed(3)} per article · ${data.cost.total_usd.toFixed(2)} all time
+              · ${data.cost.per_story_usd.toFixed(3)} per story · ${data.cost.total_usd.toFixed(2)} all time
             </span>
           </p>
           <p className="muted small">
-            Estimate from list prices. Models: {data.settings.text_model} · {data.settings.image_model} (cover {data.settings.image_quality}, figures{' '}
-            {data.settings.figure_quality})
+            Estimate from list prices. Models: {data.settings.text_model} · {data.settings.image_model} ({data.settings.image_quality}, max {data.settings.images_max} per story)
           </p>
         </div>
       </section>
@@ -155,14 +155,14 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
       <section className="panel">
         <h2>Recent runs</h2>
         {data.recent_runs.length === 0 ? (
-          <p className="muted">No runs yet. Press “Generate now” to write the first article.</p>
+          <p className="muted">No runs yet. Press “Write now” for the first story.</p>
         ) : (
           <table className="table">
             <thead>
               <tr>
                 <th>When</th>
                 <th>Trigger</th>
-                <th>Topic</th>
+                <th>What</th>
                 <th>Result</th>
                 <th>Tokens</th>
               </tr>
@@ -197,13 +197,19 @@ function RunRow({ run }: { run: Run }) {
       <td title={formatDate(run.started_at, true)}>{timeAgo(run.started_at)}</td>
       <td>{run.trigger}</td>
       <td>
-        {run.kind === 'trending' ? (
+        {run.kind === 'trending' && (
           <span title={run.detail ?? ''}>
-            <span className="now-dot" /> Right now{run.detail ? `: ${run.detail.split(' — ')[0]}` : ''}
+            <span className="now-dot" /> {run.topic_name ?? 'Right now'}
+            {run.detail ? `: ${run.detail}` : ''}
           </span>
-        ) : (
-          (run.topic_name ?? '—')
         )}
+        {run.kind === 'planned' && (
+          <span>
+            {run.topic_name ?? '—'}
+            {run.detail ? <span className="muted"> · {run.detail}</span> : ''}
+          </span>
+        )}
+        {run.kind === 'plan' && <span>Curriculum: {run.topic_name ?? run.detail ?? '—'}</span>}
       </td>
       <td>
         {run.status === 'running' && (
@@ -211,11 +217,12 @@ function RunRow({ run }: { run: Run }) {
             <span className="spinner" /> {run.step}
           </span>
         )}
-        {run.status === 'succeeded' && (
-          <Link to={`/a/${run.article_slug}`} className="status status-ok">
-            {run.article_title}
+        {run.status === 'succeeded' && run.story_slug && (
+          <Link to={`/s/${run.story_slug}`} className="status status-ok">
+            {run.story_title}
           </Link>
         )}
+        {run.status === 'succeeded' && !run.story_slug && <span className="status status-ok">{run.detail ?? 'done'}</span>}
         {run.status === 'failed' && (
           <span className="status status-fail" title={run.error ?? ''}>
             {run.error}
@@ -224,7 +231,8 @@ function RunRow({ run }: { run: Run }) {
       </td>
       <td className="mono small">
         {run.usage.input_tokens ? `${compact(run.usage.input_tokens)} / ${compact(run.usage.output_tokens ?? 0)}` : '—'}
-        {run.usage.images ? ' +img' : ''}
+        {run.usage.images ? ` +${run.usage.images} img` : ''}
+        {run.usage.searches ? ` +${run.usage.searches} search` : ''}
       </td>
     </tr>
   );

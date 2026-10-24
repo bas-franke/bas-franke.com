@@ -24,21 +24,21 @@ export const config = {
 
 /**
  * USD per million tokens, used only for the cost estimate on the dashboard. Update when OpenAI changes prices
- * (platform.openai.com/docs/pricing). Text: gpt-5.4-nano. Image: gpt-image-2 output tokens.
+ * (platform.openai.com/docs/pricing). Text: gpt-5.4-mini class. Image: gpt-image-2 output tokens.
  */
 export const PRICES = {
-  textInputPerM: Number(env.PRICE_TEXT_INPUT ?? 0.2),
-  textOutputPerM: Number(env.PRICE_TEXT_OUTPUT ?? 1.25),
+  textInputPerM: Number(env.PRICE_TEXT_INPUT ?? 0.25),
+  textOutputPerM: Number(env.PRICE_TEXT_OUTPUT ?? 2),
   imageOutputPerM: Number(env.PRICE_IMAGE_OUTPUT ?? 30),
   /** Flat price per web search call. */
   webSearchCall: Number(env.PRICE_WEB_SEARCH ?? 0.01),
 };
 
-export function estimateCostUsd(u: { input_tokens?: number; output_tokens?: number; image_tokens?: number }, searches = 0) {
+export function estimateCostUsd(u: { input_tokens?: number; output_tokens?: number; image_tokens?: number; searches?: number }) {
   return (
     ((u.input_tokens ?? 0) * PRICES.textInputPerM + (u.output_tokens ?? 0) * PRICES.textOutputPerM + (u.image_tokens ?? 0) * PRICES.imageOutputPerM) /
       1_000_000 +
-    searches * PRICES.webSearchCall
+    (u.searches ?? 0) * PRICES.webSearchCall
   );
 }
 

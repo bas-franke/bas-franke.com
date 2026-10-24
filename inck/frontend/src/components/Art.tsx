@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { Category } from '../types';
 
 // Remembered per page load, so a missing file is tried once, not once per card (and never flashes a broken image).
 const missing = new Set<string>();
@@ -33,10 +34,15 @@ export default function Art({ name, fallback, className }: { name: string; fallb
   );
 }
 
-/** "Space & astronomy" → "space-astronomy", used for topic icon filenames. */
-export const artSlug = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/&/g, ' ')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+/** The existing topic icons, reused per category. */
+const CATEGORY_ART: Record<Category, string> = {
+  technology: 'topic-computing-ai',
+  science: 'topic-space-astronomy',
+  money: 'topic-economics-money',
+  world: 'topic-weird-history',
+  society: 'topic-design-architecture',
+};
+
+export function CategoryIcon({ category, className = 'topic-icon' }: { category: Category; className?: string }) {
+  return <Art name={CATEGORY_ART[category] ?? 'topic-default'} fallback="topic-default" className={className} />;
+}

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes } from 'react-router-dom';
 import { ApiError, api } from '../../api';
-import Articles from './Articles';
 import Dashboard from './Dashboard';
 import Login from './Login';
 import Settings from './Settings';
+import Stories from './Stories';
 import Topics from './Topics';
 
 type Auth = { state: 'checking' } | { state: 'login'; notice?: string } | { state: 'in'; user: string };
@@ -15,6 +15,7 @@ export default function AdminApp() {
   const onLoggedOut = useCallback(() => setAuth({ state: 'login' }), []);
 
   useEffect(() => {
+    document.title = 'inck admin';
     api<{ user: string }>('/api/admin/me')
       .then((r) => setAuth({ state: 'in', user: r.user }))
       .catch((err) =>
@@ -40,7 +41,7 @@ export default function AdminApp() {
           <NavLink to="/sudo" end>
             Dashboard
           </NavLink>
-          <NavLink to="/sudo/articles">Articles</NavLink>
+          <NavLink to="/sudo/stories">Stories</NavLink>
           <NavLink to="/sudo/topics">Topics</NavLink>
           <NavLink to="/sudo/settings">Settings</NavLink>
         </nav>
@@ -54,7 +55,8 @@ export default function AdminApp() {
       <main className="admin-main">
         <Routes>
           <Route path="/sudo" element={<Dashboard onLoggedOut={onLoggedOut} />} />
-          <Route path="/sudo/articles" element={<Articles onLoggedOut={onLoggedOut} />} />
+          <Route path="/sudo/stories" element={<Stories onLoggedOut={onLoggedOut} />} />
+          <Route path="/sudo/articles" element={<Stories onLoggedOut={onLoggedOut} />} />
           <Route path="/sudo/topics" element={<Topics onLoggedOut={onLoggedOut} />} />
           <Route path="/sudo/settings" element={<Settings onLoggedOut={onLoggedOut} />} />
         </Routes>

@@ -52,7 +52,7 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
           <legend>Schedule</legend>
           <label className="row">
             <input type="checkbox" checked={s.enabled} onChange={(e) => set('enabled', e.target.checked)} />
-            Generate articles automatically
+            Write stories automatically
           </label>
           <div className="fields">
             <label>
@@ -100,8 +100,8 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
               <input value={s.language} onChange={(e) => set('language', e.target.value)} />
             </label>
             <label>
-              Target length (words)
-              <input type="number" min={200} max={4000} step={50} value={s.target_words} onChange={(e) => set('target_words', Number(e.target.value))} />
+              Story length (words)
+              <input type="number" min={80} max={600} step={10} value={s.target_words} onChange={(e) => set('target_words', Number(e.target.value))} />
             </label>
             <label className="wide">
               Tone
@@ -113,28 +113,28 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
             </label>
             <label className="wide">
               Extra instructions for the writer
-              <textarea rows={4} value={s.extra_instructions} onChange={(e) => set('extra_instructions', e.target.value)} placeholder="e.g. Always end with a practical takeaway. Avoid politics." />
+              <textarea rows={4} value={s.extra_instructions} onChange={(e) => set('extra_instructions', e.target.value)} placeholder="e.g. End every story with a question to think about." />
             </label>
           </div>
           <label className="row">
             <input type="checkbox" checked={s.web_search_enabled} onChange={(e) => set('web_search_enabled', e.target.checked)} />
-            Let the model search the web for fresh facts and sources
+            Let the model search the web (used for “right now” stories, event topics and their curricula)
           </label>
-          <label className="row">
-            <input type="checkbox" checked={s.charts_enabled} onChange={(e) => set('charts_enabled', e.target.checked)} />
-            Include data charts when there is something worth charting
-          </label>
+          <p className="muted small">
+            Every story is written to stand alone: no prior knowledge, every term explained, one idea per story, told as a short story rather
+            than a lecture.
+          </p>
         </fieldset>
 
         <fieldset className="panel">
           <legend>Right now</legend>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Part of the articles follow what people are curious about today instead of an evergreen topic. The scout reads Google Trends,
-            Wikipedia's most-read pages and Hacker News, searches the web, and picks one lightweight subject (no war, crime, politics or
-            disasters).
+            Part of the stories follow what the world is trying to understand today. The scout reads news headlines (BBC, NYT), Google Trends,
+            Wikipedia's most-read pages and Hacker News, searches the web, picks one subject and files it into an existing topic or creates a
+            new one (a conflict, a crash, a crisis) with its own curriculum, history included.
           </p>
           <label className="slider">
-            Share of "right now" articles: <strong>{s.trending_share}%</strong>
+            Share of “right now” stories: <strong>{s.trending_share}%</strong>
             <input type="range" min={0} max={100} step={5} value={s.trending_share} onChange={(e) => set('trending_share', Number(e.target.value))} />
           </label>
           <div className="fields">
@@ -146,51 +146,46 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
         </fieldset>
 
         <fieldset className="panel">
-          <legend>Models</legend>
+          <legend>Pictures</legend>
+          <label className="row">
+            <input type="checkbox" checked={s.images_enabled} onChange={(e) => set('images_enabled', e.target.checked)} />
+            Allow pictures (the writer adds one only when it genuinely helps; most stories get none)
+          </label>
           <div className="fields">
             <label>
-              Text model
-              <input value={s.text_model} onChange={(e) => set('text_model', e.target.value)} className="mono" />
+              At most per story
+              <select value={s.images_max} onChange={(e) => set('images_max', Number(e.target.value))}>
+                <option value={0}>0</option>
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+              </select>
             </label>
             <label>
               Image model
               <input value={s.image_model} onChange={(e) => set('image_model', e.target.value)} className="mono" />
             </label>
             <label>
-              Cover image quality
+              Quality
               <select value={s.image_quality} onChange={(e) => set('image_quality', e.target.value as SettingsData['image_quality'])}>
                 <option value="low">low (≈ ½ cent)</option>
                 <option value="medium">medium (≈ 4 cents)</option>
                 <option value="high">high (expensive)</option>
               </select>
             </label>
-            <label>
-              Inline figure quality
-              <select value={s.figure_quality} onChange={(e) => set('figure_quality', e.target.value as SettingsData['figure_quality'])}>
-                <option value="low">low (≈ ½ cent)</option>
-                <option value="medium">medium (≈ 4 cents)</option>
-                <option value="high">high (expensive)</option>
-              </select>
-            </label>
           </div>
-          <label className="row">
-            <input type="checkbox" checked={s.images_enabled} onChange={(e) => set('images_enabled', e.target.checked)} />
-            Illustrate articles (cover image plus inline figures)
-          </label>
+        </fieldset>
+
+        <fieldset className="panel">
+          <legend>Text model</legend>
           <div className="fields">
             <label>
-              Images per article, at least
-              <input type="number" min={1} max={8} value={s.images_min} onChange={(e) => set('images_min', Number(e.target.value))} />
-            </label>
-            <label>
-              At most
-              <input type="number" min={1} max={8} value={s.images_max} onChange={(e) => set('images_max', Number(e.target.value))} />
+              Model
+              <input value={s.text_model} onChange={(e) => set('text_model', e.target.value)} className="mono" />
             </label>
           </div>
           <p className="muted small">
-            The writer decides how many images each article needs within this range. Every image is one paid image request, so the
-            maximum is the main cost lever. Any model name from your OpenAI account works; the gpt-5.4 mini/nano models are the cheapest
-            current text models.
+            Used for planning curricula, scouting and writing. Any model name from your OpenAI account works; gpt-5.4-mini is a good balance
+            of quality and price for 200-word stories, gpt-5.4-nano is cheaper.
           </p>
         </fieldset>
 

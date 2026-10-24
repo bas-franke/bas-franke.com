@@ -148,4 +148,126 @@ export const migrations: { name: string; sql: string }[] = [
         ADD COLUMN trending_guidance text NOT NULL DEFAULT 'Think "what would a curious friend send me today?": a new discovery, a space launch, a record, a surprising market move, a viral maths puzzle, a product everyone is suddenly talking about. If in doubt whether something is too heavy, skip it.';
     `,
   },
+  {
+    // inck becomes a learning feed: very short standalone stories, organised in topics with a generated curriculum.
+    // The long-form articles are deleted on purpose (their image files are swept at startup, see index.ts).
+    name: '007_stories',
+    sql: `
+      DROP TABLE IF EXISTS runs;
+      DROP TABLE IF EXISTS articles;
+      DROP TABLE IF EXISTS topics;
+
+      ALTER TABLE settings
+        DROP COLUMN IF EXISTS figure_quality,
+        DROP COLUMN IF EXISTS images_min,
+        DROP COLUMN IF EXISTS charts_enabled;
+      ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_target_words_check;
+      ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_images_max_check;
+      -- The row must satisfy the new ranges before the constraints are added.
+      UPDATE settings SET target_words = 200, images_max = 2;
+      ALTER TABLE settings
+        ADD CONSTRAINT settings_target_words_check CHECK (target_words BETWEEN 80 AND 600),
+        ADD CONSTRAINT settings_images_max_check CHECK (images_max BETWEEN 0 AND 2);
+      ALTER TABLE settings
+        ALTER COLUMN interval_minutes SET DEFAULT 15,
+        ALTER COLUMN max_per_day SET DEFAULT 96,
+        ALTER COLUMN text_model SET DEFAULT 'gpt-5.4-mini',
+        ALTER COLUMN image_quality SET DEFAULT 'low',
+        ALTER COLUMN images_max SET DEFAULT 2,
+        ALTER COLUMN target_words SET DEFAULT 200,
+        ALTER COLUMN tone SET DEFAULT 'vivid, warm and precise, like a friend who is great at explaining things',
+        ALTER COLUMN audience SET DEFAULT 'curious people of any background, with no prior knowledge of the topic',
+        ALTER COLUMN tagline SET DEFAULT 'Big ideas, one short story at a time.',
+        ALTER COLUMN trending_share SET DEFAULT 40,
+        ALTER COLUMN trending_guidance SET DEFAULT 'Prefer what many people are trying to understand today: a conflict, a market move, a political moment, a scientific result, a technology everyone suddenly uses. Explain the history behind it, not just the headline. Skip celebrity gossip, individual crime cases, sports results and unverified rumours.';
+      UPDATE settings SET
+        interval_minutes = 15,
+        max_per_day = 96,
+        text_model = CASE WHEN text_model IN ('gpt-5-mini', 'gpt-5.4-nano') THEN 'gpt-5.4-mini' ELSE text_model END,
+        image_quality = 'low',
+        images_max = 2,
+        target_words = 200,
+        tone = 'vivid, warm and precise, like a friend who is great at explaining things',
+        audience = 'curious people of any background, with no prior knowledge of the topic',
+        tagline = CASE WHEN tagline = 'Interesting things, written while you sleep.' THEN 'Big ideas, one short story at a time.' ELSE tagline END,
+        trending_share = 40,
+        trending_guidance = 'Prefer what many people are trying to understand today: a conflict, a market move, a political moment, a scientific result, a technology everyone suddenly uses. Explain the history behind it, not just the headline. Skip celebrity gossip, individual crime cases, sports results and unverified rumours.',
+        last_run_at = NULL,
+        updated_at = now();
+
+      CREATE TABLE topics (
+        id          serial PRIMARY KEY,
+        slug        text NOT NULL UNIQUE,
+        name        text NOT NULL UNIQUE,
+        description text NOT NULL DEFAULT '',
+        category    text NOT NULL DEFAULT 'technology' CHECK (category IN ('technology','science','money','world','society')),
+        kind        text NOT NULL DEFAULT 'field' CHECK (kind IN ('field','event')),
+        weight      int NOT NULL DEFAULT 5 CHECK (weight BETWEEN 0 AND 10),
+        enabled     boolean NOT NULL DEFAULT true,
+        plan        jsonb,
+        planned_at  timestamptz,
+        created_at  timestamptz NOT NULL DEFAULT now(),
+        updated_at  timestamptz NOT NULL DEFAULT now()
+      );
+      INSERT INTO topics (slug, name, description, category, kind) VALUES
+        ('artificial-intelligence', 'Artificial intelligence', 'How machines learn, what today''s AI can and cannot do, and why it changes work, science and power.', 'technology', 'field'),
+        ('quantum-computing', 'Quantum computing', 'Computers built on the strange rules of the very small: qubits, superposition, and what they might one day crack.', 'technology', 'field'),
+        ('crypto-and-blockchain', 'Crypto & blockchain', 'Bitcoin, mining, wallets and blockchains: how digital money works without a bank, and why it is so volatile.', 'technology', 'field'),
+        ('semiconductors-and-chips', 'Semiconductors & chips', 'The tiny switches inside every device, how they are made, and why a few factories matter to the whole world.', 'technology', 'field'),
+        ('how-the-internet-works', 'How the internet works', 'What actually happens between tapping a link and a page appearing: cables, addresses, servers and encryption.', 'technology', 'field'),
+        ('genetics-and-biotech', 'Genetics & biotech', 'DNA, genes, gene editing and the biotech behind modern medicine, explained from scratch.', 'science', 'field'),
+        ('climate-and-energy', 'Climate & energy', 'Why the planet is warming, how energy is made and moved, and what the options really cost.', 'science', 'field'),
+        ('space-exploration', 'Space exploration', 'Rockets, orbits, probes and the plans to live beyond Earth.', 'science', 'field'),
+        ('nuclear-power-and-weapons', 'Nuclear power & weapons', 'Splitting atoms for electricity and for bombs: the physics, the risks and the politics.', 'science', 'field'),
+        ('stock-markets-and-crashes', 'Stock markets & crashes', 'What a share is, how prices move, and the anatomy of bubbles and crashes past and present.', 'money', 'field'),
+        ('inflation-and-central-banks', 'Inflation & central banks', 'Why prices rise, what interest rates do, and how central banks steer an economy.', 'money', 'field'),
+        ('global-trade-and-supply-chains', 'Global trade & supply chains', 'Tariffs, shipping, sanctions and the fragile chains that put products on shelves.', 'money', 'field'),
+        ('the-war-in-ukraine', 'The war in Ukraine', 'The largest war in Europe since 1945: how it started, who is involved, and what it changes for the world.', 'world', 'event');
+
+      CREATE TABLE stories (
+        id            serial PRIMARY KEY,
+        slug          text NOT NULL UNIQUE,
+        topic_id      int NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+        title         text NOT NULL,
+        hook          text NOT NULL DEFAULT '',
+        body_md       text NOT NULL,
+        takeaway      text NOT NULL DEFAULT '',
+        kind          text NOT NULL DEFAULT 'planned' CHECK (kind IN ('planned','trending')),
+        why_now       text,
+        section_index int NOT NULL DEFAULT 0,
+        plan_index    int NOT NULL DEFAULT 0,
+        section_name  text NOT NULL DEFAULT '',
+        plan_item     text,
+        difficulty    int NOT NULL DEFAULT 1 CHECK (difficulty BETWEEN 1 AND 3),
+        tags          text[] NOT NULL DEFAULT '{}',
+        images        jsonb NOT NULL DEFAULT '[]',
+        sources       jsonb NOT NULL DEFAULT '[]',
+        model         text,
+        usage         jsonb NOT NULL DEFAULT '{}',
+        read_seconds  int NOT NULL DEFAULT 60,
+        views         int NOT NULL DEFAULT 0,
+        status        text NOT NULL DEFAULT 'published' CHECK (status IN ('published','hidden')),
+        published_at  timestamptz NOT NULL DEFAULT now(),
+        created_at    timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX stories_feed_idx ON stories (status, published_at DESC, id DESC);
+      CREATE INDEX stories_path_idx ON stories (topic_id, section_index, plan_index, published_at, id);
+
+      CREATE TABLE runs (
+        id          serial PRIMARY KEY,
+        trigger     text NOT NULL CHECK (trigger IN ('schedule','manual')),
+        status      text NOT NULL DEFAULT 'running' CHECK (status IN ('running','succeeded','failed')),
+        step        text NOT NULL DEFAULT 'starting',
+        kind        text NOT NULL DEFAULT 'planned' CHECK (kind IN ('planned','trending','plan')),
+        detail      text,
+        topic_id    int REFERENCES topics(id) ON DELETE SET NULL,
+        story_id    int REFERENCES stories(id) ON DELETE SET NULL,
+        error       text,
+        usage       jsonb NOT NULL DEFAULT '{}',
+        started_at  timestamptz NOT NULL DEFAULT now(),
+        finished_at timestamptz
+      );
+      CREATE INDEX runs_started_idx ON runs (started_at DESC);
+    `,
+  },
 ];

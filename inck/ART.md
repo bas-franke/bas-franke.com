@@ -1,12 +1,11 @@
 # inck artwork
 
-The site has slots for 17 illustrations. Each is optional: a missing file is simply left out, so add them one at a
+The site has slots for a handful of illustrations. Each is optional: a missing file is simply left out, so add them one at a
 time. Save finished PNGs with exactly these filenames in [`frontend/public/art/`](frontend/public/art/), commit and push;
 the inck deploy picks them up.
 
 | # | Filename | Where it shows | Display size | Generate at | Export at |
 |---|----------|----------------|--------------|-------------|-----------|
-| 1 | `masthead.png` | Next to the big "inck." title on the front page | 64–120 px tall | 1024×1024 | 360×360 |
 | 2 | `topic-space-astronomy.png` | Topic pill + cards | 16 px | 1024×1024 | 64×64 |
 | 3 | `topic-computing-ai.png` | Topic pill + cards | 16 px | 1024×1024 | 64×64 |
 | 4 | `topic-weird-history.png` | Topic pill + cards | 16 px | 1024×1024 | 64×64 |
@@ -16,14 +15,15 @@ the inck deploy picks them up.
 | 8 | `topic-design-architecture.png` | Topic pill + cards | 16 px | 1024×1024 | 64×64 |
 | 9 | `topic-future-tech.png` | Topic pill + cards | 16 px | 1024×1024 | 64×64 |
 | 10 | `topic-default.png` | Any topic without its own icon | 16 px | 1024×1024 | 64×64 |
-| 11 | `loading.png` | While the first stories load | ~200 px | 1024×1024 | 600×600 |
-| 12 | `empty.png` | No stories yet / no search results | ~200 px | 1024×1024 | 600×600 |
-| 13 | `notfound.png` | Article not found | ~200 px | 1024×1024 | 600×600 |
-| 14 | `footer.png` | Page footer | ~110 px | 1024×1024 | 330×330 |
+| 11 | `loading.png` | While the feed loads | ~180 px | 1024×1024 | 600×600 |
+| 12 | `empty.png` | No stories yet (feed, topic hub) | ~180 px | 1024×1024 | 600×600 |
+| 13 | `notfound.png` | Story or topic not found | ~180 px | 1024×1024 | 600×600 |
+| 14 | `footer.png` | The "you are all caught up" card at the end of the feed | ~120 px | 1024×1024 | 330×330 |
 
-Topic icon filenames come from the topic name: lowercase, `&` dropped, anything that is not a letter or digit becomes
-`-` ("Space & astronomy" → `topic-space-astronomy.png`). A topic you add later gets `topic-default.png` until you make
-its own icon.
+Topic icons are now shown per **category** (the feed groups topics into World, Money, Technology, Science and
+Society): `topic-weird-history.png` stands for World, `topic-economics-money.png` for Money, `topic-computing-ai.png`
+for Technology, `topic-space-astronomy.png` for Science and `topic-design-architecture.png` for Society, with
+`topic-default.png` as the fallback. The mapping lives in `frontend/src/components/Art.tsx`.
 
 ## How to generate
 

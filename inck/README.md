@@ -1,33 +1,45 @@
 # inck: inck.ai
 
-An automated magazine. Every hour (configurable) it picks a topic, has ChatGPT write a genuinely interesting article with
-data charts, has `gpt-image-2` paint a cover and 2–6 inline illustrations, and publishes it. Everything (settings, topics, articles, run
-history) lives in its own PostgreSQL database on the shared RDS instance. Vite + React frontend, Node.js + Express
-backend on port **3003**.
+A learning feed. Every 15 minutes (configurable) it writes one **very short story** (about 200 words) that makes a single
+complicated idea click: a qubit, a ceasefire, why prices rise, how a chip is made. You scroll through them one per screen,
+like a video feed; the site opens on the latest story. Each story belongs to a **topic** (Artificial intelligence, The war in
+Ukraine, Inflation & central banks, …) that has its own hub page where the stories are organised as a curriculum from
+"no knowledge needed" to deeper. Every story is written to stand alone: no prior knowledge, every term explained.
 
-| URL                       | What                                                                 |
-|---------------------------|----------------------------------------------------------------------|
-| `https://inck.ai`         | The magazine: latest articles, topic filter, search, article pages   |
-| `https://inck.ai/sudo`   | Dashboard, "Generate now", settings, topics, article management      |
+Everything (settings, topics, their curricula, stories, run history) lives in its own PostgreSQL database on the shared RDS
+instance. Vite + React frontend, Node.js + Express backend on port **3003**.
 
-## How generation works
+| URL                       | What                                                                         |
+|---------------------------|------------------------------------------------------------------------------|
+| `https://inck.ai`         | The feed, opening on the latest story (`/s/<slug>` is one story's address)   |
+| `https://inck.ai/topics`  | The condensed overview: every topic by category, plus search                 |
+| `https://inck.ai/t/<slug>`| A topic hub: intro, sections, every story and what is still planned          |
+| `https://inck.ai/sudo`    | Admin: "Write now", settings, topics and curricula, story management         |
 
-1. The scheduler ticks every 30 s. When `enabled`, the last run is ≥ `interval_minutes` ago, the time is inside the
-   active hours and fewer than `max_per_day` articles were made in the last 24 h, it starts a run.
-2. The run decides between an evergreen topic and a **"right now" piece** so that, over time, `trending_share` (default 50%)
-   of articles follow what is interesting today. Evergreen: a topic is picked at random, weighted by its `weight` and favouring
-   topics with fewer articles this week. Right now: the backend fetches live signals for free (Google Trends daily trending
-   searches, Wikipedia's most-read pages, the Hacker News front page) and a quick scout step with web search picks one
-   lightweight subject, skipping war, crime, politics, disasters and gossip.
-3. The text model (default `gpt-5.4-mini`, with web search on) returns a strict JSON article: title, dek, Markdown body,
-   tags, 0–3 charts with real figures, sources, and 2–6 image prompts. `[[chart:N]]` and `[[image:N]]` markers in the body say where they go.
-4. The image model (default `gpt-image-2`) renders the illustrations, two at a time (WebP, stored in `/srv/apps/inck/data/images`).
-5. The article is published. Failed runs are logged with their error and shown on the dashboard.
+## How it works
 
-Charts are rendered in the browser from the data (Recharts), so numbers stay readable and the page stays light.
-
-The site has slots for decorative illustrations (mascot, topic icons, empty states). Prompts, sizes and filenames are in
-[ART.md](ART.md); finished PNGs go in `frontend/public/art/`. Missing images are simply left out.
+1. **Topics and curricula.** A topic is either a *field* (a lasting subject such as Quantum computing) or an *event*
+   (something happening in the world, such as a war or a crash). The first time a topic is picked, the text model
+   designs its **curriculum**: an intro plus 4–7 sections, each with 3–8 story ideas, ordered from basics to deeper.
+   For events the sections always cover what is happening, how it started (history), who is involved, key moments,
+   consequences and what could happen next. Every topic also gets an automatic **Latest** section for "right now" stories.
+   When every planned item has been written, the plan is extended. Thirteen topics are seeded; the scout adds more.
+2. **The scheduler** ticks every 30 s. When `enabled`, the last run is ≥ `interval_minutes` ago (default 15), the time
+   is inside the active hours and fewer than `max_per_day` stories were made in the last 24 h, it starts a run.
+3. **A run** is either a *curriculum* story or a *right now* story, so that over time `trending_share` (default 40%) of
+   stories follow the world. Curriculum: a random enabled topic (weighted, favouring topics with few stories) and its
+   next unwritten item. Right now: the scout reads free live signals (BBC and NYT world/business/science headlines,
+   Google Trends, Wikipedia's most-read pages, Hacker News), searches the web, picks one subject many people are trying to
+   understand (wars, elections, crashes, inflation, scientific results, new technology; no gossip, crime cases or sports
+   results) and files it into an existing topic or creates a new one with a curriculum of its own.
+4. **The writer** (default `gpt-5.4-mini`) returns strict JSON: title, one-line hook, the story in Markdown, a one-sentence
+   takeaway, the section it belongs to, difficulty, tags, 0–2 picture ideas with a relevance rating, and sources. Rules:
+   about `target_words` words, told as a story (a scene, an analogy, why it matters), fully standalone, neutral on
+   contested matters, no links in the body. Web search is used for "right now" stories and event topics.
+5. **Pictures** (default `gpt-image-2`, low quality) are rendered only for ideas rated essential or helpful, at most
+   `images_max` (default 2). Most stories have none. Files go to `/srv/apps/inck/data/images`; orphans are swept daily.
+6. The story is published and appears at the top of the feed, in its topic hub, and as a "go deeper" link from related
+   stories (its neighbours on the topic path and stories elsewhere that share tags).
 
 ## Configuration: `/srv/apps/inck/.env` on the server
 
@@ -36,14 +48,15 @@ The site has slots for decorative illustrations (mascot, topic icons, empty stat
 | `DATABASE_URL`   | yes      | `postgres://inck:<password>@<rds-endpoint>:5432/inck?sslmode=require`   |
 | `OPENAI_API_KEY` | yes      | From <https://platform.openai.com/api-keys>                             |
 | `ADMIN_PASSWORD` | yes      | Login for `/sudo` (user `admin`, or set `ADMIN_USER`)                  |
-| `DATA_DIR`       | no       | Where images are stored; default `/srv/apps/inck/data`                  |
+| `DATA_DIR`       | no       | Where pictures are stored; default `/srv/apps/inck/data`                |
 
-Everything else (interval, hours, models, tone, topics, site name) is changed in the admin UI and stored in the database.
-After editing `.env`: `pm2 restart inck --update-env`.
+Everything else (interval, hours, models, tone, length, trending share, topics, site name) is changed in the admin UI and
+stored in the database. After editing `.env`: `pm2 restart inck --update-env`.
 
-**Costs:** each article is one text request (a few thousand tokens, more with web search) plus one image. At hourly
-generation with `gpt-5.4-nano`, a medium-quality cover and low-quality inline figures, expect about $1–2 per day; the dashboard shows token and
-image counts. Set a usage limit in your OpenAI account to be safe.
+**Costs:** a story is one text request of a few thousand tokens (plus about $0.01 per web search for "right now" stories
+and events) and, now and then, one low-quality picture (about half a cent). Planning a curriculum is one extra request per
+topic. At a story every 15 minutes with `gpt-5.4-mini`, expect roughly $2–4 per day; the dashboard shows the estimate.
+Set a usage limit in your OpenAI account to be safe.
 
 ---
 
@@ -87,7 +100,8 @@ CREATE DATABASE inck OWNER inck;
 REVOKE ALL ON DATABASE inck FROM PUBLIC;
 ```
 
-The app creates its own tables on first start (migrations run automatically).
+The app creates its own tables on first start (migrations run automatically). Migration `007_stories` replaced the
+original long-form magazine: it drops the old `articles` table and its illustrations are removed from disk at startup.
 
 ## 4. OpenAI API key
 
@@ -123,7 +137,8 @@ sudo nginx -t && sudo systemctl reload nginx
 ## 6. Deploy
 
 Push a change under `inck/` to `master`, or GitHub → **Actions → Deploy inck → Run workflow**. Then open
-<https://inck.ai/sudo>, sign in, and press **Generate now** for the first article. The scheduler takes over from there.
+<https://inck.ai/sudo>, sign in, and press **Write now** for the first story (the first run of a topic also plans its
+curriculum, so it takes a minute). The scheduler takes over from there.
 
 The status page (<https://status.bas-franke.com>) shows every one of these steps as a check, with fix instructions,
 including the database connection and whether the backend reports a missing API key.
@@ -136,10 +151,12 @@ Requires Node.js 22.12+ (Node 24 recommended). No PostgreSQL install needed: `np
 
 ```bash
 npm run install:all
-cp backend/.env.example backend/.env.local   # add your OPENAI_API_KEY to generate articles locally
+cp backend/.env.example backend/.env.local   # add your OPENAI_API_KEY to generate stories locally
 npm run dev
 ```
 
 - Site: <http://localhost:5173>, admin: <http://localhost:5173/sudo> (password from `.env.local`)
 - Backend: <http://localhost:3003/api/health>
-- Dev database data lives in `backend/.pg/` (git-ignored); images in `backend/.data/`.
+- Dev database data lives in `backend/.pg/` (git-ignored); pictures in `backend/.data/`.
+- No API key? `npm --prefix backend run seed:dev` inserts a few made-up stories into the local database so the feed and
+  hubs have something to show (it refuses to run against anything but localhost).

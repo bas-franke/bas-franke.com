@@ -22,7 +22,7 @@ export function withinActiveHours(s: Settings, date = new Date()) {
 }
 
 export async function publishedLast24h() {
-  const row = await one<{ n: string }>(`SELECT count(*) AS n FROM articles WHERE created_at > now() - interval '24 hours'`);
+  const row = await one<{ n: string }>(`SELECT count(*) AS n FROM stories WHERE created_at > now() - interval '24 hours'`);
   return Number(row?.n ?? 0);
 }
 
@@ -58,7 +58,7 @@ async function tick() {
   const due = !settings.last_run_at || Date.now() - settings.last_run_at.getTime() >= settings.interval_minutes * 60_000;
   if (!due) return;
   if ((await publishedLast24h()) >= settings.max_per_day) return;
-  console.log('scheduler: generating article');
+  console.log('scheduler: generating story');
   await generate('schedule');
 }
 
