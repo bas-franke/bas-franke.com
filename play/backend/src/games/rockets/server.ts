@@ -48,6 +48,9 @@ interface RPlayer extends GamePlayer {
   deaths: number;
   brain?: RocketsBot;
   shots: number;
+  /** Who last hurt this player and when, so a knock into the void still credits the shooter. */
+  lastHitBy?: string;
+  lastHitAt?: number;
 }
 
 interface Rocket {
@@ -242,6 +245,8 @@ class RocketsGame implements GameServer {
 
   private fire(p: RPlayer, seq: number) {
     p.nextFire = this.now + RK.fireInterval;
+    // Shooting ends spawn protection: nobody gets to attack while invulnerable.
+    p.protectedUntil = Math.min(p.protectedUntil, this.now);
     p.shots++;
     const dir = lookDir(p.yaw, p.pitch);
     const eye = eyePosition(p.body.pos);
@@ -296,8 +301,9 @@ class RocketsGame implements GameServer {
       const centre = v3(p.body.pos.x, p.body.pos.y + RK.height * 0.5, p.body.pos.z);
       if (p !== direct && segmentBoxes(at, centre, this.map.boxes)) continue; // behind cover
       const self = owner === p;
+      if (!self && this.now < p.protectedUntil) continue; // spawn protection: no damage and no knockback
       const falloff = 1 - d / RK.splashRadius;
-      let dmg = p === direct ? RK.directDamage : RK.splashDamage * falloff;
+      let dmg = p === direct ? (this.isAirshot(p) ? RK.airshotDamage : RK.directDamage) : RK.splashDamage * falloff;
       if (self) dmg *= RK.selfDamageScale;
 
       // Knockback: away from the blast, with a guaranteed bit of lift so floor hits launch players.
@@ -314,16 +320,31 @@ class RocketsGame implements GameServer {
     }
   }
 
+  /** A direct hit on a player clearly off the ground (not just mid-hop) is an airshot. */
+  private isAirshot(p: RPlayer) {
+    if (p.body.onGround) return false;
+    const feet = p.body.pos;
+    return !segmentBoxes(feet, v3(feet.x, feet.y - RK.airshotHeight, feet.z), this.map.boxes);
+  }
+
   private damage(p: RPlayer, dmg: number, by: RPlayer | null) {
     if (dmg <= 0 || p.dead) return;
     if (this.now < p.protectedUntil && by !== p) return;
     p.hp -= dmg;
+    if (by && by !== p) {
+      p.lastHitBy = by.id;
+      p.lastHitAt = this.now;
+    }
     this.events.push({ k: 'hurt', id: p.id, dmg, by: by?.id ?? '' });
     if (p.hp <= 0) this.kill(p, by);
   }
 
-  private kill(victim: RPlayer, killer: RPlayer | null) {
-    if (victim.dead) return;
+  private kill(victim: RPlayer, killedBy: RPlayer | null) {
+    // After the deciding frag nothing else counts (two kills in one tick would otherwise score after the end).
+    if (victim.dead || this.ended) return;
+    // Falling into the void soon after someone's rocket is their frag, not a suicide.
+    const killer = killedBy ?? this.recentAttacker(victim);
+    victim.lastHitBy = undefined;
     victim.dead = true;
     victim.hp = 0;
     victim.deaths++;
@@ -334,6 +355,12 @@ class RocketsGame implements GameServer {
     this.events.push({ k: 'kill', v: victim.id, by: killer?.id ?? '', self });
     this.host.broadcast({ k: 'score', scores: this.scores() });
     if (killer && !self && killer.frags >= RK.fragLimit) this.endMatch();
+  }
+
+  /** The player who hurt `p` within the last few seconds, if they are still in the game. */
+  private recentAttacker(p: RPlayer): RPlayer | null {
+    if (!p.lastHitBy || this.now - (p.lastHitAt ?? 0) > RK.fallCreditSeconds) return null;
+    return this.players.get(p.lastHitBy) ?? null;
   }
 
   /**

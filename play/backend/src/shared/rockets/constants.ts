@@ -33,27 +33,35 @@ export const RK = {
   maxPitch: 1.5,
 
   maxHealth: 100,
-  rocketSpeed: 30,
+  /** Faster than a strafe-jumping player, so nobody simply outruns a rocket; still slow enough to dodge at range. */
+  rocketSpeed: 34,
   rocketRadius: 0.2,
   rocketLife: 6,
   fireInterval: 0.75,
   /** Rocket spawns this far in front of the eyes so it does not hit the shooter. */
   muzzleOffset: 0.9,
   splashRadius: 3.8,
-  splashDamage: 90,
-  directDamage: 100,
+  /** Kept below directDamage so a hit on the body always beats a shot at the feet. */
+  splashDamage: 80,
+  /** A full-health player survives one direct hit (like Quake's 125 spawn health): two rockets, or one plus splash. */
+  directDamage: 85,
+  /** Direct hit on a target at least airshotHeight above the ground (higher than a plain jump): always a kill. */
+  airshotDamage: 100,
+  airshotHeight: 2.5,
   selfDamageScale: 0.4,
   /** Velocity added at the centre of the blast for a full-damage hit. */
-  knockback: 16,
-  /** Rocket jumps feel better with a little extra lift. */
-  selfKnockbackScale: 1.35,
+  knockback: 13,
+  /** Rocket jumps feel better with a little extra lift: a jump plus a rocket at the feet climbs about 15 m. */
+  selfKnockbackScale: 1.2,
   /** Minimum upward share of the knockback so ground hits lift players. */
-  knockbackLift: 0.25,
+  knockbackLift: 0.2,
 
+  /** A fall into the void within this many seconds of being hit is a frag for the shooter, not a suicide. */
+  fallCreditSeconds: 4,
   respawnDelay: 2.2,
   spawnProtection: 1.5,
   matchSeconds: 300,
-  fragLimit: 15,
+  fragLimit: 20,
 
   healthPackAmount: 25,
   healthPackRespawn: 20,

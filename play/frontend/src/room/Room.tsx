@@ -4,9 +4,13 @@ import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameServerMsg, typ
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
+import { SCREENSHOTS } from '../games/catalog';
 import { gameModules } from '../games/registry';
 import type { ClientContext, GameClient } from '../games/types';
 import { RoomSocket } from '../net/socket';
+import { GameCover } from '../ui/GameCover';
+import { GameDetails } from '../ui/GameDetails';
+import { Header } from '../ui/Header';
 import { MapPicker } from './MapPicker';
 
 interface ChatLine {
@@ -171,14 +175,14 @@ export function RoomPage() {
     return (
       <div className="page">
         <Header />
-        <div className="panel" style={{ maxWidth: 520, margin: '40px auto', textAlign: 'center' }}>
-          <h2 style={{ marginBottom: 8 }}>Room {code.toUpperCase()}</h2>
-          <p style={{ color: 'var(--ink-dim)' }}>{fatal}</p>
+        <div className="panel notice-panel">
+          <span className="room-code">{code.toUpperCase()}</span>
+          <p>{fatal}</p>
           <div className="form-actions" style={{ justifyContent: 'center' }}>
             <button className="btn" onClick={leave}>
               Back to the lobby
             </button>
-            <QuickPlayButton />
+            {roomRef.current && <PlayNowButton game={roomRef.current.game} />}
           </div>
         </div>
       </div>
@@ -189,7 +193,7 @@ export function RoomPage() {
     return (
       <div className="page">
         <Header />
-        <p className="status-line">{quick ? 'Dropping you into the arena…' : `Joining room ${code.toUpperCase()}…`}</p>
+        <p className="status-line">{quick ? 'Starting your match…' : `Joining room ${code.toUpperCase()}…`}</p>
       </div>
     );
   }
@@ -199,42 +203,30 @@ export function RoomPage() {
 
   return (
     <div className="page" style={{ ['--accent' as string]: meta.accent }}>
-      <Header />
       <WaitingRoom room={room} you={you} isHost={isHost} socket={socket!} notice={notice} chat={chat} lastMatch={lastMatch} onLeave={leave} />
       {room.state === 'playing' && <GameStage game={room.game} ctx={ctx} attach={attachGame} />}
     </div>
   );
 }
 
-/** Starts a fresh quick-play room; offered where the current room is gone. */
-function QuickPlayButton() {
+/** Starts a fresh quick-play room of the same game; offered where the current room is gone. */
+function PlayNowButton({ game }: { game: GameId }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const go = async () => {
     sfx.unlock();
     setBusy(true);
     try {
-      const code = await quickPlay();
+      const code = await quickPlay(game);
       navigate(`/room/${code}`, { state: { quickStart: true } satisfies QuickStart });
     } catch {
       setBusy(false);
     }
   };
   return (
-    <button className="btn primary" style={{ ['--accent' as string]: GAMES.rockets.accent }} onClick={go} disabled={busy}>
-      {busy ? 'Setting up…' : 'Quick play Rockets'}
+    <button className="btn primary" style={{ ['--accent' as string]: GAMES[game].accent }} onClick={go} disabled={busy}>
+      {busy ? 'Starting…' : `Play ${GAMES[game].name} now`}
     </button>
-  );
-}
-
-function Header() {
-  return (
-    <header className="topbar">
-      <a className="brand" href="/">
-        play<span className="dot">.</span>
-        <small>bas-franke.com</small>
-      </a>
-    </header>
   );
 }
 
@@ -247,10 +239,11 @@ function NamePrompt({ code, initial, onSubmit }: { code: string; initial: string
   return (
     <div className="page">
       <Header />
-      <form className="panel" onSubmit={submit} style={{ maxWidth: 420, margin: '40px auto' }}>
-        <h2 style={{ marginBottom: 6 }}>Joining room {code.toUpperCase()}</h2>
-        <p style={{ color: 'var(--ink-dim)', marginTop: 0 }}>What should the others call you?</p>
-        <label className="field">
+      <form className="panel notice-panel" onSubmit={submit}>
+        <span className="room-code">{code.toUpperCase()}</span>
+        <h2>You are joining a room</h2>
+        <p>What should the others call you?</p>
+        <label className="field" style={{ textAlign: 'left' }}>
           Your name
           <input value={value} onChange={(e) => setValue(e.target.value)} maxLength={LIMITS.playerNameMax} placeholder="Player" autoFocus />
         </label>
@@ -290,6 +283,8 @@ function WaitingRoom({
   const canStart = room.players.length >= meta.minPlayers;
   const playing = room.state === 'playing';
   const [copied, setCopied] = useState(false);
+  const [details, setDetails] = useState(false);
+  const shots = SCREENSHOTS[room.game];
 
   const share = async () => {
     try {
@@ -301,37 +296,50 @@ function WaitingRoom({
     }
   };
   const setBots = (count: number, difficulty?: BotDifficulty) => socket.send({ t: 'setBots', count, difficulty });
+  const setMap = (map: string) => socket.send({ t: 'setMap', map });
   const start = () => (sfx.unlock(), socket.send({ t: 'start' }));
   const hasMaps = room.game === 'rockets';
-  const mapName = MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random every match';
+  const mapName = MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map';
   const difficulty = DIFFICULTIES.find((d) => d.id === room.botDifficulty) ?? DIFFICULTIES[1];
-  const lineup = `${humans} ${humans === 1 ? 'player' : 'players'} vs ${bots} ${difficulty.label.toLowerCase()} ${bots === 1 ? 'bot' : 'bots'}${hasMaps ? ` on ${mapName === 'Random every match' ? 'a random map' : mapName}` : ''}`;
+  const botsLabel = `${bots} ${difficulty.label.toLowerCase()} ${bots === 1 ? 'bot' : 'bots'}`;
+  const lineup = `${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${hasMaps ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : ''}`;
 
   return (
     <>
-      <div className="room-title">
-        <h1>{room.name}</h1>
-        <span className="room-code" title="Room code">
-          {room.code}
-        </span>
-        <span className="pill accent">{meta.name}</span>
+      <Header>
         <button className="btn small" onClick={share}>
           {copied ? 'Link copied' : 'Copy invite link'}
         </button>
         <button className="btn small ghost" onClick={onLeave}>
           Leave
         </button>
+      </Header>
+
+      <div className="room-title">
+        <div className="room-title-main">
+          <span className="pill accent">{meta.name}</span>
+          <h1>{room.name}</h1>
+          <span className="slots">
+            {humans} {humans === 1 ? 'player' : 'players'}
+            {bots ? ` + ${botsLabel}` : ''} · {room.maxPlayers} seats
+            {hasMaps && ` · ${mapName}`}
+          </span>
+        </div>
+        <div className="room-code-box" title="Share this code">
+          <span className="label">Room code</span>
+          <span className="room-code">{room.code}</span>
+        </div>
       </div>
       {notice && <p className="error">{notice}</p>}
 
       {lastMatch && !playing && (
-        <AfterMatch room={room} you={you} isHost={isHost} last={lastMatch} canStart={canStart} onStart={start} socket={socket} onLeave={onLeave} />
+        <AfterMatch room={room} you={you} isHost={isHost} last={lastMatch} canStart={canStart} onStart={start} onMap={setMap} onLeave={onLeave} />
       )}
 
       <div className="room-layout">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+        <div className="room-main">
           <div className="panel">
-            <div className="section-head" style={{ marginBottom: 10 }}>
+            <div className="section-head">
               <h2>Players</h2>
               <span className="slots">
                 {room.players.length} / {room.maxPlayers} seats
@@ -340,23 +348,32 @@ function WaitingRoom({
             <ul className="players">
               {room.players.map((p) => (
                 <li key={p.id} className={!p.connected ? 'offline' : ''}>
-                  <span className="swatch" style={{ background: colorHex(p.color) }} />
+                  <span className="avatar" style={{ background: colorHex(p.color) }}>
+                    {p.name.slice(0, 1).toUpperCase()}
+                  </span>
                   <span className="who">{p.name}</span>
                   {p.id === you && <span className="tag">you</span>}
-                  {p.id === room.hostId && <span className="tag">host</span>}
+                  {p.id === room.hostId && <span className="tag host">host</span>}
                   {p.bot && <span className="tag">bot · {difficulty.label.toLowerCase()}</span>}
                   {!p.bot && p.id !== you && p.connected && <span className="tag">{p.ping} ms</span>}
+                  {!p.connected && <span className="tag">reconnecting…</span>}
+                </li>
+              ))}
+              {Array.from({ length: room.maxPlayers - room.players.length }, (_, i) => (
+                <li key={`free-${i}`} className="free">
+                  <span className="avatar" />
+                  <span className="who">Open seat</span>
                 </li>
               ))}
             </ul>
 
-            <div className="start-row">
+            <div className="host-controls">
               {isHost ? (
                 <>
-                  <button className="btn primary start-btn" disabled={!canStart || playing} onClick={start}>
+                  <span className="slots">{canStart ? lineup : `Needs at least ${meta.minPlayers} players. Add a bot or share the code.`}</span>
+                  <button className="btn primary start start-btn" data-testid="start" disabled={!canStart || playing} onClick={start}>
                     {playing ? 'Match running' : `Start ${meta.name}`}
                   </button>
-                  <span className="slots">{canStart ? lineup : `Needs at least ${meta.minPlayers} players. Add a bot or share the code.`}</span>
                 </>
               ) : (
                 <span className="slots">
@@ -367,20 +384,20 @@ function WaitingRoom({
           </div>
 
           <div className="panel">
-            <div className="section-head" style={{ marginBottom: 12 }}>
+            <div className="section-head">
               <h2>Bots</h2>
               <span className="slots">{isHost ? 'Fill empty seats; players always bump a bot.' : 'The host sets these.'}</span>
             </div>
             <div className="bot-controls">
-              <div className="bot-count" aria-label="Number of bots">
-                <button type="button" className="btn small" onClick={() => setBots(bots - 1)} disabled={!isHost || bots <= 0} aria-label="Remove a bot">
+              <div className="bot-count">
+                <button type="button" className="btn small" onClick={() => setBots(bots - 1)} disabled={!isHost || bots <= 0} aria-label="Fewer bots">
                   −
                 </button>
                 <span className="bot-num">
                   <b>{bots}</b>
                   {bots === 1 ? 'bot' : 'bots'}
                 </span>
-                <button type="button" className="btn small" onClick={() => setBots(bots + 1)} disabled={!isHost || room.players.length >= room.maxPlayers} aria-label="Add a bot">
+                <button type="button" className="btn small" onClick={() => setBots(bots + 1)} disabled={!isHost || room.players.length >= room.maxPlayers} aria-label="More bots">
                   +
                 </button>
               </div>
@@ -405,14 +422,25 @@ function WaitingRoom({
 
           {hasMaps && (
             <div className="panel">
-              <div className="section-head" style={{ marginBottom: 12 }}>
+              <div className="section-head">
                 <h2>Map</h2>
                 <span className="slots">
                   {mapName}
                   {!isHost && ' · the host picks'}
                 </span>
               </div>
-              <MapPicker value={room.map} editable={isHost} onPick={(map) => socket.send({ t: 'setMap', map })} />
+              {/* The cards are the picker; this select stays for keyboard users and the screenshot tool. */}
+              {isHost && (
+                <select className="visually-hidden" data-testid="map-select" aria-label="Map" value={room.map} onChange={(e) => setMap(e.target.value)}>
+                  <option value={RANDOM_MAP}>Random map</option>
+                  {MAP_LIST.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <MapPicker value={room.map} editable={isHost} onPick={setMap} />
               <p className="slots map-legend">
                 <i className="spawn" /> spawn <i className="pad" /> jump pad <i className="pack" /> health · brighter is higher
               </p>
@@ -420,10 +448,15 @@ function WaitingRoom({
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div className="panel">
-            <h2 style={{ fontSize: 20, marginBottom: 6 }}>{meta.name}</h2>
-            <p style={{ color: 'var(--ink-dim)', margin: '0 0 12px' }}>{meta.description}</p>
+        <div className="room-side">
+          <div className="panel game-panel">
+            <button type="button" className="panel-cover" onClick={() => setDetails(true)} aria-label={`Screenshots of ${meta.name}`}>
+              <GameCover game={room.game} />
+              {shots.length > 0 && <span className="tile-shots">{shots.length} screenshots</span>}
+            </button>
+            <h2>{meta.name}</h2>
+            <p className="tagline">{meta.tagline}</p>
+            <p className="desc">{meta.description}</p>
             <dl className="controls">
               {meta.controls.map((c) => (
                 <div key={c.keys} style={{ display: 'contents' }}>
@@ -436,11 +469,12 @@ function WaitingRoom({
           <Chat chat={chat} socket={socket} />
         </div>
       </div>
+      {details && <GameDetails game={room.game} onClose={() => setDetails(false)} />}
     </>
   );
 }
 
-const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
 
 /** Shown above the room after a match: who won, where you placed, and one click to go again. */
 function AfterMatch({
@@ -450,7 +484,7 @@ function AfterMatch({
   last,
   canStart,
   onStart,
-  socket,
+  onMap,
   onLeave,
 }: {
   room: RoomView;
@@ -459,16 +493,15 @@ function AfterMatch({
   last: LastMatch;
   canStart: boolean;
   onStart: () => void;
-  socket: RoomSocket;
+  onMap: (id: string) => void;
   onLeave: () => void;
 }) {
   const player = (id: string) => room.players.find((p) => p.id === id);
   const sorted = [...last.rows].sort((a, b) => b.value - a.value);
   const place = sorted.findIndex((r) => r.id === you);
   const headline = !last.finished ? 'Match ended early' : last.winner === you ? 'You won!' : last.winner ? `${player(last.winner)?.name ?? 'Someone'} won` : 'Draw';
-  const hasMaps = room.game === 'rockets';
   const nextMap = () => {
-    socket.send({ t: 'setMap', map: randomMapId(last.mapId) });
+    onMap(randomMapId(last.mapId));
     onStart();
   };
 
@@ -503,7 +536,7 @@ function AfterMatch({
             <button className="btn primary start-btn" onClick={onStart} disabled={!canStart}>
               Play again
             </button>
-            {hasMaps && room.map !== RANDOM_MAP && (
+            {room.game === 'rockets' && room.map !== RANDOM_MAP && (
               <button className="btn" onClick={nextMap} disabled={!canStart}>
                 Play on another map
               </button>

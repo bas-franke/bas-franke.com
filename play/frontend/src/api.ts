@@ -1,4 +1,4 @@
-import type { BotDifficulty, RoomSettings, RoomSummary } from '@shared/protocol';
+import { GAMES, type BotDifficulty, type GameId, type RoomSettings, type RoomSummary } from '@shared/protocol';
 import { MAP_LIST } from '@shared/rockets/maps';
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -10,19 +10,18 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const listRooms = () => api<{ rooms: RoomSummary[] }>('/api/rooms');
 export const getRoom = (code: string) => api<{ room: RoomSummary }>(`/api/rooms/${encodeURIComponent(code)}`);
-/** `map` is optional: the server falls back to a random map every match. */
-export const createRoom = (settings: Omit<RoomSettings, 'map'> & { map?: string }) =>
-  api<{ room: RoomSummary }>('/api/rooms', { method: 'POST', body: JSON.stringify(settings) });
+export const createRoom = (settings: Omit<RoomSettings, 'map'> & { map?: string }) => api<{ room: RoomSummary }>('/api/rooms', { method: 'POST', body: JSON.stringify(settings) });
 
-/** Bot difficulties in picker order, with the one-line promise each makes. */
+/** Bot difficulties in picker order, with the one-line promise each makes (see the profiles in bots.ts). */
 export const DIFFICULTIES: { id: BotDifficulty; label: string; blurb: string }[] = [
-  { id: 'easy', label: 'Easy', blurb: 'Slow aim, stand-and-shoot. Good for learning rocket jumps.' },
-  { id: 'normal', label: 'Normal', blurb: 'A fair fight. They strafe and rocket-jump after you.' },
-  { id: 'hard', label: 'Hard', blurb: 'Sharp aim, fast reactions, bunny hops. Bring your best.' },
+  { id: 'easy', label: 'Easy', blurb: 'Slow aim, stand-and-shoot. Good for learning the ropes.' },
+  { id: 'normal', label: 'Normal', blurb: 'A fair fight. They strafe and chase you.' },
+  { id: 'hard', label: 'Hard', blurb: 'Sharp aim, fast reactions. Bring your best.' },
 ];
 
-/** Bots a quick-play match fills in next to you. */
-export const QUICK_BOTS = 4;
+/** Bots a quick-play match fills in next to you, capped by the game's seats. */
+const QUICK_BOTS = 4;
+export const quickBots = (game: GameId) => Math.max(GAMES[game].minPlayers - 1, Math.min(QUICK_BOTS, GAMES[game].maxPlayers - 1));
 
 /** Router state that tells the room page to start the match as soon as it has joined. */
 export interface QuickStart {
@@ -35,16 +34,18 @@ export function randomMapId(avoid?: string) {
   return pool[Math.floor(Math.random() * pool.length)].id;
 }
 
-/** One-click Rockets: a room with bots on a random map. Returns the room code; the room page starts it. */
-export async function quickPlay(difficulty: BotDifficulty = savedDifficulty()) {
-  const nick = savedName() || 'Player';
+/**
+ * One-click play for any game: a room with bots and the saved difficulty. No map is sent, so games with maps pick a
+ * random one every match. Returns the room code; the room page starts the match when it arrives with QuickStart.
+ */
+export async function quickPlay(game: GameId) {
+  const meta = GAMES[game];
   const { room } = await createRoom({
-    name: `${nick}'s quick match`,
-    game: 'rockets',
-    maxPlayers: 8,
-    bots: QUICK_BOTS,
-    botDifficulty: difficulty,
-    map: randomMapId(),
+    name: `Quick ${meta.name.toLowerCase()}`,
+    game,
+    maxPlayers: meta.maxPlayers,
+    bots: quickBots(game),
+    botDifficulty: savedDifficulty(),
   });
   return room.code;
 }

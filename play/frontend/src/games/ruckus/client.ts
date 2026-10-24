@@ -8,12 +8,13 @@ import type { PawnSnap, Phase, RuckusEvent, RuckusScore, RuckusServerMsg, Ruckus
 import { type Layout, MINIGAMES, type MinigameId, type Pawn, type RuckusInput, type WorldState, newPawn, stepPawn } from '@shared/ruckus/world';
 import { sfx } from '../../engine/audio';
 import { Effects } from '../../engine/effects';
-import { Engine, colorHex, makeLabel } from '../../engine/engine';
+import { Engine } from '../../engine/engine';
 import { Input } from '../../engine/input';
 import { INTERP_DELAY, SnapshotBuffer, damp, lerpAngle } from '../../engine/interp';
-import { capsuleFallback, instantiate, loadModel, sphereFallback } from '../../engine/models';
+import { instantiate, loadModel } from '../../engine/models';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { RuckusArena, addRuckusLights } from './arena';
+import { comicLabel, inked, toonModel } from './look';
 
 export interface RuckusHudState {
   ready: boolean;
@@ -84,6 +85,9 @@ export class RuckusClient implements GameClient {
   private phaseLeft = 0;
   private phaseLeftAt = 0;
   private camTarget = new THREE.Vector3();
+  private readonly camGoal = new THREE.Vector3();
+  private readonly camDesired = new THREE.Vector3();
+  private readonly seen = new Set<string>();
   private disposed = false;
   private lastTickSound = 0;
 
@@ -104,8 +108,8 @@ export class RuckusClient implements GameClient {
     sfx.unlock();
     void Promise.all([loadModel('pawn'), loadModel('bomb'), loadModel('coin'), loadModel('crown')]).then(([pawn, bomb, coin, crown]) => {
       if (this.disposed) return;
-      this.models = { pawn, bomb, coin, crown };
-      this.arena?.setCoinModel(coin);
+      this.models = { pawn: toonModel(pawn), bomb: toonModel(bomb), coin: toonModel(coin), crown: toonModel(crown) };
+      this.arena?.setCoinModel(this.models.coin);
       // Rebuild pawns with the real model.
       for (const [id, view] of this.pawns) {
         engine.scene.remove(view.group);
@@ -113,6 +117,8 @@ export class RuckusClient implements GameClient {
       }
       this.hud.set({ ready: true });
     });
+    // Dev-only handle for screenshots and poking at the scene from the console.
+    if (import.meta.env.DEV) (window as unknown as { __ruckus: RuckusClient }).__ruckus = this;
     engine.start((dt, now) => this.frame(dt, now));
   }
 
@@ -245,6 +251,8 @@ export class RuckusClient implements GameClient {
         const p = at(e.id);
         const color = this.pawns.get(e.id)?.color ?? 0xffffff;
         this.effects?.burst(vadd(p, v3(0, 0.6, 0)), color, 40, 5, 0.9, 0.8);
+        // Only pop a word when it happens on screen, not deep below the arena.
+        if (p.y > -3) this.effects?.boom(vadd(p, v3(0, 0.6, 0)), 1.6);
         sfx.play('out', e.id === you ? 0 : dist(p));
         break;
       }
@@ -255,7 +263,8 @@ export class RuckusClient implements GameClient {
       case 'boom': {
         const p = fromTuple(e.at);
         this.effects?.burst(vadd(p, v3(0, 0.8, 0)), 0xff7a59, 80, 8, 0.9, 0.5);
-        this.effects?.flash(vadd(p, v3(0, 1, 0)), 0xffb070, 1.5, 0.4, 30);
+        this.effects?.flash(vadd(p, v3(0, 1, 0)), 0xff7a1f, 1.8, 0.45, 30);
+        this.effects?.boom(vadd(p, v3(0, 1.4, 0)), 2.6);
         sfx.play('boom', dist(p));
         break;
       }
@@ -266,12 +275,14 @@ export class RuckusClient implements GameClient {
       case 'dash': {
         const v = this.pawns.get(e.id);
         if (v) v.squash = 1;
+        if (e.id !== you) this.dustPuff(at(e.id));
         sfx.play('dash', e.id === you ? 0 : dist(at(e.id)));
         break;
       }
       case 'shove': {
         const p = at(e.id);
         this.effects?.burst(vadd(p, v3(0, 0.7, 0)), 0xffffff, 15, 3, 0.4, 0.6);
+        this.effects?.boom(vadd(p, v3(0, 0.9, 0)), 1.1);
         sfx.play('hit', e.id === you || e.by === you ? 0 : dist(p));
         break;
       }
@@ -334,10 +345,16 @@ export class RuckusClient implements GameClient {
       sfx.play('dash');
       const v = this.pawns.get(this.ctx.you);
       if (v) v.squash = 1;
+      this.dustPuff(me.body.pos);
     }
     me.pending.push(inp);
     if (me.pending.length > 180) me.pending.splice(0, me.pending.length - 180);
     this.outbox.push(inp);
+  }
+
+  /** A little cartoon dust cloud kicked up at a pawn's feet. */
+  private dustPuff(p: Vec3) {
+    this.effects?.burst({ x: p.x, y: p.y + 0.15, z: p.z }, 0xffffff, 10, 2.2, 0.35, 0.3);
   }
 
   private pawnView(id: string): PawnView | null {
@@ -345,9 +362,14 @@ export class RuckusClient implements GameClient {
     if (v) return v;
     const info = this.ctx.room().players.find((p) => p.id === id);
     if (!info || !this.engine) return null;
-    const group = instantiate(this.models?.pawn ?? null, info.color, () => capsuleFallback(info.color, RU.radius, RU.height));
-    const label = makeLabel(info.name, colorHex(info.color));
-    label.position.y = RU.height + 0.6;
+    const group = instantiate(this.models?.pawn ?? null, info.color, () => {
+      const r = RU.radius;
+      const mesh = inked(new THREE.CapsuleGeometry(r, Math.max(0.1, RU.height - r * 2), 6, 12), info.color);
+      mesh.position.y = RU.height / 2;
+      return mesh;
+    });
+    const label = comicLabel(info.name, info.color);
+    label.position.y = RU.height + 0.75;
     label.scale.multiplyScalar(1.3);
     group.add(label);
     this.engine.scene.add(group);
@@ -359,7 +381,8 @@ export class RuckusClient implements GameClient {
   private updatePawns(dt: number, now: number) {
     const you = this.ctx.you;
     const me = this.me;
-    const seen = new Set<string>();
+    const seen = this.seen;
+    seen.clear();
     const sample = this.snaps.sample(now - INTERP_DELAY);
     let holderPos: THREE.Vector3 | null = null;
     const holder = this.world.bomb?.holder ?? null;
@@ -394,7 +417,7 @@ export class RuckusClient implements GameClient {
     // Bomb over the holder's head.
     if (holder && holderPos && this.engine) {
       if (!this.bomb) {
-        this.bomb = instantiate(this.models?.bomb ?? null, undefined, () => sphereFallback(0x222222, 0.3));
+        this.bomb = instantiate(this.models?.bomb ?? null, undefined, () => inked(new THREE.SphereGeometry(0.3, 12, 10), 0x2b2738));
         this.engine.scene.add(this.bomb);
       }
       this.bomb.visible = true;
@@ -411,11 +434,12 @@ export class RuckusClient implements GameClient {
     const leaderView = leader && leader.points > 0 && scores.filter((s) => s.points === leader.points).length === 1 ? this.pawns.get(leader.id) : null;
     if (leaderView?.group.visible && this.engine) {
       if (!this.crown) {
-        this.crown = instantiate(this.models?.crown ?? null, undefined, () => sphereFallback(0xffd166, 0.15));
+        this.crown = instantiate(this.models?.crown ?? null, undefined, () => inked(new THREE.SphereGeometry(0.15, 12, 10), 0xffc928));
         this.engine.scene.add(this.crown);
       }
       this.crown.visible = true;
-      this.crown.position.copy(leaderView.group.position).add(new THREE.Vector3(0, RU.height + 0.15, 0));
+      this.crown.position.copy(leaderView.group.position);
+      this.crown.position.y += RU.height + 0.15;
       this.crown.rotation.y = leaderView.group.rotation.y;
     } else if (this.crown) this.crown.visible = false;
   }
@@ -423,17 +447,16 @@ export class RuckusClient implements GameClient {
   private updateCamera(dt: number) {
     const { engine, me } = this;
     if (!engine) return;
-    let target: THREE.Vector3;
+    const target = this.camGoal;
     if (me.participating && !me.out && this.phase !== 'results' && this.phase !== 'final') {
-      target = new THREE.Vector3(me.body.pos.x + me.smooth.x, Math.max(0, me.body.pos.y), me.body.pos.z + me.smooth.z);
-    } else target = new THREE.Vector3(0, 0, 0);
+      target.set(me.body.pos.x + me.smooth.x, Math.max(0, me.body.pos.y), me.body.pos.z + me.smooth.z);
+    } else target.set(0, 0, 0);
     const k = 1 - Math.exp(-5 * dt);
     this.camTarget.lerp(target, k);
     const span = this.layout ? (this.layout.kind === 'disc' ? this.layout.radius : this.layout.kind === 'square' ? this.layout.half : (this.layout.cols * this.layout.size) / 2) : 9;
     const height = 12 + span * 0.8;
     const back = 9 + span * 0.55;
-    const desired = new THREE.Vector3(this.camTarget.x * 0.35, height, this.camTarget.z * 0.35 + back);
-    engine.camera.position.lerp(desired, k);
+    engine.camera.position.lerp(this.camDesired.set(this.camTarget.x * 0.35, height, this.camTarget.z * 0.35 + back), k);
     engine.camera.lookAt(this.camTarget.x * 0.6, 0, this.camTarget.z * 0.6);
   }
 }
