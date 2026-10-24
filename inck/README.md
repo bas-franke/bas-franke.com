@@ -14,7 +14,7 @@ instance. Vite + React frontend, Node.js + Express backend on port **3003**.
 | `https://inck.ai`         | The feed, opening on the latest story (`/s/<slug>` is one story's address)   |
 | `https://inck.ai/topics`  | The condensed overview: every topic by category, plus search                 |
 | `https://inck.ai/t/<slug>`| A topic hub: intro, sections, every story and what is still planned          |
-| `https://inck.ai/sudo`    | Admin: "Write now", settings, topics and curricula, story management         |
+| `https://inck.ai/sudo`    | Admin: "Write now", "Scan now" for the radar, settings, topics and curricula |
 
 ## How it works
 
@@ -26,20 +26,28 @@ instance. Vite + React frontend, Node.js + Express backend on port **3003**.
    When every planned item has been written, the plan is extended. Thirteen topics are seeded; the scout adds more.
 2. **The scheduler** ticks every 30 s. When `enabled`, the last run is ≥ `interval_minutes` ago (default 15), the time
    is inside the active hours and fewer than `max_per_day` stories were made in the last 24 h, it starts a run.
-3. **A run** is either a *curriculum* story or a *right now* story, so that over time `trending_share` (default 40%) of
-   stories follow the world. Curriculum: a random enabled topic (weighted, favouring topics with few stories) and its
-   next unwritten item. Right now: the scout reads free live signals (BBC and NYT world/business/science headlines,
-   Google Trends, Wikipedia's most-read pages, Hacker News), searches the web, picks one subject many people are trying to
-   understand (wars, elections, crashes, inflation, scientific results, new technology; no gossip, crime cases or sports
-   results) and files it into an existing topic or creates a new one with a curriculum of its own.
+3. **The trend radar** discovers, on its own, what the world is talking about. Every `radar_hours` (default 3,
+   checked before a "right now" story) it reads free live signals (BBC and NYT world/business/science headlines,
+   Google Trends, Wikipedia's most-read pages, Hacker News), searches the web, and returns the 6–10 hottest subjects
+   with a **heat** score (1–5) and a one-line reason. Each becomes a topic (or updates the existing topic it belongs
+   to); topics it no longer lists cool down one step per scan. The seeded topics are never a menu for it.
+   **A run** is either a *right now* story or a *curriculum* story, so that over time `trending_share` (default 60%)
+   of stories serve hot topics. Right now: pick a hot topic (the hotter the likelier, spread over the day); a hot topic
+   with few stories first gets its curriculum basics, then the scout picks the one thing to explain about it today.
+   Curriculum: a random enabled topic, weighted by weight and heat, favouring topics with few stories, and its next
+   unwritten item. Both skip gossip, individual crime cases, sports results and unverified rumours.
 4. **The writer** (default `gpt-5.4-mini`) returns strict JSON: title, one-line hook, the story in Markdown, a one-sentence
    takeaway, the section it belongs to, difficulty, tags, 0–2 picture ideas with a relevance rating, and sources. Rules:
    about `target_words` words, told as a story (a scene, an analogy, why it matters), fully standalone, neutral on
    contested matters, no links in the body. Web search is used for "right now" stories and event topics.
-5. **Pictures** (default `gpt-image-2`, low quality) are rendered only for ideas rated essential or helpful, at most
-   `images_max` (default 2). Most stories have none. Files go to `/srv/apps/inck/data/images`; orphans are swept daily.
+5. **Pictures** (default `gpt-image-2`, low quality) follow relevance: a story in a topic everyone is talking about
+   (heat 4–5) always gets at least one picture that anchors it, a warm topic (2–3) gets one when it helps, and stories
+   in cool topics only get one when it is essential; never more than `images_max` (default 2). Files go to
+   `/srv/apps/inck/data/images`; orphans are swept daily.
 6. The story is published and appears at the top of the feed, in its topic hub, and as a "go deeper" link from related
-   stories (its neighbours on the topic path and stories elsewhere that share tags).
+   stories (its neighbours on the topic path and stories elsewhere that share tags). Hot topics are shown prominently:
+   a trending strip above the feed (the rail on wide screens), a "Trending now" section on the overview, a badge on
+   their stories and a banner on their hub.
 
 ## Configuration: `/srv/apps/inck/.env` on the server
 

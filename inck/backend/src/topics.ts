@@ -108,7 +108,16 @@ export function resolveSection(plan: TopicPlan, name: string) {
   return { index, section: plan.sections[index] };
 }
 
-/** Topics with unwritten items first, weighted by weight and favouring topics with fewer stories. */
+function weightedPick<T>(items: { t: T; w: number }[]): T {
+  let r = Math.random() * items.reduce((s, x) => s + x.w, 0);
+  for (const { t, w } of items) {
+    r -= w;
+    if (r <= 0) return t;
+  }
+  return items[items.length - 1].t;
+}
+
+/** Curriculum runs: any enabled topic, weighted by weight, favouring hot topics and topics with fewer stories. */
 export async function pickTopic(topicId?: number): Promise<Topic> {
   if (topicId) {
     const topic = await one<Topic>('SELECT * FROM topics WHERE id = $1', [topicId]);
@@ -120,11 +129,19 @@ export async function pickTopic(topicId?: number): Promise<Topic> {
      WHERE t.enabled AND t.weight > 0 GROUP BY t.id`,
   );
   if (!rows.length) throw new Error('No enabled topics. Add or enable a topic in the admin.');
-  const weighted = rows.map((t) => ({ t, w: t.weight / (1 + Number(t.stories) / 4) }));
-  let r = Math.random() * weighted.reduce((s, x) => s + x.w, 0);
-  for (const { t, w } of weighted) {
-    r -= w;
-    if (r <= 0) return t;
-  }
-  return weighted[weighted.length - 1].t;
+  return weightedPick(rows.map((t) => ({ t, w: (t.weight * (1 + t.heat)) / (1 + Number(t.stories) / 4) })));
+}
+
+/**
+ * "Right now" runs: one of the topics the radar marked hot, the hotter the likelier, spread out so that one topic
+ * does not take every slot (stories written in the last 24 hours count against it). Null when nothing is hot.
+ */
+export async function pickHotTopic(): Promise<Topic | null> {
+  const { rows } = await query<Topic & { recent: string }>(
+    `SELECT t.*, count(s.id) FILTER (WHERE s.created_at > now() - interval '24 hours') AS recent
+     FROM topics t LEFT JOIN stories s ON s.topic_id = t.id
+     WHERE t.enabled AND t.heat > 0 GROUP BY t.id`,
+  );
+  if (!rows.length) return null;
+  return weightedPick(rows.map((t) => ({ t, w: (t.heat * t.heat) / (1 + Number(t.recent)) })));
 }

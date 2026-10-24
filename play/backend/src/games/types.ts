@@ -1,6 +1,7 @@
 // Contract between a room and the game running inside it. Each game is a self-contained module under games/<id>/.
 
 import type { BotDifficulty, GameClientMsg, GameServerMsg, RoomSettings, Team } from '../shared/protocol.js';
+import type { Look } from '../shared/rockets/cosmetics.js';
 
 export interface GamePlayer {
   id: string;
@@ -9,6 +10,8 @@ export interface GamePlayer {
   color: number;
   /** Set in team modes. */
   team?: Team;
+  /** Robot customisation (Rockets). */
+  look?: Look;
 }
 
 /** What a game can see and do in its room. */

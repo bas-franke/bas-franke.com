@@ -23,6 +23,7 @@ import {
 } from './shared/protocol.js';
 import { mapById, RANDOM_MAP } from './shared/rockets/maps.js';
 import { MODES, TEAMS } from './shared/rockets/modes.js';
+import { randomLook, sanitizeLook } from './shared/rockets/cosmetics.js';
 import type { GameMode, Team } from './shared/protocol.js';
 
 export class RoomError extends Error {
@@ -83,7 +84,7 @@ export class Room implements GameHost {
   }
 
   players(): GamePlayer[] {
-    return [...this.members.values()].map(({ id, name, bot, color, team }) => ({ id, name, bot, color, team }));
+    return [...this.members.values()].map(({ id, name, bot, color, team, look }) => ({ id, name, bot, color, team, look }));
   }
 
   humans() {
@@ -108,6 +109,7 @@ export class Room implements GameHost {
       connected: m.bot || m.socket?.readyState === 1,
       ping: m.ping,
       ...(m.team !== undefined ? { team: m.team } : {}),
+      ...(m.look ? { look: m.look } : {}),
     }));
     return {
       code: this.code,
@@ -265,7 +267,7 @@ export class Room implements GameHost {
     while (bots.length < count) {
       const taken = new Set(bots.map((b) => b.name));
       const name = BOT_NAMES.find((n) => !taken.has(n)) ?? `Bot ${bots.length + 1}`;
-      const bot: Member = { id: randomId('b'), name, bot: true, color: this.freeColor(), ping: 0, joinedAt: Date.now() };
+      const bot: Member = { id: randomId('b'), name, bot: true, color: this.freeColor(), look: randomLook(), ping: 0, joinedAt: Date.now() };
       if (this.teamMode()) bot.team = this.smallerTeam();
       this.members.set(bot.id, bot);
       bots.push(bot);
@@ -341,6 +343,10 @@ export class Room implements GameHost {
         return;
       case 'setTeam':
         this.setTeam(member, msg.team);
+        return;
+      case 'setLook':
+        member.look = sanitizeLook(msg.look);
+        this.broadcastRoom();
         return;
       case 'start':
         this.requireHost(member);

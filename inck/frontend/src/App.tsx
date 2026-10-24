@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { api } from './api';
+import { Flame } from './components/Art';
+import { storyPath } from './components/StoryCard';
 import AdminApp from './pages/admin/AdminApp';
 import Feed from './pages/Feed';
 import TopicHub from './pages/TopicHub';
@@ -46,6 +48,17 @@ export default function App() {
           </NavLink>
         </div>
         <p className="nav-blurb">{site?.tagline ?? 'Big ideas, one short story at a time.'}</p>
+        {site && site.trending.length > 0 && (
+          <div className="nav-trending">
+            <span className="rail-label mono">trending now</span>
+            {site.trending.slice(0, 6).map((t) => (
+              <Link key={t.slug} to={t.latest_slug ? storyPath(t.latest_slug, t.slug) : `/t/${t.slug}`} className="nav-trend" title={t.heat_reason}>
+                <Flame className={`flame heat-${t.heat}`} />
+                <span>{t.name}</span>
+              </Link>
+            ))}
+          </div>
+        )}
         <p className="nav-foot mono">
           {site ? `${site.stories} stories · ${site.topics} topics` : ''}
           <br />

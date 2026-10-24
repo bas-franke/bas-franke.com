@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { mediaUrl, readLabel, timeAgo } from '../api';
 import type { Story } from '../types';
-import { CategoryIcon } from './Art';
+import { CategoryIcon, Flame } from './Art';
 import Markdown from './Markdown';
 
 /** A link into a story's topic path: the reader dives into that subject and keeps scrolling along its curriculum. */
@@ -34,6 +34,12 @@ export default function StoryCard({ story, index, active, topicMode }: { story: 
             {story.topic.name}
           </Link>
           {story.section_name && <span className="chip chip-section">{story.section_name}</span>}
+          {story.topic.heat >= 3 && (
+            <span className={`chip chip-hot heat-${story.topic.heat}`} title={story.topic.heat_reason}>
+              <Flame />
+              trending
+            </span>
+          )}
           {story.kind === 'trending' && (
             <span className="chip chip-now">
               <span className="now-dot" />

@@ -48,8 +48,11 @@ export interface Settings {
   extra_instructions: string;
   /** Percentage of stories that follow what is happening in the world right now. */
   trending_share: number;
-  /** Extra rules for the trend scout. */
+  /** Extra rules for the trend radar and scout. */
   trending_guidance: string;
+  /** How often the radar rescans what is trending (it runs lazily, before a "right now" story). */
+  radar_hours: number;
+  radar_at: Date | null;
   site_name: string;
   tagline: string;
   last_run_at: Date | null;
@@ -67,6 +70,11 @@ export interface Topic {
   enabled: boolean;
   plan: TopicPlan | null;
   planned_at: Date | null;
+  /** 0 = not trending; 1–5 set by the radar (5 = everyone is talking about it). Decays when a scan no longer lists it. */
+  heat: number;
+  /** One sentence for readers: what is happening that makes this topic hot. */
+  heat_reason: string;
+  heat_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -117,7 +125,7 @@ export interface Story {
   created_at: Date;
 }
 
-export type RunKind = StoryKind | 'plan';
+export type RunKind = StoryKind | 'plan' | 'radar';
 
 export interface Run {
   id: number;

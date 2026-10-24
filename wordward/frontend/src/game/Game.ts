@@ -14,6 +14,7 @@ import { makeBalaurBody, makeBubble, makeModel, tickBubbles, type Bubble, type K
 import { buildWorld, IMPACT_Y, type World } from './world';
 import { sfx } from './audio';
 import { flush as flushProgress, isMastered, record } from './progress';
+import { recordStars, type Level } from './levels';
 import {
   ENTRIES,
   glyphs,
@@ -42,6 +43,8 @@ export interface Settings {
   lenient: boolean;
   /** Type the word you read first, to pop the creature's bubble shield. */
   shields: boolean;
+  /** Adventure mode: the level overrides topics, mode and length, and the round can be won. */
+  level?: Level;
 }
 
 export interface WordView {
@@ -72,7 +75,11 @@ export interface Missed {
 }
 
 export interface GameState {
-  phase: 'idle' | 'playing' | 'paused' | 'over';
+  phase: 'idle' | 'playing' | 'paused' | 'over' | 'won';
+  /** The adventure level being played, or null in free play. */
+  level: Level | null;
+  /** Stars earned when a level is won (1–3). */
+  stars: number;
   hp: number;
   maxHp: number;
   score: number;
@@ -210,6 +217,8 @@ export class Game {
 
   state: GameState = {
     phase: 'idle',
+    level: null,
+    stars: 0,
     hp: MAX_HP,
     maxHp: MAX_HP,
     score: 0,
@@ -256,11 +265,17 @@ export class Game {
 
   // ---- rounds --------------------------------------------------------------------------------------------------
 
-  start(settings: Settings) {
+  start(input: Settings) {
+    const { level } = input;
+    // A level picks the topics, the mode and the waves; difficulty, direction and toggles stay the player's.
+    const settings: Settings = level
+      ? { ...input, categories: level.categories.length ? level.categories : ENTRIES.map((e) => e.category), mix: level.mix }
+      : input;
     this.settings = settings;
     this.clearEnemies();
     this.effects.clear();
-    const pool = ENTRIES.filter((e) => settings.categories.includes(e.category));
+    const words = (e: Entry) => stripHints(e[targetLang(settings.direction)]).split(' ').length;
+    const pool = ENTRIES.filter((e) => settings.categories.includes(e.category) && (!level?.maxWords || !e.sentence || words(e) <= level.maxWords));
     // Draws come from the end of a deck, so words not yet mastered go last and are served first.
     const order = (list: Entry[]) => {
       const mastered = list.filter((e) => isMastered(e.id, settings.direction));
@@ -279,6 +294,8 @@ export class Game {
     this.state = {
       ...this.state,
       phase: 'playing',
+      level: level ?? null,
+      stars: 0,
       hp: MAX_HP,
       score: 0,
       wave: 0,
@@ -311,9 +328,17 @@ export class Game {
   private nextWave() {
     const wave = this.state.wave + 1;
     if (wave > 1) flushProgress();
-    const boss = wave % 5 === 0 && this.settings.mix !== 'sentences';
+    const level = this.settings.level;
+    if (level && wave > level.waves) {
+      this.win();
+      return;
+    }
+    // Free play: a balaur every 5th wave. Adventure: on the level's last wave.
+    const boss = level ? wave === level.waves && level.boss > 0 : wave % 5 === 0 && this.settings.mix !== 'sentences';
     this.bossPending = boss;
-    this.waveLeft = Math.min(30, 4 + wave * 2) - (boss ? 6 : 0);
+    // Levels count waves from the level's own difficulty, so a later level starts busier.
+    const busy = level ? wave + Math.floor(level.n / 6) : wave;
+    this.waveLeft = Math.max(3, Math.min(30, 4 + busy * 2) - (boss ? 6 : 0));
     this.waveBreak = 2.6;
     this.spawnTimer = 0;
     const heal = wave > 1 && this.state.hp < MAX_HP;
@@ -324,10 +349,25 @@ export class Game {
       hp: heal ? this.state.hp + 1 : this.state.hp,
       banner: boss
         ? { text: 'Balaurul!', sub: `Valul ${wave} · Wave ${wave} · boss${heal ? ' · +1 ♥' : ''}`, n: wave }
-        : { text: `Valul ${wave}`, sub: wave === 1 ? 'Apără cetatea! · Defend the castle!' : `Wave ${wave}${heal ? ' · +1 ♥' : ''}`, n: wave },
+        : level && wave === 1
+          ? { text: `${level.emoji} ${level.ro}`, sub: `Nivelul ${level.n} · Level ${level.n} · ${level.en}`, n: wave }
+          : { text: `Valul ${wave}`, sub: wave === 1 ? 'Apără cetatea! · Defend the castle!' : `Wave ${wave}${level ? `/${level.waves}` : ''}${heal ? ' · +1 ♥' : ''}`, n: wave },
     };
     this.world.setDamage(this.state.hp / MAX_HP);
     if (wave > 1) sfx.play('wave');
+    this.emit();
+  }
+
+  /** All waves of the level cleared: stars for health left and accuracy, and the next level opens. */
+  private win() {
+    const { hp, typed, errors } = this.state;
+    const accuracy = typed ? (typed - errors) / typed : 1;
+    const stars = hp >= 8 && accuracy >= 0.9 ? 3 : hp >= 4 && accuracy >= 0.75 ? 2 : 1;
+    const level = this.settings.level!;
+    recordStars(this.settings.direction, level.id, stars);
+    flushProgress();
+    sfx.play('bigpoof');
+    this.state = { ...this.state, phase: 'won', stars, banner: null, toast: null };
     this.emit();
   }
 
@@ -383,7 +423,7 @@ export class Game {
 
   /** The balaur: one head per word (3 at wave 5, one more every 5 waves, at most 5), short words only. */
   private spawnBoss() {
-    const heads = Math.min(5, 2 + Math.floor(this.state.wave / 5));
+    const heads = this.settings.level?.boss || Math.min(5, 2 + Math.floor(this.state.wave / 5));
     const entries: Entry[] = [];
     for (let tries = 0; entries.length < heads && tries < 40; tries++) {
       const e = this.draw(false);
@@ -497,7 +537,8 @@ export class Game {
     const waveFactor = Math.min(2.3, 1 + (this.state.wave - 1) * 0.08);
     // Never faster than a learner at this difficulty can type it, plus a few seconds to read.
     const typeTime = letters / diff.cps + (parts.length > 2 ? 6 : 3);
-    const time = Math.max((FALL_TIME[kind] * diff.time) / (kind === 'balaur' ? 1 : waveFactor), typeTime);
+    const levelSpeed = this.settings.level?.speed ?? 1;
+    const time = Math.max((FALL_TIME[kind] * diff.time) / (kind === 'balaur' ? levelSpeed : waveFactor * levelSpeed), typeTime);
     const startY = this.top + (kind === 'balaur' ? 5 : 2);
     const enemy: Enemy = {
       id: this.nextId++,

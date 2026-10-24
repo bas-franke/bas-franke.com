@@ -3,8 +3,11 @@
 import { WORDS_A } from './words-a';
 import { WORDS_B } from './words-b';
 import { WORDS_C } from './words-c';
+import { WORDS_D } from './words-d';
+import { WORDS_E } from './words-e';
 import { SENTENCES } from './sentences';
 import { SENTENCES_B } from './sentences-b';
+import { SENTENCES_C } from './sentences-c';
 
 export type Lang = 'en' | 'ro';
 /** `en-ro`: you read English and type Romanian. `ro-en`: the other way round. */
@@ -64,6 +67,29 @@ export const CATEGORIES: Category[] = [
   { id: 'romania', en: 'Romania', ro: 'România' },
   { id: 'castle', en: 'Castle & battle', ro: 'Cetate și luptă' },
   { id: 'space', en: 'Space', ro: 'Spațiu' },
+  { id: 'animals2', en: 'More animals', ro: 'Alte animale' },
+  { id: 'food2', en: 'More food', ro: 'Altă mâncare' },
+  { id: 'home2', en: 'Around the house', ro: 'Prin casă' },
+  { id: 'city2', en: 'Around town', ro: 'Prin oraș' },
+  { id: 'nature2', en: 'Plants & landscape', ro: 'Plante și peisaje' },
+  { id: 'weather2', en: 'More weather', ro: 'Alte vremuri' },
+  { id: 'time2', en: 'When & how often', ro: 'Când și cât de des' },
+  { id: 'numbers2', en: 'Big numbers & maths', ro: 'Numere mari' },
+  { id: 'adverbs', en: 'Linking words', ro: 'Cuvinte de legătură' },
+  { id: 'questions', en: 'Questions', ro: 'Întrebări' },
+  { id: 'verbs3', en: 'Even more verbs', ro: 'Și mai multe verbe' },
+  { id: 'sports', en: 'Sports', ro: 'Sporturi' },
+  { id: 'arts', en: 'Music & arts', ro: 'Muzică și artă' },
+  { id: 'society', en: 'Society & news', ro: 'Societate' },
+  { id: 'internet', en: 'Online', ro: 'Internet' },
+  { id: 'character', en: 'Character', ro: 'Caracter' },
+  { id: 'jobs2', en: 'More jobs', ro: 'Alte meserii' },
+  { id: 'holidays', en: 'Holidays', ro: 'Sărbători' },
+  { id: 'science', en: 'Science', ro: 'Știință' },
+  { id: 'body2', en: 'Body & doctor', ro: 'Corp și doctor' },
+  { id: 'school2', en: 'At school', ro: 'La școală' },
+  { id: 'shopping2', en: 'In the shop', ro: 'În magazin' },
+  { id: 'clothing2', en: 'More clothes', ro: 'Alte haine' },
   { id: 'sentences', en: 'Sentences', ro: 'Propoziții' },
 ];
 
@@ -80,8 +106,8 @@ function parse(block: string, category: string, sentence: boolean): Entry[] {
 }
 
 export const ENTRIES: Entry[] = [
-  ...Object.entries({ ...WORDS_A, ...WORDS_B, ...WORDS_C }).flatMap(([cat, block]) => parse(block, cat, false)),
-  ...parse(SENTENCES + SENTENCES_B, 'sentences', true),
+  ...Object.entries({ ...WORDS_A, ...WORDS_B, ...WORDS_C, ...WORDS_D, ...WORDS_E }).flatMap(([cat, block]) => parse(block, cat, false)),
+  ...parse(SENTENCES + SENTENCES_B + SENTENCES_C, 'sentences', true),
 ];
 
 export const countIn = (cats: string[]) => ENTRIES.filter((e) => cats.includes(e.category)).length;

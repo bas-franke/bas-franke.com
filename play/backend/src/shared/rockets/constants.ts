@@ -60,8 +60,10 @@ export const RK = {
   fallCreditSeconds: 4,
   respawnDelay: 2.2,
   spawnProtection: 1.5,
-  matchSeconds: 300,
-  fragLimit: 20,
+  /** @deprecated The clock is per mode: MODES[mode].seconds in modes.ts (this mirrors free for all). */
+  matchSeconds: 420,
+  /** @deprecated The goal is per mode: MODES[mode].limit in modes.ts (this mirrors free for all). */
+  fragLimit: 25,
 
   healthPackAmount: 25,
   healthPackRespawn: 20,

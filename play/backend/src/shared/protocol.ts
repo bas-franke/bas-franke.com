@@ -1,6 +1,7 @@
 // Lobby and room protocol shared by server and client. Game-specific messages live in <game>/protocol.ts and
 // travel inside the { t: 'g', m } envelope; the room knows which game is running and routes them.
 
+import type { Look } from './rockets/cosmetics.js';
 import type { RocketsClientMsg, RocketsServerMsg } from './rockets/protocol.js';
 import type { RuckusClientMsg, RuckusServerMsg } from './ruckus/protocol.js';
 
@@ -107,6 +108,8 @@ export interface PlayerInfo {
   ping: number;
   /** Set in team modes. */
   team?: Team;
+  /** Robot customisation (Rockets). */
+  look?: Look;
 }
 
 export interface RoomView {
@@ -132,6 +135,8 @@ export type ClientMsg =
   | { t: 'setMode'; mode: GameMode }
   /** Any player, any time (also mid-match); the room keeps bots balanced around humans. */
   | { t: 'setTeam'; team: Team }
+  /** The player's robot customisation; sent after joining and whenever it changes. */
+  | { t: 'setLook'; look: Look }
   | { t: 'start' }
   | { t: 'stop' }
   | { t: 'chat'; text: string }

@@ -158,6 +158,17 @@ function TopicRow({
         {topic.stories} {topic.stories === 1 ? 'story' : 'stories'}
         <br />
         {topic.sections ? `${topic.written}/${topic.planned} planned written` : 'no curriculum yet'}
+        {topic.heat > 0 && (
+          <>
+            <br />
+            <span className="trend-heat" title={topic.heat_reason}>
+              hot {topic.heat}/5
+            </span>{' '}
+            <button className="link-btn" onClick={() => onChange({ heat: 0 })} disabled={busy} type="button">
+              cool down
+            </button>
+          </>
+        )}
       </span>
       <div className="topic-actions">
         {dirty && (

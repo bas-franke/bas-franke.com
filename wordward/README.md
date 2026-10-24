@@ -5,9 +5,16 @@ each inside a bubble shield. Type the word on the bubble (the language you read)
 to send the creature home with a star beam from Bufnița, the owl guardian. The closest creature is always the target,
 and both languages stay on screen the whole time, so you read, copy and remember as you play.
 Vite + React + three.js frontend (cel-shaded storybook look, everything procedural), tiny Node.js + Express backend on
-port **3005**. No database: settings, best scores and learning progress live in the browser's `localStorage`.
+port **3005**. No database: settings, best scores, level stars and learning progress are saved in cookies on the
+player's device (mirrored to `localStorage`).
 
 ## How it plays
+
+- **Adventure:** 35 themed levels on a map, from *Salut!* (first words) through food, animals, town, verbs, school,
+  holidays and science to *Maestru* (everything). A level is 3–8 waves of its topics, ends with the balaur (3–5 heads;
+  not on sentence-only levels) and gets a little faster than the one before. Clearing it gives 1–3 stars
+  (★★★ = 8+ HP and 90%+ accuracy) and opens the next level. Stars are kept per direction. Defined in `game/levels.ts`.
+- **Free play:** endless waves from the topics you pick, with a balaur every 5th wave.
 
 - **Directions:** EN → RO (read English, type Romanian) or RO → EN.
 - **Shields (on by default):** every creature first wears a bubble with the word in the language you read; typing it
@@ -28,6 +35,16 @@ port **3005**. No database: settings, best scores and learning progress live in 
   unmastered words are served first. The menu shows how many words of the chosen topics you have mastered.
 - **Castle:** 10 HP (Pokémon-style bar), +1 at the start of every wave. Cottages puff smoke as it takes damage.
 
+## Saving (cookies)
+
+`game/save.ts` keeps one save object (settings, best scores, level stars, per-word progress) and writes it to
+first-party cookies `ww0`, `ww1`… (`wwn` = chunk count; 2-year `Max-Age`, `SameSite=Lax`, `Secure` on HTTPS) and in
+full to `localStorage` (`wordward:save`). On load both are read and merged (best of each). Cookies travel with every
+request and Nginx rejects a Cookie header over 8 KB, so the cookie copy is capped at about 6 KB: words are stored as
+5-character FNV hashes plus a mastery digit (`abcde2.fghij3…`), best-learned first, and whatever does not fit stays in
+`localStorage` only. That is roughly 850 words in the cookies; levels, bests and settings always fit. The first
+versions' separate localStorage keys are migrated once.
+
 ## Mobile
 
 - The app is sized to `visualViewport`, so when the phone keyboard opens the whole game (HUD, castle, word panel)
@@ -46,7 +63,9 @@ frontend/src/
 │   ├── Game.ts      waves, spawning, targeting, shields then words, scoring, camera framing, DOM word tags
 │   ├── world.ts     banded sky, smiling sun, clouds, pastel mountains, hills, the castle and the owl guardian
 │   ├── enemies.ts   procedural creatures (bat, rock buddy, ghost, baby dragon, pebble, balaur) and bubbles
-│   ├── progress.ts  per-word learning progress in localStorage
+│   ├── progress.ts  per-word learning progress (mastered after two typo-free wins)
+│   ├── levels.ts    the adventure levels, stars and unlocking
+│   ├── save.ts      the save: cookies (budgeted) + localStorage
 │   ├── effects.ts   pooled star beams, sparkles, poof clouds, bubble pops, dust
 │   ├── toon.ts      toon shader look-dev patch, cached materials, ink outlines (copied from play/)
 │   ├── engine.ts    renderer wrapper with an adaptive-resolution governor
@@ -55,11 +74,13 @@ frontend/src/
     ├── words-a.ts   nouns by topic       `english|romanian`, "(hints)" are shown but not typed
     ├── words-b.ts   verbs, adjectives, small words, feelings
     ├── words-c.ts   phrases, countries, travel, cooking, office, Romania, castle & battle, space, more of everything
+    ├── words-d.ts   more animals, food, house, town, plants, time, numbers, linking words, questions, verbs
+    ├── words-e.ts   sports, arts, society, online, character, jobs, holidays, science, body, school, shop, clothes
     ├── sentences*.ts short sentences (≤ 6 words a side)
     └── index.ts     categories, parsing, the typing/matching rules
 ```
 
-About 1,900 words and phrases in 40 topics plus 300+ sentences. To add vocabulary, add `english|romanian` lines to a category block (or a new block plus an entry in `CATEGORIES`).
+About 3,250 words and phrases in 62 topics plus ~500 sentences. To add vocabulary, add `english|romanian` lines to a category block (or a new block plus an entry in `CATEGORIES`).
 Verbs are written `(to) eat|(a) mânca` so the infinitive marker is shown but not typed.
 
 ## Configuration
