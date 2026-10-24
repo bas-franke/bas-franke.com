@@ -125,7 +125,11 @@ const bakeColor = new THREE.Color();
  * character). `lit` = the soft toon surface with the warm rim (same look as `toon(color)`), else unlit like `flat()`.
  */
 class Baker {
-  constructor(private readonly lit = true) {}
+  /** `rim` = the warm rim light of `toon()` (off for matte wool). */
+  constructor(
+    private readonly lit = true,
+    private readonly rim = true,
+  ) {}
   private parts: THREE.BufferGeometry[] = [];
   /** `shade(x, y, z)` (optional) scales the colour per vertex: knit ribs, stripes, soft gradients at no extra cost. */
   add(geo: THREE.BufferGeometry, color: number, shade?: (x: number, y: number, z: number) => number) {
@@ -148,7 +152,7 @@ class Baker {
     if (!this.parts.length) return;
     const geo = this.parts.length === 1 ? this.parts[0] : mergeGeometries(this.parts)!;
     if (geo !== this.parts[0]) for (const p of this.parts) p.dispose();
-    parent.add(new THREE.Mesh(geo, this.lit ? vertexColorMaterial(true) : flatVertexColorMaterial()));
+    parent.add(new THREE.Mesh(geo, this.lit ? vertexColorMaterial(this.rim) : flatVertexColorMaterial()));
     this.parts = [];
   }
 }
@@ -183,12 +187,14 @@ function glow(color: number, size: number) {
 // ---- floor --------------------------------------------------------------------------------------------------------
 
 /** The defenders are modelled at about creature size and drawn a little bigger. */
-const DEFENDER_SCALE = 1.05;
+const DEFENDER_SCALE = 1.0;
+/** The wizard is a little bulkier than the robot. */
+const WIZARD_SCALE = 1.15;
 const FLOOR_HALF = FIELD_HALF + 7;
 const FLOOR_NEAR = LINE_Z + 14;
 const FLOOR_FAR = LINE_Z - FIELD_LENGTH - 4;
-/** Flagstone size: big square slabs, about a defender wide (some split in halves, some 1.5 long). */
-const TILE = 2.1;
+/** Flagstone size: square slabs, about a dozen across the field (one in twenty split in halves). */
+const TILE = 1.5;
 
 /** Floor texture resolution, texels per world unit: 40 on 'high' (1200×2320), 24 on 'low' (720×1392, 36% the memory). */
 const FLOOR_PX = { high: 40, low: 24 } as const;
@@ -227,27 +233,57 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
   const T = TILE * PX;
 
   // ---- flagstones
+  // Mortar first: the whole floor dark, so the deep gaps are what the slabs leave uncovered.
+  g.fillStyle = 'rgb(30,31,28)';
+  g.fillRect(0, 0, W, H);
   const joints: [number, number, number, number][] = [];
+  /** A slab's outline: a rectangle inset by half the gap, its corners nudged and rounded, so no two gaps match. */
+  const slabPath = (x: number, y: number, w: number, h: number) => {
+    const gap = 1.7;
+    const j = () => (rnd() - 0.5) * 2.4;
+    const ax = x + gap + j();
+    const ay = y + gap + j();
+    const bx = x + w - gap + j();
+    const by = y + gap + j();
+    const cx = x + w - gap + j();
+    const cy = y + h - gap + j();
+    const dx = x + gap + j();
+    const dy = y + h - gap + j();
+    const r = 3 + rnd() * 3;
+    g.beginPath();
+    g.moveTo(ax + r, ay);
+    g.arcTo(bx, by, cx, cy, r);
+    g.arcTo(cx, cy, dx, dy, r);
+    g.arcTo(dx, dy, ax, ay, r);
+    g.arcTo(ax, ay, bx, by, r);
+    g.closePath();
+  };
   const stone = (x: number, y: number, w: number, h: number) => {
     joints.push([x, y, w, h]);
-    // Slate: mostly cool blue-grey, some grey-green; the lamps bring the warmth.
-    // A narrow cool range: grey-green (150) to blue-grey (205), never warm (the lamps add that).
-    const hue = 150 + rnd() * 55;
-    const sat = 6 + rnd() * 4;
-    const lit = 48 + rnd() * 6;
+    // Slate: cool grey with a hint of blue or green, never warm (the lamps add that).
+    const hue = 170 + rnd() * 45;
+    const sat = 5 + rnd() * 6;
+    const lit = 42 + rnd() * 8;
     g.save();
-    g.beginPath();
-    g.rect(x, y, w, h);
+    slabPath(x, y, w, h);
     g.clip();
     g.fillStyle = `hsl(${hue} ${sat}% ${lit}%)`;
     g.fillRect(x, y, w, h);
-    // Crazy paving: overlapping irregular patches, each a shade off, with a faint dark seam.
-    const n = Math.round(((w * h) / (T * T)) * (8 + rnd() * 5));
-    g.lineWidth = 1.1;
+    // Mottle: many small soft blotches a shade lighter or darker, the rough face of split stone.
+    const n = Math.round(((w * h) / (T * T)) * 34);
     for (let i = 0; i < n; i++) {
+      const dark = rnd() < 0.5;
+      g.fillStyle = dark ? `rgba(20,24,24,${0.05 + rnd() * 0.08})` : `rgba(226,230,222,${0.04 + rnd() * 0.07})`;
+      g.beginPath();
+      g.ellipse(x + rnd() * w, y + rnd() * h, 2 + rnd() * 7, 1.5 + rnd() * 5, rnd() * Math.PI, 0, Math.PI * 2);
+      g.fill();
+    }
+    // A few faint larger patches with barely-there seams: worn stone, not cracked glass.
+    g.lineWidth = 1;
+    for (let i = 0, m = 2 + ((rnd() * 2) | 0); i < m; i++) {
       const cx = x + rnd() * w;
       const cy = y + rnd() * h;
-      const r = T * (0.16 + rnd() * 0.22);
+      const r = T * (0.18 + rnd() * 0.2);
       const sides = 5 + ((rnd() * 3) | 0);
       const rot = rnd() * Math.PI;
       g.beginPath();
@@ -260,76 +296,84 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
         else g.lineTo(px, py);
       }
       g.closePath();
-      g.fillStyle = `hsl(${hue + (rnd() - 0.5) * 8} ${sat}% ${lit + (rnd() - 0.5) * 6}%)`;
+      g.fillStyle = `hsla(${hue + (rnd() - 0.5) * 10} ${sat}% ${lit + (rnd() - 0.5) * 6}% / 0.6)`;
       g.fill();
-      g.strokeStyle = `rgba(22,26,26,${0.08 + rnd() * 0.1})`;
+      g.strokeStyle = `rgba(22,26,26,${0.03 + rnd() * 0.03})`;
       g.stroke();
     }
-    // Weathering: soft dark and light clouds, the odd lichen stain.
-    for (let i = 0; i < 4; i++) {
+    // Weathering: a soft dark or light cloud, the odd lichen stain.
+    for (let i = 0; i < 2; i++) {
       const bx = x + rnd() * w;
       const by = y + rnd() * h;
-      const br = 12 + rnd() * 36;
+      const br = 10 + rnd() * 24;
       const grad = g.createRadialGradient(bx, by, 0, bx, by, br);
       const kind = rnd();
-      grad.addColorStop(0, kind < 0.4 ? 'rgba(26,30,30,0.16)' : kind < 0.8 ? 'rgba(232,230,218,0.1)' : 'rgba(100,118,70,0.12)');
+      grad.addColorStop(0, kind < 0.45 ? 'rgba(26,30,30,0.14)' : kind < 0.85 ? 'rgba(232,230,218,0.08)' : 'rgba(80,100,60,0.12)');
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = grad;
       g.fillRect(x, y, w, h);
     }
-    // Worn edges: a little darker towards the joints.
-    g.strokeStyle = 'rgba(18,20,18,0.16)';
-    g.lineWidth = 6;
-    g.strokeRect(x, y, w, h);
+    // A raised slab: lighter in the middle, a darker bevelled rim with a thin light inner bevel.
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const dome = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.62);
+    dome.addColorStop(0, 'rgba(236,240,236,0.09)');
+    dome.addColorStop(0.6, 'rgba(236,240,236,0.02)');
+    dome.addColorStop(1, 'rgba(12,14,14,0.1)');
+    g.fillStyle = dome;
+    g.fillRect(x, y, w, h);
+    slabPath(x, y, w, h);
+    // (two strokes, so the rim darkens gradually towards the gap: 0.22 at the edge)
+    g.strokeStyle = 'rgba(14,16,16,0.11)';
+    g.lineWidth = 10;
+    g.stroke();
+    g.lineWidth = 5;
+    g.stroke();
+    g.strokeStyle = 'rgba(230,234,226,0.06)';
+    g.lineWidth = 3;
+    g.strokeRect(x + 6, y + 6, w - 12, h - 12);
     // A hairline crack now and then.
-    if (rnd() < 0.15) {
-      g.strokeStyle = 'rgba(15,18,16,0.4)';
-      g.lineWidth = 1.1;
+    if (rnd() < 0.08) {
+      g.strokeStyle = 'rgba(15,18,16,0.3)';
+      g.lineWidth = 1;
       g.beginPath();
-      let cx = x + rnd() * w;
-      let cy = y;
-      g.moveTo(cx, cy);
-      while (cy < y + h) {
-        cx += (rnd() - 0.5) * 14;
-        cy += 6 + rnd() * 10;
-        g.lineTo(cx, cy);
+      let kx = x + rnd() * w;
+      let ky = y;
+      g.moveTo(kx, ky);
+      while (ky < y + h) {
+        kx += (rnd() - 0.5) * 12;
+        ky += 6 + rnd() * 10;
+        g.lineTo(kx, ky);
       }
       g.stroke();
     }
     g.restore();
   };
-  // Rows aligned so a joint runs along the defence line and a stone is centred on the middle of the field; now and
-  // then a row is shifted half a stone, or has a half or a long stone in it.
+  // A regular grid of square slabs, aligned so a joint runs along the defence line and a slab is centred on the
+  // middle of the field; one in twenty is split into two halves.
   const x0 = X(0) - T / 2 - Math.ceil(X(0) / T) * T;
   const y0 = Z(LINE_Z) - Math.ceil(Z(LINE_Z) / T) * T;
   for (let ty = y0; ty < H; ty += T) {
-    let tx = x0 - (rnd() < 0.2 ? T / 2 : 0);
-    while (tx < W) {
+    for (let tx = x0; tx < W; tx += T) {
       const r = rnd();
-      const w = r < 0.1 ? T / 2 : r < 0.2 ? T * 1.5 : T;
-      if (rnd() < 0.1) {
-        stone(tx, ty, w, T / 2);
-        stone(tx, ty + T / 2, w, T / 2);
-      } else stone(tx, ty, w, T);
-      tx += w;
+      if (r < 0.015) {
+        stone(tx, ty, T, T / 2);
+        stone(tx, ty + T / 2, T, T / 2);
+      } else if (r < 0.03) {
+        stone(tx, ty, T / 2, T);
+        stone(tx + T / 2, ty, T / 2, T);
+      } else stone(tx, ty, T, T);
     }
   }
-  // Mortar: a thin pale joint with dark edges.
-  g.strokeStyle = 'rgba(30,30,26,0.75)';
-  g.lineWidth = 3.4;
-  for (const [x, y, w, h] of joints) g.strokeRect(x, y, w, h);
-  g.strokeStyle = 'rgba(150,140,118,0.3)';
-  g.lineWidth = 1;
-  for (const [x, y, w, h] of joints) g.strokeRect(x, y, w, h);
 
   // ---- carved rune inlays: a pale band with dark edges
   const carve = (draw: () => void, strength = 1, width = 7) => {
     g.lineCap = 'round';
     g.lineJoin = 'round';
-    g.strokeStyle = `rgba(26,24,20,${Math.min(1, 0.5 * strength)})`;
+    g.strokeStyle = `rgba(26,24,20,${Math.min(1, 0.28 * strength)})`;
     g.lineWidth = width;
     draw();
-    g.strokeStyle = `rgba(200,182,146,${Math.min(1, 0.42 * strength)})`;
+    g.strokeStyle = `rgba(200,182,146,${Math.min(1, 0.25 * strength)})`;
     g.lineWidth = width * 0.55;
     draw();
   };
@@ -377,14 +421,8 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
     carve(star4(nx, nz, 0.95, 0.25), 1.2, 8);
     carve(star4(nx, nz, 0.26, 0), 1, 5);
   }
-  // Lines out of the nodes: up the field, down to the defenders' ring, and across to the side lines.
-  carve(line(0, RUNE_Z - RUNE_R - 0.95, 0, FLOOR_FAR + 6), 0.6);
-  carve(line(0, RUNE_Z + RUNE_R + 0.95, 0, LOW_RUNE_Z - LOW_RUNE_R), 0.6);
-  for (const s of [-1, 1]) {
-    carve(line(s * (RUNE_R + 0.95), RUNE_Z, s * (FIELD_HALF - 1.6), RUNE_Z), 0.75);
-    // Long lines down the length of the field.
-    carve(line(s * (FIELD_HALF - 1.6), FLOOR_FAR + 4, s * (FIELD_HALF - 1.6), LINE_Z + 6), 0.45);
-  }
+  // Faint lines out of the side nodes, across to the edge of the field.
+  for (const s of [-1, 1]) carve(line(s * (RUNE_R + 0.95), RUNE_Z, s * (FIELD_HALF - 1.6), RUNE_Z), 0.3);
   // A second circle far up the hall, and a fainter one around the defenders.
   const farZ = RUNE_Z - 17;
   carve(circle(0, farZ, RUNE_R * 0.9), 0.7, 7);
@@ -396,44 +434,61 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
   carve(circle(0, LOW_RUNE_Z, LOW_RUNE_R), 0.5, 7);
   carve(circle(0, LOW_RUNE_Z, LOW_RUNE_R - 0.35), 0.35, 5);
 
-  // The defence line: a row of faintly glowing golden glyphs across the field.
-  g.strokeStyle = 'rgba(240,196,110,0.26)';
-  g.lineWidth = 2;
-  for (let x = -FIELD_HALF + 1; x <= FIELD_HALF - 1; x += 1.25) {
-    const cx = X(x);
-    const cy = Z(LINE_Z);
+  // ---- moss: continuous green threads growing along the joints, small clumps where joints cross, thicker towards
+  // the walls; a thick carpet creeping out from under the shelves.
+  const mossColor = () => `hsla(${78 + rnd() * 30} ${28 + rnd() * 16}% ${17 + rnd() * 12}% / ${0.6 + rnd() * 0.35})`;
+  /** A moss thread along a joint from (ax, ay), `len` long in direction (dx, dy), wobbling ±1 px. */
+  const thread = (ax: number, ay: number, dx: number, dy: number, len: number) => {
+    g.strokeStyle = mossColor();
+    g.lineWidth = 2 + rnd() * 2;
     g.beginPath();
-    g.moveTo(cx - 9, cy);
-    g.lineTo(cx, cy - 9);
-    g.lineTo(cx + 9, cy);
-    g.lineTo(cx, cy + 9);
-    g.closePath();
+    g.moveTo(ax, ay);
+    for (let d = 6; d <= len; d += 6) {
+      const j = (rnd() - 0.5) * 2;
+      g.lineTo(ax + dx * d - dy * j, ay + dy * d + dx * j);
+    }
     g.stroke();
-  }
-
-  // ---- moss: tufts in the joints (mostly where they cross), thicker towards the walls
-  const tuft = (x: number, y: number, size: number) => {
-    const n = 3 + ((rnd() * 5) | 0);
-    for (let i = 0; i < n; i++) {
-      g.fillStyle = `hsla(${70 + rnd() * 28} ${32 + rnd() * 24}% ${24 + rnd() * 20}% / ${0.55 + rnd() * 0.4})`;
+    // Fuzz: little dabs along it, so it reads as moss and not a painted line.
+    for (let d = 0; d <= len; d += 5) {
+      if (rnd() < 0.5) continue;
+      const j = (rnd() - 0.5) * 4;
+      g.fillStyle = mossColor();
       g.beginPath();
-      g.ellipse(x + (rnd() - 0.5) * size * 2.2, y + (rnd() - 0.5) * size * 2.2, 1.2 + rnd() * size * 0.6, 1 + rnd() * size * 0.45, rnd() * Math.PI, 0, Math.PI * 2);
+      g.ellipse(ax + dx * d - dy * j, ay + dy * d + dx * j, 1 + rnd() * 2, 1 + rnd() * 1.5, rnd() * Math.PI, 0, Math.PI * 2);
       g.fill();
     }
   };
+  const clump = (x: number, y: number, size: number) => {
+    const n = 3 + ((rnd() * 4) | 0);
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = mossColor();
+      g.beginPath();
+      g.ellipse(x + (rnd() - 0.5) * size * 1.6, y + (rnd() - 0.5) * size * 1.6, 1.5 + rnd() * size * 0.6, 1.2 + rnd() * size * 0.45, rnd() * Math.PI, 0, Math.PI * 2);
+      g.fill();
+    }
+  };
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
   for (const [x, y, w, h] of joints) {
-    const edge = Math.min(1, Math.abs((x + w / 2) / PX - FLOOR_HALF) / FIELD_HALF);
-    if (rnd() < 0.55 + edge * 0.45) tuft(x, y, 3 + rnd() * (3 + edge * 5));
-    // A few along the edges.
-    if (rnd() < 0.25 + edge * 0.5) tuft(x + rnd() * w, y, 2 + rnd() * 3);
-    if (rnd() < 0.25 + edge * 0.5) tuft(x, y + rnd() * h, 2 + rnd() * 3);
+    const edge = Math.min(1, Math.max(0, (Math.abs((x + w / 2) / PX - FLOOR_HALF) - 2) / (FIELD_HALF - 2)));
+    // Threads along the top and left joints of this slab.
+    for (let i = 0; i < 2; i++) {
+      if (rnd() < 0.38 + edge * 0.5) {
+        const len = 20 + rnd() * 40;
+        const horiz = rnd() < 0.5;
+        if (horiz) thread(x + rnd() * Math.max(1, w - len), y, 1, 0, Math.min(len, w));
+        else thread(x, y + rnd() * Math.max(1, h - len), 0, 1, Math.min(len, h));
+      }
+    }
+    // A clump at the crossing.
+    if (rnd() < 0.18 + edge * 0.4) clump(x, y, 3 + rnd() * (2 + edge * 4));
   }
-  // Thick moss creeping out from under the shelves.
-  for (let i = 0; i < 1600; i++) {
+  // Thick moss creeping out from under the shelves, outside the field.
+  for (let i = 0; i < 1400; i++) {
     const s = rnd() < 0.5 ? -1 : 1;
-    const x = s * (FIELD_HALF - 1.5 + Math.pow(rnd(), 0.7) * 8);
+    const x = s * (FIELD_HALF + 0.5 + Math.pow(rnd(), 0.7) * 6.5);
     const z = FLOOR_FAR + rnd() * (FLOOR_NEAR - FLOOR_FAR);
-    tuft(X(x), Z(z), 2 + rnd() * 4);
+    clump(X(x), Z(z), 2 + rnd() * 4);
   }
 
   // Grain: per-pixel noise so the stone does not look like flat vector shapes.
@@ -450,8 +505,8 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
   // ---- baked light
   // Contact shadows under the defenders, nudged away from the key light.
   for (const [x, z, r] of [
-    [WIZARD_AT[0] + 0.2, WIZARD_AT[1] - 0.05, 1.25],
-    [ROBOT_AT[0] + 0.2, ROBOT_AT[1] - 0.05, 1.15],
+    [WIZARD_AT[0] + 0.15, WIZARD_AT[1] - 0.05, 1.2 * DEFENDER_SCALE * WIZARD_SCALE],
+    [ROBOT_AT[0] + 0.15, ROBOT_AT[1] - 0.05, 1.15 * DEFENDER_SCALE],
   ] as const) {
     const sh = g.createRadialGradient(X(x), Z(z), 0, X(x), Z(z), r * PX);
     sh.addColorStop(0, 'rgba(14,10,8,0.55)');
@@ -655,80 +710,93 @@ function bendTip(geo: THREE.BufferGeometry, h: number, side: number, droop: numb
 }
 
 /**
- * The little wizard, seen from behind: a big dark green knitted hat with a wide floppy brim and its tip bent over,
- * a thick cream knitted scarf whose striped, fringed tails hang down his back, a plump green robe, and a candle on a
- * stick raised at his side.
+ * The little wizard, seen from behind: a tall dark green knitted hat with a wide floppy brim and its tip curled over,
+ * a thick cream knitted scarf wound round his neck with two striped, fringed ends hanging down his back, a green
+ * knitted coat with round shoulders, and a candle on a stick raised at his side. Matte wool all over: no rim shine.
  */
 function makeWizard(candleLight: boolean) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  const ROBE = 0x3d5a44;
-  const HAT = 0x26463f;
-  const BRIM = 0x2e544b;
-  const SCARF = 0xefe5cc;
-  const SAGE = 0x7d9670;
-  const b = new Baker();
-  // Robe: a plump knitted bell, darker at the hem.
-  const robeKnit = knit(9, 22, 0.2);
+  const ROBE = 0x3b5843;
+  const HAT = 0x2a4a40;
+  const BRIM = 0x2f5247;
+  const SCARF = 0xe8dcc0;
+  const SAGE = 0x6f8a66;
+  const b = new Baker(true, false);
+  // Coat: a knitted bell with broad round shoulders, darker at the hem, with vertical cable stripes.
+  const robeKnit = knit(10, 22, 0.24);
   b.add(
-    softLathe([[0, 0], [0.8, 0.02], [0.9, 0.2], [0.87, 0.58], [0.76, 1.0], [0.58, 1.32], [0.3, 1.47], [0, 1.5]], 20, 32),
+    softLathe([[0, 0], [0.8, 0.02], [0.88, 0.2], [0.84, 0.6], [0.8, 0.98], [0.74, 1.2], [0.56, 1.36], [0.28, 1.46], [0, 1.48]], 22, 32),
     ROBE,
-    (x, y, z) => robeKnit(x, y, z) * (y < 0.14 ? 0.72 : 1),
+    (x, y, z) => robeKnit(x, y, z) * (y < 0.14 ? 0.72 : 1) * (0.92 + 0.08 * Math.cos(Math.atan2(x, z) * 6)),
   );
-  // Scarf: a thick knitted cream ring with ribs, and two tails down his back (towards the camera), each with sage
-  // stripes near the end and a fringe.
-  b.add(new THREE.TorusGeometry(0.5, 0.25, 10, 28).rotateX(Math.PI / 2).scale(1, 0.8, 1).translate(0, 1.42, 0.04), SCARF, (x, _y, z) =>
-    0.9 + 0.1 * Math.cos(Math.atan2(x, z) * 14),
-  );
+  // Shoulders: two knitted pads, so he is not an egg.
+  for (const sx of [-1, 1]) b.add(new THREE.SphereGeometry(0.34, 12, 10).scale(1.1, 0.8, 1).translate(sx * 0.56, 1.2, 0.02), ROBE, robeKnit);
+  // A darker hem band.
+  b.add(new THREE.TorusGeometry(0.82, 0.07, 6, 32).rotateX(Math.PI / 2).translate(0, 0.08, 0), 0x2c4433, knit(0, 32, 0.2));
+  // Scarf: a thick knitted cream torus round the neck, ribbed, and two ends hanging down his back (towards the
+  // camera), each with sage stripes near the end and a fringe.
+  // Shaded in wound bands (darker where one wrap tucks under the next) with fine ribs.
+  b.add(new THREE.TorusGeometry(0.47, 0.21, 10, 32).rotateX(Math.PI / 2).scale(1, 0.9, 1).translate(0, 1.44, 0.04), SCARF, (x, y, z) => {
+    const a = Math.atan2(x, z);
+    const band = 0.5 + 0.5 * Math.cos(a * 3 + y * 14);
+    return (0.72 + 0.28 * band) * (0.93 + 0.07 * Math.cos(a * 24));
+  });
+  const scarfKnit = (_x: number, y: number) => 0.9 + 0.1 * Math.cos(y * 50);
   const tail = (x: number, len: number, tilt: number, twist: number) => {
-    const at = (geo: THREE.BufferGeometry) => geo.rotateX(-tilt).rotateZ(twist).translate(x, 1.38, 0.6);
-    b.add(at(new THREE.BoxGeometry(0.4, len, 0.12, 1, 6, 1).translate(0, -len / 2, 0)), SCARF);
-    for (const f of [0.62, 0.72, 0.84]) b.add(at(new THREE.BoxGeometry(0.41, 0.05, 0.13).translate(0, -len * f, 0)), SAGE);
+    const at = (geo: THREE.BufferGeometry) => geo.rotateX(-tilt).rotateZ(twist).translate(x, 1.4, 0.64);
+    b.add(at(new THREE.BoxGeometry(0.4, len, 0.12, 1, 8, 1).translate(0, -len / 2, 0)), SCARF, scarfKnit);
+    for (const f of [0.6, 0.7, 0.8]) b.add(at(new THREE.BoxGeometry(0.41, 0.045, 0.13).translate(0, -len * f, 0)), SAGE);
     // Fringe: little tassels hanging off the end.
     for (let f = 0; f < 6; f++) {
-      b.add(at(new THREE.CylinderGeometry(0.026, 0.016, 0.22, 4).translate(-0.16 + f * 0.064, -len - 0.1, 0)), SCARF);
+      b.add(at(new THREE.CylinderGeometry(0.026, 0.015, 0.2, 4).translate(-0.16 + f * 0.064, -len - 0.09, 0)), SCARF);
     }
   };
-  tail(0.17, 1.05, 0.6, 0.1);
-  tail(-0.15, 0.8, 0.7, -0.06);
+  tail(0.13, 1.1, 0.52, 0.06);
+  tail(-0.11, 0.9, 0.58, -0.04);
   // Left sleeve hanging, with a little satchel at the hip.
-  b.add(new THREE.CapsuleGeometry(0.22, 0.45, 4, 10).rotateZ(0.3).translate(-0.74, 0.92, 0.05), ROBE, robeKnit);
-  b.add(new THREE.BoxGeometry(0.34, 0.4, 0.16).rotateY(0.3).translate(-0.86, 0.55, -0.12), 0x6a4528);
+  b.add(new THREE.CapsuleGeometry(0.22, 0.45, 4, 10).rotateZ(0.25).translate(-0.76, 0.86, 0.05), ROBE, robeKnit);
+  b.add(new THREE.BoxGeometry(0.34, 0.4, 0.16).rotateY(0.3).translate(-0.86, 0.5, -0.12), 0x5a3c24);
   b.bake(body);
 
   const head = new THREE.Group();
-  head.position.y = 1.62;
+  head.position.y = 1.7;
+  // Hat tipped forward a little, so the camera behind him sees the scarf under the brim.
+  head.rotation.x = -0.18;
   body.add(head);
-  const hb = new Baker();
-  hb.add(new THREE.SphereGeometry(0.42, 16, 12).translate(0, 0.22, 0), PAL.skin);
+  const hb = new Baker(true, false);
+  hb.add(new THREE.SphereGeometry(0.4, 16, 12).translate(0, 0.2, 0), PAL.skin);
   // White beard tufts peeking out at the sides of the face (front is -z).
-  hb.add(new THREE.SphereGeometry(0.36, 12, 10).scale(1.25, 1.1, 0.8).translate(0, -0.08, -0.22), 0xf4efe6);
-  for (const sx of [-1, 1]) hb.add(new THREE.SphereGeometry(0.16, 8, 6).translate(sx * 0.42, 0.04, -0.14), 0xf4efe6);
-  // Hat: a wide floppy brim (wavy, drooping at the back and sides) and a tall knitted cone whose tip flops over to
-  // his left and a little back.
-  const brim = softLathe([[0.4, 0.06], [0.62, 0.04], [0.78, -0.04], [0.84, -0.1], [0.79, -0.15], [0.6, -0.07], [0.42, -0.02]], 10, 30);
+  hb.add(new THREE.SphereGeometry(0.34, 12, 10).scale(1.25, 1.1, 0.8).translate(0, -0.08, -0.22), 0xf4efe6);
+  for (const sx of [-1, 1]) hb.add(new THREE.SphereGeometry(0.15, 8, 6).translate(sx * 0.4, 0.04, -0.14), 0xf4efe6);
+  // Hat: a wide floppy brim (wavy, drooping at the back and sides) and a tall knitted cone whose tip curls over
+  // backwards and to his left.
+  const brim = softLathe([[0.4, 0.06], [0.64, 0.04], [0.82, -0.05], [0.9, -0.12], [0.85, -0.17], [0.62, -0.08], [0.42, -0.02]], 10, 32);
   {
     const p = brim.attributes.position;
     for (let i = 0; i < p.count; i++) {
       const a = Math.atan2(p.getX(i), p.getZ(i));
       const r = Math.hypot(p.getX(i), p.getZ(i));
-      p.setY(i, p.getY(i) - Math.max(0, r - 0.55) * (0.1 + 0.1 * Math.sin(a * 3 + 1)));
+      p.setY(i, p.getY(i) - Math.max(0, r - 0.55) * (0.14 + 0.12 * Math.sin(a * 3 + 1)));
     }
     brim.computeVertexNormals();
   }
-  hb.add(brim.translate(0, 0.42, 0), BRIM, knit(14, 40, 0.22));
-  const cone = softLathe([[0.6, 0], [0.5, 0.35], [0.34, 0.75], [0.17, 1.1], [0.05, 1.38], [0, 1.45]], 18, 24);
-  hb.add(cone, HAT, knit(11, 26, 0.26));
-  bendTip(cone, 1.45, -0.62, 0.5, 0.12);
-  cone.translate(0, 0.42, 0);
+  hb.add(brim.translate(0, 0.4, 0), BRIM, knit(14, 40, 0.24));
+  const HAT_H = 2.0;
+  const cone = softLathe([[0.6, 0], [0.5, 0.45], [0.36, 0.95], [0.22, 1.4], [0.11, 1.75], [0.05, 1.93], [0, HAT_H]], 24, 24);
+  hb.add(cone, HAT, knit(9, 26, 0.28));
+  bendTip(cone, HAT_H, -0.55, 0.85, 0.5);
+  cone.translate(0, 0.4, 0);
+  // The curl at the tip: a small knitted roll.
+  hb.add(new THREE.TorusGeometry(0.1, 0.055, 6, 12, Math.PI * 1.4).rotateY(Math.PI / 2).translate(-0.55, 0.4 + HAT_H - 0.92, 0.6), HAT);
   hb.bake(head);
 
   // Right arm with the candle (the side next to the robot).
   const arm = new THREE.Group();
   arm.position.set(0.66, 1.0, -0.05);
   body.add(arm);
-  const ab = new Baker();
+  const ab = new Baker(true, false);
   ab.add(new THREE.CapsuleGeometry(0.2, 0.5, 4, 10).rotateZ(-1.1).translate(0.3, 0.1, 0), ROBE, robeKnit);
   ab.add(new THREE.SphereGeometry(0.15, 10, 8).translate(0.62, 0.26, 0), PAL.skin);
   // A tall wooden candle stick: the flame burns above the hat brim, out to the side.
@@ -743,9 +811,9 @@ function makeWizard(candleLight: boolean) {
   halo.position.copy(flame.position);
   arm.add(halo);
   // The candle's own light on 'high'; 'low' bakes it into the floor (one point light less in every lit shader).
-  const light = candleLight ? new THREE.PointLight(0xffa850, 5, 8, 1.6) : null;
+  const light = candleLight ? new THREE.PointLight(0xffa850, 4, 8, 1.6) : null;
   if (light) {
-    light.position.set(1.0, 2.6, 0.2);
+    light.position.set(1.3, 2.3, 0.5);
     arm.add(light);
   }
 
@@ -778,54 +846,61 @@ function makeWizard(candleLight: boolean) {
       const flick = base * (1 + Math.sin(t * 17) * 0.06 + Math.sin(t * 7.3) * 0.08) + castT * 2.5;
       flame.scale.set(0.8 + flick * 0.2, flick, 0.8 + flick * 0.2);
       halo.scale.setScalar(1.5 + flick * 0.8);
-      if (light) light.intensity = 4 * flick;
+      if (light) light.intensity = 3.2 * flick;
     },
   };
 }
 
 /**
- * The robot cannon: a round cream body with a teal lower half and a gold trim, a cute face up front, little ear
- * knobs, a teal drum with a brass coil on its right side, cream feet and wheels, and a teal barrel with brass rings.
+ * The robot cannon: a round aged-cream body with a teal lower half and a dark brass seam, a cute face up front,
+ * little ear knobs, a teal drum with a round brass dial on its right side, four dark round feet, and a teal barrel
+ * with brass rings.
  */
 function makeRobot() {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  const CREAM = 0xf6f1e6;
-  const TEAL = 0x1f7f8a;
-  const TEAL_DARK = 0x175560;
-  const BRASS = 0xd6a74c;
-  const BRASS_DARK = 0x8a6230;
+  const CREAM = 0xe9dcc0;
+  const TEAL = 0x1f6f73;
+  const TEAL_DARK = 0x16484c;
+  const BRASS = 0xb98a45;
+  const BRASS_DARK = 0x5c4522;
+  const FEET = 0x2e2a2a;
   const b = new Baker();
   // Body, softly shaded darker towards the bottom.
   b.add(new THREE.SphereGeometry(0.8, 24, 18).scale(1, 0.94, 1).translate(0, 1.0, 0), CREAM, (_x, y) => 0.86 + 0.14 * Math.min(1, Math.max(0, (y - 0.5) / 0.9)));
-  // Teal lower half: the bottom of a slightly larger sphere, with a gold trim along its edge.
+  // Teal lower half: the bottom of a slightly larger sphere, with a dark brass seam along its edge.
   b.add(new THREE.SphereGeometry(0.83, 24, 9, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.58).scale(1, 0.94, 1).translate(0, 1.0, 0), TEAL);
-  b.add(new THREE.TorusGeometry(0.805, 0.035, 6, 32).rotateX(Math.PI / 2).translate(0, 1.185, 0), BRASS);
+  b.add(new THREE.TorusGeometry(0.81, 0.025, 5, 32).rotateX(Math.PI / 2).translate(0, 1.185, 0), BRASS_DARK);
   // Ear knobs on top.
   for (const sx of [-1, 1]) {
     b.add(new THREE.SphereGeometry(0.15, 10, 8).translate(sx * 0.5, 1.6, -0.12), CREAM);
     b.add(new THREE.CylinderGeometry(0.06, 0.08, 0.1, 8).translate(sx * 0.47, 1.52, -0.11), TEAL_DARK);
   }
-  // A little dial on the left; a big teal drum with a brass coil on the right (like a scroll of laser wire).
+  // A little knob on the left; a big teal drum on the right with a round brass dial on its face.
   b.add(new THREE.CylinderGeometry(0.2, 0.2, 0.14, 14).rotateZ(Math.PI / 2).translate(-0.8, 1.0, 0), TEAL);
   b.add(new THREE.CylinderGeometry(0.11, 0.11, 0.18, 10).rotateZ(Math.PI / 2).translate(-0.84, 1.0, 0), BRASS);
-  b.add(new THREE.CylinderGeometry(0.46, 0.46, 0.32, 20).rotateZ(Math.PI / 2).translate(0.84, 0.98, 0.05), TEAL);
-  b.add(new THREE.CylinderGeometry(0.38, 0.38, 0.04, 20).rotateZ(Math.PI / 2).translate(1.01, 0.98, 0.05), BRASS);
-  for (const r of [0.3, 0.2, 0.1]) b.add(new THREE.TorusGeometry(r, 0.035, 5, 18).rotateY(Math.PI / 2).translate(1.03, 0.98, 0.05), BRASS_DARK);
-  b.add(new THREE.TorusGeometry(0.46, 0.035, 5, 24).rotateY(Math.PI / 2).translate(1.0, 0.98, 0.05), BRASS);
-  // Round cream feet with dark soles peeking out in front, small dark wheels behind.
+  // (Built along +x, then turned a little towards the camera so the dial face shows.)
+  const side = (geo: THREE.BufferGeometry) => geo.rotateY(-0.5).translate(0, 0.98, 0.05);
+  b.add(side(new THREE.CylinderGeometry(0.46, 0.46, 0.32, 20).rotateZ(Math.PI / 2).translate(0.84, 0, 0)), TEAL);
+  // The dial: a brass bezel, a cream face, tick marks, a dark needle and hub.
+  b.add(side(new THREE.CylinderGeometry(0.36, 0.36, 0.06, 20).rotateZ(Math.PI / 2).translate(1.02, 0, 0)), BRASS);
+  b.add(side(new THREE.CylinderGeometry(0.28, 0.28, 0.03, 20).rotateZ(Math.PI / 2).translate(1.055, 0, 0)), CREAM);
+  for (let i = 0; i < 8; i++) {
+    b.add(side(new THREE.BoxGeometry(0.02, 0.06, 0.02).translate(0, 0.21, 0).rotateX((i / 8) * Math.PI * 2).translate(1.075, 0, 0)), BRASS_DARK);
+  }
+  b.add(side(new THREE.BoxGeometry(0.02, 0.2, 0.035).translate(0, 0.09, 0).rotateX(-0.8).translate(1.08, 0, 0)), 0x2a2222);
+  b.add(side(new THREE.CylinderGeometry(0.045, 0.045, 0.04, 8).rotateZ(Math.PI / 2).translate(1.08, 0, 0)), BRASS_DARK);
+  // Four dark round feet.
   for (const sx of [-1, 1]) {
-    b.add(new THREE.SphereGeometry(0.21, 12, 8).scale(1, 0.8, 1.05).translate(sx * 0.42, 0.22, 0.56), CREAM);
-    b.add(new THREE.CylinderGeometry(0.17, 0.17, 0.05, 12).translate(sx * 0.42, 0.04, 0.56), 0x3b3a40);
-    b.add(new THREE.CylinderGeometry(0.2, 0.2, 0.16, 14).rotateZ(Math.PI / 2).translate(sx * 0.5, 0.2, -0.42), 0x3b3a40);
+    for (const sz of [-1, 1]) b.add(new THREE.SphereGeometry(0.2, 12, 8).scale(1, 0.75, 1.1).translate(sx * 0.46, 0.15, sz * 0.46), FEET);
   }
   // Turret base.
   b.add(new THREE.CylinderGeometry(0.28, 0.36, 0.2, 16).translate(0, 1.74, 0), TEAL);
-  b.add(new THREE.TorusGeometry(0.3, 0.035, 5, 18).rotateX(Math.PI / 2).translate(0, 1.82, 0), BRASS);
+  b.add(new THREE.TorusGeometry(0.3, 0.025, 5, 18).rotateX(Math.PI / 2).translate(0, 1.82, 0), BRASS_DARK);
   b.bake(body);
   // Face (towards the camera, +z), high on the front so it reads from above.
-  const FACE_A = 0.55;
+  const FACE_A = 0.8;
   const face = new THREE.Group();
   face.position.set(0, 1.0 + Math.sin(FACE_A) * 0.72, Math.cos(FACE_A) * 0.73);
   face.rotation.x = -FACE_A;
@@ -946,7 +1021,7 @@ export function buildWorld(scene: THREE.Scene): World {
   // Faces -z, towards the creatures: we see his back, like the player standing behind him.
   wizard.root.position.set(WIZARD_AT[0], 0, WIZARD_AT[1]);
   wizard.root.name = 'wizard';
-  wizard.root.scale.setScalar(DEFENDER_SCALE);
+  wizard.root.scale.setScalar(DEFENDER_SCALE * WIZARD_SCALE);
   // Leaning back a touch and turned a little towards the robot, so the camera sees his scarf, beard and candle.
   wizard.root.rotation.set(-0.22, -0.3, 0, 'YXZ');
   scene.add(wizard.root);

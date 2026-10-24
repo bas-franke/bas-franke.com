@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { Engine } from './engine';
 import { Effects } from './effects';
 import { makeBalaurBody, makeBubble, makeModel, tickBubbles, type Bubble, type Kind, type Model } from './enemies';
+import { setShieldFocus } from './shield';
 import { buildWorld, DEFENDER_FRONT, FIELD_HALF, FIELD_LENGTH, fieldZ, IMPACT_Y, LINE_Z, type World } from './world';
 import { sfx } from './audio';
 import { flush as flushProgress, isMastered, record } from './progress';
@@ -153,9 +154,15 @@ interface Slot {
   px?: number;
   py?: number;
   html?: string;
-  /** Measured tag size (CSS px) for tags that dodge each other (balaur heads); cleared when the tag changes. */
+  /** Measured tag size (CSS px), so tags can dodge each other; cleared when the tag changes. */
   w?: number;
   h?: number;
+  /** Extra lift of the tag's bottom edge above its anchor (CSS px; a sentence banner sits 2.6em above). */
+  lift?: number;
+  /** This frame's tag position (bottom-centre, CSS px) while tags are being de-collided. */
+  tx?: number;
+  ty?: number;
+  owner?: Enemy;
 }
 
 interface WordPart {
@@ -230,10 +237,15 @@ const FALL_TIME: Record<EnemyKind, number> = { bat: 15, meteor: 19, ghost: 21, z
 const POOFS = ['POOF!', 'PUFF!', 'WOW!', 'SUPER!', 'YAY!', 'NICE!'];
 
 /** The camera always shows at least this much of the field in front of the defence line (world units). */
-const MIN_FIELD = 21;
+const MIN_FIELD = 20;
+/**
+ * Vertical field of view (degrees). Narrow, like a long lens from far away: the far tiles are drawn only ~1.25x
+ * smaller than the near ones and the shelves' uprights barely converge (a wide lens makes the walls loom).
+ */
+const FOV = 28;
 /** Camera pitch below the horizon: a high view from in front; tall portrait screens look a little steeper. */
-const PITCH_LANDSCAPE = THREE.MathUtils.degToRad(55);
-const PITCH_PORTRAIT = THREE.MathUtils.degToRad(63);
+const PITCH_LANDSCAPE = THREE.MathUtils.degToRad(58);
+const PITCH_PORTRAIT = THREE.MathUtils.degToRad(65);
 /** Creatures are modelled at about 1 m radius and drawn bigger, so faces read on a phone. */
 const CREATURE_SCALE = 1.45;
 /** Extra creature scale on portrait screens. */
@@ -300,7 +312,7 @@ export class Game {
   };
 
   constructor(container: HTMLElement, tags: HTMLElement) {
-    this.engine = new Engine(container, { fov: 40, shadows: false, near: 1, far: 1200 });
+    this.engine = new Engine(container, { fov: FOV, shadows: false, near: 1, far: 1200 });
     this.tags = tags;
     this.world = buildWorld(this.engine.scene);
     this.effects = new Effects(this.engine.scene);
@@ -722,6 +734,8 @@ export class Game {
       for (const s of best.slots) this.renderTag(best, s);
       this.emit();
     }
+    // Only the current target's shield (or boss head) glows at full strength.
+    setShieldFocus(best?.parts[best.partIdx]?.slot.anchor ?? null);
     return best;
   }
 
@@ -973,7 +987,8 @@ export class Game {
     const aspect = W / H;
     const tanF = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const pitch = THREE.MathUtils.lerp(PITCH_PORTRAIT, PITCH_LANDSCAPE, THREE.MathUtils.clamp((aspect - 0.5) / 0.8, 0, 1));
-    const bottomPx = Math.max(H * 0.45, H - this.insets.bottom - 6);
+    // The bottom inset is the whole word panel (the hint strip above the typing box included); keep a little air.
+    const bottomPx = Math.max(H * 0.45, H - this.insets.bottom - Math.min(14, H * 0.015 + 4));
     const topPx = Math.min(H * 0.3, this.insets.top * 0.55 + 4);
     const vb = 1 - (2 * bottomPx) / H;
     const vt = 1 - (2 * topPx) / H;
@@ -1120,33 +1135,61 @@ export class Game {
     this.emit();
   }
 
-  /** Measures the balaur heads' tags that changed (one layout read, only after a spawn, a keystroke or a retarget). */
+  /** Measures the tags that changed (one layout read, only after a spawn, a keystroke or a retarget). */
   private measureTags() {
     for (const e of this.enemies) {
-      if (e.kind !== 'balaur') continue;
       for (const s of e.slots) {
         if (s.done || s.w !== undefined) continue;
         s.w = s.tag.offsetWidth;
         s.h = s.tag.offsetHeight;
+        // A sentence banner's bottom edge sits 2.6em above its anchor (see the transform in positionTags).
+        s.lift = s.model ? 0 : 2.6 * (parseFloat(getComputedStyle(s.tag).fontSize) || 14);
       }
     }
   }
 
+  /** Tags of this frame, in placement order (reused, so no per-frame allocation). */
+  private tagOrder: Slot[] = [];
+  /** The target's tags are placed first (they never move for others), then from the bottom of the screen up. */
+  private byTagPriority = (a: Slot, b: Slot) => {
+    const ta = a.owner?.id === this.targetId ? 1 : 0;
+    const tb = b.owner?.id === this.targetId ? 1 : 0;
+    return tb - ta || b.ty! - a.ty!;
+  };
+
+  /** True when tag `s` with its bottom edge at screen y overlaps the already placed tag `o` (with a few px of air). */
+  private tagsOverlap(s: Slot, y: number, o: Slot) {
+    if (Math.abs(s.tx! - o.tx!) >= ((s.w ?? 0) + (o.w ?? 0)) / 2 + 4) return false;
+    const bottom = y - (s.lift ?? 0);
+    const oBottom = o.ty! - (o.lift ?? 0);
+    return bottom > oBottom - (o.h ?? 0) - 3 && bottom - (s.h ?? 0) < oBottom + 3;
+  }
+
+  /** The first placed tag (of `count`) that tag `s` overlaps with its bottom edge at y, or undefined. */
+  private tagHit(s: Slot, y: number, count: number) {
+    const order = this.tagOrder;
+    for (let j = 0; j < count; j++) {
+      const o = order[j];
+      // A convoy's tags are laid out as a group already.
+      if (o.owner === s.owner && s.owner?.kind === 'convoy') continue;
+      if (this.tagsOverlap(s, y, o)) return o;
+    }
+    return undefined;
+  }
+
   /**
    * Word tags float above their creatures like speech bubbles; a convoy's sentence banner floats above the pebbles'
-   * tags. A balaur's head tags dodge each other: when a tag would overlap its left neighbour's, it moves up above it
-   * (every other one, so a row of heads gets a zigzag of tags on a narrow screen).
+   * tags. Tags never overlap each other (balaur heads, escorts, everything): placed in priority order, a tag that
+   * would overlap one already placed moves up above it, or below it when going up would hide it under the HUD.
    * Only writes a tag's transform when its position (rounded to half pixels) moved, and never reads layout.
    */
   private positionTags() {
     const v = this.tmp;
     const width = this.engine.renderer.getSize(this.view).x;
+    const minY = this.insets.top + 40;
+    const order = this.tagOrder;
+    order.length = 0;
     for (const e of this.enemies) {
-      const dodge = e.kind === 'balaur';
-      let prevX = 0;
-      let prevW = -1;
-      let prevTop = 0;
-      let prevLifted = false;
       for (const s of e.slots) {
         if (s.done) continue;
         s.anchor.updateWorldMatrix(true, false);
@@ -1155,26 +1198,42 @@ export class Game {
         else v.y += s.radius * 1.6;
         const p = this.project(v);
         // Keep the tag on screen and below the HUD (its bottom edge is at p.y).
-        const x = Math.round(Math.min(width - 64, Math.max(64, p.x)) * 2) / 2;
-        let y = Math.round(Math.max(this.insets.top + 40, p.y) * 2) / 2;
-        if (dodge) {
-          // A little air between a head's tag and its horns.
-          y -= 8;
-          const w = s.w ?? 0;
-          const lift: boolean = prevW >= 0 && !prevLifted && Math.abs(x - prevX) < (w + prevW) / 2 + 6;
-          if (lift) y = Math.min(y, prevTop - 6);
-          prevX = x;
-          prevW = w;
-          prevTop = y - (s.h ?? 0);
-          prevLifted = lift;
-        }
-        s.sx = x;
-        s.sy = y - 18;
-        if (x === s.px && y === s.py) continue;
-        s.px = x;
-        s.py = y;
-        s.tag.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${s.model ? '-100%' : 'calc(-100% - 2.6em)'})`;
+        const half = Math.min(width / 2, Math.max(64, (s.w ?? 0) / 2 + 6));
+        s.tx = Math.round(Math.min(width - half, Math.max(half, p.x)) * 2) / 2;
+        // A little air between a balaur head's tag and its horns.
+        s.ty = Math.round(Math.max(minY, p.y) * 2) / 2 - (e.kind === 'balaur' ? 8 : 0);
+        s.owner = e;
+        order.push(s);
       }
+    }
+    order.sort(this.byTagPriority);
+    for (let i = 0; i < order.length; i++) {
+      const s = order[i];
+      // Unmeasured tags (spawned this frame) are measured at the start of the next one.
+      if (s.w !== undefined && i > 0) {
+        const lift = s.lift ?? 0;
+        const h = s.h ?? 0;
+        let up = s.ty!;
+        for (let n = 0, o = this.tagHit(s, up, i); o && n < 12; n++, o = this.tagHit(s, up, i)) {
+          up = o.ty! - (o.lift ?? 0) - (o.h ?? 0) - 4 + lift;
+        }
+        if (up - lift - h >= this.insets.top + 4) s.ty = up;
+        else {
+          let down = s.ty!;
+          for (let n = 0, o = this.tagHit(s, down, i); o && n < 12; n++, o = this.tagHit(s, down, i)) {
+            down = o.ty! - (o.lift ?? 0) + 4 + h + lift;
+          }
+          s.ty = down;
+        }
+      }
+      const x = s.tx!;
+      const y = s.ty!;
+      s.sx = x;
+      s.sy = y - 18;
+      if (x === s.px && y === s.py) continue;
+      s.px = x;
+      s.py = y;
+      s.tag.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${s.model ? '-100%' : 'calc(-100% - 2.6em)'})`;
     }
   }
 }
