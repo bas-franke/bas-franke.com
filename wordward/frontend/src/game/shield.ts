@@ -1,15 +1,17 @@
 // The rune shield every creature wears first (the word you read is written on it; typing it pops the shield).
 //
-// No dome: a thin golden rune circle glows on the floor around the creature, like the carved circles in the library
-// floor, with a band of slowly turning glyphs between two fine rules, and a few glyph sparks that orbit the creature
-// while drifting upwards. A letter hitting the shield sends a quick ripple out from the circle and makes the sparks
-// flare. Both parts are additive but dim, so the creature stays the thing you look at.
+// No dome: a thin golden rune circle glows on the floor just outside the creature's body, like the carved circles in
+// the library floor, with a narrow band of slowly turning glyphs between two hairline rules, and a few glyph sparks
+// that orbit the creature while drifting upwards. A letter hitting the shield sends a quick ripple out from the circle
+// and makes the sparks flare. Both parts are additive and dim: only the current target (`setShieldFocus`) shows its
+// circle at full strength, every other shield is a faint circle plus its sparks, so the creatures stay what you look
+// at. A sentence convoy's wide stadium is rules only (no glyphs) at about a quarter strength. A shield whose creature
+// stands high above the floor (a balaur head on its neck) faces the camera as a halo around the head instead.
 //
 // Two draw calls for all shields together: one InstancedMesh draws every floor circle, another every shield's sparks.
 // Each instance carries its shield root's world matrix and per-shield attributes (size, hit flash, phase, glyph
 // tiles); `tickBubbles` packs the live shields into them once per frame, and the vertex shaders place everything from
-// those, so nothing is allocated per frame. A wide sentence shield (`w` > `r`)
-// becomes a stadium: two half circles joined by straight runs, with the glyphs following the outline.
+// those, so nothing is allocated per frame. A wide sentence shield (`w` > `r`) becomes a stadium: two half circles joined by straight runs, with the glyphs following the outline.
 
 import * as THREE from 'three';
 
@@ -108,6 +110,15 @@ function runeTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+/**
+ * Ring strength (1 = the old full-bright circle) for shields that are not the current target and for the target; a
+ * sentence stadium's (calm, target); the sparks' (calm, target). GLSL float literals.
+ */
+const CALM = '0.2';
+const FOCUS = '0.55';
+const WIDE = ['0.2', '0.28'];
+const SPARK = ['0.45', '0.65'];
+
 /** How far the floor quad reaches beyond the circle, in shield radii (room for the hit ripple). */
 const EXT = 1.5;
 
@@ -117,21 +128,30 @@ function materials() {
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      // Per shield (instance): iSize = (half length of the straight run, radius, floor height in the shield's frame);
-      // iLook = (flash, phase, glyph tiles around the outline). The instance matrix is the shield root's world matrix.
+      // Per shield (instance): iSize = (half length of the straight run, radius, floor height in the shield's frame or
+      // the halo centre's height when upright, upright 0/1); iLook = (flash, phase, glyph tiles around the outline,
+      // focus 0..1). The instance matrix is the shield root's world matrix.
       uniforms: { time, runes: { value: runeTexture() } },
       vertexShader: /* glsl */ `
-        attribute vec3 iSize; attribute vec3 iLook;
-        varying vec2 vP; varying vec2 size; varying vec3 look;
+        attribute vec4 iSize; attribute vec4 iLook;
+        varying vec2 vP; varying vec2 size; varying vec4 look;
         void main() {
           size = iSize.xy;
           look = iLook;
           vP = position.xz * vec2(size.x + size.y * ${EXT.toFixed(2)}, size.y * ${EXT.toFixed(2)});
-          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(vP.x, position.y + iSize.z, vP.y, 1.0);
+          if (iSize.w > 0.5) {
+            // Upright: a camera-facing halo around the head centre (the head itself hides the part in front of it).
+            vec4 mv = modelViewMatrix * instanceMatrix * vec4(0.0, iSize.z, 0.0, 1.0);
+            float sc = length((modelMatrix * instanceMatrix)[0].xyz);
+            mv.xy += vec2(vP.x, -vP.y) * sc;
+            gl_Position = projectionMatrix * mv;
+          } else {
+            gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(vP.x, position.y + iSize.z, vP.y, 1.0);
+          }
         }`,
       fragmentShader: /* glsl */ `
         uniform float time; uniform sampler2D runes;
-        varying vec2 vP; varying vec2 size; varying vec3 look;
+        varying vec2 vP; varying vec2 size; varying vec4 look;
         const float PI = 3.14159265;
         // An antialiased line of half width w (in radii) at distance c, never thinner than about a pixel.
         float rule(float d, float c, float w, float aa) {
@@ -147,13 +167,18 @@ function materials() {
           // the quad's pixels end here, before any atan or texture fetch. (After fwidth, which needs every pixel.)
           if (d > (flash > 0.01 ? max(1.2, 1.5 - flash * 0.4) : 1.2)) discard;
           float breathe = 0.85 + 0.15 * sin(time * 1.7 + look.y);
-          float lit = breathe * (1.0 + flash * 1.1);
-          // Two fine rules with the glyphs between them, a soft glow hugging the outer rule, a whisper of fill.
-          float a = rule(d, 1.0, 0.014, aa) * 0.3 + rule(d, 0.785, 0.007, aa) * 0.17;
+          // Strength: the current target in full, every other shield faint, a sentence stadium about a quarter; a hit
+          // flares any of them back to full.
+          bool wide = L > 0.0;
+          float strength = wide ? mix(${WIDE[0]}, ${WIDE[1]}, look.w) : mix(${CALM}, ${FOCUS}, look.w);
+          // A sentence stadium covers a lot of floor: its flare stays modest.
+          float lit = breathe * (wide ? strength * (1.0 + flash * 0.7) : mix(strength, 1.0, flash) * (1.0 + flash * 0.8));
+          // Two hairline rules with the glyphs between them, a soft glow hugging the outer rule, a whisper of fill.
+          float a = rule(d, 1.0, 0.007, aa) * 0.34 + rule(d, 0.88, 0.0035, aa) * 0.2;
           // A small circle on screen (a phone) cannot show the glyphs: dim them so they do not smear into a bright band.
           float detail = smoothstep(0.05, 0.016, aa);
-          float band = (d - 0.815) / 0.16;
-          if (band > 0.0 && band < 1.0) {
+          float band = (d - 0.9) / 0.08;
+          if (!wide && band > 0.0 && band < 1.0) {
             // Arc length along the stadium outline, clockwise from the front-left corner, for the glyph band.
             float s;
             if (abs(vP.x) <= L) s = vP.y > 0.0 ? vP.x + L : 3.0 * L + PI * R - vP.x;
@@ -166,11 +191,11 @@ function materials() {
             float u = s / (4.0 * L + 2.0 * PI * R) * look.z + time * 0.012;
             a += texture2D(runes, vec2(u, band)).r * mix(0.13, 0.26, detail);
           }
-          a += exp(-pow((d - 1.0) / 0.08, 2.0)) * 0.05 + smoothstep(1.0, 0.2, d) * 0.018;
+          a += exp(-pow((d - 1.0) / 0.06, 2.0)) * 0.04 + smoothstep(1.0, 0.2, d) * 0.012;
           a *= lit;
           // Hit: a ripple racing outwards from the circle.
           float rip = 1.0 + (1.0 - flash) * 0.42;
-          a += rule(d, rip, 0.02 + (1.0 - flash) * 0.03, aa) * flash * 0.6;
+          a += rule(d, rip, 0.012 + (1.0 - flash) * 0.02, aa) * flash * (wide ? 0.14 : 0.55);
           vec3 col = mix(vec3(1.0, 0.52, 0.16), vec3(1.0, 0.78, 0.42), clamp(flash, 0.0, 1.0));
           gl_FragColor = vec4(col * a, 1.0);
           #include <colorspace_fragment>
@@ -183,22 +208,23 @@ function materials() {
       uniforms: { time },
       vertexShader: /* glsl */ `
         uniform float time;
-        attribute vec2 corner; attribute vec3 seed; attribute vec3 iSize; attribute vec3 iLook;
+        attribute vec2 corner; attribute vec3 seed; attribute vec4 iSize; attribute vec4 iLook;
         varying vec2 vC; varying float vA;
         void main() {
-          vec3 look = iLook;
+          vec4 look = iLook;
           float L = iSize.x, R = iSize.y, flash = look.x;
           float a = seed.x + time * seed.z + look.y;
           // Each spark circles the creature just inside the rune circle while rising, then fades and starts again low.
           float rise = fract(time * 0.16 + seed.y + look.y * 0.13);
-          float k = 0.9 + flash * 0.3;
-          vec3 c = vec3(cos(a) * (L + R * k), R * (0.08 + rise * 1.25), sin(a) * R * k);
+          // Just outside the rune circle (a halo's sparks circle the head at its own radius).
+          float k = (iSize.w > 0.5 ? 1.0 : 1.12) + flash * 0.3;
+          vec3 c = vec3(cos(a) * (L + R * k), R * (0.1 + rise * 1.55), sin(a) * R * k);
           vec4 mv = modelViewMatrix * instanceMatrix * vec4(c, 1.0);
           float sc = length((modelMatrix * instanceMatrix)[0].xyz);
           float tw = 0.75 + 0.25 * sin(time * 4.0 + seed.x * 7.0);
           mv.xy += corner * R * sc * 0.085 * tw * (1.0 + flash * 0.8);
           vC = corner;
-          vA = sin(rise * 3.14159) * (0.6 + flash * 0.8);
+          vA = sin(rise * 3.14159) * (mix(${SPARK[0]}, ${SPARK[1]}, look.w) + flash * 0.8);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
@@ -221,12 +247,25 @@ const START_CAPACITY = 16;
 
 interface Live {
   root: THREE.Group;
-  /** Half length of the straight run and radius, in the shield root's frame. */
+  /** Size asked for: half length of the straight run and radius, in the shield root's frame. */
   L: number;
-  R: number;
-  tiles: number;
+  r: number;
   phase: number;
   flash: number;
+  /** Eased towards 1 while this is the current target's shield. */
+  focus: number;
+}
+
+/** The current target's object (see `setShieldFocus`). */
+let focusRoot: THREE.Object3D | null = null;
+let lastT = -1;
+
+/**
+ * Marks the shield inside `root` (the target creature's model root, a balaur head, or a convoy's root) as the current
+ * target: its rune circle shows at full strength, every other shield stays calm. `null` calms them all.
+ */
+export function setShieldFocus(root: THREE.Object3D | null) {
+  focusRoot = root;
 }
 
 /** Every live shield, drawn by one instanced mesh for the circles and one for the sparks. */
@@ -247,8 +286,8 @@ function grow(n: number) {
   sparks?.geometry.dispose();
   rings?.dispose();
   capacity = n;
-  sizeAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
-  lookAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+  sizeAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4).setUsage(THREE.DynamicDrawUsage);
+  lookAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4).setUsage(THREE.DynamicDrawUsage);
   const rg = new THREE.BufferGeometry();
   rg.index = floorGeo.index;
   for (const k in floorGeo.attributes) rg.setAttribute(k, floorGeo.attributes[k]);
@@ -281,6 +320,8 @@ function grow(n: number) {
  */
 export function tickBubbles(t: number) {
   time.value = t;
+  const dt = lastT < 0 ? 0 : Math.min(0.1, Math.max(0, t - lastT));
+  lastT = t;
   if (live.length > capacity) grow(Math.max(START_CAPACITY, capacity * 2, live.length));
   let n = 0;
   let scene: THREE.Object3D | null = null;
@@ -289,9 +330,11 @@ export function tickBubbles(t: number) {
     // Walk up to the scene: a shield is drawn while every ancestor is visible, and dropped once it is detached.
     let o: THREE.Object3D = b.root;
     let shown = o.visible;
+    let focused = o === focusRoot;
     while (o.parent) {
       o = o.parent;
       if (!o.visible) shown = false;
+      if (o === focusRoot) focused = true;
     }
     if (!(o as THREE.Scene).isScene) {
       live[i] = live[live.length - 1];
@@ -301,11 +344,18 @@ export function tickBubbles(t: number) {
     }
     scene = o;
     if (!shown) continue;
+    b.focus += ((focused ? 1 : 0) - b.focus) * Math.min(1, dt * 8);
     b.root.updateWorldMatrix(true, false);
     rings!.setMatrixAt(n, b.root.matrixWorld);
-    // Keep the circle on the creature's floor even when the shield is lifted around a hovering body.
-    sizeAttr.setXYZ(n, b.L, b.R, 0.03 - b.root.position.y);
-    lookAttr.setXYZ(n, b.flash, b.phase, b.tiles);
+    // A creature standing high above the floor (a balaur head on its neck: its parent sits well above y = 0) gets an
+    // upright halo around the head; everything else a circle on its floor, kept there even when the shield is lifted
+    // around a hovering body. The circle sits just outside the body (0.76 r; the halo clears the head at 1.05 r).
+    const upright = !b.L && (b.root.parent?.matrixWorld.elements[13] ?? 0) > 0.5;
+    const R = b.r * (upright ? 1.05 : 0.76);
+    if (upright) sizeAttr.setXYZW(n, 0, R, b.r * 0.8, 1);
+    else sizeAttr.setXYZW(n, b.L, R, 0.03 - b.root.position.y, 0);
+    // Glyph tiles (12 runes each) around the outline: about 26 on a single creature's circle.
+    lookAttr.setXYZW(n, b.flash, b.phase, Math.max(1, Math.round((4 * b.L + 2 * Math.PI * R) / (R * 2.9))), b.focus);
     n++;
   }
   if (!rings || !sparks) return;
@@ -320,10 +370,10 @@ export function tickBubbles(t: number) {
     rings.instanceMatrix.addUpdateRange(0, n * 16);
     rings.instanceMatrix.needsUpdate = true;
     sizeAttr.clearUpdateRanges();
-    sizeAttr.addUpdateRange(0, n * 3);
+    sizeAttr.addUpdateRange(0, n * 4);
     sizeAttr.needsUpdate = true;
     lookAttr.clearUpdateRanges();
-    lookAttr.addUpdateRange(0, n * 3);
+    lookAttr.addUpdateRange(0, n * 4);
     lookAttr.needsUpdate = true;
   }
 }
@@ -344,16 +394,13 @@ export interface Bubble {
 export function makeBubble(r: number, w = r): Bubble {
   if (!rings) grow(START_CAPACITY);
   const root = new THREE.Group();
-  const R = r * 0.95;
-  const L = Math.max(0, w - r);
   const b: Live = {
     root,
-    L,
-    R,
-    // Glyph tiles (12 runes each) around the outline: about 24 on a single creature's circle.
-    tiles: Math.max(1, Math.round((4 * L + 2 * Math.PI * R) / (R * 3.6))),
+    L: Math.max(0, w - r),
+    r,
     phase: Math.random() * 10,
     flash: 0,
+    focus: 0,
   };
   live.push(b);
   return {
