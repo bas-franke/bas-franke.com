@@ -41,6 +41,8 @@ export interface MapData {
   fogColor: number;
   /** Per-kind colour overrides for this map's look. */
   tint?: Partial<Record<BoxKind, number>>;
+  /** Neon trim, floor grid and jump pad colour. */
+  accent?: number;
 }
 
 /** Launch velocity that carries a player from `from` to `to` with the apex `apexExtra` metres above the landing. */
@@ -184,7 +186,7 @@ export class MapBuilder {
     return this;
   }
 
-  build(meta: Pick<MapData, 'id' | 'name' | 'half' | 'skyColor' | 'fogColor' | 'tint'>): MapData {
+  build(meta: Pick<MapData, 'id' | 'name' | 'half' | 'skyColor' | 'fogColor' | 'tint' | 'accent'>): MapData {
     return { ...meta, boxes: this.boxes, pads: this.pads, spawns: this.spawns, packs: this.packs, killY: RK.killY };
   }
 }

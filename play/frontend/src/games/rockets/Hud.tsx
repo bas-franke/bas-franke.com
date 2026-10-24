@@ -96,7 +96,10 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
           </span>
         )}
       </div>
-      <div className="menu-hint">Esc: menu · Tab: scores</div>
+      <div className="menu-hint">
+        {s.fps > 0 && <span className="fps">{s.fps} fps · </span>}
+        Esc: menu · Tab: scores
+      </div>
 
       {(board || s.ended) && (
         <div className="overlay-center" style={{ pointerEvents: s.ended ? 'auto' : 'none' }}>

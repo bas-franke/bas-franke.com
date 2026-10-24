@@ -22,7 +22,7 @@ function foundry(): MapData {
     p.box('ledge', half - 3.5, 0, -12, half, 4, 12).stairs('z', -1, half - 1.75, 12 + B.run(0, 4), 3.5, 0, 4);
     p.pack(half - 1.7, 4, 0);
   });
-  return b.build({ id: 'foundry', name: 'Foundry', half, skyColor: 0x0b0f1a, fogColor: 0x121a2b });
+  return b.build({ id: 'foundry', accent: 0x2ed8a0, name: 'Foundry', half, skyColor: 0x3f9be8, fogColor: 0xbfe4ff });
 }
 
 /** Floating islands over the void, joined by narrow bridges; fall off and you are gone. */
@@ -41,7 +41,7 @@ function skyway(): MapData {
     p.stairs('x', 1, 7, 25, 4, 0, 5).box('platform', 7 + B.run(0, 5), 4, 23, 21, 5, 27);
     p.padTo(v3(23.5, 5, 23.5), v3(5, 0, 5), 2);
   });
-  return b.build({ id: 'skyway', name: 'Skyway', half, skyColor: 0x1b2a4a, fogColor: 0x2a3b5e, tint: { floor: 0x2a3550, platform: 0x34405e } });
+  return b.build({ id: 'skyway', accent: 0xff5ea8, name: 'Skyway', half, skyColor: 0x2f8cf0, fogColor: 0xd8f0ff, tint: { floor: 0x9ad06a, platform: 0xf2c14e, stair: 0xe8a840 } });
 }
 
 /** Two sandstone plateaus either side of a canyon, linked by high bridges. */
@@ -63,11 +63,12 @@ function canyon(): MapData {
   });
   return b.build({
     id: 'canyon',
+    accent: 0x3ec8ff,
     name: 'Canyon',
     half,
-    skyColor: 0x2a1810,
-    fogColor: 0x3a2416,
-    tint: { floor: 0x3a2a1e, ledge: 0x5a3f2a, wall: 0x2e2016, platform: 0x4a3524 },
+    skyColor: 0xff8a4a,
+    fogColor: 0xffd8a0,
+    tint: { floor: 0xe8b27a, ledge: 0xd0703e, wall: 0xb8603a, platform: 0x8a5a3a, stair: 0xd88a52, tower: 0xc8643c, crate: 0x6a9a4a },
   });
 }
 
@@ -87,7 +88,7 @@ function ziggurat(): MapData {
     p.padTo(v3(19, 0, 19), v3(3, 6, 3), 1.8);
     p.spawn(29, 3.5, 29).spawn(0, 0, 26).spawn(28, 0, 10);
   });
-  return b.build({ id: 'ziggurat', name: 'Ziggurat', half, skyColor: 0x14100a, fogColor: 0x221a10, tint: { platform: 0x4a4030, stair: 0x55493a, floor: 0x2a241a } });
+  return b.build({ id: 'ziggurat', accent: 0x3ec8ff, name: 'Ziggurat', half, skyColor: 0x4ab8e8, fogColor: 0xf6e8c0, tint: { platform: 0xf0c060, stair: 0xe0aa50, floor: 0xd8c08a, ledge: 0x5ab070, pillar: 0xe85d5d } });
 }
 
 /** A forest of spires of different heights, chained together by jump pads. */
@@ -104,7 +105,7 @@ function spires(): MapData {
     p.spawn(16, 0, 16).spawn(30, 0, 0).spawn(24, 10, 24);
     p.pack(24, 10, 24).pack(0, 0, 22);
   });
-  return b.build({ id: 'spires', name: 'Spires', half, skyColor: 0x0a1424, fogColor: 0x10223a, tint: { tower: 0x2a4060, floor: 0x16233a } });
+  return b.build({ id: 'spires', accent: 0xffb020, name: 'Spires', half, skyColor: 0x7ac8ff, fogColor: 0xeef8ff, tint: { tower: 0x6a9ae8, floor: 0xdde6f2, stair: 0x9ab8f0 } });
 }
 
 /** A walled keep with battlements, corner turrets and bunkers in the yard. */
@@ -124,7 +125,7 @@ function fortress(): MapData {
     p.spawn(28, 3, 28).spawn(27, 0, -2).spawn(4, 0, -8);
     p.pack(30, 0, 10);
   });
-  return b.build({ id: 'fortress', name: 'Fortress', half, skyColor: 0x101418, fogColor: 0x1a2028, tint: { ledge: 0x3a3f48, tower: 0x444a55, floor: 0x22262c } });
+  return b.build({ id: 'fortress', accent: 0xffd23a, name: 'Fortress', half, skyColor: 0x5aa8e0, fogColor: 0xdcecf4, tint: { ledge: 0xb8b0a0, tower: 0xa09888, floor: 0x86c060, wall: 0x9a9284, stair: 0xc8bfae, platform: 0xc84a3a } });
 }
 
 /** A ring of floor around a bottomless pit, an island in the middle and a raised walkway all the way round. */
@@ -142,7 +143,7 @@ function pit(): MapData {
     p.spawn(22, 0, -10).spawn(24, 5, 24).spawn(20, 0, 0);
     p.pack(0, 5, 29.5);
   });
-  return b.build({ id: 'pit', name: 'The Pit', half, skyColor: 0x1a0808, fogColor: 0x2a0c0c, tint: { floor: 0x2a1616, platform: 0x45222a } });
+  return b.build({ id: 'pit', accent: 0xffe03a, name: 'The Pit', half, skyColor: 0xe8483a, fogColor: 0xffb88a, tint: { floor: 0x8a5a4a, platform: 0x6a3a5a, wall: 0x5a3442, stair: 0x9a6a5a, crate: 0xffa020 } });
 }
 
 /** Two raised bases facing each other, a long bridge between them and towers either side. */
@@ -162,7 +163,7 @@ function twinBases(): MapData {
     p.spawn(6, baseH, 30).spawn(-6, baseH, 30).spawn(14, 0, 20).spawn(-24, 0, 24).spawn(20, 6, 10);
     p.pack(-20, 6, 10).pack(28, 0, 28);
   });
-  return b.build({ id: 'twin', name: 'Twin Bases', half, skyColor: 0x081418, fogColor: 0x0e2026, tint: { ledge: 0x1f3a40, tower: 0x2a4650 } });
+  return b.build({ id: 'twin', accent: 0xff5ea8, name: 'Twin Bases', half, skyColor: 0x38c0d0, fogColor: 0xdaf6f0, tint: { ledge: 0xe86a4a, tower: 0x4a8ad8, floor: 0xd8e0c8, platform: 0xf2c14e } });
 }
 
 /** City blocks: streets at ground level, rooftops of every height, pads up to the tallest. */
@@ -178,7 +179,7 @@ function downtown(): MapData {
     p.block('crate', 16.5, 30, 1, 1, 2);
     p.spawn(16.5, 0, 16.5).spawn(33, 0, 17).spawn(17, 0, 34);
   });
-  return b.build({ id: 'downtown', name: 'Downtown', half, skyColor: 0x070a14, fogColor: 0x0c1220, tint: { tower: 0x252c3e, floor: 0x14182a } });
+  return b.build({ id: 'downtown', accent: 0x3ee0b0, name: 'Downtown', half, skyColor: 0x3a4ea8, fogColor: 0xf0a0b8, tint: { tower: 0xd06ab8, floor: 0x7a7e92, stair: 0xf2c14e, crate: 0x5ec2e6, wall: 0x5a5e88 } });
 }
 
 /** Rings of floating platforms over the void, linked only by jump pads. Rocket jumps welcome. */
@@ -195,7 +196,7 @@ function orbit(): MapData {
     p.spawn(14.5, 3, 0).spawn(18.5, 6, 18.5);
     p.pack(27, 6, 2.5);
   });
-  return b.build({ id: 'orbit', name: 'Orbit', half, skyColor: 0x05030f, fogColor: 0x0c0820, tint: { platform: 0x2c2448, pillar: 0x3a3060 } });
+  return b.build({ id: 'orbit', accent: 0x3ee0b0, name: 'Orbit', half, skyColor: 0x4a2ab0, fogColor: 0xd0b8ff, tint: { platform: 0xf2c14e, pillar: 0xff6ab0 } });
 }
 
 export const MAPS: MapData[] = [foundry(), skyway(), canyon(), ziggurat(), spires(), fortress(), pit(), twinBases(), downtown(), orbit()];
