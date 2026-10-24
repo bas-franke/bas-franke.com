@@ -382,4 +382,12 @@ export const migrations: { name: string; sql?: string; run?: (client: pg.PoolCli
       }
     },
   },
+  {
+    // The writing rules were tuned on gpt-6-luna; planning, the radar and the scout use the same model.
+    name: '012_gpt6_luna',
+    sql: `
+      ALTER TABLE settings ALTER COLUMN text_model SET DEFAULT 'gpt-6-luna';
+      UPDATE settings SET text_model = 'gpt-6-luna', updated_at = now();
+    `,
+  },
 ];

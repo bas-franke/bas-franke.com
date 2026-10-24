@@ -43,7 +43,7 @@ instance. Vite + React frontend, Node.js + Express backend on port **3003**.
    with few stories first gets its curriculum basics, then the scout picks the one thing to explain about it today.
    Curriculum: a random enabled topic, weighted by weight and heat, favouring topics with few stories, and its next
    unwritten item. Both skip gossip, individual crime cases, sports results and unverified rumours.
-4. **The writer** (default `gpt-5.4-mini`) returns strict JSON: title, one-line hook, the story in Markdown, a one-sentence
+4. **The writer** (default `gpt-6-luna`) returns strict JSON: title, one-line hook, the story in Markdown, a one-sentence
    takeaway, the section it belongs to, difficulty, tags, 0–2 picture ideas with a relevance rating, and sources. Rules:
    about `target_words` words, told as a story (a scene, an analogy, why it matters), fully standalone, neutral on
    contested matters, no links in the body. Web search is used for "right now" stories and event topics.
@@ -70,7 +70,8 @@ stored in the database. After editing `.env`: `pm2 restart inck --update-env`.
 
 **Costs:** a story is one text request of a few thousand tokens (plus about $0.01 per web search for "right now" stories
 and events) and, now and then, one low-quality picture (about half a cent). Planning a curriculum is one extra request per
-topic. At a story an hour with `gpt-5.4-mini`, expect roughly $0.50–1 per day; the dashboard shows the estimate.
+topic. At a story an hour, expect roughly $0.50–1 per day; the dashboard estimate uses gpt-5.4-mini list prices
+(override with `PRICE_TEXT_INPUT`/`PRICE_TEXT_OUTPUT`).
 Set a usage limit in your OpenAI account to be safe.
 
 ---

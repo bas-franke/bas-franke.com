@@ -204,8 +204,8 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
             </label>
           </div>
           <p className="muted small">
-            Used for planning curricula, scouting and writing. Any model name from your OpenAI account works; gpt-5.4-mini is a good balance
-            of quality and price for 200-word stories, gpt-5.4-nano is cheaper.
+            Used for planning curricula, scouting and writing. Any model name from your OpenAI account works; gpt-6-luna is the default the writing rules were tuned on,
+            gpt-5.4-mini and gpt-5.4-nano also work.
           </p>
         </fieldset>
 
