@@ -9,6 +9,8 @@
 
 .rk-preview {
   display: block;
+  position: sticky;
+  top: 0;
   width: 100%;
   aspect-ratio: 4 / 5;
   border: 1px solid var(--line);
@@ -35,6 +37,16 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ink-dim);
+}
+/* Part pickers two to a row, so every option fits next to the preview. */
+.rk-custom-parts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+.rk-custom-parts .rk-variant {
+  padding: 5px 10px;
+  font-size: 13px;
 }
 .rk-custom-note {
   margin: 6px 0 0;
@@ -114,6 +126,7 @@
     grid-template-columns: 1fr;
   }
   .rk-preview {
+    position: static;
     max-width: 260px;
     margin: 0 auto;
   }
