@@ -338,7 +338,8 @@ class Batch {
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = additive ? 20 : 5;
-    this.mesh.visible = false;
+    // Stays visible even when empty: three still binds the program (so it compiles with the first frame, not with
+    // the first hit) but skips the zero-instance draw.
   }
 
   push(p: Particle, size: number, rot: number, alpha: number) {
@@ -363,7 +364,6 @@ class Batch {
   flush() {
     const geo = this.mesh.geometry as THREE.InstancedBufferGeometry;
     geo.instanceCount = this.count;
-    this.mesh.visible = this.count > 0;
     if (!this.count) return;
     for (const a of this.attrs) {
       a.clearUpdateRanges();
@@ -645,13 +645,15 @@ export class Effects {
     for (let i = 0; i < 6; i++) this.spark(at, 0xff9a4a, 5, 0.26);
   }
 
-  /** Compiles every effect material up front so the first hit does not stutter. */
+  /**
+   * Compiles the laser and ink-splat materials up front (the particle batches compile with the first frame anyway),
+   * so the first hit does not stutter. Uses parallel compile where the browser supports it. Call once after setup.
+   */
   prewarm(renderer: THREE.WebGLRenderer, camera: THREE.Camera) {
-    const o = new THREE.Vector3(0, -100, 0);
-    this.beam(o, new THREE.Vector3(0, -99, 0));
-    this.poof(o);
-    this.update(0);
-    renderer.compile(this.scene, camera);
+    const o = new THREE.Vector3(0, -1000, 0);
+    this.beam(o, new THREE.Vector3(0, -999, 0));
+    this.splat(0, 0, 1);
+    void renderer.compileAsync(this.root, camera, this.scene).catch(() => {});
     this.clear();
   }
 

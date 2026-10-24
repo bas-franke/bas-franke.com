@@ -551,7 +551,7 @@ function sootGeo(r: number, load: 'stack2' | 'stack3' | 'tome') {
     for (let i = 0; i < n; i++) {
       const h = 0.15 + rand() * 0.06;
       const w = r * (1.05 - i * 0.08) + rand() * 0.08;
-      book(books, w, h, w * 0.72, BOOK_COLOURS[Math.floor(rand() * BOOK_COLOURS.length)], [(rand() - 0.5) * 0.08, y + h / 2, (rand() - 0.5) * 0.06], [0, (rand() - 0.5) * 0.6, 0], i === n - 1);
+      book(books, w, h, w * 0.72, i === n - 1 ? 0x8f2a22 : BOOK_COLOURS[1 + Math.floor(rand() * (BOOK_COLOURS.length - 1))], [(rand() - 0.5) * 0.08, y + h / 2, (rand() - 0.5) * 0.06], [0, (rand() - 0.5) * 0.6, 0], i === n - 1);
       y += h;
     }
   }

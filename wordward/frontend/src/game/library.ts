@@ -38,18 +38,18 @@ const ROWS = [0.5, 1.64, 2.78, 3.92, 5.06, 6.2];
 /** Target bay width between two posts. */
 const BAY = 2.3;
 /** How far the side walls continue behind the defence line. */
-const NEAR_EXTRA = 9;
+const NEAR_EXTRA = 6;
 
 const BOOK_COLORS = [
-  0x8e3a2c, 0x74303a, 0x3d6648, 0x2f5e5a, 0x34477a, 0xa87c3c, 0x6a4a30, 0x5c3d5e, 0xc8aa78, 0x8a5a34, 0x4a7a66,
-  0x9c4c34, 0x2e5444, 0x6e3644, 0x3d5a86,
+  0x6a2e26, 0x58262e, 0x2f4a38, 0x2a4646, 0x2c3a58, 0x7e6238, 0x4a3424, 0x463246, 0xa8916c, 0x664630, 0x38584a,
+  0x723c2c, 0x26403a, 0x54303c, 0x334664,
 ];
-const CUSHION_COLORS = [0xb0403a, 0x9c3434, 0x58884e, 0x4a7a4a, 0x3d5f96, 0x3a7a78];
-const LEAF_COLORS = [0x3d6a2a, 0x4c7d31, 0x5b8f3a, 0x34602a, 0x6b9c44, 0x2f5526];
-const WOOD = 0x5e3d27;
-const WOOD_DARK = 0x3b2415;
-const BRASS = 0xc8913a;
-const BRASS_DARK = 0x7d5524;
+const CUSHION_COLORS = [0x84332e, 0x72302c, 0x4a6840, 0x3c5a3a, 0x34507a, 0x33605c];
+const LEAF_COLORS = [0x2a4a20, 0x325626, 0x3a622a, 0x24421c, 0x426c30, 0x2c5024];
+const WOOD = 0x452b1a;
+const WOOD_DARK = 0x24160d;
+const BRASS = 0x9a6c34;
+const BRASS_DARK = 0x4e3418;
 
 /** Colour of the faked lantern light (linear, multiplied by albedo and the baked amount). */
 const WARM = new THREE.Vector3(1.0, 0.62, 0.3);
@@ -176,8 +176,8 @@ function libMaterial(key: string, o: MatOpts = {}) {
         `#include <color_fragment>
 #ifdef USE_MAP
 	vec4 tx = texture2D( map, vMapUv );
-	diffuseColor.rgb = mix( diffuseColor.rgb * tx.r, vec3( 0.86, 0.52, 0.16 ) * ( 0.75 + 0.35 * tx.r ), tx.g );
-	diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.80, 0.68, 0.46 ) * tx.r, tx.b );
+	diffuseColor.rgb = mix( diffuseColor.rgb * tx.r, vec3( 0.58, 0.38, 0.13 ) * ( 0.75 + 0.35 * tx.r ), tx.g );
+	diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.66, 0.56, 0.40 ) * tx.r, tx.b );
 #endif`,
       );
     fs = fs.replace(
@@ -401,6 +401,10 @@ function bookGeometry() {
   boxUv(g, 5, 0.8, 0.5, 1.0, 1.0); // fore edge
   uv.needsUpdate = true;
   g.translate(0, 0.5, 0);
+  // Drop the bottom face (always on a shelf or a book): 10 triangles a book.
+  const idx = Array.from(g.index!.array);
+  g.setIndex(idx.slice(0, 18).concat(idx.slice(24)));
+  g.clearGroups();
   return g;
 }
 
@@ -497,16 +501,16 @@ function flowerGeometry() {
     const l = pt(0.55, 0.32);
     const tip = pt(1, 0);
     const r = pt(0.55, -0.32);
+    void tip;
     push(c0[0], 0.02, c0[1], white);
-    push(r[0], 0.05, r[1], white);
-    push(l[0], 0.05, l[1], white);
-    push(l[0], 0.05, l[1], white);
-    push(r[0], 0.05, r[1], white);
-    push(tip[0], 0.1, tip[1], white);
+    push(pt(1.05, -0.38)[0], 0.08, pt(1.05, -0.38)[1], white);
+    push(pt(1.05, 0.38)[0], 0.08, pt(1.05, 0.38)[1], white);
+    void l;
+    void r;
   }
-  for (let k = 0; k < 6; k++) {
-    const a0 = (k / 6) * Math.PI * 2;
-    const a1 = ((k + 1) / 6) * Math.PI * 2;
+  for (let k = 0; k < 3; k++) {
+    const a0 = (k / 3) * Math.PI * 2;
+    const a1 = ((k + 1) / 3) * Math.PI * 2;
     push(0, 0.12, 0, yellow);
     push(Math.cos(a1) * 0.22, 0.07, Math.sin(a1) * 0.22, yellow);
     push(Math.cos(a0) * 0.22, 0.07, Math.sin(a0) * 0.22, yellow);
@@ -599,7 +603,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
 
   // Primitives (unit sized).
   const box = new THREE.BoxGeometry(1, 1, 1);
-  const cyl = new THREE.CylinderGeometry(1, 1, 1, 8);
+  const cyl = new THREE.CylinderGeometry(1, 1, 1, 7);
   const cyl12 = new THREE.CylinderGeometry(1, 1, 1, 12);
   const cone = new THREE.ConeGeometry(1, 1, 8);
   const hemi = new THREE.SphereGeometry(1, 10, 4, 0, Math.PI * 2, 0, Math.PI / 2);
@@ -756,8 +760,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
 
   const crate = (x: number, z: number, s = R(0.55, 0.75)) => {
     const yaw = R(-0.3, 0.3);
-    piece(props, box, local(x, s / 2, z, 0, yaw, 0, s * 1.1, s, s), jitter(0x7a4c2a, 0.06));
-    piece(props, box, local(x, s - 0.02, z, 0, yaw, 0, s * 1.14, 0.06, s * 1.04), jitter(0x5a3820, 0.05));
+    piece(props, box, local(x, s / 2, z, 0, yaw, 0, s * 1.1, s, s), jitter(0x5a3a22, 0.05));
+    piece(props, box, local(x, s - 0.02, z, 0, yaw, 0, s * 1.14, 0.06, s * 1.04), jitter(0x42291a, 0.04));
     return s;
   };
 
@@ -786,7 +790,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     let runH = 0;
     while (x < x1 - 0.08) {
       const r = rng();
-      if (run <= 0 && r < 0.05 && gap > 0.7 && x1 - x > 0.5) {
+      if (run <= 0 && r < 0.025 && gap > 0.7 && x1 - x > 0.5) {
         lantern(x + 0.22, y0, -0.32, R(0.85, 1.0));
         x += 0.48;
         continue;
@@ -878,10 +882,10 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   const buildWall = (len: number, strip: number, windows: (j: number, nb: number) => boolean, ends: boolean) => {
     const wood = (l = 0.06) => jitter(WOOD, l);
     piece(props, box, local(len / 2, HEIGHT / 2, -DEPTH - 0.05, 0, 0, 0, len, HEIGHT, 0.1), jitter(WOOD_DARK, 0.02));
-    piece(props, box, local(len / 2, 0.25, -DEPTH / 2, 0, 0, 0, len, 0.5, DEPTH), jitter(0x4a2c18, 0.02));
+    piece(props, box, local(len / 2, 0.25, -DEPTH / 2, 0, 0, 0, len, 0.5, DEPTH), jitter(0x342012, 0.02));
     piece(props, box, local(len / 2, 0.06, 0.02, 0, 0, 0, len, 0.12, 0.06), jitter(0x2e1b10, 0.02));
-    piece(props, box, local(len / 2, HEIGHT + 0.16, -DEPTH / 2 + 0.12, 0, 0, 0, len, 0.32, DEPTH + 0.34), jitter(0x55321c, 0.02));
-    piece(props, box, local(len / 2, HEIGHT + 0.38, -DEPTH / 2 + 0.06, 0, 0, 0, len, 0.12, DEPTH + 0.5), jitter(0x6e4428, 0.02));
+    piece(props, box, local(len / 2, HEIGHT + 0.16, -DEPTH / 2 + 0.12, 0, 0, 0, len, 0.32, DEPTH + 0.34), jitter(0x3e2616, 0.02));
+    piece(props, box, local(len / 2, HEIGHT + 0.38, -DEPTH / 2 + 0.06, 0, 0, 0, len, 0.12, DEPTH + 0.5), jitter(0x4e321e, 0.02));
     // Dark roof beyond the wall top, so the camera never sees the void behind the shelves.
     piece(props, box, local(len / 2, HEIGHT + 0.42, -DEPTH - 12, 0, 0, 0, len + 24, 0.05, 24), 0x1c120c);
 
@@ -891,9 +895,9 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const x = i * bw;
       if (!ends && (i === 0 || i === nb)) continue;
       piece(props, box, local(x, HEIGHT / 2, -DEPTH / 2 + 0.02, 0, 0, 0, 0.2, HEIGHT, DEPTH + 0.04), wood());
-      piece(props, box, local(x, HEIGHT / 2, 0.04, 0, 0, 0, 0.26, HEIGHT, 0.06), jitter(0x6e4a32, 0.05));
+      piece(props, box, local(x, HEIGHT / 2, 0.04, 0, 0, 0, 0.26, HEIGHT, 0.06), jitter(0x553722, 0.04));
       // Hanging lanterns on brackets in front of the posts.
-      if (i > 0 && i < nb && rng() < 0.75) {
+      if (i > 0 && i < nb && rng() < 0.55) {
         const y = R(ROWS[1] + 0.2, ROWS[4]);
         piece(props, box, local(x, y + 0.95, 0.22, 0, 0, 0, 0.05, 0.05, 0.4), jitter(BRASS_DARK));
         lantern(x, y, 0.4, R(0.95, 1.15), true);
@@ -903,7 +907,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const x0 = j * bw + 0.1;
       const x1 = (j + 1) * bw - 0.1;
       const win = windows(j, nb);
-      const winRow = 2;
+      const winRow = 1;
       for (let r = 0; r < ROWS.length; r++) {
         const y0 = ROWS[r];
         const next = r + 1 < ROWS.length ? ROWS[r + 1] : HEIGHT;
@@ -919,69 +923,58 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       for (let k = 0; k < vines; k++) vine(R(x0, x1), R(1.2, win ? 2.2 : 4.8));
     }
     // Garland of leaves along the cornice top.
-    for (let x = 0; x < len; x += R(0.08, 0.2))
+    for (let x = 0; x < len; x += R(0.14, 0.3))
       leaf(x, HEIGHT + 0.46, R(-0.2, 0.35), R(-1.6, -0.6), R(-0.4, 0.4), R(-2, 2), R(0.22, 0.34));
 
-    // Floor strip props: a dense back row against the shelves, a middle row and small things at the field edge.
-    // Everything here is a bit larger than life (P) so it reads from the high camera, like the reference.
-    const P = 1.45;
+    // Floor strip props, kept sparse: a row against the shelves (book stacks, a lantern, deep-green plants, the odd
+    // cushion), now and then something in the middle of the strip, and ivy with mushrooms creeping to the field edge.
+    const P = 1.35;
     const ivyPatch = (cx: number, cz: number, n: number, spread: number) => {
       for (let k = 0; k < n; k++) {
         const lx = cx + R(-spread, spread);
         const lz = cz + R(-spread, spread) * 0.6;
-        leaf(lx, R(0.01, 0.12), lz, -Math.PI / 2 + R(0.15, 0.7), R(0, 6.3), 0, R(0.26, 0.4));
-        if (rng() < 0.14) flower(lx, R(0.1, 0.2), lz, R(0.1, 0.14));
+        leaf(lx, R(0.01, 0.12), lz, -Math.PI / 2 + R(0.15, 0.7), R(0, 6.3), 0, R(0.24, 0.36));
+        if (rng() < 0.18) flower(lx, R(0.1, 0.2), lz, R(0.1, 0.13));
       }
     };
-    let x = R(0.2, 0.5);
+    let x = R(0.2, 0.6);
     while (x < len - 0.3) {
       const back = rng();
-      const zb = R(0.45, 0.85);
-      if (back < 0.3) {
-        const top = bookStack(x, zb, 0, 8, P);
-        if (rng() < 0.45) lantern(x + R(-0.1, 0.1), top, zb, R(1.3, 1.6));
-        else if (rng() < 0.4) candles(x, zb, top);
-        else if (rng() < 0.4) openBook(x, zb, top, 0.9);
-      } else if (back < 0.48) {
-        const h = crate(x, zb, R(0.75, 1.0));
-        if (rng() < 0.6) lantern(x, h, zb, R(1.3, 1.6));
-        else bookStack(x, zb, h, 4, P);
-      } else if (back < 0.66) bush(x, zb + 0.2, R(1.4, 2.0), 7);
-      else if (back < 0.84) {
-        let y = cushion(x, zb + 0.2, 0, R(1.1, 1.4));
-        if (rng() < 0.5) y = cushion(x + R(-0.15, 0.15), zb + 0.2, y - 0.08, R(0.9, 1.1));
-        if (rng() < 0.35) openBook(x, zb + 0.2, y - 0.05, 1.0);
-      } else lantern(x, 0, zb, R(1.7, 2.1));
-      ivyPatch(x, R(0.1, 0.6), 5 + Math.floor(R(0, 6)), 0.5);
+      const zb = R(0.4, 0.75);
+      if (back < 0.34) {
+        const top = bookStack(x, zb, 0, 6, P);
+        if (rng() < 0.4) lantern(x + R(-0.1, 0.1), top, zb, R(1.3, 1.5));
+        else if (rng() < 0.3) candles(x, zb, top);
+      } else if (back < 0.5) {
+        const h = crate(x, zb, R(0.7, 0.9));
+        if (rng() < 0.65) lantern(x, h, zb, R(1.3, 1.5));
+      } else if (back < 0.72) bush(x, zb + 0.15, R(1.2, 1.6), 6);
+      else if (back < 0.82) cushion(x, zb + 0.2, 0, R(1.1, 1.3));
+      else if (back < 0.92) lantern(x, 0, zb, R(1.7, 2.0));
+      ivyPatch(x, R(0.1, 0.5), 2 + Math.floor(R(0, 4)), 0.5);
 
-      if (strip > 1.8 && rng() < 0.85) {
+      if (strip > 1.8 && rng() < 0.3) {
         const xm = x + R(-0.35, 0.35);
-        const zm = R(1.5, 2.3);
+        const zm = R(1.4, 2.1);
         const mid = rng();
-        if (mid < 0.25) cushion(xm, zm, 0, R(1.0, 1.3));
-        else if (mid < 0.45) bookStack(xm, zm, 0, 5, P);
-        else if (mid < 0.58) openBook(xm, zm, 0, 1.25);
-        else if (mid < 0.7) lantern(xm, 0, zm, R(1.5, 1.8));
-        else if (mid < 0.86) bush(xm, zm, R(1.0, 1.5), 6);
+        if (mid < 0.25) cushion(xm, zm, 0, R(1.0, 1.2));
+        else if (mid < 0.5) openBook(xm, zm, 0, 1.15);
+        else if (mid < 0.7) bookStack(xm, zm, 0, 3, P);
         else candles(xm, zm);
       }
-      if (rng() < 0.5) {
+      if (rng() < 0.3) {
         const xf = x + R(-0.4, 0.4);
-        const zf = R(Math.min(strip - 0.4, 2.4), strip + 0.35);
-        const f = rng();
-        if (f < 0.35) mushrooms(xf, zf);
-        else if (f < 0.55) openBook(xf, zf, 0, 1.1);
-        else if (f < 0.75) ivyPatch(xf, zf, 8, 0.45);
-        else if (f < 0.85) candles(xf, zf);
-        else bush(xf, zf, R(0.7, 1.0), 3);
+        const zf = R(Math.min(strip - 0.6, 2.2), strip + 0.2);
+        if (rng() < 0.5) mushrooms(xf, zf);
+        else ivyPatch(xf, zf, 6, 0.45);
       }
-      x += R(0.6, 1.0);
+      x += R(0.95, 1.5);
     }
   };
 
   // Left wall: x = -wallX, running from the near end (z = zNear) to the far wall.
   W.copy(wallFrame(-wallX, zNear, 0, -1, 1, 0));
-  buildWall(sideLen, STRIP, (j, nb) => j % 4 === 1 && j < nb - 1, true);
+  buildWall(sideLen, STRIP, (j, nb) => j % 3 === 1 && j < nb - 1, true);
   {
     // A globe on the left, a bit beyond the middle.
     const x = zNear - (opts.lineZ - opts.length * 0.7);
@@ -989,7 +982,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   }
   // Right wall: x = +wallX, running from the far wall to the near end.
   W.copy(wallFrame(wallX, zBack, 0, 1, -1, 0));
-  buildWall(sideLen, STRIP, (j, nb) => j % 4 === 3 && j > 0, true);
+  buildWall(sideLen, STRIP, (j, nb) => j % 3 === 2 && j < nb - 1, true);
   {
     const x = opts.lineZ - 4.5 - zBack;
     globe(x, 1.9, 1.15);

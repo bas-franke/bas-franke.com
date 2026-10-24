@@ -241,6 +241,8 @@ export function glowBatch(items: GlowItem[], flicker = 0.12): THREE.Mesh {
 
 let blobTex: THREE.CanvasTexture | null = null;
 const blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+// Shared by every blob: owners that dispose their meshes' geometry must skip it.
+blobGeo.userData.shared = true;
 /**
  * A soft contact shadow: a dark radial blob lying on the floor (y = 0.02), `radius` world units, warm brown. Much
  * cheaper than shadow maps; add it under a creature's origin. Material cached per opacity.
