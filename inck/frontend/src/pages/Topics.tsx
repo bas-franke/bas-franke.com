@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, readLabel, timeAgo } from '../api';
-import Art, { CategoryIcon } from '../components/Art';
+import Art, { CategoryIcon, Flame, HeatMeter } from '../components/Art';
 import { storyPath } from '../components/StoryCard';
 import { CATEGORY_LABEL, CATEGORY_ORDER, type CompactStory, type Site, type TopicSummary } from '../types';
 
@@ -32,6 +32,7 @@ export default function Topics({ site }: { site: Site | null }) {
 
   const live = (topics ?? []).filter((t) => t.stories > 0);
   const upcoming = (topics ?? []).filter((t) => t.stories === 0);
+  const hot = (topics ?? []).filter((t) => t.heat > 0).sort((a, b) => b.heat - a.heat);
 
   return (
     <main className="page">
@@ -81,6 +82,31 @@ export default function Topics({ site }: { site: Site | null }) {
           <p className="empty-title">No stories yet.</p>
           <p className="muted">The first ones are being written.</p>
         </div>
+      )}
+
+      {!results && hot.length > 0 && (
+        <section className="topic-group topic-group-hot">
+          <h2 className="section-label mono">
+            <Flame /> trending now
+          </h2>
+          <p className="muted small">What the world is talking about, found by the trend radar and explained from the start.</p>
+          <div className="tgrid">
+            {hot.map((t) => (
+              <Link key={t.id} to={`/t/${t.slug}`} className={`tcard tcard-hot heat-${t.heat}`}>
+                <div className="tcard-head">
+                  <CategoryIcon category={t.category} className="tcard-icon" />
+                  <HeatMeter heat={t.heat} />
+                </div>
+                <h3 className="tcard-title">{t.name}</h3>
+                <p className="tcard-intro">{t.heat_reason || t.intro || t.description}</p>
+                <p className="tcard-meta mono">
+                  {t.stories ? `${t.stories} ${t.stories === 1 ? 'story' : 'stories'}` : 'first stories being written'}
+                  {t.updated_at ? ` · ${timeAgo(t.updated_at)}` : ''}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </section>
       )}
 
       {!results &&

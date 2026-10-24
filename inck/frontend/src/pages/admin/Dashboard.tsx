@@ -40,6 +40,20 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
     }
   }
 
+  const [scanning, setScanning] = useState(false);
+  async function scanNow() {
+    setError(undefined);
+    setScanning(true);
+    try {
+      await call(() => api('/api/admin/radar', { method: 'POST' }));
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setScanning(false);
+    }
+  }
+
   if (!data) return <div className="admin-page">{error ? <p className="form-error">{error}</p> : null}</div>;
 
   const running = data.recent_runs.find((r) => r.status === 'running');
@@ -73,6 +87,39 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
       </header>
 
       {error && <p className="form-error">{error}</p>}
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>Trending now</h2>
+          <span className="muted small">
+            {data.settings.radar_at ? `radar ran ${timeAgo(data.settings.radar_at)}` : 'radar has not run yet'} · rescans every {data.settings.radar_hours} h before a “right now” story
+          </span>
+          <button className="btn" onClick={scanNow} disabled={scanning || !data.env.openai || !data.env.database}>
+            {scanning ? 'Scanning…' : 'Scan now'}
+          </button>
+        </div>
+        {data.trending.length === 0 ? (
+          <p className="muted">Nothing marked hot yet. The radar discovers trending subjects by itself from news headlines, Google Trends, Wikipedia, Hacker News and web search, and creates topics for them.</p>
+        ) : (
+          <ul className="trend-list">
+            {data.trending.map((t) => (
+              <li key={t.id}>
+                <span className="mono trend-heat">{t.heat}/5</span>
+                <span>
+                  <Link to={`/t/${t.slug}`}>
+                    <strong>{t.name}</strong>
+                  </Link>{' '}
+                  <span className="muted small">
+                    {t.kind} · {t.stories} {t.stories === 1 ? 'story' : 'stories'}
+                  </span>
+                  <br />
+                  <span className="small">{t.heat_reason}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="panel-grid">
         <div className="panel">
@@ -210,6 +257,7 @@ function RunRow({ run }: { run: Run }) {
           </span>
         )}
         {run.kind === 'plan' && <span>Curriculum: {run.topic_name ?? run.detail ?? '—'}</span>}
+        {run.kind === 'radar' && <span title={run.detail ?? ''}>Trend radar</span>}
       </td>
       <td>
         {run.status === 'running' && (

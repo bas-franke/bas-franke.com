@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError, api, mediaUrl, readLabel, timeAgo } from '../api';
-import Art, { CategoryIcon } from '../components/Art';
+import Art, { CategoryIcon, Flame, HeatMeter } from '../components/Art';
 import { storyPath } from '../components/StoryCard';
 import { CATEGORY_LABEL, type Hub, type HubStory } from '../types';
 
@@ -61,6 +61,14 @@ export default function TopicHub() {
             </span>
           )}
         </div>
+        {topic.heat > 0 && (
+          <p className={`hot-banner heat-${topic.heat}`}>
+            <Flame />
+            <span>
+              <strong>Trending now</strong> <HeatMeter heat={topic.heat} /> {topic.heat_reason}
+            </span>
+          </p>
+        )}
         <p className="hub-intro">{topic.intro}</p>
         <div className="hub-actions">
           {first && (

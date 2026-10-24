@@ -13,6 +13,8 @@ type FeedRow = Story & {
   topic_name: string;
   topic_category: string;
   topic_kind: string;
+  topic_heat: number;
+  topic_heat_reason: string;
   topic_total: string;
   topic_position: string;
 };
@@ -20,6 +22,7 @@ type FeedRow = Story & {
 const STORY_COLUMNS = `s.id, s.slug, s.title, s.hook, s.body_md, s.takeaway, s.kind, s.why_now, s.section_index, s.plan_index, s.section_name,
   s.difficulty, s.tags, s.images, s.sources, s.read_seconds, s.views, s.published_at,
   t.id AS topic_id, t.slug AS topic_slug, t.name AS topic_name, t.category AS topic_category, t.kind AS topic_kind,
+  t.heat AS topic_heat, t.heat_reason AS topic_heat_reason,
   (SELECT count(*) FROM stories x WHERE x.topic_id = s.topic_id AND x.status = 'published') AS topic_total,
   (SELECT count(*) FROM stories x WHERE x.topic_id = s.topic_id AND x.status = 'published'
      AND (x.section_index, x.plan_index, x.published_at, x.id) < (s.section_index, s.plan_index, s.published_at, s.id)) AS topic_position`;
@@ -45,12 +48,21 @@ async function related(s: FeedRow) {
 async function present(rows: FeedRow[]) {
   return Promise.all(
     rows.map(async (s) => {
-      const { topic_slug, topic_name, topic_category, topic_kind, topic_total, topic_position, topic_id, ...story } = s;
+      const { topic_slug, topic_name, topic_category, topic_kind, topic_heat, topic_heat_reason, topic_total, topic_position, topic_id, ...story } = s;
       return {
         ...story,
         // Prompts are internal; the public site only needs the file.
         images: (story.images as StoryImage[]).map(({ file, alt, caption }) => ({ file, alt, caption })),
-        topic: { id: topic_id, slug: topic_slug, name: topic_name, category: topic_category, kind: topic_kind, stories: Number(topic_total) },
+        topic: {
+          id: topic_id,
+          slug: topic_slug,
+          name: topic_name,
+          category: topic_category,
+          kind: topic_kind,
+          heat: topic_heat,
+          heat_reason: topic_heat ? topic_heat_reason : '',
+          stories: Number(topic_total),
+        },
         position: Number(topic_position),
         related: await related(s),
       };
@@ -64,6 +76,13 @@ publicRouter.get('/site', async (_req, res) => {
     `SELECT (SELECT count(*) FROM stories WHERE status = 'published') AS stories,
             (SELECT count(DISTINCT topic_id) FROM stories WHERE status = 'published') AS topics`,
   );
+  // What the radar found hot, for the trending strip and the rail; hottest first, freshest scan first.
+  const { rows: trending } = await query(
+    `SELECT t.slug, t.name, t.category, t.kind, t.heat, t.heat_reason, count(s.id)::int AS stories,
+            (SELECT x.slug FROM stories x WHERE x.topic_id = t.id AND x.status = 'published' ORDER BY x.published_at DESC LIMIT 1) AS latest_slug
+     FROM topics t LEFT JOIN stories s ON s.topic_id = t.id AND s.status = 'published'
+     WHERE t.enabled AND t.heat > 0 GROUP BY t.id ORDER BY t.heat DESC, t.heat_at DESC LIMIT 8`,
+  );
   res.json({
     site_name: settings.site_name,
     tagline: settings.tagline,
@@ -71,6 +90,7 @@ publicRouter.get('/site', async (_req, res) => {
     next_story_at: nextRunAt(settings),
     stories: Number(counts.stories),
     topics: Number(counts.topics),
+    trending,
   });
 });
 
@@ -143,7 +163,7 @@ publicRouter.post('/stories/:id/view', async (req, res) => {
 /** All topics for the overview: counts, the latest story and where to start. */
 publicRouter.get('/topics', async (_req, res) => {
   const { rows } = await query(
-    `SELECT t.id, t.slug, t.name, t.description, t.category, t.kind, t.plan->>'intro' AS intro,
+    `SELECT t.id, t.slug, t.name, t.description, t.category, t.kind, t.plan->>'intro' AS intro, t.heat, t.heat_reason,
             count(s.id)::int AS stories, max(s.published_at) AS updated_at,
             (SELECT jsonb_build_object('slug', x.slug, 'title', x.title, 'hook', x.hook) FROM stories x
                WHERE x.topic_id = t.id AND x.status = 'published' ORDER BY x.published_at DESC LIMIT 1) AS latest,
@@ -175,6 +195,8 @@ publicRouter.get('/topics/:slug', async (req, res) => {
       category: topic.category,
       kind: topic.kind,
       intro: plan?.intro ?? topic.description,
+      heat: topic.heat,
+      heat_reason: topic.heat ? topic.heat_reason : '',
       created_at: topic.created_at,
     },
     sections: (plan?.sections ?? []).map((s, index) => ({ index, name: s.name, blurb: s.blurb, live: Boolean(s.live), planned: s.items.map((i) => i.title) })),
