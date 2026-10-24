@@ -248,7 +248,7 @@ class RocketsGame implements GameServer {
       this.kill(p, null);
       return;
     }
-    if (p.hp < RK.maxHealth) this.tryPickup(p);
+    this.tryPickup(p);
     if (input.fire && this.now >= p.nextFire) this.fire(p, input.seq);
   }
 
@@ -341,7 +341,7 @@ class RocketsGame implements GameServer {
   private damage(p: RPlayer, dmg: number, by: RPlayer | null) {
     if (dmg <= 0 || p.dead) return;
     if (this.now < p.protectedUntil && by !== p) return;
-    p.hp -= dmg;
+    p.hp -= this.absorb(p, dmg);
     if (by && by !== p) {
       p.lastHitBy = by.id;
       p.lastHitAt = this.now;
@@ -488,7 +488,11 @@ class RocketsGame implements GameServer {
       now: this.now,
       self: { id: p.id, body: p.body, hp: p.hp, dead: p.dead, nextFire: p.nextFire },
       enemies,
-      packs: this.map.packs.map((pos, i) => ({ pos, available: this.packs[i].available })),
+      // Items count as packs for the bots' pickup routing, so they contest armor and mega health too.
+      packs: [
+        ...this.map.packs.map((pos, i) => ({ pos, available: this.packs[i].available })),
+        ...this.items.map((it, i) => ({ pos: it.p, available: this.itemState[i].available })),
+      ],
       map: this.map,
       canSee: (from: Vec3, to: Vec3) => !segmentBoxes(from, to, this.map.boxes),
     };
