@@ -64,7 +64,7 @@ function surfaceMaterial(color: number, surface: Surface, tex: (k: TexKey) => TH
 }
 
 /** Merged meshes under this many triangles stay whole: their draw call costs more than culling them would save. */
-const CHUNK_TRIS = 1500;
+const CHUNK_TRIS = 2500;
 const _p = new THREE.Vector3();
 
 /**
