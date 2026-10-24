@@ -41,6 +41,21 @@ player's device (mirrored to `localStorage`).
   unmastered words are served first. The menu shows how many words of the chosen topics you have mastered.
 - **Castle:** 10 HP (Pokémon-style bar), +1 at the start of every wave. Cottages puff smoke as it takes damage.
 
+## Accounts
+
+Optional. Guests play with progress saved on the device (below). With an account (username + password, **no email**,
+so children can sign up) the same save is also kept on the server and follows the player to any device:
+
+- `backend/src/accounts.ts`: `GET /api/account` (who am I + save; `enabled: false` when there is no database),
+  `POST /api/account/register | login | logout | delete`, `PUT /api/account/save`.
+- Passwords are scrypt-hashed; the session is a random token in an `HttpOnly` cookie `wws` scoped to `Path=/api`
+  (so it never rides along with page and asset requests), 1 year; only its SHA-256 is stored. Login and sign-up are
+  rate limited per IP (`AUTH_ATTEMPTS`, `SIGNUPS_PER_HOUR`).
+- Saves are merged, never overwritten (`backend/src/saves.ts`, same rules as the client): best stars/scores/word
+  progress of every device, settings from the newest. The client uploads ~3 s after each change and adopts the merged
+  result; on login this device's progress is merged into the account; logging out clears the device's progress.
+- Without `DATABASE_URL` the backend still runs (health check, guest mode) and the account button is hidden.
+
 ## Saving (cookies)
 
 `game/save.ts` keeps one save object (settings, best scores, level stars, per-word progress) and writes it to
@@ -89,9 +104,27 @@ frontend/src/
 About 3,250 words and phrases in 62 topics plus ~500 sentences. To add vocabulary, add `english|romanian` lines to a category block (or a new block plus an entry in `CATEGORIES`).
 Verbs are written `(to) eat|(a) mânca` so the infinitive marker is shown but not typed.
 
-## Configuration
+## Configuration: `/srv/apps/wordward/.env` on the server
 
-Nothing. `/srv/apps/wordward/.env` exists (created by the workflow) but no variable is read except `PORT`/`HOST`.
+| Variable           | Default | Purpose                                                      |
+|--------------------|---------|--------------------------------------------------------------|
+| `DATABASE_URL`     | —       | PostgreSQL for accounts; without it: guest mode only         |
+| `AUTH_ATTEMPTS`    | `20`    | Login/sign-up attempts per IP per 10 minutes                 |
+| `SIGNUPS_PER_HOUR` | `5`     | New accounts per IP per hour                                 |
+
+### Database (one time, for accounts)
+
+On the server (`psql` is installed), as the RDS master user:
+
+```sql
+CREATE USER wordward WITH PASSWORD '<strong-password>';
+CREATE DATABASE wordward OWNER wordward;
+REVOKE ALL ON DATABASE wordward FROM PUBLIC;
+```
+
+Then add `DATABASE_URL=postgres://wordward:<password>@<rds-endpoint>:5432/wordward?sslmode=require` to
+`/srv/apps/wordward/.env` and run `pm2 restart wordward --update-env` (or push any change). Tables are created by the
+migrations at startup. Locally, `npm --prefix backend run dev:db` starts an embedded PostgreSQL on port 5435.
 
 ---
 

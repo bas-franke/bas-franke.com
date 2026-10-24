@@ -163,7 +163,7 @@ function migrateOld(): SaveData | null {
 // ---- the save ------------------------------------------------------------------------------------------------------
 
 /** Combine two saves: settings from the newer one, the best of everything else. */
-function merge(a: SaveData | null, b: SaveData | null): SaveData {
+export function merge(a: SaveData | null, b: SaveData | null): SaveData {
   const x = a ?? empty();
   const y = b ?? empty();
   const out = empty();
@@ -196,7 +196,29 @@ export function update(fn: (d: SaveData) => void) {
   timer = setTimeout(persist, 250);
 }
 
+/** Called after every local write (the account module uses it to upload the save). */
+let onPersist: (() => void) | null = null;
+export const setPersistHook = (fn: (() => void) | null) => (onPersist = fn);
+
 export function persist() {
+  writeLocal();
+  onPersist?.();
+}
+
+/** Take in a save from elsewhere (the server): merged with ours, written locally, not uploaded again. */
+export function adopt(other: SaveData) {
+  data = merge(save(), { ...empty(), ...other });
+  writeLocal();
+}
+
+/** Forget this device's progress but keep its settings (after logging out on a shared device). */
+export function resetProgress() {
+  const settings = save().settings;
+  data = { ...empty(), settings, t: Date.now() };
+  writeLocal();
+}
+
+function writeLocal() {
   clearTimeout(timer);
   const d = save();
   try {

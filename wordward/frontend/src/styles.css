@@ -1654,3 +1654,81 @@ input {
   font-size: 15px;
   flex: none;
 }
+
+/* ---- account --------------------------------------------------------------------------------------------- */
+
+.card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.account-chip {
+  flex: none;
+  border: 2.5px solid var(--ink);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 3px 0 var(--ink);
+  padding: 6px 12px;
+  min-height: 40px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.account-chip small {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--dim);
+}
+.account-chip.in {
+  background: var(--mint);
+  flex-direction: row;
+  gap: 4px;
+}
+.map-head .account-chip {
+  margin-left: 4px;
+}
+.account-form {
+  display: grid;
+  gap: 8px;
+}
+.account-tabs {
+  margin: 8px 0 0;
+}
+.input {
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.input input {
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 17px;
+  background: #fff;
+  min-height: 48px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.input input:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--sky-2);
+}
+.input.bad input {
+  border-color: var(--red);
+}
+.form-error {
+  color: #c62845;
+  font-weight: 600;
+  font-size: 14px;
+  margin: 0;
+}
+.btn.danger {
+  background: #ffe1e6;
+  color: #a51d39;
+}

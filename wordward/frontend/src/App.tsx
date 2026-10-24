@@ -23,6 +23,7 @@ import {
   type Variant,
 } from './game/campaign';
 import { save, update } from './game/save';
+import { AccountError, accountState, authenticate, deleteAccount, initAccount, logout, onAccount, type AccountState } from './game/account';
 import { CATEGORIES, countIn, ENTRIES, stripHints, type Direction } from './vocab';
 
 const DEFAULTS: Settings = {
@@ -90,6 +91,7 @@ export default function App() {
   const [sheet, setSheet] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [, refresh] = useState(0);
+  const [accountOpen, setAccountOpen] = useState(false);
   useVisualViewport(app);
 
   useEffect(() => {
@@ -102,6 +104,18 @@ export default function App() {
       g.dispose();
     };
   }, []);
+
+  // Accounts: ask the server who we are once; logging in or out swaps the save, so re-read the settings then.
+  useEffect(() => {
+    void initAccount().then(() => {
+      setSettings(loadSettings());
+      refresh((n) => n + 1);
+    });
+  }, []);
+  const accountChanged = () => {
+    setSettings(loadSettings());
+    refresh((n) => n + 1);
+  };
 
   useEffect(() => {
     update((d) => {
@@ -224,11 +238,13 @@ export default function App() {
           ⌨️ Atinge ca să scrii <small>Tap to type</small>
         </button>
       )}
+      {phase === 'idle' && accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} onChanged={accountChanged} />}
       {phase === 'idle' && screen === 'home' && (
-        <Home settings={settings} setSettings={setSettings} best={save().best[bestKeyFor(settings, null)] ?? 0} onFree={() => play()} onAdventure={() => setScreen('map')} />
+        <Home
+          onAccount={() => setAccountOpen(true)} settings={settings} setSettings={setSettings} best={save().best[bestKeyFor(settings, null)] ?? 0} onFree={() => play()} onAdventure={() => setScreen('map')} />
       )}
       {phase === 'idle' && screen === 'map' && (
-        <CampaignMap settings={settings} setSettings={setSettings} sheet={sheet} setSheet={setSheet} onPlay={playMission} onBack={() => setScreen('home')} />
+        <CampaignMap onAccount={() => setAccountOpen(true)} settings={settings} setSettings={setSettings} sheet={sheet} setSheet={setSheet} onPlay={playMission} onBack={() => setScreen('home')} />
       )}
       {phase === 'paused' && (
         <div className="overlay">
@@ -455,8 +471,174 @@ function CommonOptions({ settings, setSettings }: { settings: Settings; setSetti
 }
 
 function SaveNote() {
-  return <p className="save-note">🍪 Progresul se salvează în cookie-uri pe acest dispozitiv · Progress is saved in cookies on this device.</p>;
+  const acc = useAccount();
+  return (
+    <p className="save-note">
+      {acc.user
+        ? `☁️ Progresul lui ${acc.user.displayName} se salvează în cont și în cookie-uri · Progress is saved to your account and in cookies.`
+        : '🍪 Progresul se salvează în cookie-uri pe acest dispozitiv · Progress is saved in cookies on this device.'}
+      {!acc.user && acc.enabled && ' Fă-ți un cont ca să-l ai peste tot · Make an account to take it anywhere.'}
+    </p>
+  );
 }
+
+function useAccount() {
+  const [acc, setAcc] = useState<AccountState>(accountState);
+  useEffect(() => onAccount(setAcc), []);
+  return acc;
+}
+
+/** The little "who am I" chip in the corner of the menus. Hidden when the server has no accounts. */
+function AccountChip({ onOpen }: { onOpen: () => void }) {
+  const acc = useAccount();
+  if (!acc.enabled) return null;
+  return (
+    <button className={`account-chip${acc.user ? ' in' : ''}`} onClick={onOpen}>
+      {acc.user ? (
+        <>
+          👤 {acc.user.displayName}
+          <small>{acc.sync === 'error' ? ' ⚠️' : acc.sync === 'pending' ? ' ⏳' : ' ☁️'}</small>
+        </>
+      ) : (
+        <>
+          👤 Cont <small>Log in / sign up</small>
+        </>
+      )}
+    </button>
+  );
+}
+
+function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const acc = useAccount();
+  const [mode, setMode] = useState<'login' | 'register'>('register');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<{ text: string; field?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      if (deleting) await deleteAccount(password);
+      else await authenticate(mode, username.trim(), password);
+      setPassword('');
+      setDeleting(false);
+      onChanged();
+    } catch (err) {
+      setError({ text: err instanceof AccountError ? err.message : 'Serverul nu răspunde · The server did not answer', field: err instanceof AccountError ? err.field : undefined });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const out = async () => {
+    setBusy(true);
+    await logout();
+    setBusy(false);
+    onChanged();
+  };
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet account-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Account">
+        <button className="sheet-close" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+        {acc.user && !deleting ? (
+          <>
+            <div className="sheet-head">
+              <span className="sheet-emoji">🦉</span>
+              <div>
+                <div className="chapter-n">Contul tău · Your account</div>
+                <h3>{acc.user.displayName}</h3>
+              </div>
+            </div>
+            <p className="sheet-topics">
+              {acc.sync === 'error'
+                ? '⚠️ Nu am putut salva pe server; reîncercăm la următoarea schimbare · Could not reach the server; we retry on the next change.'
+                : '☁️ Progresul tău se salvează pe server: intră de pe orice dispozitiv · Your progress is saved on the server: log in on any device.'}
+            </p>
+            <div className="row">
+              <button className="btn" onClick={out} disabled={busy}>
+                Ieși <small>Log out</small>
+              </button>
+              <button className="btn danger" onClick={() => setDeleting(true)}>
+                Șterge contul <small>Delete account</small>
+              </button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submit} className="account-form">
+            <div className="sheet-head">
+              <span className="sheet-emoji">{deleting ? '🗑️' : '🦉'}</span>
+              <div>
+                <div className="chapter-n">{deleting ? 'Șterge contul · Delete account' : 'Cont · Account'}</div>
+                <h3>{deleting ? 'Ești sigur?' : mode === 'register' ? 'Cont nou' : 'Intră'}</h3>
+                <div className="dim">{deleting ? 'This removes your account and its saved progress.' : mode === 'register' ? 'Create an account' : 'Log in'}</div>
+              </div>
+            </div>
+            {!deleting && (
+              <>
+                <div className="seg small-seg account-tabs">
+                  <button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => setMode('register')}>
+                    <b>Cont nou</b>
+                  </button>
+                  <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>
+                    <b>Am cont</b>
+                  </button>
+                </div>
+                <p className="sheet-topics">
+                  {mode === 'register'
+                    ? '🎈 Fără email. Alege un nume și o parolă; progresul de pe acest dispozitiv vine cu tine · No email needed. Your progress on this device comes along.'
+                    : '🔑 Progresul de pe acest dispozitiv se adaugă la cont · Progress on this device is added to your account.'}
+                </p>
+                <label className={`input${error?.field === 'username' ? ' bad' : ''}`}>
+                  <span>Nume · Username</span>
+                  <input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    maxLength={20}
+                    required
+                  />
+                </label>
+              </>
+            )}
+            <label className={`input${error?.field === 'password' ? ' bad' : ''}`}>
+              <span>Parolă · Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={mode === 'register' && !deleting ? 'new-password' : 'current-password'}
+                minLength={deleting ? 1 : 6}
+                required
+              />
+            </label>
+            {error && <p className="form-error">{error.text}</p>}
+            <div className="row">
+              <button className={`btn ${deleting ? 'danger' : 'primary'}`} type="submit" disabled={busy}>
+                {busy ? '…' : deleting ? 'Șterge definitiv · Delete' : mode === 'register' ? 'Creează contul · Sign up' : 'Intră · Log in'}
+              </button>
+              {deleting && (
+                <button className="btn" type="button" onClick={() => setDeleting(false)}>
+                  Înapoi <small>Back</small>
+                </button>
+              )}
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 function Home({
   settings,
@@ -464,7 +646,9 @@ function Home({
   best,
   onFree,
   onAdventure,
+  onAccount,
 }: {
+  onAccount: () => void;
   settings: Settings;
   setSettings: SetSettings;
   best: number;
@@ -484,7 +668,10 @@ function Home({
   return (
     <div className="overlay menu">
       <div className="card">
-        <h1 className="logo">Wordward</h1>
+        <div className="card-top">
+          <h1 className="logo">Wordward</h1>
+          <AccountChip onOpen={onAccount} />
+        </div>
         <p className="tagline">
           Apără cetatea cu vorbe! <span className="dim">Defend the castle with words.</span>
         </p>
@@ -607,7 +794,9 @@ function CampaignMap({
   setSheet,
   onPlay,
   onBack,
+  onAccount,
 }: {
+  onAccount: () => void;
   settings: Settings;
   setSettings: SetSettings;
   sheet: string | null;
@@ -642,6 +831,7 @@ function CampaignMap({
               </button>
             ))}
           </div>
+          <AccountChip onOpen={onAccount} />
         </div>
         {CHAPTERS.map((ch) => {
           const score = chapterScore(dir, ch);
