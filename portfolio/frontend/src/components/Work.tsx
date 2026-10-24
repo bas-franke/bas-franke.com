@@ -25,7 +25,10 @@ function Row({ item, index }: { item: Experience; index: number }) {
     <>
       <span className="work__index">{String(index + 1).padStart(2, '0')}</span>
       <div className="work__body">
-        <p className="work__kind">{item.role}</p>
+        <p className="work__kind">
+          <span className="work__num">{String(index + 1).padStart(2, '0')}</span>
+          {item.role}
+        </p>
         <h3 className="work__title">
           <Logo slug={item.slug} />
           <span>{item.company}</span>

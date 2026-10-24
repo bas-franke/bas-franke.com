@@ -31,17 +31,17 @@ export default function Hero() {
               {hero.secondary.label}
             </a>
           </div>
+          <a className="scroll-cue" href="#about" aria-label="Scroll to the next section">
+            <span className="scroll-cue__label">Scroll</span>
+            <span className="scroll-cue__track" aria-hidden="true">
+              <i className="scroll-cue__dot" />
+            </span>
+          </a>
         </div>
         <div className="hero__art" data-reveal style={delay(200)}>
           <Art name="hero" eager fallback={<Motif kind="horizon" />} />
         </div>
       </div>
-      <a className="scroll-cue" href="#about" aria-label="Scroll to the next section">
-        <span className="scroll-cue__label">Scroll</span>
-        <span className="scroll-cue__track" aria-hidden="true">
-          <i className="scroll-cue__dot" />
-        </span>
-      </a>
     </section>
   );
 }
