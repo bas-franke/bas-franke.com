@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Mark from './Mark';
 import ThemeToggle from './ThemeToggle';
+import ResumeButton from './ResumeButton';
 import { site } from '../content';
 import { useActiveSection } from '../hooks/useActiveSection';
 
@@ -37,7 +38,10 @@ export default function Nav() {
           </a>
         ))}
       </nav>
-      <ThemeToggle />
+      <div className="nav__right">
+        <ResumeButton variant="nav" />
+        <ThemeToggle />
+      </div>
     </header>
   );
 }

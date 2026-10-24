@@ -247,7 +247,7 @@ h3 {
   border-radius: 999px;
   padding: 14px 24px;
   cursor: pointer;
-  transition: background-color 0.35s var(--ease), color 0.35s var(--ease), border-color 0.35s;
+  transition: background-color 0.35s var(--ease), color 0.35s var(--ease), border-color 0.35s, transform 0.35s var(--ease);
 }
 
 .btn:hover:not(:disabled) {
@@ -260,29 +260,41 @@ h3 {
   cursor: wait;
 }
 
-/* link-styled button, used for the résumé download */
-.link--button {
-  appearance: none;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--line-2);
-  padding: 0 0 4px;
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  line-height: 1.4;
+.btn svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  transition: transform 0.4s var(--ease);
 }
 
-.link--button:disabled {
-  opacity: 0.6;
-  cursor: progress;
+/* the one filled button on the page: the résumé download */
+.btn--primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  padding: 15px 22px;
 }
 
-.link--button svg {
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+  transform: translateY(-1px);
+}
+
+.btn--primary:hover:not(:disabled) svg {
+  transform: translateY(2px);
+}
+
+.btn--small {
+  padding: 9px 14px;
+  font-size: 0.68rem;
+  gap: 7px;
+}
+
+.btn--small svg {
   width: 12px;
   height: 12px;
-  flex: none;
 }
 
 /* -------------------------------------------------------------- reveal */
@@ -361,6 +373,12 @@ h3 {
   border-color: var(--ink);
 }
 
+.nav__right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .theme {
   display: inline-flex;
   align-items: center;
@@ -389,7 +407,7 @@ h3 {
   display: grid;
   align-items: center;
   padding-top: var(--nav-h);
-  padding-bottom: 72px;
+  padding-bottom: 112px;
   overflow: hidden;
 }
 
@@ -427,7 +445,7 @@ h3 {
 .hero__actions {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 20px;
   flex-wrap: wrap;
   margin-top: 8px;
 }
@@ -445,34 +463,60 @@ h3 {
 
 .scroll-cue {
   position: absolute;
-  left: var(--gutter);
-  bottom: 28px;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  padding: 8px 14px;
   font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.16em;
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--ink-3);
+  color: var(--ink-2);
   text-decoration: none;
+  transition: color 0.3s;
 }
 
-.scroll-cue i {
-  display: block;
-  width: 56px;
-  height: 1px;
-  background: linear-gradient(90deg, var(--ink-3), var(--ink-3) 50%, transparent 50%);
-  background-size: 200% 100%;
-  animation: cue 2.6s var(--ease) infinite;
+.scroll-cue:hover {
+  color: var(--ink);
 }
 
-@keyframes cue {
-  from {
-    background-position: 100% 0;
+.scroll-cue__track {
+  position: relative;
+  width: 1px;
+  height: 64px;
+  background: var(--line-2);
+}
+
+.scroll-cue__dot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  background: var(--ink);
+  animation: cue-drop 2.8s var(--ease) infinite;
+}
+
+@keyframes cue-drop {
+  0% {
+    transform: translateY(-4px);
+    opacity: 0;
   }
-  to {
-    background-position: -100% 0;
+  15% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(60px);
+    opacity: 0;
   }
 }
 
@@ -1014,6 +1058,12 @@ a.work__row:hover .arrow {
 
 /* ----------------------------------------------------------- responsive */
 
+@media (max-width: 900px) {
+  .btn--nav {
+    display: none;
+  }
+}
+
 @media (max-width: 960px) {
   .hero__inner,
   .about,
@@ -1125,5 +1175,10 @@ a.work__row:hover .arrow {
   [data-reveal] {
     opacity: 1;
     transform: none;
+  }
+
+  .scroll-cue__dot {
+    opacity: 1;
+    transform: translateY(28px);
   }
 }

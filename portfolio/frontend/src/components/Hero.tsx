@@ -23,13 +23,13 @@ export default function Hero() {
             {hero.lead}
           </p>
           <div className="hero__actions" data-reveal style={delay(360)}>
+            <ResumeButton />
             <a className="btn" href={hero.primary.href}>
               {hero.primary.label}
             </a>
             <a className="link" href={hero.secondary.href}>
               {hero.secondary.label}
             </a>
-            <ResumeButton />
           </div>
         </div>
         <div className="hero__art" data-reveal style={delay(200)}>
@@ -37,8 +37,10 @@ export default function Hero() {
         </div>
       </div>
       <a className="scroll-cue" href="#about" aria-label="Scroll to the next section">
-        <span>Scroll</span>
-        <i aria-hidden="true" />
+        <span className="scroll-cue__label">Scroll</span>
+        <span className="scroll-cue__track" aria-hidden="true">
+          <i className="scroll-cue__dot" />
+        </span>
       </a>
     </section>
   );
