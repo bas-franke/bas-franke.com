@@ -1,31 +1,37 @@
 import { Resolver } from 'node:dns/promises';
 import { config, elasticIp, repoDoc, statusEnvFile } from '../config.js';
-import { fail, ok, warn, type CheckDef, type Fix } from '../types.js';
+import { fail, ok, warn, type CheckDef, type Fix, type Project } from '../types.js';
 import { errorMessage } from '../util.js';
 
 // Ask public resolvers so we see what the rest of the world sees, not a local cache.
 const resolver = new Resolver({ timeout: 3000, tries: 2 });
 resolver.setServers(['1.1.1.1', '8.8.8.8']);
 
-const hostLabel = (domain: string) =>
-  domain === config.rootDomain ? '' : domain.slice(0, -(config.rootDomain.length + 1));
+/** "www.inck.ai" → "inck.ai". Good enough for the TLDs we use (no .co.uk style suffixes). */
+export const rootOf = (domain: string) => domain.split('.').slice(-2).join('.');
 
-function dnsFix(domain: string): Fix {
+const hostLabel = (domain: string) => {
+  const root = rootOf(domain);
+  return domain === root ? '' : domain.slice(0, -(root.length + 1));
+};
+
+function dnsFix(domain: string, registrar: string): Fix {
+  const root = rootOf(domain);
   const label = hostLabel(domain);
   const record =
     label === 'www'
-      ? 'Add a record: Type CNAME, Host "www", Answer "bas-franke.com", TTL 300.'
+      ? `Add a record: Type CNAME, Host "www", Answer "${root}", TTL 300.`
       : `Add a record: Type A, Host "${label || '(leave empty)'}", Answer "${elasticIp()}", TTL 300.` +
         (label ? ' Alternatively, one wildcard A record with Host "*" covers every subdomain.' : '');
 
   return {
-    summary: `Point ${domain} at the server's Elastic IP in name.com.`,
+    summary: `Point ${domain} at the server's Elastic IP at ${registrar}.`,
     steps: [
-      { text: 'Log in to name.com → My Domains → bas-franke.com → Manage DNS Records.' },
+      { text: `Log in to ${registrar} and open the DNS records for ${root}.` },
       {
         text: label
           ? `Delete any existing record with Host "${label}" that does not point at ${elasticIp()}.`
-          : 'Delete name.com\'s default parking records for the root (empty Host), and turn off URL Forwarding for the domain.',
+          : `Delete the registrar's default parking records for the root (empty Host), and turn off URL forwarding for ${root}.`,
       },
       { text: record },
       { text: 'Wait a few minutes, then verify from any machine:', code: `nslookup ${domain} 1.1.1.1` },
@@ -43,12 +49,12 @@ const expectedIpFix: Fix = {
   ],
 };
 
-export function dnsCheck(domain: string): CheckDef {
+export function dnsCheck(project: Project, domain: string): CheckDef {
   return {
     id: `dns:${domain}`,
     title: `DNS record for ${domain}`,
     provider: 'name.com',
-    fix: dnsFix(domain),
+    fix: dnsFix(domain, project.registrar ?? 'name.com'),
     run: async () => {
       let addresses: string[];
       try {

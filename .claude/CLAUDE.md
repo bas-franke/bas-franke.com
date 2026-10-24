@@ -8,6 +8,7 @@ database inside a **shared RDS instance**.
 |-------------|---------------|-----------------------------------------|--------------|----------|
 | portfolio   | `portfolio/`  | `bas-franke.com`, `www.bas-franke.com`  | 3001         | none     |
 | status      | `status/`     | `status.bas-franke.com`                 | 3002         | none     |
+| inck        | `inck/`       | `inck.ai`, `www.inck.ai`                | 3003         | `inck`   |
 
 When adding a project, add a row here, register it in `status/backend/src/projects.ts` so the status page
 monitors it, and follow [docs/adding-a-project.md](docs/adding-a-project.md).

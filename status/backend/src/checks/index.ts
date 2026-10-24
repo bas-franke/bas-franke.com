@@ -54,7 +54,7 @@ export const sharedChecks: CheckDef[] = [
 
 export function projectChecks(project: Project): CheckDef[] {
   return [
-    ...project.domains.map(dnsCheck),
+    ...project.domains.map((d) => dnsCheck(project, d)),
     deployRunCheck(project),
     deployedFilesCheck(project),
     envFileCheck(project),

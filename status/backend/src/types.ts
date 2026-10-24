@@ -60,6 +60,8 @@ export interface Project {
   domains: string[];
   port: number;
   database: boolean;
+  /** Where the domain's DNS is managed; used in fix instructions. Defaults to name.com. */
+  registrar?: string;
 }
 
 export const ok = (detail: string): Outcome => ({ status: 'ok', detail });

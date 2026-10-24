@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "status-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "status/frontend", "run", "dev", "--", "--strictPort", "--port", "5173"],
+      "port": 5173
+    }
+  ]
+}

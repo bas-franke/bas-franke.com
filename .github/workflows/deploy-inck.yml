@@ -1,0 +1,93 @@
+name: Deploy inck
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'inck/**'
+      - '.github/workflows/deploy-inck.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-inck
+  cancel-in-progress: false
+
+env:
+  PROJECT: inck
+  BACKEND_PORT: 3003
+  NODE_VERSION: '24'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    # Secrets may live in the "main" environment; repository secrets work too.
+    environment: main
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            ${{ env.PROJECT }}/frontend/package-lock.json
+            ${{ env.PROJECT }}/backend/package-lock.json
+
+      - name: Build frontend
+        working-directory: ${{ env.PROJECT }}/frontend
+        run: npm ci && npm run build
+
+      - name: Build backend
+        working-directory: ${{ env.PROJECT }}/backend
+        run: npm ci && npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          missing=""
+          [ -n "$EC2_HOST" ] || missing="$missing EC2_HOST"
+          [ -n "$EC2_USER" ] || missing="$missing EC2_USER"
+          [ -n "$SSH_KEY" ] || missing="$missing EC2_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing. Add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          install -m 700 -d ~/.ssh
+          # Strip Windows line endings in case the key was pasted from a CRLF file.
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null; then
+            echo "::error::EC2_SSH_KEY is not a valid private key. Paste the full contents of gh-deploy, including the BEGIN/END lines."
+            exit 1
+          fi
+          if ! ssh-keyscan -T 15 -H "$EC2_HOST" >> ~/.ssh/known_hosts || [ ! -s ~/.ssh/known_hosts ]; then
+            echo "::error::Cannot reach $EC2_HOST on port 22. Check EC2_HOST and that the security group allows SSH."
+            exit 1
+          fi
+          printf 'Host server\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n' "$EC2_HOST" "$EC2_USER" > ~/.ssh/config
+
+      - name: Upload files
+        run: |
+          ssh server "mkdir -p /var/www/$PROJECT/frontend /srv/apps/$PROJECT/backend"
+          rsync -az --delete "$PROJECT/frontend/dist/" "server:/var/www/$PROJECT/frontend/"
+          rsync -az --delete --exclude node_modules \
+            "$PROJECT/backend/dist" \
+            "$PROJECT/backend/package.json" \
+            "$PROJECT/backend/package-lock.json" \
+            "$PROJECT/deploy/ecosystem.config.cjs" \
+            "server:/srv/apps/$PROJECT/backend/"
+
+      - name: Install and restart backend
+        run: |
+          ssh server "cd /srv/apps/$PROJECT/backend \
+            && npm ci --omit=dev --no-audit --no-fund \
+            && pm2 startOrReload ecosystem.config.cjs --update-env \
+            && pm2 save"
+
+      - name: Health check
+        run: |
+          ssh server "for i in \$(seq 1 15); do curl -fsS http://127.0.0.1:$BACKEND_PORT/api/health && exit 0; sleep 2; done; pm2 logs $PROJECT --lines 50 --nostream; exit 1"

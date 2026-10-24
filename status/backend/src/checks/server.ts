@@ -187,7 +187,19 @@ export function backendHealthCheck(project: Project): CheckDef {
     },
     run: async () => {
       const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-      return res.ok ? ok(`HTTP ${res.status}`) : fail(`HTTP ${res.status} from ${url}`);
+      if (!res.ok) return fail(`HTTP ${res.status} from ${url}`);
+      // Backends may report "degraded" with a list of problems (e.g. a missing API key) while still answering.
+      const body = (await res.json().catch(() => ({}))) as { status?: string; problems?: string[] };
+      if (body.status && body.status !== 'ok') {
+        return warn(`Backend reports "${body.status}": ${(body.problems ?? []).join(', ') || 'see pm2 logs'}`, {
+          summary: `Fix the configuration in ${config.appsDir}/${project.name}/.env and restart.`,
+          steps: [
+            { text: `Edit ${config.appsDir}/${project.name}/.env (see the project README for the variables).` },
+            { text: 'Restart the backend:', code: `pm2 restart ${project.name} --update-env` },
+          ],
+        });
+      }
+      return ok(`HTTP ${res.status}`);
     },
   };
 }

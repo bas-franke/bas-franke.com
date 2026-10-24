@@ -5,4 +5,5 @@ import type { Project } from './types.js';
 export const projects: Project[] = [
   { name: 'portfolio', domains: ['bas-franke.com', 'www.bas-franke.com'], port: 3001, database: false },
   { name: 'status', domains: ['status.bas-franke.com'], port: 3002, database: false },
+  { name: 'inck', domains: ['inck.ai', 'www.inck.ai'], port: 3003, database: true, registrar: 'name.com' },
 ];
