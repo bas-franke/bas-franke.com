@@ -1,0 +1,42 @@
+{
+  "rockets": [
+    {
+      "file": "rockets-foundry.jpg",
+      "caption": "Foundry"
+    },
+    {
+      "file": "rockets-skyway.jpg",
+      "caption": "Skyway"
+    },
+    {
+      "file": "rockets-canyon.jpg",
+      "caption": "Canyon"
+    },
+    {
+      "file": "rockets-orbit.jpg",
+      "caption": "Orbit"
+    }
+  ],
+  "ruckus": [
+    {
+      "file": "ruckus-hotpotato.jpg",
+      "caption": "Hot Potato"
+    },
+    {
+      "file": "ruckus-lava.jpg",
+      "caption": "Floor is Lava"
+    },
+    {
+      "file": "ruckus-coins.jpg",
+      "caption": "Coin Rush"
+    },
+    {
+      "file": "ruckus-sweeper.jpg",
+      "caption": "Sweeper"
+    },
+    {
+      "file": "ruckus-sumo.jpg",
+      "caption": "Sumo"
+    }
+  ]
+}

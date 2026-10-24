@@ -134,8 +134,11 @@ export type ServerMsg =
   | { t: 'closed'; reason: string }
   | { t: 'g'; m: GameServerMsg };
 
-/** Player colours by room slot; also used to tint the 3D models. */
-export const PLAYER_COLORS = [0xff7a59, 0x7cf4c9, 0xffd166, 0x6ea8fe, 0xf78cff, 0x9bf06b, 0xff5c8a, 0xc4b5fd];
+/**
+ * Player colours by room slot; also used to tint the 3D models. Picked so every pair stays apart (CIELAB dE >= 23)
+ * for normal, protan and deutan vision: no red/green pairs, and the warm ones are separated by lightness.
+ */
+export const PLAYER_COLORS = [0xff7a59, 0x7cf4c9, 0xf6ff73, 0x3d7bff, 0xf78cff, 0xff8800, 0xb01e4a, 0xe60099];
 
 export const BOT_NAMES = [
   'Botticelli',

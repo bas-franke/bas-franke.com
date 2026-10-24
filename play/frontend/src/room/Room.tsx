@@ -4,9 +4,13 @@ import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameServerMsg, typ
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
+import { SCREENSHOTS } from '../games/catalog';
 import { gameModules } from '../games/registry';
 import type { ClientContext, GameClient } from '../games/types';
 import { RoomSocket } from '../net/socket';
+import { GameCover } from '../ui/GameCover';
+import { GameDetails } from '../ui/GameDetails';
+import { Header } from '../ui/Header';
 
 interface ChatLine {
   id: number;
@@ -125,9 +129,9 @@ export function RoomPage() {
     return (
       <div className="page">
         <Header />
-        <div className="panel" style={{ maxWidth: 520, margin: '40px auto', textAlign: 'center' }}>
-          <h2 style={{ marginBottom: 8 }}>Room {code.toUpperCase()}</h2>
-          <p style={{ color: 'var(--ink-dim)' }}>{fatal}</p>
+        <div className="panel notice-panel">
+          <span className="room-code">{code.toUpperCase()}</span>
+          <p>{fatal}</p>
           <button className="btn primary" onClick={leave}>
             Back to the lobby
           </button>
@@ -150,21 +154,9 @@ export function RoomPage() {
 
   return (
     <div className="page" style={{ ['--accent' as string]: meta.accent }}>
-      <Header />
       <WaitingRoom room={room} you={you} isHost={isHost} socket={socket!} notice={notice} chat={chat} onLeave={leave} />
       {room.state === 'playing' && <GameStage game={room.game} ctx={ctx} attach={attachGame} />}
     </div>
-  );
-}
-
-function Header() {
-  return (
-    <header className="topbar">
-      <a className="brand" href="/">
-        play<span className="dot">.</span>
-        <small>bas-franke.com</small>
-      </a>
-    </header>
   );
 }
 
@@ -177,10 +169,11 @@ function NamePrompt({ code, initial, onSubmit }: { code: string; initial: string
   return (
     <div className="page">
       <Header />
-      <form className="panel" onSubmit={submit} style={{ maxWidth: 420, margin: '40px auto' }}>
-        <h2 style={{ marginBottom: 6 }}>Joining room {code.toUpperCase()}</h2>
-        <p style={{ color: 'var(--ink-dim)', marginTop: 0 }}>What should the others call you?</p>
-        <label className="field">
+      <form className="panel notice-panel" onSubmit={submit}>
+        <span className="room-code">{code.toUpperCase()}</span>
+        <h2>You are joining a room</h2>
+        <p>What should the others call you?</p>
+        <label className="field" style={{ textAlign: 'left' }}>
           Your name
           <input value={value} onChange={(e) => setValue(e.target.value)} maxLength={LIMITS.playerNameMax} placeholder="Player" autoFocus />
         </label>
@@ -217,6 +210,8 @@ function WaitingRoom({
   const host = room.players.find((p) => p.id === room.hostId);
   const canStart = room.players.length >= meta.minPlayers;
   const [copied, setCopied] = useState(false);
+  const [details, setDetails] = useState(false);
+  const shots = SCREENSHOTS[room.game];
 
   const share = async () => {
     try {
@@ -229,58 +224,77 @@ function WaitingRoom({
   };
   const setBots = (count: number, difficulty?: BotDifficulty) => socket.send({ t: 'setBots', count, difficulty });
   const hasMaps = room.game === 'rockets';
-  const mapName = MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random every match';
+  const mapName = MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map';
 
   return (
     <>
-      <div className="room-title">
-        <h1>{room.name}</h1>
-        <span className="room-code" title="Room code">
-          {room.code}
-        </span>
-        <span className="pill accent">{meta.name}</span>
+      <Header>
         <button className="btn small" onClick={share}>
           {copied ? 'Link copied' : 'Copy invite link'}
         </button>
         <button className="btn small ghost" onClick={onLeave}>
           Leave
         </button>
+      </Header>
+
+      <div className="room-title">
+        <div className="room-title-main">
+          <span className="pill accent">{meta.name}</span>
+          <h1>{room.name}</h1>
+          <span className="slots">
+            {humans} {humans === 1 ? 'player' : 'players'}
+            {bots ? ` + ${bots} ${bots === 1 ? 'bot' : 'bots'}` : ''} · {room.maxPlayers} seats
+            {hasMaps && ` · ${mapName}`}
+          </span>
+        </div>
+        <div className="room-code-box" title="Share this code">
+          <span className="label">Room code</span>
+          <span className="room-code">{room.code}</span>
+        </div>
       </div>
       {notice && <p className="error">{notice}</p>}
 
       <div className="room-layout">
         <div className="panel">
-          <div className="section-head" style={{ marginBottom: 10 }}>
+          <div className="section-head">
             <h2>Players</h2>
             <span className="slots">
-              {room.players.length} / {room.maxPlayers} seats · {humans} {humans === 1 ? 'player' : 'players'}
-              {bots ? `, ${bots} ${bots === 1 ? 'bot' : 'bots'}` : ''}
+              {room.players.length} / {room.maxPlayers} seats
             </span>
           </div>
           <ul className="players">
             {room.players.map((p) => (
               <li key={p.id} className={!p.connected ? 'offline' : ''}>
-                <span className="swatch" style={{ background: colorHex(p.color) }} />
+                <span className="avatar" style={{ background: colorHex(p.color) }}>
+                  {p.name.slice(0, 1).toUpperCase()}
+                </span>
                 <span className="who">{p.name}</span>
                 {p.id === you && <span className="tag">you</span>}
-                {p.id === room.hostId && <span className="tag">host</span>}
+                {p.id === room.hostId && <span className="tag host">host</span>}
                 {p.bot && <span className="tag">bot · {room.botDifficulty}</span>}
                 {!p.bot && p.id !== you && p.connected && <span className="tag">{p.ping} ms</span>}
+                {!p.connected && <span className="tag">reconnecting…</span>}
+              </li>
+            ))}
+            {Array.from({ length: room.maxPlayers - room.players.length }, (_, i) => (
+              <li key={`free-${i}`} className="free">
+                <span className="avatar" />
+                <span className="who">Open seat</span>
               </li>
             ))}
           </ul>
 
-          <div style={{ marginTop: 20, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+          <div className="host-controls">
             {isHost ? (
               <>
                 <div className="segmented" title="Bots">
-                  <button type="button" onClick={() => setBots(bots - 1)} disabled={bots <= 0}>
+                  <button type="button" onClick={() => setBots(bots - 1)} disabled={bots <= 0} aria-label="Fewer bots">
                     −
                   </button>
                   <button type="button" className="active" style={{ cursor: 'default' }}>
                     {bots} {bots === 1 ? 'bot' : 'bots'}
                   </button>
-                  <button type="button" onClick={() => setBots(bots + 1)} disabled={room.players.length >= room.maxPlayers}>
+                  <button type="button" onClick={() => setBots(bots + 1)} disabled={room.players.length >= room.maxPlayers} aria-label="More bots">
                     +
                   </button>
                 </div>
@@ -292,7 +306,7 @@ function WaitingRoom({
                   ))}
                 </div>
                 {hasMaps && (
-                  <select className="map-select" title="Map" value={room.map} onChange={(e) => socket.send({ t: 'setMap', map: e.target.value })}>
+                  <select className="map-select" data-testid="map-select" title="Map" value={room.map} onChange={(e) => socket.send({ t: 'setMap', map: e.target.value })}>
                     <option value={RANDOM_MAP}>Random map</option>
                     {MAP_LIST.map((m) => (
                       <option key={m.id} value={m.id}>
@@ -301,7 +315,12 @@ function WaitingRoom({
                     ))}
                   </select>
                 )}
-                <button className="btn primary" style={{ marginLeft: 'auto' }} disabled={!canStart || room.state === 'playing'} onClick={() => (sfx.unlock(), socket.send({ t: 'start' }))}>
+                <button
+                  className="btn primary start"
+                  data-testid="start"
+                  disabled={!canStart || room.state === 'playing'}
+                  onClick={() => (sfx.unlock(), socket.send({ t: 'start' }))}
+                >
                   {room.state === 'playing' ? 'Match running' : `Start ${meta.name}`}
                 </button>
                 {!canStart && <span className="slots" style={{ width: '100%' }}>Needs at least {meta.minPlayers} players. Add a bot or share the code.</span>}
@@ -309,16 +328,20 @@ function WaitingRoom({
             ) : (
               <span className="slots">
                 {room.state === 'playing' ? 'A match is running; you will drop in.' : `Waiting for ${host?.name ?? 'the host'} to start the game.`}
-                {hasMaps && ` Map: ${mapName}.`}
               </span>
             )}
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div className="panel">
-            <h2 style={{ fontSize: 20, marginBottom: 6 }}>{meta.name}</h2>
-            <p style={{ color: 'var(--ink-dim)', margin: '0 0 12px' }}>{meta.description}</p>
+        <div className="room-side">
+          <div className="panel game-panel">
+            <button type="button" className="panel-cover" onClick={() => setDetails(true)} aria-label={`Screenshots of ${meta.name}`}>
+              <GameCover game={room.game} />
+              {shots.length > 0 && <span className="tile-shots">{shots.length} screenshots</span>}
+            </button>
+            <h2>{meta.name}</h2>
+            <p className="tagline">{meta.tagline}</p>
+            <p className="desc">{meta.description}</p>
             <dl className="controls">
               {meta.controls.map((c) => (
                 <div key={c.keys} style={{ display: 'contents' }}>
@@ -331,6 +354,7 @@ function WaitingRoom({
           <Chat chat={chat} socket={socket} />
         </div>
       </div>
+      {details && <GameDetails game={room.game} onClose={() => setDetails(false)} />}
     </>
   );
 }
