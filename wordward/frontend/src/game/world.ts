@@ -925,15 +925,16 @@ export function buildWorld(scene: THREE.Scene): World {
   // Dusk lamplight: a warm hemisphere, one warm key light from the upper left, the hall's lamp pool, and on 'high' the
   // wizard's candle (a point light; baked into the floor on 'low'). Four lights at most: each one is a loop iteration
   // in every lit fragment.
-  const hemi = new THREE.HemisphereLight(0xd2d8e4, 0x2a2c44, 0.9);
+  const hemi = new THREE.HemisphereLight(0xd6dcd8, 0x2e2c3c, 0.85);
   scene.add(hemi);
-  const key = new THREE.DirectionalLight(0xffcc8c, 1.6);
+  const key = new THREE.DirectionalLight(0xfff0dc, 1.15);
   key.position.set(-14, 26, 12);
   key.target.position.set(0, 0, LINE_Z - 12);
   scene.add(key, key.target);
-  // A big warm lamp pool over the middle of the hall (the one extra light; the shelves fake theirs).
-  const pool = new THREE.PointLight(0xffc47a, 20, 30, 1.4);
-  pool.position.set(0, 9, LINE_Z - 9);
+  // A big amber lamp pool low over the defenders (the one extra light; the shelves fake theirs): golden haze at the
+  // near end, while the middle of the hall stays a cooler slate under the neutral key.
+  const pool = new THREE.PointLight(0xff9420, 30, 30, 1.4);
+  pool.position.set(0, 6, LINE_Z + 1);
   scene.add(pool);
 
   const quality = detectQuality();

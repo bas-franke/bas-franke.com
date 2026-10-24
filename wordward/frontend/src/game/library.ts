@@ -49,12 +49,12 @@ const BAY = 2.3;
 const NEAR_EXTRA = 5;
 
 const BOOK_COLORS = [
-  0x6a2e26, 0x58262e, 0x2f4a38, 0x2a4646, 0x2c3a58, 0x7e6238, 0x4a3424, 0x463246, 0xa8916c, 0x664630, 0x38584a,
-  0x723c2c, 0x26403a, 0x54303c, 0x334664,
+  0x66342a, 0x58302e, 0x3a4636, 0x35423e, 0x343c52, 0x7e6238, 0x4a3424, 0x463640, 0xa8916c, 0x664630, 0x434b3c,
+  0x723e2e, 0x33392f, 0x54343a, 0x3a4458,
 ];
-const CUSHION_COLORS = [0x84332e, 0x72302c, 0x4a6840, 0x3c5a3a, 0x34507a, 0x33605c];
-const LEAF_COLORS = [0x1f4a1c, 0x28561f, 0x346326, 0x1c3f18, 0x3d6c2a, 0x24501e];
-const WOOD = 0x452b1a;
+const CUSHION_COLORS = [0x80382e, 0x70342c, 0x4c5e3c, 0x405438, 0x3a4c6a, 0x36524e];
+const LEAF_COLORS = [0x2a481c, 0x34521f, 0x405a26, 0x24401a, 0x4a6228, 0x2e4c1e];
+const WOOD = 0x54331c;
 const WOOD_DARK = 0x24160d;
 const BRASS = 0x9a6c34;
 const BRASS_DARK = 0x4e3418;
@@ -63,7 +63,7 @@ const BRASS_DARK = 0x4e3418;
 const LOW_KEEP = { wallLeaf: 0.7, stripLeaf: 0.85, flower: 0.75 };
 
 /** Colour of the faked lantern light (linear, multiplied by albedo and the baked amount). */
-const WARM = new THREE.Vector3(1.0, 0.62, 0.3);
+const WARM = new THREE.Vector3(1.5, 0.86, 0.32);
 
 // ---- small helpers ------------------------------------------------------------------------------------------------
 
@@ -343,7 +343,7 @@ function libMaterial(key: string, o: MatOpts = {}) {
       `#include <emissivemap_fragment>
 	float farF = smoothstep( uFade.x, uFade.y, -vWz );
 	float litF = clamp( vBake * 2.4, 0.0, 1.0 );
-	diffuseColor.rgb *= mix( ${(o.shadow ?? 0.55).toFixed(3)}, 1.0, litF ) * ( 1.0 - 0.85 * farF );
+	diffuseColor.rgb *= mix( ${(o.shadow ?? 0.8).toFixed(3)}, 1.0, litF ) * ( 1.0 - 0.85 * farF );
 	totalEmissiveRadiance += diffuseColor.rgb * ( vBake * uWarm * ( 1.0 - 0.3 * farF ) + vLit * ( 1.0 - farF ) );
 	#ifdef USE_MAP
 		// Unlit pieces (u = -2): the vertex colour is the light (lantern glass, flames, the globe's core).

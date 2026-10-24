@@ -2,7 +2,8 @@
 // A small governor watches frame times and lowers the render resolution when a machine cannot keep up (and raises
 // it again when there is headroom), so the game stays playable everywhere.
 //
-// Colour: sRGB output, a warm grade (white balance, saturation, warm shadow lift) folded into ACES filmic tone
+// Colour: sRGB output, a warm grade (white balance, saturation, softer greens, teal/gold split tone, warm shadow
+// lift) folded into ACES filmic tone
 // mapping for the dusk library. Glow comes from additive sprites
 // (toon.ts `glowSprite`/`glowBatch`), not a bloom pass. `stats` exposes frame cost and draw calls for the
 // compare/perf tools (dev builds also publish `window.__engine`).
@@ -28,12 +29,17 @@ const LOW_BELOW_RATIO = 0.85;
 // few ALU ops in every shader that already tone maps and no extra pass. Linear values in, then ACES filmic.
 
 /** White balance: warm the whole frame like tungsten/candle light. */
-const GRADE_WB = [1.05, 1.0, 0.93];
+const GRADE_WB = [1.05, 1.0, 0.9];
 /** Saturation before the curve (1 = unchanged): ACES desaturates brights, this gives wood and books back a bit. */
-const GRADE_SAT = 1.06;
+const GRADE_SAT = 1.12;
 /** Added to the darkest tones only: shadows lift to a warm umber instead of crushing to black. */
-const GRADE_LIFT = [0.014, 0.008, 0.002];
-const GRADE_EXPOSURE = 1.1;
+const GRADE_LIFT = [0.03, 0.017, 0.005];
+const GRADE_EXPOSURE = 1.15;
+/** Greens lose this share of their excess over red/blue (half of it moved to red): yellower, softer foliage. */
+const GRADE_GREEN = 0.55;
+/** Split tone: mid/dark tones lean a touch teal (the slate floor), highlights golden (lamp glow, soft roll-off). */
+const GRADE_SHADOW_TINT = [0.98, 1.0, 1.02];
+const GRADE_HIGHLIGHT_TINT = [1.06, 1.0, 0.86];
 
 const g4 = (n: number) => n.toFixed(4);
 const v3 = (v: number[]) => `vec3( ${v.map(g4).join(', ')} )`;
@@ -45,7 +51,10 @@ if (THREE.ShaderChunk.tonemapping_pars_fragment.includes(CUSTOM_STUB)) {
 	color *= ${v3(GRADE_WB)};
 	float gradeL = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
 	color = max( mix( vec3( gradeL ), color, ${g4(GRADE_SAT)} ), 0.0 );
-	color += ${v3(GRADE_LIFT)} * ( 1.0 - smoothstep( 0.0, 0.2, gradeL ) );
+	float gradeG = max( color.g - max( color.r, color.b ), 0.0 ) * ${g4(GRADE_GREEN)};
+	color += vec3( gradeG * 0.5, -gradeG, 0.0 );
+	color *= mix( ${v3(GRADE_SHADOW_TINT)}, ${v3(GRADE_HIGHLIGHT_TINT)}, smoothstep( 0.3, 1.6, gradeL ) );
+	color += ${v3(GRADE_LIFT)} * ( 1.0 - smoothstep( 0.0, 0.25, gradeL ) );
 	return ACESFilmicToneMapping( color );
 }`,
   );
