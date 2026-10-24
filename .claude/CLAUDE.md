@@ -10,6 +10,7 @@ database inside a **shared RDS instance**.
 | status      | `status/`     | `status.bas-franke.com`                 | 3002         | `status` |
 | inck        | `inck/`       | `inck.ai`, `www.inck.ai`                | 3003         | `inck`   |
 | play        | `play/`       | `play.bas-franke.com`                   | 3004         | none     |
+| wordward    | `wordward/`   | `wordward.bas-franke.com`               | 3005         | none     |
 
 When adding a project, add a row here, register it in `status/backend/src/projects.ts` so the status page
 monitors it, and follow [docs/adding-a-project.md](docs/adding-a-project.md).

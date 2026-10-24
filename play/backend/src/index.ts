@@ -91,3 +91,5 @@ function shutdown(signal: string) {
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+// Last line of defence: a bug in one room must not take every room on the server down with it.
+process.on('uncaughtException', (err) => console.error('uncaught exception', err));

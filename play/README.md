@@ -15,17 +15,21 @@ Both games support bots (easy / normal / hard), chosen when the room is created 
 
 ```
 frontend/src/                          backend/src/
-├── lobby/      room list, create     ├── index.ts     Express: /api/health, /api/games, /api/rooms
-├── room/       waiting room, chat,   ├── net.ts       WebSocket endpoint /api/ws?room=CODE&name=Nick
-│               mounts the game       ├── rooms.ts     Room lifecycle, host, bots, auto-close
-├── engine/     three.js wrapper,     ├── games/
-│   input, interpolation, models,     │   ├── rockets/ server.ts (sim + rules), bots.ts, nav.ts
-│   effects, synthesized audio        │   └── ruckus/  server.ts (rounds), bots.ts, minigames/*
-└── games/                            └── shared/      ← imported by the frontend as @shared/*
-    ├── rockets/ client.ts, arena.ts,     ├── protocol.ts   lobby/room messages, game metadata
-    │            Hud.tsx                  ├── math.ts
-    └── ruckus/  client.ts, arena.ts,     ├── rockets/      constants, map(s), physics, protocol
-                 Hud.tsx                  └── ruckus/       constants, world (layouts + pawn physics), protocol
+├── lobby/      server list, create    ├── index.ts     Express: /api/health, /api/games, /api/rooms
+│               dialog, game tiles     ├── net.ts       WebSocket endpoint /api/ws?room=CODE&name=Nick
+├── room/       waiting room, chat,    ├── rooms.ts     Room lifecycle, host, bots, auto-close
+│               mounts the game        ├── games/
+├── ui/         header, dialogs,       │   ├── rockets/ server.ts (sim + rules), bots.ts, nav.ts
+│               screenshot gallery     │   └── ruckus/  server.ts (rounds), bots.ts, minigames/*
+├── engine/     three.js wrapper,      └── shared/      ← imported by the frontend as @shared/*
+│   input, interpolation, models,          ├── protocol.ts   lobby/room messages, game metadata
+│   effects, synthesized audio             ├── math.ts
+└── games/                                 ├── rockets/      constants, map(s), physics, protocol
+    ├── catalog.ts  screenshots per game   └── ruckus/       constants, world (layouts + pawn physics), protocol
+    ├── rockets/ client.ts, arena.ts,
+    │            Hud.tsx
+    └── ruckus/  client.ts, arena.ts,
+                 Hud.tsx
 ```
 
 - **One source of truth for rules.** `backend/src/shared/` holds the protocol, the arena and all movement physics.
@@ -67,6 +71,14 @@ Every model (droid, launcher, rocket, health pack, pawn, bomb, coin, crown) is b
 [tools/blender/build_models.py](tools/blender/build_models.py) and exported to `frontend/public/models/*.glb`.
 Rebuild them with `npm run models` (finds Blender automatically; set `BLENDER=/path/to/blender` otherwise). Materials
 named `Team` are recoloured per player at runtime. If a model fails to load the game falls back to a primitive.
+
+### Screenshots
+
+The lobby shows real screenshots of every game (`frontend/public/screenshots/`, listed in
+`frontend/src/games/screenshots.json`): on the game tiles, in the room list, in the game picker and as a gallery in
+the game details. `npm run screenshots` takes them automatically by playing each game against bots in a headless
+browser. **Regenerate them whenever a game's look changes** and commit them with the change: see
+[SCREENSHOTS.md](SCREENSHOTS.md).
 
 ## Configuration: `/srv/apps/play/.env` on the server
 
@@ -139,3 +151,4 @@ npm run dev
 - Backend: <http://localhost:3004/api/health>
 - Open the room URL in a second browser tab to play against yourself; bots are the quickest way to test a game alone.
 - In this browser's embedded preview pointer lock is refused; Rockets then switches to drag-to-look with `F` to fire.
+- `npm run screenshots` refreshes the lobby screenshots ([SCREENSHOTS.md](SCREENSHOTS.md)).

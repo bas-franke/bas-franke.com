@@ -9,7 +9,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const listRooms = () => api<{ rooms: RoomSummary[] }>('/api/rooms');
 export const getRoom = (code: string) => api<{ room: RoomSummary }>(`/api/rooms/${encodeURIComponent(code)}`);
-export const createRoom = (settings: Omit<RoomSettings, 'map'>) => api<{ room: RoomSummary }>('/api/rooms', { method: 'POST', body: JSON.stringify(settings) });
+export const createRoom = (settings: Omit<RoomSettings, 'map'> & { map?: string }) => api<{ room: RoomSummary }>('/api/rooms', { method: 'POST', body: JSON.stringify(settings) });
 
 const NAME_KEY = 'play.name';
 export const savedName = () => localStorage.getItem(NAME_KEY) ?? '';
