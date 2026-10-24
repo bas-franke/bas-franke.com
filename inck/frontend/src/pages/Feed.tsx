@@ -173,7 +173,7 @@ export default function Feed({ site }: { site: Site | null }) {
   const trending = !topic && site?.trending.length ? site.trending : [];
 
   return (
-    <div className={`feed-shell ${topic ? 'feed-topic-mode' : ''} ${trending.length ? 'feed-has-strip' : ''}`}>
+    <div className={`feed-shell ${topic ? 'feed-topic-mode' : ''} ${trending.length ? 'feed-has-strip' : ''} ${page.has_before && first ? 'feed-has-before' : ''}`}>
       {trending.length > 0 && (
         <div className="trend-strip" aria-label="Trending now">
           <span className="trend-label mono">
@@ -205,7 +205,7 @@ export default function Feed({ site }: { site: Site | null }) {
       )}
 
       {page.has_before && first && (
-        <Link to={topic ? `/s/${first.slug}?t=${topic.slug}` : '/'} className="before-pill" onClick={() => (selfKey.current = null)}>
+        <Link to={topic ? `/s/${first.slug}?t=${topic.slug}` : '/'} className={`before-pill ${active > 0 ? 'is-hidden' : ''}`} onClick={() => (selfKey.current = null)}>
           ↑ {topic ? 'start of this topic' : 'newer stories'}
         </Link>
       )}

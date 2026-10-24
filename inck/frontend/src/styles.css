@@ -2192,3 +2192,34 @@ fieldset.panel {
     top: 14px;
   }
 }
+
+/* The "newer stories" pill floats over the top of the first story: give that story room for it, and fade the pill
+   out once the reader has moved on so it never covers a later story's tags. */
+.before-pill {
+  transition: opacity 0.2s ease;
+}
+
+.before-pill.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.feed-has-before .story:first-of-type {
+  padding-top: 106px;
+}
+
+.feed-has-before.feed-has-strip .story:first-of-type,
+.feed-has-before.feed-topic-mode .story:first-of-type {
+  padding-top: 144px;
+}
+
+@media (min-width: 1100px) {
+  .feed-has-before .story:first-of-type,
+  .feed-has-before.feed-has-strip .story:first-of-type {
+    padding-top: 56px;
+  }
+
+  .feed-has-before.feed-topic-mode .story:first-of-type {
+    padding-top: 100px;
+  }
+}
