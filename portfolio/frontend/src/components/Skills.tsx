@@ -6,7 +6,7 @@ export default function Skills() {
     <section id="skills" className="section container">
       <div className="section__head" data-reveal>
         <p className="eyebrow">03 — Skills</p>
-        <h2>What I work with, and how.</h2>
+        <h2>{skills.heading}</h2>
       </div>
       <div className="skills">
         <div className="tiers" data-reveal>

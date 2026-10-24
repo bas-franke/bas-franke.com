@@ -1,6 +1,6 @@
 # Portfolio artwork
 
-The site has nine optional image slots. Each one shows a procedural line drawing in the site's own ink until the
+The site has six optional image slots. Each one shows a procedural line drawing in the site's own ink until the
 file exists, so the page is complete without any of them and you can add them one at a time.
 
 **Where files go:** `frontend/src/art/` (picked up at build time, hashed and cached forever), except the link
@@ -9,6 +9,41 @@ the rest and the drawings disappear by themselves.
 
 **Dark mode:** light artwork is automatically inverted in dark mode, which works well for ink-on-paper images.
 If you want full control, add a `<name>-dark.webp` next to any file and it is used instead.
+
+## One prompt for everything
+
+Paste this into ChatGPT as a single message. It asks for the six images one after another in the same style; after
+each one, download it and save it with the filename it names (see the table below for where it goes and how to resize).
+
+```text
+I need a set of 6 illustrations for my portfolio website, all in exactly the same style. Please generate them one at a time, in the order below, each as a separate image, and keep the style identical across all of them: same paper, same ink, same blue. Do not add any text, letters, numbers, logos, watermarks, signatures, frames or borders to any image.
+
+STYLE FOR ALL IMAGES
+Minimal ink-wash illustration on warm off-white paper (#f5f2ec). Thin, confident charcoal-ink lines (#1b1d1c), soft diluted ink washes in warm grey, and one accent colour of dusty lake blue (#4f6b7c) used sparingly. Calm, quiet and precise, with a lot of empty paper. The restraint of Japanese sumi-e, but no clichés: no lotus, no bamboo, no stacked stones, no enso brush circle, no people, no mountains. Subtle paper grain and a very slight ink bleed at the edge of each stroke.
+
+IMAGE 1, "hero" (portrait, 1024x1536)
+A wide, perfectly still body of water meets a pale empty sky, the horizon about two thirds of the way down. Low, faint mist on the water. One thin dark line of a distant shore. The surface of the water is suggested by a handful of thin horizontal ink lines, spaced more widely towards the bottom. A small pale sun, drawn as one quiet circle, hangs above the horizon on the right. Nothing else. Mood: the moment just before the day starts.
+
+IMAGE 2, "hero-dark" (portrait, 1024x1536)
+The same scene as image 1 at night: near-black paper (#141516) with warm pale ink (#ebe7df) instead of charcoal, the same lake-blue accent, and a small moon instead of the sun. Nothing else. Mood: quiet, late, calm.
+
+IMAGE 3, "work-saxo" (landscape, 1536x1024)
+Eight thin horizontal hairlines across the page like ruled paper, with generous margins. One single confident line in lake blue rises from the lower left to the upper right in a slow, smooth curve, like a hand-drawn chart of steady growth, ending in a small filled dot. Nothing else.
+
+IMAGE 4, "work-binck" (landscape, 1536x1024)
+A fine, even grid of thin ink hairlines, like a page from an accountant's ledger, slightly off-centre with wide margins. Five or six cells filled with a soft lake-blue wash, scattered like entries being recorded. Precise, orderly, calm. Nothing else.
+
+IMAGE 5, "work-irp" (landscape, 1536x1024)
+Concentric thin ink circles, like ripples spreading from a single drop on still water, centred a little right of the middle. The inner rings are crisp, the outer rings fade until they dissolve into the paper. Nothing else.
+
+IMAGE 6, "og" (landscape, 1536x1024)
+The same dawn scene as image 1, but very wide: still water, a low horizon, faint mist, a handful of thin horizontal lines for the surface, one small pale sun on the right. The left two thirds of the image is empty pale sky. No text.
+
+After each image, tell me its name from this list so I can save it with the right filename, then continue with the next one.
+```
+
+If ChatGPT stops after one image, reply "next" and it continues. The individual prompts further down are the same
+descriptions, in case you want to redo a single image.
 
 ## How to generate
 
@@ -37,10 +72,7 @@ Minimal ink-wash illustration on warm off-white paper (#f5f2ec). Thin, confident
 | 3 | `src/art/work-saxo.webp` | Work list: Saxo Bank | 4:3 | 1536×1024, crop | 960×720 |
 | 4 | `src/art/work-binck.webp` | Work list: BinckBank | 4:3 | 1536×1024, crop | 960×720 |
 | 5 | `src/art/work-irp.webp` | Work list: IRP | 4:3 | 1536×1024, crop | 960×720 |
-| 6 | `src/art/work-inck.webp` | Work list: inck.ai | 4:3 | 1536×1024, crop | 960×720 |
-| 7 | `src/art/work-status.webp` | Work list: status page | 4:3 | 1536×1024, crop | 960×720 |
-| 8 | `src/art/work-portfolio.webp` | Work list: this site | 4:3 | 1536×1024, crop | 960×720 |
-| 9 | `public/og.jpg` | Link preview in chat apps and social media | 1.91:1 | 1536×1024, crop | 1200×630 (JPEG) |
+| 6 | `public/og.jpg` | Link preview in chat apps and social media | 1.91:1 | 1536×1024, crop | 1200×630 (JPEG) |
 
 The export sizes are roughly 3× the display size, so they stay crisp on high-DPI screens.
 
@@ -79,28 +111,7 @@ Landscape composition. A fine, even grid of thin ink hairlines, like a page from
 Landscape composition. Concentric thin ink circles, like ripples spreading from a single drop on still water, centred a little right of the middle. The inner rings are crisp, the outer rings fade until they dissolve into the paper. Nothing else.
 ```
 
-### 6. `work-inck.webp`
-
-```text
-[STYLE BLOCK]
-Landscape composition. A single drop of ink falls from the top of the page, drawn as one short vertical line and a small teardrop, and lands on a still surface that shows three or four thin elliptical ripples. Below the surface the ink spreads into a soft grey wash. It should suggest writing and publishing without showing a pen. Nothing else.
-```
-
-### 7. `work-status.webp`
-
-```text
-[STYLE BLOCK]
-Landscape composition. One long thin horizontal ink line crosses the whole page, perfectly steady, with a single small heartbeat pulse in the middle drawn in lake blue: one sharp rise, one dip, then steady again. Two much fainter guide lines run parallel above and below. Nothing else.
-```
-
-### 8. `work-portfolio.webp`
-
-```text
-[STYLE BLOCK]
-Landscape composition. A single sheet of paper drawn in thin ink outline with a soft shadow, lying slightly rotated on the page, with a second sheet beneath it offset a little. On the top sheet, three short horizontal lines like the first lines of a letter, the first one in lake blue. Nothing else.
-```
-
-### 9. `og.jpg`
+### 6. `og.jpg`
 
 ```text
 [STYLE BLOCK]

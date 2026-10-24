@@ -80,52 +80,11 @@ function Ripples() {
   );
 }
 
-function Drop() {
-  const ripples = [30, 70, 120, 180, 250];
-  return (
-    <>
-      <line x1="300" y1="30" x2="300" y2="150" className="line" opacity=".5" />
-      <ellipse cx="300" cy="172" rx="7" ry="10" className="ink-fill" opacity=".85" />
-      {ripples.map((rx, i) => (
-        <ellipse key={rx} cx="300" cy="300" rx={rx} ry={rx * 0.32} className="line" opacity={0.55 - i * 0.1} />
-      ))}
-    </>
-  );
-}
-
-function Pulse() {
-  return (
-    <>
-      <line x1="40" y1="120" x2="560" y2="120" className="line" opacity=".18" />
-      <line x1="40" y1="280" x2="560" y2="280" className="line" opacity=".18" />
-      <line x1="40" y1="200" x2="250" y2="200" className="line" opacity=".6" />
-      <line x1="350" y1="200" x2="560" y2="200" className="line" opacity=".6" />
-      <path d="M250 200 L268 200 L283 150 L300 250 L316 200 L350 200" className="accent" />
-    </>
-  );
-}
-
-function Fold() {
-  return (
-    <>
-      <rect x="166" y="96" width="300" height="240" className="line" opacity=".25" />
-      <rect x="150" y="80" width="300" height="240" className="line" opacity=".65" />
-      <line x1="150" y1="80" x2="450" y2="320" className="line" opacity=".3" />
-      <line x1="190" y1="130" x2="300" y2="130" className="accent" />
-      <line x1="190" y1="152" x2="262" y2="152" className="line" opacity=".45" />
-      <line x1="190" y1="174" x2="282" y2="174" className="line" opacity=".45" />
-    </>
-  );
-}
-
 const drawings: Record<MotifKind, () => ReactElement> = {
   horizon: Horizon,
   rise: Rise,
   ledger: Ledger,
   ripples: Ripples,
-  drop: Drop,
-  pulse: Pulse,
-  fold: Fold,
 };
 
 export default function Motif({ kind }: { kind: MotifKind }) {

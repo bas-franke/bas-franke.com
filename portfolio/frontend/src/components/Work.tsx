@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import Art from './Art';
 import Motif from './Motif';
-import { projects, type Project } from '../content';
+import { projects, work, type Project } from '../content';
 
 function Arrow() {
   return (
@@ -56,7 +56,7 @@ export default function Work() {
     <section id="work" className="section container">
       <div className="section__head" data-reveal>
         <p className="eyebrow">02 — Work</p>
-        <h2>A few things I have built and looked after.</h2>
+        <h2>{work.heading}</h2>
       </div>
       <ol className="work">
         {projects.map((project, i) => (
