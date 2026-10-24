@@ -1297,6 +1297,17 @@ code,
   font-weight: 600;
   text-shadow: var(--rk-outline-thin);
 }
+/* Touch mode: the bottom corners belong to the move stick and the fire/jump buttons. */
+.rk .menu-hint.top {
+  top: 60px;
+  bottom: auto;
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.rk.touch-mode .rk-speed {
+  bottom: 140px;
+}
 
 @keyframes rk-hit {
   0% {
@@ -1355,30 +1366,7 @@ code,
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .rk .rk-tag,
-  .rk .rk-lowvig,
-  .rk .timer.hurry,
-  .rk .rk-line,
-  .rk .burst,
-  .rk .rk-respawn p b,
-  .rk .rk-health.low .rk-bar.hp .fill {
-    animation: none;
-  }
-  .rk .rk-lowvig {
-    opacity: 0.8;
-  }
-  /* The hit X keeps its shape and colour change, it just fades instead of spinning in. */
-  .rk .rk-hitmark {
-    animation: rk-fade 0.32s linear forwards;
-  }
-  .rk .rk-xhair,
-  .rk .rk-bar .ghost {
-    transition: none;
-  }
-}
-
-/* The in-game reduced motion setting does the same. */
+/* Reduced motion (the Rockets setting, which defaults to the OS preference): no shakes, throbs or pop-ins. */
 .rk.calm .rk-tag,
 .rk.calm .rk-lowvig,
 .rk.calm .timer.hurry,

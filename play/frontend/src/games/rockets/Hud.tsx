@@ -5,6 +5,7 @@ import type { ScoreRow } from '@shared/rockets/protocol';
 import { type ClientContext, useStore } from '../types';
 import type { FeedLine, RocketsClient, RocketsHudState } from './client';
 import { SettingsPanel } from './SettingsPanel';
+import { TouchControls, useTouchMode } from './TouchControls';
 import { settings } from './settings';
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -38,6 +39,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
   const [menu, setMenu] = useState(false);
   const [now, setNow] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const touchMode = useTouchMode();
   const settingsOpen = useRef(false);
   settingsOpen.current = showSettings;
   const cfg = useStore(settings);
@@ -111,7 +113,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
   const killer = s.dead ? [...(s.feed as RichFeedLine[])].reverse().find((l) => l.v === ctx.you) : undefined;
 
   return (
-    <div className={`hud rk ${low ? 'low' : ''} ${cfg.reducedMotion ? 'calm' : ''}`}>
+    <div className={`hud rk ${low ? 'low' : ''} ${cfg.reducedMotion ? 'calm' : ''} ${touchMode ? 'touch-mode' : ''}`}>
       <div className={`flash ${hurtFlash ? 'on' : ''}`} />
       {low && <div className="rk-lowvig" />}
 
@@ -147,6 +149,10 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
             </div>
           )}
         </div>
+      )}
+
+      {touchMode && !s.ended && !menu && (
+        <TouchControls touch={(client as unknown as { touch: import('../../engine/touch').TouchInput }).touch} onMenu={() => setMenu(true)} onScores={setBoard} />
       )}
 
       <div className="corner tl">
@@ -216,21 +222,25 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
       )}
 
       <div className="corner bc">
-        {!s.locked && !s.dragLook && !s.ended && !menu && (
+        {!touchMode && !s.locked && !s.dragLook && !s.ended && !menu && (
           <span className="hint-bar" onClick={() => client.setPaused(false)}>
             Click the arena to grab the mouse · <kbd>WASD</kbd> move · <kbd>Space</kbd> jump · click to fire
           </span>
         )}
-        {s.dragLook && !s.ended && !menu && (
+        {!touchMode && s.dragLook && !s.ended && !menu && (
           <span className="hint-bar">
             Pointer lock is unavailable here: drag to look, <kbd>F</kbd> or <kbd>Ctrl</kbd> to fire
           </span>
         )}
       </div>
-      <div className="menu-hint">
-        {cfg.showFps && s.fps > 0 && <span className="fps">{s.fps} fps · </span>}
-        Esc: menu · Tab: scores
-      </div>
+      {touchMode ? (
+        cfg.showFps && s.fps > 0 && <div className="menu-hint top">{s.fps} fps</div>
+      ) : (
+        <div className="menu-hint">
+          {cfg.showFps && s.fps > 0 && <span className="fps">{s.fps} fps · </span>}
+          Esc: menu · Tab: scores
+        </div>
+      )}
 
       {s.ended && (
         <div className="overlay-center" style={{ pointerEvents: 'auto' }}>
