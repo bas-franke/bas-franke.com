@@ -89,6 +89,15 @@ input {
   display: block;
 }
 
+/* A soft dark vignette that frames the game view (cheap: one gradient over the canvas). */
+.stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 75% 70% at 50% 48%, rgba(12, 6, 2, 0) 50%, rgba(12, 6, 2, 0.3) 78%, rgba(8, 4, 1, 0.68) 100%);
+}
+
 .hurt {
   position: absolute;
   inset: 0;
@@ -121,23 +130,23 @@ input {
 }
 
 .tag {
-  --tag-bg: #f8f0dc;
-  --tag-edge: rgba(120, 84, 46, 0.55);
+  --tag-bg: #f7efdc;
+  --tag-edge: rgba(120, 84, 46, 0.45);
   position: absolute;
   left: 0;
   top: 0;
-  padding: 2px 9px 3px;
+  padding: 1px 9px 2px;
   background: var(--tag-bg);
-  background-image: linear-gradient(180deg, #fffaec, var(--tag-bg));
+  background-image: linear-gradient(180deg, #fffbf0, var(--tag-bg));
   border: 1px solid var(--tag-edge);
-  border-radius: 9px;
-  box-shadow: 0 2px 5px rgba(20, 10, 2, 0.45);
+  border-radius: 10px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 2px 4px rgba(20, 10, 2, 0.4);
   color: var(--ink);
   font-family: var(--font);
   text-align: center;
   white-space: nowrap;
-  line-height: 1.2;
-  opacity: 0.9;
+  line-height: 1.15;
+  opacity: 0.92;
   will-change: transform;
   font-size: 12px;
 }
@@ -146,10 +155,10 @@ input {
   content: '';
   position: absolute;
   left: 50%;
-  bottom: -5px;
-  width: 8px;
-  height: 8px;
-  margin-left: -4px;
+  bottom: -4px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
   background: var(--tag-bg);
   border-right: 1px solid var(--tag-edge);
   border-bottom: 1px solid var(--tag-edge);
@@ -160,73 +169,84 @@ input {
   display: flex;
   align-items: baseline;
   justify-content: center;
-  gap: 4px;
-  font-weight: 600;
+  gap: 3px;
+  font-weight: 500;
   font-size: 14px;
 }
+/* Language badges only on the target tag; the others carry just the words. */
 .tag .line b {
+  display: none;
   font-family: var(--font);
-  font-size: 8px;
+  font-size: 7.5px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--dim);
+  opacity: 0.75;
   align-self: center;
+}
+.tag.target .line b {
+  display: inline;
 }
 .tag .line.shield b {
   color: var(--gold-ink);
 }
 .tag .line small {
-  font-size: 10px;
+  font-size: 9px;
   font-style: italic;
   font-weight: 400;
   color: var(--dim);
-  margin-left: 3px;
+  margin-left: 2px;
 }
-.tag .line.waiting {
-  opacity: 0.5;
-  font-size: 11px;
-}
+/* Secondary lines (the translation still to come, a finished line, info): very small and faint. */
+.tag .line.waiting,
 .tag .line.done,
 .tag .line.info {
-  font-size: 10.5px;
-  font-weight: 500;
+  font-size: 9.5px;
+  font-weight: 400;
   color: var(--dim);
+  line-height: 1.1;
+}
+.tag .line.waiting {
+  opacity: 0.7;
+}
+.tag .line.done {
+  opacity: 0.6;
+}
+.tag .line.waiting small,
+.tag .line.done small,
+.tag .line.info small {
+  display: none;
 }
 .tag .line .done {
   color: var(--gold-ink);
   opacity: 0.75;
 }
-/* The bubble (shield) line is subtly golden. */
-.tag .line.shield {
-  color: #6e4a12;
+/* The bubble (shield) line is a touch warmer. */
+.tag .line.shield.active {
+  color: #5a3c10;
 }
 .tag.shielded {
-  --tag-edge: rgba(190, 140, 50, 0.75);
-  box-shadow: 0 2px 5px rgba(20, 10, 2, 0.45), 0 0 8px rgba(255, 210, 120, 0.35);
+  --tag-edge: rgba(190, 140, 50, 0.6);
 }
 .tag.target {
-  --tag-bg: #fffaee;
-  --tag-edge: #c8902e;
+  --tag-bg: #fff8e6;
+  --tag-edge: rgba(200, 144, 46, 0.9);
   opacity: 1;
   z-index: 2;
-  padding: 3px 11px 4px;
-  border-width: 1.5px;
-  box-shadow: 0 2px 6px rgba(20, 10, 2, 0.5), 0 0 0 2px rgba(255, 220, 140, 0.45), 0 0 16px rgba(255, 200, 100, 0.55);
-}
-.tag.target::after {
-  border-width: 1.5px;
+  padding: 2px 11px 3px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 2px 5px rgba(20, 10, 2, 0.45), 0 0 12px rgba(255, 200, 100, 0.5);
 }
 .tag.target .line.active {
   font-size: 17px;
+  font-weight: 600;
 }
 .tag .line.active .done {
   color: #b5760f;
   opacity: 1;
-  text-shadow: 0 0 6px rgba(255, 196, 80, 0.7);
+  text-shadow: 0 0 6px rgba(255, 196, 80, 0.6);
 }
 .tag .line.active .cur {
-  background: rgba(242, 200, 96, 0.55);
-  border-radius: 3px;
+  border-radius: 2px;
   box-shadow: inset 0 -2px 0 #c8902e;
 }
 .tag.wrong {
@@ -562,55 +582,67 @@ input {
   transform: scale(0.92);
 }
 
-/* The parchment input box at the bottom: what is being typed (with a caret), the other language small above it. */
+/* The input box at the bottom: a single cream parchment pill with what is being typed (with a caret) and an enter
+   mark; the creature's name and the other language sit small on a faint dark strip above it. */
 .dialog {
-  width: min(470px, 100%);
-  background: linear-gradient(180deg, #fffaec, #f1e4c6);
-  border: 1px solid rgba(110, 76, 40, 0.75);
-  border-radius: 16px;
-  box-shadow: inset 0 0 0 2px #fdf6e4, inset 0 0 0 3px rgba(200, 150, 70, 0.45), 0 4px 14px rgba(15, 8, 2, 0.55);
-  padding: 3px 12px 5px;
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   color: var(--ink);
 }
-.dialog.shield {
-  box-shadow: inset 0 0 0 2px #fdf6e4, inset 0 0 0 3px rgba(214, 164, 64, 0.85), 0 4px 14px rgba(15, 8, 2, 0.55), 0 0 14px rgba(255, 205, 110, 0.35);
-}
 .dialog-meta {
+  align-self: center;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   align-items: baseline;
-  gap: 0 12px;
-  padding: 1px 2px 2px;
-  border-bottom: 1px dashed rgba(150, 110, 60, 0.4);
-  font-size: 12px;
+  gap: 0 10px;
+  max-width: 100%;
+  padding: 1px 12px 2px;
+  border-radius: 999px;
+  background: rgba(22, 13, 5, 0.5);
+  font-size: 11.5px;
   line-height: 1.3;
-  color: var(--ink-soft);
+  color: rgba(255, 244, 222, 0.85);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 .dialog-name {
   font-style: italic;
-  font-weight: 600;
-  color: var(--ink-soft);
-  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 240, 214, 0.7);
+  font-size: 11.5px;
 }
 .dialog-name::first-letter {
   text-transform: uppercase;
 }
 .dialog-name small {
   font-weight: 400;
-  color: var(--dim);
-  font-size: 11px;
+  color: rgba(255, 240, 214, 0.5);
+  font-size: 10.5px;
 }
 .dialog-input {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
+  min-height: 42px;
+  padding: 0 16px 0 20px;
+  background: linear-gradient(180deg, #fffbef 0%, #f6ecd4 55%, #ecdcb8 100%);
+  border: 1px solid rgba(110, 76, 40, 0.7);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px #fdf7e6, inset 0 0 0 3px rgba(200, 150, 70, 0.4), inset 0 -3px 6px rgba(160, 115, 55, 0.18),
+    0 4px 14px rgba(15, 8, 2, 0.55), 0 1px 3px rgba(15, 8, 2, 0.5);
+}
+.dialog.shield .dialog-input {
+  box-shadow: inset 0 0 0 2px #fdf7e6, inset 0 0 0 3px rgba(214, 164, 64, 0.85), inset 0 -3px 6px rgba(160, 115, 55, 0.18),
+    0 4px 14px rgba(15, 8, 2, 0.55), 0 0 14px rgba(255, 205, 110, 0.4);
 }
 .dialog-input.idle {
   justify-content: flex-start;
 }
 .dialog-idle {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 18px;
   font-style: italic;
   color: var(--ink-soft);
@@ -624,10 +656,11 @@ input {
 .enter {
   margin-left: auto;
   flex: none;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
+  line-height: 1;
   color: var(--ink-soft);
-  opacity: 0.8;
+  opacity: 0.85;
 }
 .caret {
   display: inline-block;
@@ -647,7 +680,7 @@ input {
 .dline {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 5px;
   line-height: 1.25;
   min-width: 0;
 }
@@ -656,34 +689,35 @@ input {
 }
 .dline .lang {
   flex: none;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--dim);
+  letter-spacing: 0.08em;
+  color: rgba(255, 240, 214, 0.55);
   white-space: nowrap;
 }
 .dline .lang i {
   font-style: normal;
-  font-size: 10px;
+  font-size: 9px;
 }
+/* In the pill the language mark is a faint tag before the words, not a badge. */
 .dline.main .lang {
-  font-size: 11px;
+  font-size: 9.5px;
   align-self: center;
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: rgba(150, 110, 60, 0.13);
-  color: var(--ink-soft);
+  color: var(--dim);
+  opacity: 0.8;
+}
+.dline.main .lang i {
+  display: none;
 }
 .dline.main.shield .lang {
-  background: rgba(230, 180, 80, 0.3);
   color: var(--gold-ink);
 }
 .dwords {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 9px;
-  font-size: 13px;
-  font-weight: 600;
+  gap: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
   min-width: 0;
 }
 .dline.main .dwords {
@@ -692,25 +726,27 @@ input {
   gap: 0 11px;
 }
 .dline.waiting {
+  opacity: 0.75;
+}
+.dline.main.waiting {
   opacity: 0.6;
 }
 .dline.done .dwords,
 .dline.info .dwords {
-  color: var(--ink-soft);
+  color: rgba(255, 244, 222, 0.85);
 }
 .dline.shield:not(.main) .dwords {
-  color: #7a5414;
+  color: #f6d993;
 }
 .dw .g {
   white-space: pre;
 }
 /* In the input box: typed letters in dark ink, the rest of the word ghosted after the caret. */
 .dline.main .dw .g {
-  color: #a8916f;
+  color: #a88f6b;
 }
 .dline.main .dw .g.done {
   color: var(--ink);
-  font-weight: 600;
 }
 .dline.main .dw.done .g {
   color: var(--ink-soft);
@@ -720,17 +756,22 @@ input {
   color: var(--ink-soft);
 }
 .dline:not(.main) .dw .g.done {
-  color: var(--gold-ink);
+  color: var(--gold-2);
 }
 .dw.done {
   opacity: 0.7;
 }
 .dw .hint {
-  font-size: 11px;
+  font-size: 10px;
   font-style: italic;
+  color: rgba(255, 240, 214, 0.55);
+  margin-left: 3px;
+  font-weight: 400;
+}
+.dline.main .dw .hint {
+  font-size: 12px;
   color: var(--dim);
   margin-left: 4px;
-  font-weight: 400;
 }
 
 .toast {
@@ -1281,9 +1322,9 @@ input {
     grid-template-columns: 1fr 1fr;
   }
   .hud {
-    padding-left: 18px;
-    padding-right: 18px;
-    padding-top: max(12px, env(safe-area-inset-top));
+    padding-left: 26px;
+    padding-right: 22px;
+    padding-top: max(18px, env(safe-area-inset-top));
   }
   .hud.bottom {
     padding-bottom: 16px;
@@ -1320,30 +1361,38 @@ input {
   }
   .tag {
     font-size: 13px;
-    padding: 2px 10px 3px;
+    padding: 1px 11px 3px;
   }
   .tag .line {
     font-size: 16px;
   }
+  .tag .line.waiting,
+  .tag .line.done,
+  .tag .line.info {
+    font-size: 10.5px;
+  }
   .tag.target .line.active {
-    font-size: 20px;
+    font-size: 19px;
   }
   .dialog {
-    padding: 4px 16px 6px;
-    border-radius: 20px;
+    width: clamp(440px, 34vw, 600px);
   }
   .dline.main .dwords {
-    font-size: 28px;
+    font-size: 30px;
   }
   .dialog-input {
-    min-height: 46px;
+    min-height: 54px;
+    padding: 0 22px 0 30px;
+  }
+  .enter {
+    font-size: 26px;
   }
   .dialog-meta,
   .dialog-name {
-    font-size: 13px;
+    font-size: 12.5px;
   }
   .dwords {
-    font-size: 14px;
+    font-size: 13px;
   }
   .toast {
     top: 84px;
@@ -1352,7 +1401,7 @@ input {
 }
 
 /* Narrow phones: hide the sprigs' outer leaves so the wave plate fits between hearts and score. */
-@media (max-width: 380px) {
+@media (max-width: 430px) {
   .sprig {
     width: 22px;
     height: 14px;
@@ -1366,8 +1415,11 @@ input {
     width: 19px;
     height: 19px;
   }
+  .hearts {
+    gap: 1px;
+  }
   .score-num {
-    font-size: 19px;
+    font-size: 21px;
   }
 }
 
@@ -1403,15 +1455,14 @@ input {
     height: 40px;
   }
   .dialog {
-    padding: 1px 10px 2px;
-    border-radius: 12px;
+    gap: 2px;
   }
   .dialog-name {
     display: none;
   }
   .dialog-meta {
     font-size: 11px;
-    padding: 0 2px 1px;
+    padding: 0 10px 1px;
   }
   .dwords {
     font-size: 12px;
@@ -1420,7 +1471,8 @@ input {
     font-size: 19px;
   }
   .dialog-input {
-    min-height: 30px;
+    min-height: 32px;
+    padding: 0 12px 0 16px;
   }
   .enter {
     font-size: 16px;

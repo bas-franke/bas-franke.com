@@ -18,7 +18,7 @@ export const VARIANTS: Record<Variant, { emoji: string; ro: string; en: string; 
   std: { emoji: '⭐', ro: 'Normal', en: 'Standard', desc: 'Pop the bubble, then type the translation.' },
   memory: { emoji: '🧠', ro: 'Din memorie', en: 'From memory', desc: 'The translation is hidden: type it from memory. Two misses on a letter show it.' },
   reverse: { emoji: '🔄', ro: 'Invers', en: 'Reversed', desc: 'Same words, the other direction.' },
-  speed: { emoji: '⚡', ro: 'Viteză', en: 'Speed', desc: 'Creatures fall much faster and the castle has only 5 HP.' },
+  speed: { emoji: '⚡', ro: 'Viteză', en: 'Speed', desc: 'Creatures come much faster and you have only 5 HP.' },
   perfect: { emoji: '🎯', ro: 'Fără greșeli', en: 'No typos', desc: 'Three typos and the mission is over.' },
 };
 
@@ -58,60 +58,60 @@ type C = [emoji: string, ro: string, en: string, missions: M[], boss: [ro: strin
 const need = (mission: string, variant: Variant): Requirement => ({ mission, variant });
 
 const CHAPTERS_DEF: C[] = [
-  ['🏡', 'Satul', 'The village', [
+  ['🏡', 'Satul', 'The Village', [
     ['salut', '🐣', 'Salut!', 'Hello!', ['basics'], ['std', 'memory', 'reverse'], { waves: 3 }],
     ['numere', '🔢', 'Numere și culori', 'Numbers & colours', ['numbers', 'colors'], ['std', 'memory', 'speed'], { waves: 3 }],
     ['familia', '👪', 'Familia', 'Family', ['family', 'people'], ['std', 'memory', 'reverse'], { waves: 3, requires: [need('salut', 'memory')] }],
     ['masa', '🍎', 'La masă', 'At the table', ['food', 'drinks', 'produce'], ['std', 'memory', 'speed']],
-  ], ['Balaurul satului', 'The village dragon', 10, 2]],
-  ['🌲', 'Pădurea', 'The forest', [
+  ], ['Balaurul satului', 'The Village Bookwyrm', 10, 2]],
+  ['🌲', 'Pădurea', 'The Forest', [
     ['animale', '🐻', 'Animale', 'Animals', ['animals'], ['std', 'memory', 'perfect']],
     ['natura', '🌼', 'Natură', 'Nature', ['nature'], ['std', 'reverse', 'speed']],
     ['vreme', '🌦️', 'Vreme', 'Weather', ['weather', 'weather2'], ['std', 'memory', 'perfect'], { requires: [need('animale', 'perfect')] }],
     ['propozitii1', '💬', 'Primele propoziții', 'First sentences', ['sentences'], ['std', 'memory', 'reverse'], { mix: 'sentences', maxWords: 3, waves: 3 }],
     ['salbatice', '🦊', 'Animale sălbatice', 'Wild animals', ['animals2'], ['std', 'speed', 'memory'], { requires: [need('natura', 'reverse')] }],
-  ], ['Balaurul pădurii', 'The forest dragon', 14, 3]],
-  ['🏠', 'Acasă', 'At home', [
+  ], ['Balaurul pădurii', 'The Forest Bookwyrm', 14, 3]],
+  ['🏠', 'Acasă', 'At Home', [
     ['acasa', '🛋️', 'Prin casă', 'Around the house', ['home', 'home2'], ['std', 'memory', 'reverse']],
     ['haine', '👕', 'Haine', 'Clothes', ['clothing', 'clothing2'], ['std', 'speed', 'perfect']],
     ['corp', '🙋', 'Corpul', 'The body', ['body', 'health', 'body2'], ['std', 'memory', 'reverse'], { requires: [need('acasa', 'memory')] }],
     ['timp', '⏰', 'Timp', 'Time', ['time', 'time2'], ['std', 'memory', 'speed']],
     ['bucatarie', '🍳', 'Bucătărie', 'Cooking', ['kitchen', 'food2'], ['std', 'perfect', 'memory'], { requires: [need('masa', 'speed')] }],
-  ], ['Balaurul din pod', 'The attic dragon', 15, 3]],
-  ['🏙️', 'Orașul', 'The town', [
+  ], ['Balaurul din pod', 'The Attic Bookwyrm', 15, 3]],
+  ['🏙️', 'Orașul', 'The Town', [
     ['oras', '🏛️', 'Prin oraș', 'Around town', ['places', 'city2'], ['std', 'memory', 'reverse']],
     ['drum', '🚌', 'La drum', 'On the road', ['transport', 'travel'], ['std', 'speed', 'memory']],
     ['cumparaturi', '🛒', 'Cumpărături', 'Shopping', ['shopping', 'shopping2'], ['std', 'perfect', 'reverse']],
     ['vorba', '🗣️', 'De vorbă', 'Small talk', ['phrases', 'questions', 'sentences'], ['std', 'memory', 'reverse'], { mix: 'mixed', maxWords: 4, requires: [need('propozitii1', 'memory')] }],
     ['numere2', '🧮', 'Numere mari', 'Big numbers', ['numbers2'], ['std', 'memory', 'perfect'], { requires: [need('numere', 'speed')] }],
-  ], ['Balaurul din piață', 'The market dragon', 15, 4]],
+  ], ['Balaurul din piață', 'The Market Bookwyrm', 15, 4]],
   ['🏫', 'Școala', 'School', [
     ['scoala', '🎒', 'La școală', 'At school', ['school', 'school2'], ['std', 'memory', 'speed']],
     ['verbe', '🏃', 'Verbe', 'Verbs', ['verbs'], ['std', 'memory', 'speed']],
     ['adjective', '✨', 'Adjective', 'Adjectives', ['adjectives'], ['std', 'reverse', 'perfect'], { requires: [need('verbe', 'memory')] }],
     ['meserii', '💼', 'Meserii', 'Jobs', ['jobs', 'jobs2', 'office'], ['std', 'memory', 'reverse']],
     ['legaturi', '🔗', 'Cuvinte mici', 'Little words', ['small', 'adverbs'], ['std', 'perfect', 'memory'], { requires: [need('adjective', 'perfect')] }],
-  ], ['Balaurul directorului', "The headmaster's dragon", 16, 4]],
-  ['🎪', 'Târgul', 'The fair', [
+  ], ['Balaurul directorului', "The Headmaster's Bookwyrm", 16, 4]],
+  ['🎪', 'Târgul', 'The Fair', [
     ['sport', '⚽', 'Sport și hobby', 'Sport & hobbies', ['sports', 'hobbies'], ['std', 'speed', 'memory']],
     ['arta', '🎻', 'Muzică și artă', 'Music & art', ['arts'], ['std', 'memory', 'reverse']],
     ['sarbatori', '🎄', 'Sărbători', 'Holidays', ['holidays', 'romania'], ['std', 'memory', 'perfect']],
     ['suflet', '💗', 'Suflet', 'Heart & mind', ['emotions', 'character'], ['std', 'reverse', 'memory'], { requires: [need('familia', 'reverse')] }],
     ['online', '💻', 'Online', 'Online', ['tech', 'internet'], ['std', 'speed', 'perfect']],
-  ], ['Balaurul de la bâlci', 'The fairground dragon', 16, 5]],
-  ['🏔️', 'Munții', 'The mountains', [
+  ], ['Balaurul de la bâlci', 'The Fairground Bookwyrm', 16, 5]],
+  ['🏔️', 'Munții', 'The Mountains', [
     ['stiinta', '🧪', 'Știință și spațiu', 'Science & space', ['science', 'space'], ['std', 'memory', 'reverse']],
     ['cetate', '🏰', 'Legende', 'Castles & legends', ['castle', 'things'], ['std', 'speed', 'perfect']],
     ['propozitii2', '📚', 'Propoziții', 'Sentences', ['sentences'], ['std', 'memory', 'reverse'], { mix: 'sentences', requires: [need('vorba', 'memory')] }],
     ['verbe2', '🤸', 'Mai multe verbe', 'More verbs', ['verbs2', 'verbs3'], ['std', 'memory', 'speed'], { waves: 6, requires: [need('verbe', 'speed')] }],
     ['adjective2', '🎭', 'Mai multe adjective', 'More adjectives', ['adjectives2', 'nouns'], ['std', 'reverse', 'perfect'], { waves: 6 }],
     ['lumea', '🌍', 'Lumea', 'The world', ['countries', 'society'], ['std', 'memory', 'reverse']],
-  ], ['Balaurul munților', 'The mountain dragon', 20, 6]],
-  ['🏰', 'Cetatea', 'The citadel', [
+  ], ['Balaurul munților', 'The Mountain Bookwyrm', 20, 6]],
+  ['🏰', 'Cetatea', 'The Citadel', [
     ['maestru1', '📖', 'Toate cuvintele', 'Every word', [], ['std', 'memory', 'speed'], { waves: 6 }],
     ['maestru2', '📜', 'Toate propozițiile', 'Every sentence', ['sentences'], ['std', 'memory', 'reverse'], { mix: 'sentences', waves: 5 }],
     ['maestru3', '🏆', 'Maestru', 'Master', [], ['std', 'perfect', 'memory'], { mix: 'mixed', waves: 8, requires: [need('maestru1', 'memory')] }],
-  ], ['Marele Balaur', 'The Great Dragon', 15, 4]],
+  ], ['Marele Balaur', 'The Great Bookwyrm', 15, 4]],
 ];
 
 export const CHAPTERS: Chapter[] = [];
@@ -134,7 +134,7 @@ CHAPTERS_DEF.forEach(([emoji, ro, en, defs, [bossRo, bossEn, bossStars, bossVari
     kind: 'review',
     emoji: '🔁',
     ro: 'Recapitulare',
-    en: `Review: ${en.toLowerCase()}`,
+    en: `Review: ${en}`,
     categories: [...cats].filter((c) => c !== 'sentences'),
     mix: 'words',
     waves: 3,
@@ -204,11 +204,11 @@ export function describe(dir: Direction, mission: Mission, r: Requirement): { te
   if ('mission' in r) {
     const m = missionById(r.mission)!;
     const v = VARIANTS[r.variant];
-    return { text: `${v.emoji} ${m.ro} · ${v.ro}`, goto: m.id };
+    return { text: `${v.emoji} ${m.en} · ${v.en}`, goto: m.id };
   }
   const score = chapterScore(dir, CHAPTERS[mission.chapter - 1]);
-  if ('stars' in r) return { text: `⭐ ${r.stars} stele în capitol · stars in this chapter`, progress: `${Math.min(score.stars, r.stars)}/${r.stars}` };
-  return { text: `🎭 ${r.variants} variante câștigate · variant wins`, progress: `${Math.min(score.variants, r.variants)}/${r.variants}` };
+  if ('stars' in r) return { text: `⭐ ${r.stars} stars in this chapter`, progress: `${Math.min(score.stars, r.stars)}/${r.stars}` };
+  return { text: `🎭 ${r.variants} variant wins in this chapter`, progress: `${Math.min(score.variants, r.variants)}/${r.variants}` };
 }
 
 /** Open when the previous mission on the path is won (standard) and every requirement is met. */
@@ -246,7 +246,7 @@ export function runFor(dir: Direction, mission: Mission, variant: Variant): RunC
     maxWords: mission.maxWords,
     speed: base,
     boss: mission.mix === 'sentences' ? 0 : heads,
-    label: `Misiunea ${mission.n} · ${VARIANTS[variant].emoji} ${VARIANTS[variant].ro} · ${VARIANTS[variant].en}`,
+    label: `Mission ${mission.n} · ${VARIANTS[variant].emoji} ${VARIANTS[variant].en}`,
   };
   if (mission.kind === 'boss') {
     run.bossEveryWave = true;

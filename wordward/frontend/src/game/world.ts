@@ -37,7 +37,7 @@ export const PAL = {
   mint: 0x5fd6b0,
   teal: 0x2a8a9c,
   tealDark: 0x1c5a68,
-  robe: 0x2c4a37,
+  robe: 0x34594a,
   hat: 0x3e6b48,
   skin: 0xf0c49c,
   candle: 0xf6ecd2,
@@ -167,7 +167,7 @@ function glow(color: number, size: number) {
 // ---- floor --------------------------------------------------------------------------------------------------------
 
 /** The defenders are modelled at about creature size and drawn a little bigger. */
-const DEFENDER_SCALE = 1.2;
+const DEFENDER_SCALE = 1.05;
 const FLOOR_HALF = FIELD_HALF + 7;
 const FLOOR_NEAR = LINE_Z + 14;
 const FLOOR_FAR = LINE_Z - FIELD_LENGTH - 4;
@@ -201,7 +201,7 @@ function floorTexture(): THREE.CanvasTexture {
     // Grey-green to blue-grey slate; the lamps and the colour grade bring the warmth.
     const hue = 90 + rnd() * 110;
     const sat = 5 + rnd() * 7;
-    const lit = 41 + rnd() * 10;
+    const lit = 46 + rnd() * 10;
     const r = 4 + rnd() * 6;
     g.save();
     // A slightly wonky rounded quad, so the stones look hand-cut.
@@ -388,8 +388,8 @@ function floorTexture(): THREE.CanvasTexture {
 
   // A soft pool of warm lamplight down the middle of the hall.
   for (const [cz, r, a] of [
-    [LINE_Z - 9, FIELD_HALF * 1.9, 0.2],
-    [LINE_Z - 24, FIELD_HALF * 1.5, 0.1],
+    [LINE_Z - 9, FIELD_HALF * 1.9, 0.36],
+    [LINE_Z - 24, FIELD_HALF * 1.5, 0.18],
   ] as const) {
     const pool = g.createRadialGradient(X(0), Z(cz), 0, X(0), Z(cz), r * PX);
     pool.addColorStop(0, `rgba(255,196,112,${a})`);
@@ -434,6 +434,7 @@ function buildFloor(scene: THREE.Scene) {
   geo.translate(0, 0, (FLOOR_NEAR + FLOOR_FAR) / 2);
   const mat = new THREE.MeshLambertMaterial({ map: tex, bumpMap: tex, bumpScale: 0.7 });
   const floor = new THREE.Mesh(geo, mat);
+  floor.name = 'floor';
   floor.renderOrder = -1;
   scene.add(floor);
 }
@@ -488,10 +489,10 @@ function makeWizard() {
       new THREE.Vector2(0.0, 0.0),
       new THREE.Vector2(0.86, 0.0),
       new THREE.Vector2(0.92, 0.12),
-      new THREE.Vector2(0.84, 0.55),
-      new THREE.Vector2(0.66, 1.05),
-      new THREE.Vector2(0.5, 1.36),
-      new THREE.Vector2(0.0, 1.44),
+      new THREE.Vector2(0.86, 0.55),
+      new THREE.Vector2(0.76, 1.05),
+      new THREE.Vector2(0.64, 1.34),
+      new THREE.Vector2(0.0, 1.48),
     ],
     20,
   );
@@ -501,15 +502,21 @@ function makeWizard() {
   b.add(new THREE.TorusGeometry(0.73, 0.06, 6, 24).rotateX(Math.PI / 2).translate(0, 0.82, 0), 0x6b5536);
   // Scarf: a thick knitted cream ring with knit ridges, and two long tails down his back (towards the camera),
   // each ending in a fringe, so it reads from above past the hat brim.
-  b.add(new THREE.TorusGeometry(0.5, 0.25, 10, 22).rotateX(Math.PI / 2).scale(1, 0.8, 1).translate(0, 1.4, 0), PAL.cream);
-  for (const y of [1.3, 1.5]) b.add(new THREE.TorusGeometry(0.55, 0.06, 5, 22).rotateX(Math.PI / 2).translate(0, y, 0), PAL.creamDark);
+  const SCARF = 0xe8dabb;
+  const KNIT = 0xb89c70;
+  b.add(new THREE.TorusGeometry(0.44, 0.21, 10, 22).rotateX(Math.PI / 2).scale(1, 0.85, 1).translate(0, 1.44, 0), SCARF);
+  // Knit ribs around the ring.
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2;
+    b.add(new THREE.TorusGeometry(0.2, 0.025, 4, 10).rotateY(a + Math.PI / 2).translate(Math.sin(a) * 0.44, 1.44, Math.cos(a) * 0.44), KNIT);
+  }
   const tail = (x: number, len: number, tilt: number, twist: number) => {
     const at = (geo: THREE.BufferGeometry) => geo.rotateX(-tilt).rotateZ(twist).translate(x, 1.36, 0.55);
-    b.add(at(new THREE.BoxGeometry(0.36, len, 0.12).translate(0, -len / 2, 0)), PAL.cream);
-    for (let k = 1; k < 4; k++) b.add(at(new THREE.BoxGeometry(0.37, 0.05, 0.13).translate(0, (-len * k) / 4, 0)), PAL.creamDark);
+    b.add(at(new THREE.BoxGeometry(0.36, len, 0.12).translate(0, -len / 2, 0)), SCARF);
+    for (let k = 1; k < 4; k++) b.add(at(new THREE.BoxGeometry(0.37, 0.05, 0.13).translate(0, (-len * k) / 4, 0)), KNIT);
     // Fringe: little tassels hanging off the end.
     for (let f = 0; f < 5; f++) {
-      b.add(at(new THREE.CylinderGeometry(0.025, 0.018, 0.2, 4).translate(-0.14 + f * 0.07, -len - 0.09, 0)), PAL.cream);
+      b.add(at(new THREE.CylinderGeometry(0.025, 0.018, 0.2, 4).translate(-0.14 + f * 0.07, -len - 0.09, 0)), SCARF);
     }
   };
   tail(0.18, 1.0, 0.32, 0.12);
@@ -551,7 +558,7 @@ function makeWizard() {
   const flame = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8).scale(1, 1.8, 1), flat(0xfff2b0));
   flame.position.set(0.66, 2.0, 0);
   arm.add(flame);
-  const halo = glow(0xffb347, 1.6);
+  const halo = glow(0xff9d3a, 2.2);
   halo.position.copy(flame.position);
   arm.add(halo);
   const light = new THREE.PointLight(0xffa850, 5, 8, 1.6);
@@ -586,7 +593,7 @@ function makeWizard() {
       body.scale.set(1 / Math.sqrt(breathe), breathe, 1 / Math.sqrt(breathe));
       const flick = base * (1 + Math.sin(t * 17) * 0.06 + Math.sin(t * 7.3) * 0.08) + castT * 2.5;
       flame.scale.set(0.8 + flick * 0.2, flick, 0.8 + flick * 0.2);
-      halo.scale.setScalar(1.1 + flick * 0.6);
+      halo.scale.setScalar(1.5 + flick * 0.8);
       light.intensity = 4 * flick;
     },
   };
@@ -717,7 +724,7 @@ export function buildWorld(scene: THREE.Scene): World {
   key.target.position.set(0, 0, LINE_Z - 12);
   scene.add(key, key.target);
   // A big warm lamp pool over the middle of the hall (the one extra light; the shelves fake theirs).
-  const pool = new THREE.PointLight(0xffc47a, 13, 34, 1.4);
+  const pool = new THREE.PointLight(0xffc47a, 20, 30, 1.4);
   pool.position.set(0, 9, LINE_Z - 9);
   scene.add(pool);
 
@@ -727,13 +734,15 @@ export function buildWorld(scene: THREE.Scene): World {
 
   const wizard = makeWizard();
   // Faces -z, towards the creatures: we see his back, like the player standing behind him.
-  wizard.root.position.set(-1.9, 0, LINE_Z + 2.1);
+  wizard.root.position.set(-1.6, 0, LINE_Z + 2.0);
+  wizard.root.name = 'wizard';
   wizard.root.scale.setScalar(DEFENDER_SCALE);
   // Leaning back a touch and turned a little towards the robot, so the camera sees his scarf, beard and candle.
   wizard.root.rotation.set(-0.22, -0.3, 0, 'YXZ');
   scene.add(wizard.root);
   const robot = makeRobot();
-  robot.root.position.set(1.7, 0, LINE_Z + 1.9);
+  robot.root.position.set(1.5, 0, LINE_Z + 1.9);
+  robot.root.name = 'robot';
   robot.root.scale.setScalar(DEFENDER_SCALE);
   scene.add(robot.root);
 

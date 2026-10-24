@@ -128,7 +128,7 @@ export interface GameState {
   errors: number;
   destroyed: number;
   target: TargetView | null;
-  /** Big message in the middle of the screen ("Valul 3"), with a counter so React can restart its animation. */
+  /** Big message in the middle of the screen ("Wave 3"), with a counter so React can restart its animation. */
   banner: { text: string; sub: string; n: number } | null;
   /** "A wild bat appeared!", the first time each creature shows up in a game. */
   toast: { ro: string; en: string; n: number } | null;
@@ -186,27 +186,28 @@ interface Enemy {
   mistakes: number;
 }
 
-/** "A wild … appeared!" per kind; Romanian needs the article and adjective to agree with the creature's gender. */
+/** The "A wild … appeared!" toast per kind. */
 const APPEARS: Record<EnemyKind, string> = {
-  bat: 'Un liliac sălbatic a apărut!',
-  meteor: 'Un pietroi sălbatic a apărut!',
-  ghost: 'O fantomiță sălbatică a apărut!',
-  zmeu: 'Un zmeuț sălbatic a apărut!',
-  rock: 'O pietricică sălbatică a apărut!',
-  head: 'Balaurul a apărut!',
-  convoy: 'Un șir de pietricele a apărut!',
-  balaur: 'Balaurul a apărut!',
+  bat: 'A wild Glimmerwing appeared!',
+  meteor: 'A wild Sootling appeared!',
+  ghost: 'A wild Scrollshell appeared!',
+  zmeu: 'A wild Tome Toter appeared!',
+  rock: 'A wild Inkling appeared!',
+  head: 'The Bookwyrm appeared!',
+  convoy: 'An Inkling parade appeared!',
+  balaur: 'The Bookwyrm appeared!',
 };
 
-export const NAMES: Record<EnemyKind, [ro: string, en: string]> = {
-  bat: ['liliac', 'bat'],
-  meteor: ['pietroi', 'rock buddy'],
-  ghost: ['fantomiță', 'little ghost'],
-  zmeu: ['zmeuț', 'baby dragon'],
-  rock: ['pietricică', 'pebble'],
-  head: ['cap de balaur', 'dragon head'],
-  convoy: ['șir de pietricele', 'pebble parade'],
-  balaur: ['Balaurul', 'the dragon'],
+/** Each creature's name and, small after it, what it is. */
+export const NAMES: Record<EnemyKind, [name: string, what: string]> = {
+  bat: ['Glimmerwing', 'moth fairy'],
+  meteor: ['Sootling', 'soot sprite'],
+  ghost: ['Scrollshell', 'scroll snail'],
+  zmeu: ['Tome Toter', 'book-carrying sprite'],
+  rock: ['Inkling', 'ink slime'],
+  head: ['Bookwyrm head', 'library dragon'],
+  convoy: ['Inkling parade', 'ink slimes'],
+  balaur: ['The Bookwyrm', 'library dragon'],
 };
 
 const MAX_HP = 10;
@@ -217,7 +218,7 @@ const DIFF = {
 };
 /** Seconds a creature of each kind takes to fall the whole field at wave 1 on normal. */
 const FALL_TIME: Record<EnemyKind, number> = { bat: 15, meteor: 19, ghost: 21, zmeu: 25, rock: 19, head: 25, convoy: 36, balaur: 65 };
-const POOFS = ['POF!', 'PUF!', 'BRAVO!', 'SUPER!', 'YUPI!', 'TOP!'];
+const POOFS = ['POOF!', 'PUFF!', 'WOW!', 'SUPER!', 'YAY!', 'NICE!'];
 
 /** The camera always shows at least this much of the field in front of the defence line (world units). */
 const MIN_FIELD = 21;
@@ -226,6 +227,8 @@ const PITCH_LANDSCAPE = THREE.MathUtils.degToRad(55);
 const PITCH_PORTRAIT = THREE.MathUtils.degToRad(63);
 /** Creatures are modelled at about 1 m radius and drawn bigger, so faces read on a phone. */
 const CREATURE_SCALE = 1.45;
+/** Extra creature scale on portrait screens. */
+const PORTRAIT_BOOST = 1.2;
 /** Narrow screens show at least this much width at the defence line: the field plus a sliver of the shelves' props. */
 const MIN_HALF_WIDTH = FIELD_HALF + 1.1;
 /** Screen pixels kept free above a creature for its word tag, so tags of new arrivals never slide under the HUD. */
@@ -411,10 +414,10 @@ export class Game {
       wave,
       hp: heal ? this.state.hp + 1 : this.state.hp,
       banner: boss
-        ? { text: 'Balaurul!', sub: `Valul ${wave} · Wave ${wave} · boss${heal ? ' · +1 ♥' : ''}`, n: wave }
+        ? { text: 'The Bookwyrm!', sub: `Wave ${wave} · boss${heal ? ' · +1 ♥' : ''}`, n: wave }
         : run && wave === 1
-          ? { text: `${run.emoji} ${run.ro}`, sub: run.label ?? run.en, n: wave }
-          : { text: `Valul ${wave}`, sub: wave === 1 ? 'Apără cetatea! · Defend the castle!' : `Wave ${wave}${run ? `/${run.waves}` : ''}${heal ? ' · +1 ♥' : ''}`, n: wave },
+          ? { text: `${run.emoji} ${run.en}`, sub: run.label ?? run.en, n: wave }
+          : { text: `Wave ${wave}`, sub: wave === 1 ? 'Defend the library!' : `${run ? `Wave ${wave} of ${run.waves}` : 'Here they come!'}${heal ? ' · +1 ♥' : ''}`, n: wave },
     };
     this.world.setDamage(this.state.hp / this.state.maxHp);
     if (wave > 1) sfx.play('wave');
@@ -584,7 +587,7 @@ export class Game {
           // Hug the creature: the dome (see shield.ts) reaches 1.54 r up and 0.88 r out, so size it to the taller of
           // its height and its girth. Hovering creatures (the moth) get their bubble lifted around the body.
           const h = (model as { height?: number }).height ?? model.radius * 2;
-          slot.bubble = makeBubble(Math.max(model.radius * 1.05, h * 0.6));
+          slot.bubble = makeBubble(Math.max(model.radius * 1.02, h * 0.56));
           if (kind === 'bat') slot.bubble.root.position.y = h * 0.28;
           model.root.add(slot.bubble.root);
           parts.push(word('shield', e, e[src], slot));
@@ -595,7 +598,10 @@ export class Game {
     }
 
     // Scale the group up, but never wider than the screen (long sentences on a narrow phone).
-    const scale = Math.min(CREATURE_SCALE, (this.halfWidth * 2 - 1.5) / Math.max(1, total));
+    // Portrait phones look from higher up, so creatures are drawn a little bigger there.
+    const el = this.engine.renderer.domElement;
+    const portrait = el.clientWidth < el.clientHeight * 0.8 ? PORTRAIT_BOOST : 1;
+    const scale = Math.min(CREATURE_SCALE * portrait, (this.halfWidth * 2 - 1.5) / Math.max(1, total));
     root.scale.setScalar(scale);
     for (const s of slots) s.radius *= scale;
     total *= scale;
@@ -603,7 +609,7 @@ export class Game {
     // Keep the creature and its word tag inside the field: groups by their width, single creatures by their word.
     const chars = Math.max(...entries.map((e) => Math.max(stripHints(e[dst]).length, stripHints(e[src]).length)));
     const group = kind === 'convoy' || kind === 'balaur';
-    const margin = Math.min(this.halfWidth - 0.5, group ? total / 2 + 0.6 : 1.2 + chars * 0.06);
+    const margin = Math.min(this.halfWidth - 0.5, group ? total / 2 + 0.6 : 0.9 + chars * 0.05);
     const lim = Math.max(0, this.halfWidth - margin);
     const startY = this.top + (kind === 'balaur' ? 5 : 2);
     // Spread out: of a few candidate lanes, take the one farthest from creatures already near the same depth.
@@ -615,6 +621,7 @@ export class Game {
         const cx = -lim + ((i + 0.2 + Math.random() * 0.6) / LANES) * 2 * lim;
         let d = 99;
         for (const o of this.enemies) d = Math.min(d, Math.abs(cx - this.laneX(o)) + Math.abs(startY - o.y) * 0.45);
+        d += Math.random() * 0.3;
         if (d > best) {
           best = d;
           x = cx;
@@ -622,7 +629,7 @@ export class Game {
       }
     }
     // Drift a little towards the middle on the way down, never all into one column.
-    const aimX = group ? x * 0.6 : THREE.MathUtils.clamp(x * 0.7 + (Math.random() * 2 - 1) * 1.5, -lim, lim);
+    const aimX = group ? x * 0.6 : THREE.MathUtils.clamp(x * 0.85 + (Math.random() * 2 - 1) * 1.2, -lim, lim);
     const diff = DIFF[this.settings.difficulty];
     const waveFactor = Math.min(2.3, 1 + (this.state.wave - 1) * 0.08);
     // Never faster than a learner at this difficulty can type it, plus a few seconds to read.
@@ -649,7 +656,7 @@ export class Game {
     for (const s of slots) this.renderTag(enemy, s);
     if (!this.seen.has(kind)) {
       this.seen.add(kind);
-      const en = kind === 'balaur' ? 'The dragon appeared!' : kind === 'convoy' ? 'A pebble parade appeared!' : `A wild ${NAMES[kind][1]} appeared!`;
+      const en = NAMES[kind][1];
       this.state = { ...this.state, toast: { ro: APPEARS[kind], en, n: this.spawned } };
       sfx.play('appear');
       this.emit();
@@ -722,7 +729,7 @@ export class Game {
       this.state = { ...this.state, combo: 0, multiplier: 1, typed, errors };
       const limit = this.settings.run?.maxErrors;
       if (limit !== undefined && errors >= limit) {
-        this.gameOver('Prea multe greșeli · Too many typos');
+        this.gameOver('Too many typos');
         return;
       }
       this.emit();
@@ -760,7 +767,7 @@ export class Game {
         slot.bubble.root.removeFromParent();
         slot.bubble = undefined;
         sfx.play('pop');
-        this.pop(at, 'POC!', 'pop-shield');
+        this.pop(at, 'POP!', 'pop-shield');
       }
       if (part.layer === 'core') {
         if (enemy.kind !== 'convoy') record(part.entry.id, this.settings.direction, part.mistakes === 0);
@@ -777,7 +784,7 @@ export class Game {
         if (enemy.kind === 'convoy') record(enemy.entry.id, this.settings.direction, enemy.mistakes === 0);
         if (enemy.body) {
           this.effects.poof(enemy.root.position, 3.2, 0x5fd68a);
-          this.pop(enemy.root.position, 'VICTORIE!', 'pop-big');
+          this.pop(enemy.root.position, 'VICTORY!', 'pop-big');
         }
         sfx.play(enemy.kind === 'zmeu' || enemy.kind === 'convoy' || enemy.kind === 'balaur' ? 'bigpoof' : 'poof');
         score += this.killBonus(enemy) * multiplier;
@@ -949,7 +956,7 @@ export class Game {
     const spawnVisible = h * (1 / Math.tan(dipS) - 1 / Math.tan(dipB)) - DEFENDER_FRONT;
     this.top = IMPACT_Y + Math.min(FIELD_LENGTH - 4, visible - 1.5, spawnVisible) - 2;
     const lineHalf = (DEFENDER_FRONT * Math.cos(pitch) + h * kD) * tanF * aspect;
-    this.halfWidth = Math.min(FIELD_HALF - 0.6, lineHalf - 0.4);
+    this.halfWidth = Math.min(FIELD_HALF - 0.3, lineHalf - 0.4);
   }
 
   private frame(dt: number, t: number) {

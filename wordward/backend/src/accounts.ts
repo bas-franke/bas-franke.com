@@ -129,20 +129,20 @@ accounts.post('/register', async (req, res) => {
   const ip = req.ip ?? 'unknown';
   const { username, password, save } = body(req);
   if (typeof username !== 'string' || !USERNAME.test(username)) {
-    res.status(400).json({ error: 'Numele: 3–20 litere, cifre sau _ . - · Username: 3–20 letters, digits or _ . -', field: 'username' });
+    res.status(400).json({ error: 'Username: 3–20 letters, digits or _ . -', field: 'username' });
     return;
   }
   if (typeof password !== 'string' || password.length < 6 || password.length > 200) {
-    res.status(400).json({ error: 'Parola: minim 6 caractere · Password: at least 6 characters', field: 'password' });
+    res.status(400).json({ error: 'Password: at least 6 characters', field: 'password' });
     return;
   }
   if (limited(`signup:${ip}`, config.signupsPerHour, 3_600_000) || limited(`auth:${ip}`, config.authAttempts, 600_000)) {
-    res.status(429).json({ error: 'Prea multe încercări. Mai încearcă peste puțin timp · Too many attempts, try again later.' });
+    res.status(429).json({ error: 'Too many attempts, try again later.' });
     return;
   }
   const taken = await one('SELECT 1 FROM users WHERE lower(username) = lower($1)', [username]);
   if (taken) {
-    res.status(409).json({ error: 'Numele este luat · That username is taken', field: 'username' });
+    res.status(409).json({ error: 'That username is taken', field: 'username' });
     return;
   }
   const user = await one<User>(
@@ -158,7 +158,7 @@ accounts.post('/register', async (req, res) => {
 accounts.post('/login', async (req, res) => {
   const ip = req.ip ?? 'unknown';
   if (limited(`auth:${ip}`, config.authAttempts, 600_000)) {
-    res.status(429).json({ error: 'Prea multe încercări. Mai încearcă peste 10 minute · Too many attempts, try again in 10 minutes.' });
+    res.status(429).json({ error: 'Too many attempts, try again in 10 minutes.' });
     return;
   }
   const { username, password, save } = body(req);
@@ -167,7 +167,7 @@ accounts.post('/login', async (req, res) => {
       ? await one<User & { password_hash: string }>('SELECT id, username, display_name, password_hash FROM users WHERE lower(username) = lower($1)', [username])
       : undefined;
   if (!row || !(await verifyPassword(password as string, row.password_hash))) {
-    res.status(401).json({ error: 'Nume sau parolă greșită · Wrong username or password' });
+    res.status(401).json({ error: 'Wrong username or password' });
     return;
   }
   await startSession(req, res, row.id);
@@ -202,7 +202,7 @@ accounts.post('/delete', async (req, res) => {
   const { password } = body(req);
   const row = user && (await one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [user.id]));
   if (!user || !row || typeof password !== 'string' || !(await verifyPassword(password, row.password_hash))) {
-    res.status(401).json({ error: 'Parolă greșită · Wrong password' });
+    res.status(401).json({ error: 'Wrong password' });
     return;
   }
   await query('DELETE FROM users WHERE id = $1', [user.id]);

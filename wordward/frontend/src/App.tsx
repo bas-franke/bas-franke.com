@@ -235,7 +235,7 @@ export default function App() {
       {state && game && playing && <Hud state={state} game={game} />}
       {phase === 'playing' && !focused && touchDevice() && (
         <button className="tap-to-type" onClick={focusInput}>
-          ⌨️ Atinge ca să scrii <small>Tap to type</small>
+          ⌨️ Tap to type
         </button>
       )}
       {phase === 'idle' && accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} onChanged={accountChanged} />}
@@ -249,14 +249,14 @@ export default function App() {
       {phase === 'paused' && (
         <div className="overlay">
           <div className="card small">
-            <h2>Pauză</h2>
-            <p className="dim">Paused</p>
+            <h2>Paused</h2>
+            <p className="dim">Take a breath. The creatures will wait.</p>
             <div className="row">
               <button className="btn primary" onClick={() => game?.pause(false)}>
-                Continuă <small>Resume</small>
+                Resume <small>Esc</small>
               </button>
               <button className="btn" onClick={toMenu}>
-                {run ? 'Hartă' : 'Meniu'} <small>{run ? 'Map' : 'Menu'}</small>
+                {run ? 'Map' : 'Menu'}
               </button>
             </div>
           </div>
@@ -346,10 +346,10 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
             </span>
           </div>
         </div>
-        <div className="wave-ribbon" aria-label={`Valul ${state.wave} · Wave ${state.wave}`}>
+        <div className="wave-ribbon" aria-label={`Wave ${state.wave}`}>
           <Sprig />
           <span className="wave-plate">
-            Valul {state.wave}
+            Wave {state.wave}
             {lvl ? <small>/{lvl.waves}</small> : null}
           </span>
           <Sprig right />
@@ -371,7 +371,7 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
       </div>
       {state.toast && (
         <div className="toast" key={state.toast.n}>
-          <b>{state.toast.ro}</b> <span>{state.toast.en}</span>
+          <b>{state.toast.ro}</b> {state.toast.en && <span>{state.toast.en}</span>}
         </div>
       )}
       {state.banner && (
@@ -402,7 +402,7 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
           ) : (
             <div className="dialog-input idle">
               <span className="dialog-idle">
-                Liniște… <small>All quiet. Get ready!</small>
+                All quiet… <small>Get ready!</small>
               </span>
               <span className="caret" aria-hidden="true" />
             </div>
@@ -451,26 +451,26 @@ function Word({ word, live, done }: { word: WordView; live: boolean; done: boole
 
 const DIRECTIONS: { id: Direction; label: string; sub: string }[] = [
   { id: 'en-ro', label: 'EN → RO', sub: 'Learn Romanian' },
-  { id: 'ro-en', label: 'RO → EN', sub: 'Învață engleză' },
+  { id: 'ro-en', label: 'RO → EN', sub: 'Learn English' },
 ];
 const MIXES: { id: Mix; label: string; sub: string }[] = [
-  { id: 'words', label: 'Cuvinte', sub: 'Words' },
-  { id: 'mixed', label: 'Amestec', sub: 'Mixed' },
-  { id: 'sentences', label: 'Propoziții', sub: 'Sentences' },
+  { id: 'words', label: 'Words', sub: 'one at a time' },
+  { id: 'mixed', label: 'Mixed', sub: 'words & sentences' },
+  { id: 'sentences', label: 'Sentences', sub: 'whole lines' },
 ];
 const DIFFICULTIES: { id: Difficulty; label: string; sub: string }[] = [
-  { id: 'easy', label: 'Ușor', sub: 'Easy' },
-  { id: 'normal', label: 'Normal', sub: 'Normal' },
-  { id: 'hard', label: 'Greu', sub: 'Hard' },
+  { id: 'easy', label: 'Easy', sub: 'slow & gentle' },
+  { id: 'normal', label: 'Normal', sub: 'just right' },
+  { id: 'hard', label: 'Hard', sub: 'quick fingers' },
 ];
 
-const BESTIARY: [emoji: string, ro: string, en: string][] = [
-  ['🦇', 'Liliac', 'short words'],
-  ['🪨', 'Pietroi', 'words'],
-  ['👻', 'Fantomiță', 'long words'],
-  ['🐲', 'Zmeuț', 'longest words'],
-  ['🫧', 'Pietricele', 'sentences'],
-  ['🐉', 'Balaurul', 'boss'],
+const BESTIARY: [emoji: string, name: string, what: string][] = [
+  ['🦋', 'Glimmerwing', 'short words'],
+  ['📚', 'Sootling', 'words'],
+  ['🐌', 'Scrollshell', 'long words'],
+  ['📖', 'Tome Toter', 'longest words'],
+  ['💧', 'Inklings', 'sentences'],
+  ['🐉', 'Bookwyrm', 'boss'],
 ];
 
 type SetSettings = (s: Settings) => void;
@@ -482,7 +482,7 @@ function CommonOptions({ settings, setSettings }: { settings: Settings; setSetti
     <>
       <div className="field two">
         <div>
-          <div className="field-label">Direcție · Direction</div>
+          <div className="field-label">Direction</div>
           <div className="seg">
             {DIRECTIONS.map((d) => (
               <button key={d.id} className={settings.direction === d.id ? 'on' : ''} onClick={() => set('direction', d.id)}>
@@ -493,7 +493,7 @@ function CommonOptions({ settings, setSettings }: { settings: Settings; setSetti
           </div>
         </div>
         <div>
-          <div className="field-label">Dificultate · Difficulty</div>
+          <div className="field-label">Difficulty</div>
           <div className="seg">
             {DIFFICULTIES.map((d) => (
               <button key={d.id} className={settings.difficulty === d.id ? 'on' : ''} onClick={() => set('difficulty', d.id)}>
@@ -508,13 +508,13 @@ function CommonOptions({ settings, setSettings }: { settings: Settings; setSetti
         <label className="check">
           <input type="checkbox" checked={settings.shields} onChange={(e) => set('shields', e.target.checked)} />
           <span>
-            Scuturi 🫧 <span className="dim">type the word you read first</span>
+            Shields 🫧 <span className="dim">type the word you read first</span>
           </span>
         </label>
         <label className="check">
           <input type="checkbox" checked={settings.lenient} onChange={(e) => set('lenient', e.target.checked)} />
           <span>
-            Diacritice ușoare <span className="dim">a = ă/â, i = î, s = ș, t = ț</span>
+            Easy accents <span className="dim">a = ă/â, i = î, s = ș, t = ț</span>
           </span>
         </label>
       </div>
@@ -527,9 +527,9 @@ function SaveNote() {
   return (
     <p className="save-note">
       {acc.user
-        ? `☁️ Progresul lui ${acc.user.displayName} se salvează în cont și în cookie-uri · Progress is saved to your account and in cookies.`
-        : '🍪 Progresul se salvează în cookie-uri pe acest dispozitiv · Progress is saved in cookies on this device.'}
-      {!acc.user && acc.enabled && ' Fă-ți un cont ca să-l ai peste tot · Make an account to take it anywhere.'}
+        ? `☁️ ${acc.user.displayName}'s progress is saved to the account and in cookies.`
+        : '🍪 Progress is saved in cookies on this device.'}
+      {!acc.user && acc.enabled && ' Make an account to take it anywhere.'}
     </p>
   );
 }
@@ -553,7 +553,7 @@ function AccountChip({ onOpen }: { onOpen: () => void }) {
         </>
       ) : (
         <>
-          👤 Cont <small>Log in / sign up</small>
+          👤 Account <small>Log in / sign up</small>
         </>
       )}
     </button>
@@ -580,7 +580,7 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
       setDeleting(false);
       onChanged();
     } catch (err) {
-      setError({ text: err instanceof AccountError ? err.message : 'Serverul nu răspunde · The server did not answer', field: err instanceof AccountError ? err.field : undefined });
+      setError({ text: err instanceof AccountError ? err.message : 'The server did not answer', field: err instanceof AccountError ? err.field : undefined });
     } finally {
       setBusy(false);
     }
@@ -604,21 +604,21 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
             <div className="sheet-head">
               <span className="sheet-emoji">🦉</span>
               <div>
-                <div className="chapter-n">Contul tău · Your account</div>
+                <div className="chapter-n">Your account</div>
                 <h3>{acc.user.displayName}</h3>
               </div>
             </div>
             <p className="sheet-topics">
               {acc.sync === 'error'
-                ? '⚠️ Nu am putut salva pe server; reîncercăm la următoarea schimbare · Could not reach the server; we retry on the next change.'
-                : '☁️ Progresul tău se salvează pe server: intră de pe orice dispozitiv · Your progress is saved on the server: log in on any device.'}
+                ? '⚠️ Could not reach the server; we retry on the next change.'
+                : '☁️ Your progress is saved on the server: log in on any device.'}
             </p>
             <div className="row">
               <button className="btn" onClick={out} disabled={busy}>
-                Ieși <small>Log out</small>
+                Log out
               </button>
               <button className="btn danger" onClick={() => setDeleting(true)}>
-                Șterge contul <small>Delete account</small>
+                Delete account
               </button>
             </div>
           </>
@@ -627,28 +627,28 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
             <div className="sheet-head">
               <span className="sheet-emoji">{deleting ? '🗑️' : '🦉'}</span>
               <div>
-                <div className="chapter-n">{deleting ? 'Șterge contul · Delete account' : 'Cont · Account'}</div>
-                <h3>{deleting ? 'Ești sigur?' : mode === 'register' ? 'Cont nou' : 'Intră'}</h3>
-                <div className="dim">{deleting ? 'This removes your account and its saved progress.' : mode === 'register' ? 'Create an account' : 'Log in'}</div>
+                <div className="chapter-n">{deleting ? 'Delete account' : 'Account'}</div>
+                <h3>{deleting ? 'Are you sure?' : mode === 'register' ? 'New account' : 'Log in'}</h3>
+                <div className="dim">{deleting ? 'This removes your account and its saved progress.' : mode === 'register' ? 'Pick a name and a password' : 'Welcome back!'}</div>
               </div>
             </div>
             {!deleting && (
               <>
                 <div className="seg small-seg account-tabs">
                   <button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => setMode('register')}>
-                    <b>Cont nou</b>
+                    <b>New account</b>
                   </button>
                   <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>
-                    <b>Am cont</b>
+                    <b>I have one</b>
                   </button>
                 </div>
                 <p className="sheet-topics">
                   {mode === 'register'
-                    ? '🎈 Fără email. Alege un nume și o parolă; progresul de pe acest dispozitiv vine cu tine · No email needed. Your progress on this device comes along.'
-                    : '🔑 Progresul de pe acest dispozitiv se adaugă la cont · Progress on this device is added to your account.'}
+                    ? '🎈 No email needed. Pick a name and a password; your progress on this device comes along.'
+                    : '🔑 Progress on this device is added to your account.'}
                 </p>
                 <label className={`input${error?.field === 'username' ? ' bad' : ''}`}>
-                  <span>Nume · Username</span>
+                  <span>Username</span>
                   <input
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -663,7 +663,7 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
               </>
             )}
             <label className={`input${error?.field === 'password' ? ' bad' : ''}`}>
-              <span>Parolă · Password</span>
+              <span>Password</span>
               <input
                 type="password"
                 value={password}
@@ -676,11 +676,11 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
             {error && <p className="form-error">{error.text}</p>}
             <div className="row">
               <button className={`btn ${deleting ? 'danger' : 'primary'}`} type="submit" disabled={busy}>
-                {busy ? '…' : deleting ? 'Șterge definitiv · Delete' : mode === 'register' ? 'Creează contul · Sign up' : 'Intră · Log in'}
+                {busy ? '…' : deleting ? 'Delete forever' : mode === 'register' ? 'Sign up' : 'Log in'}
               </button>
               {deleting && (
                 <button className="btn" type="button" onClick={() => setDeleting(false)}>
-                  Înapoi <small>Back</small>
+                  Back
                 </button>
               )}
             </div>
@@ -729,7 +729,7 @@ function Home({
           <AccountChip onOpen={onAccount} />
         </div>
         <p className="tagline">
-          Apără cetatea cu vorbe! <span className="dim">Defend the castle with words.</span>
+          Defend the library with words! <span className="dim">Learn Romanian and English as you type.</span>
         </p>
         <ol className="how">
           <li>
@@ -746,17 +746,17 @@ function Home({
           <button className="mode-card adventure" onClick={onAdventure}>
             <span className="mode-emoji">🗺️</span>
             <span>
-              <b>Aventură</b> <small>Adventure</small>
+              <b>Adventure</b> <small>Campaign</small>
               <span className="mode-sub">
-                {MISSIONS.length} misiuni · ⭐ {stars}/{maxStars}
+                {MISSIONS.length} missions · ⭐ {stars}/{maxStars}
               </span>
             </span>
           </button>
           <button className={`mode-card free${showFree ? ' open' : ''}`} onClick={() => setShowFree(!showFree)}>
             <span className="mode-emoji">♾️</span>
             <span>
-              <b>Joc liber</b> <small>Free play</small>
-              <span className="mode-sub">{best > 0 ? `Record ${best.toLocaleString()}` : 'Endless waves, your topics'}</span>
+              <b>Free play</b> <small>Your rules</small>
+              <span className="mode-sub">{best > 0 ? `Best ${best.toLocaleString()}` : 'Endless waves, your topics'}</span>
             </span>
           </button>
         </div>
@@ -764,7 +764,7 @@ function Home({
         {showFree && (
           <div className="free-panel">
             <div className="field">
-              <div className="field-label">Mod · Mode</div>
+              <div className="field-label">Mode</div>
               <div className="seg">
                 {MIXES.map((m) => (
                   <button key={m.id} className={settings.mix === m.id ? 'on' : ''} onClick={() => set('mix', m.id)}>
@@ -776,7 +776,7 @@ function Home({
             </div>
             <div className="field">
               <div className="field-label">
-                Teme · Topics{' '}
+                Topics{' '}
                 <span className="dim">
                   ({settings.categories.length}/{CATEGORIES.length}, {total.toLocaleString()} entries)
                 </span>
@@ -792,7 +792,7 @@ function Home({
               <div className="chips">
                 {CATEGORIES.map((c) => (
                   <button key={c.id} className={settings.categories.includes(c.id) ? 'chip on' : 'chip'} onClick={() => toggleCat(c.id)}>
-                    {c.ro} <small>{c.en}</small>
+                    {c.en}
                   </button>
                 ))}
               </div>
@@ -807,7 +807,7 @@ function Home({
 
         <div className="progress-row">
           <div>
-            Stăpânite · Mastered: <b>{mastered.toLocaleString()}</b> / {allWords.toLocaleString()}
+            Mastered: <b>{mastered.toLocaleString()}</b> / {allWords.toLocaleString()}
           </div>
           <div className="sample">
             {stripHints(sample.en)} = <b>{stripHints(sample.ro)}</b>
@@ -815,9 +815,9 @@ function Home({
         </div>
 
         <div className="bestiary">
-          {BESTIARY.map(([emoji, ro, en]) => (
-            <span key={ro}>
-              <i>{emoji}</i> <b>{ro}</b> {en}
+          {BESTIARY.map(([emoji, name, what]) => (
+            <span key={name}>
+              <i>{emoji}</i> <b>{name}</b> {what}
             </span>
           ))}
         </div>
@@ -875,9 +875,9 @@ function CampaignMap({
             ←
           </button>
           <div>
-            <h2>Aventură</h2>
+            <h2>Adventure</h2>
             <p className="dim">
-              Adventure · ⭐ {totalStars(dir)}/{maxStars}
+              ⭐ {totalStars(dir)}/{maxStars} stars
             </p>
           </div>
           <div className="seg small-seg">
@@ -899,8 +899,8 @@ function CampaignMap({
               <div className="chapter-head">
                 <span className="chapter-emoji">{ch.emoji}</span>
                 <div>
-                  <div className="chapter-n">Capitolul {ch.n} · Chapter {ch.n}</div>
-                  <b>{ch.ro}</b> <span className="dim">{ch.en}</span>
+                  <div className="chapter-n">Chapter {ch.n}</div>
+                  <b>{ch.en}</b>
                 </div>
                 <span className="chapter-stars">
                   ⭐ {score.stars}/{maxChapterStars(ch)}
@@ -920,7 +920,7 @@ function CampaignMap({
                         ref={m === current ? currentRef : undefined}
                         className={`node ${m.kind}${unlocked ? '' : ' locked'}${stars ? ' cleared' : ''}${m === current ? ' current' : ''}`}
                         onClick={() => setSheet(m.id)}
-                        aria-label={`${m.ro}: ${unlocked ? `${stars} stars` : 'locked'}`}
+                        aria-label={`${m.en}: ${unlocked ? `${stars} stars` : 'locked'}`}
                       >
                         <span className="node-emoji">{unlocked ? m.emoji : '🔒'}</span>
                         <span className="node-n">{m.n}</span>
@@ -937,9 +937,13 @@ function CampaignMap({
                         )}
                       </button>
                       <span className="node-label">
-                        {m.ro}
+                        {m.en}
                         {stars > 0 && <Stars n={stars} />}
-                        {stars > 0 && variantsWon < m.variants.length - 1 && <small className="node-more">+{m.variants.length - 1 - variantsWon} variante</small>}
+                        {stars > 0 && variantsWon < m.variants.length - 1 && (
+                          <small className="node-more">
+                            +{m.variants.length - 1 - variantsWon} {m.variants.length - 1 - variantsWon === 1 ? 'variant' : 'variants'}
+                          </small>
+                        )}
                       </span>
                     </div>
                   );
@@ -971,12 +975,12 @@ function MissionSheet({
   const unlocked = isOpen(dir, mission);
   const prev = MISSIONS[mission.n - 2];
   const topics = mission.categories.length
-    ? mission.categories.map((id) => CATEGORIES.find((c) => c.id === id)?.ro ?? id).join(', ')
-    : 'toate temele · every topic';
+    ? mission.categories.map((id) => CATEGORIES.find((c) => c.id === id)?.en ?? id).join(', ')
+    : 'every topic';
   const chapter = CHAPTERS[mission.chapter - 1];
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={mission.ro}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={mission.en}>
         <button className="sheet-close" onClick={onClose} aria-label="Close">
           ✕
         </button>
@@ -984,23 +988,22 @@ function MissionSheet({
           <span className="sheet-emoji">{mission.emoji}</span>
           <div>
             <div className="chapter-n">
-              Misiunea {mission.n} · {chapter.emoji} {chapter.ro}
-              {mission.kind === 'review' ? ' · recapitulare' : mission.kind === 'boss' ? ' · boss' : ''}
+              Mission {mission.n} · {chapter.emoji} {chapter.en}
+              {mission.kind === 'review' ? ' · review' : mission.kind === 'boss' ? ' · boss' : ''}
             </div>
-            <h3>{mission.ro}</h3>
-            <div className="dim">{mission.en}</div>
+            <h3>{mission.en}</h3>
           </div>
         </div>
         <p className="sheet-topics">
           {mission.kind === 'review'
-            ? '🔁 Cuvintele pe care încă nu le știi din capitol · the words of this chapter you have not mastered yet'
-            : `📚 ${topics} · ${mission.waves} valuri${mission.kind === 'boss' ? ', balaur în fiecare val' : ''}`}
+            ? '🔁 The words of this chapter you have not mastered yet'
+            : `📚 ${topics} · ${mission.waves} waves${mission.kind === 'boss' ? ', the Bookwyrm in every wave' : ''}`}
         </p>
         {!unlocked && (
           <div className="reqs">
-            <div className="field-label">🔒 Încuiat · Locked: ai nevoie de · you need</div>
+            <div className="field-label">🔒 Locked: you need</div>
             {prev && (
-              <Req ok={starsFor(dir, prev.id) > 0} text={`⭐ ${prev.ro} · ${VARIANTS.std.ro}`} onGo={() => onGo(prev.id)} />
+              <Req ok={starsFor(dir, prev.id) > 0} text={`⭐ ${prev.en} · ${VARIANTS.std.en}`} onGo={() => onGo(prev.id)} />
             )}
             {mission.requires.map((r, i) => {
               const d = describe(dir, mission, r);
@@ -1017,12 +1020,12 @@ function MissionSheet({
               <div key={v} className={`variant${can ? '' : ' locked'}`}>
                 <span className="variant-emoji">{info.emoji}</span>
                 <div className="variant-text">
-                  <b>{info.ro}</b> <span className="dim">{info.en}</span>
-                  <div className="variant-desc">{can || v === 'std' ? info.desc : 'Câștigă întâi varianta normală · Win the standard run first.'}</div>
+                  <b>{info.en}</b>
+                  <div className="variant-desc">{can || v === 'std' ? info.desc : 'Win the standard run first.'}</div>
                 </div>
                 <Stars n={stars} />
                 <button className="btn primary play" disabled={!can} onClick={() => onPlay(mission, v)}>
-                  {stars ? 'Din nou' : 'Joacă'}
+                  {stars ? 'Replay' : 'Play'}
                 </button>
               </div>
             );
@@ -1041,7 +1044,7 @@ function Req({ ok, text, progress, onGo }: { ok: boolean; text: string; progress
       {progress && <span className="req-progress">{progress}</span>}
       {!ok && onGo && (
         <button className="link" onClick={onGo}>
-          mergi →
+          go →
         </button>
       )}
     </div>
@@ -1071,9 +1074,9 @@ function Won({
     <div className="overlay">
       <div className="card won">
         <div className="won-emoji">{run.emoji}</div>
-        <h2>Misiune completă!</h2>
+        <h2>Mission complete!</h2>
         <p className="dim">
-          {run.ro} · {run.en} · {variant.emoji} {variant.ro}
+          {run.en} · {variant.emoji} {variant.en}
         </p>
         <div className="won-stars">
           <Stars n={state.stars} />
@@ -1081,7 +1084,7 @@ function Won({
         <div className="stats">
           <div>
             <b>{state.score.toLocaleString()}</b>
-            <span>{state.score >= best ? 'Record nou! · New best' : 'Scor · Score'}</span>
+            <span>{state.score >= best ? 'New best!' : 'Score'}</span>
           </div>
           <div>
             <b>
@@ -1091,25 +1094,25 @@ function Won({
           </div>
           <div>
             <b>{state.destroyed}</b>
-            <span>Trimiși acasă · Sent home</span>
+            <span>Sent home</span>
           </div>
           <div>
             <b>{accuracy}%</b>
-            <span>Precizie · Accuracy</span>
+            <span>Accuracy</span>
           </div>
         </div>
         {state.stars < 3 && <p className="hint-line">⭐⭐⭐ = 80%+ HP left and 90%+ accuracy</p>}
         <div className="row">
           {next && (
             <button className="btn primary" onClick={onNext}>
-              {next.emoji} {next.ro} <small>Next · Enter</small>
+              {next.emoji} {next.en} <small>Next · Enter</small>
             </button>
           )}
           <button className="btn" onClick={onAgain}>
-            Din nou <small>Replay</small>
+            Replay
           </button>
           <button className="btn" onClick={onMap}>
-            Hartă <small>Map</small>
+            Map
           </button>
         </div>
       </div>
@@ -1136,32 +1139,32 @@ function GameOver({
   return (
     <div className="overlay">
       <div className="card">
-        <h2 className="over-title">Cetatea a obosit!</h2>
+        <h2 className="over-title">The library needs a nap!</h2>
         <p className="dim">
           {state.failReason ? `${state.failReason}. ` : ''}
-          {state.run ? `${state.run.emoji} ${state.run.ro} · ${state.run.en}. ` : ''}The castle needs a nap. Great effort, try again!
+          {state.run ? `${state.run.emoji} ${state.run.en}. ` : ''}Great effort, try again!
         </p>
         <div className="stats">
           <div>
             <b>{state.score.toLocaleString()}</b>
-            <span>{isBest ? 'Record nou! · New best' : 'Scor · Score'}</span>
+            <span>{isBest ? 'New best!' : 'Score'}</span>
           </div>
           <div>
             <b>{state.wave}</b>
-            <span>Valul · Wave</span>
+            <span>Wave</span>
           </div>
           <div>
             <b>{state.destroyed}</b>
-            <span>Trimiși acasă · Sent home</span>
+            <span>Sent home</span>
           </div>
           <div>
             <b>{accuracy}%</b>
-            <span>Precizie · Accuracy</span>
+            <span>Accuracy</span>
           </div>
         </div>
         {state.missed.length > 0 && (
           <div className="practice">
-            <div className="field-label">De exersat · Words to practise</div>
+            <div className="field-label">Words to practise</div>
             <ul>
               {state.missed.slice(0, 12).map((m) => (
                 <li key={m.entry.id}>
@@ -1175,10 +1178,10 @@ function GameOver({
         )}
         <div className="row">
           <button className="btn primary" onClick={onAgain}>
-            Din nou! <small>Play again · Enter</small>
+            Play again <small>Enter</small>
           </button>
           <button className="btn" onClick={onMenu}>
-            {state.run ? 'Hartă' : 'Meniu'} <small>{state.run ? 'Map' : 'Menu'}</small>
+            {state.run ? 'Map' : 'Menu'}
           </button>
         </div>
       </div>
