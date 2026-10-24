@@ -1,59 +1,15 @@
 // Builds the three.js scene for a Rockets arena from the server's box list, in a cel-shaded comic style: toon-lit
-// surfaces in bright colours, an ink hull around every box plus ink crease lines, a hand-drawn tile floor and a sky
-// with puffy low-poly clouds. Boxes are merged into one mesh per kind, so even the busiest map draws in a couple of
-// dozen calls.
+// surfaces in bright colours with hand-drawn textures per kind (tiles, bricks, metal plates, strata...), an ink hull
+// around every box plus ink crease lines, hazard stripes on every drop, props on and behind the outer walls, and a
+// themed sky. Everything is merged per material, so even the busiest map draws the arena in under forty calls.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { BoxKind, MapData } from '@shared/rockets/map';
-import { INK, flat, hullGeometry, inkMaterial, toonRamp } from '../../engine/toon';
-
-type Visible = Exclude<BoxKind, 'clip'>;
-
-/** Square tiles with inked grout and a few speckles, tinted by the material colour. */
-function tileTexture(cells: number, grout: number, speckle: boolean): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, size, size);
-  const step = size / cells;
-  // Alternate tiles a touch darker, like a printed checker.
-  for (let i = 0; i < cells; i++) {
-    for (let j = 0; j < cells; j++) {
-      if ((i + j) % 2) {
-        ctx.fillStyle = 'rgba(0,0,0,0.06)';
-        ctx.fillRect(i * step, j * step, step, step);
-      }
-    }
-  }
-  if (speckle) {
-    for (let i = 0; i < 160; i++) {
-      ctx.fillStyle = `rgba(0,0,0,${0.05 + Math.random() * 0.08})`;
-      ctx.beginPath();
-      ctx.arc(Math.random() * size, Math.random() * size, 1 + Math.random() * 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  ctx.strokeStyle = 'rgba(22,18,28,0.75)';
-  ctx.lineWidth = grout;
-  for (let i = 0; i <= cells; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * step, 0);
-    ctx.lineTo(i * step, size);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, i * step);
-    ctx.lineTo(size, i * step);
-    ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
-}
+import type { MapBox, MapData } from '@shared/rockets/map';
+import { INK, hullGeometry, inkLineMaterial, inkMaterial, toonRamp } from '../../engine/toon';
+import { BASE_SURFACES, Bucket, type Surface, type Visible, at, buildProps, edgeHazards, themeOf } from './arenaDecor';
+import { SUN_DIR, buildSky } from './arenaSky';
+import { TEX_SIZE, type TexKey, arenaTexture, mulberry } from './arenaTextures';
 
 /** Comic defaults; maps override per kind through `tint`. */
 const PALETTE: Record<Visible, number> = {
@@ -68,20 +24,60 @@ const PALETTE: Record<Visible, number> = {
 };
 
 const DEFAULT_ACCENT = 0x3ee0b0;
+/** Visual jump pads are this much wider than their trigger radius, so they read from across the map. */
+const PAD_SCALE = 1.45;
+const PACK_COLOR = 0x7cf4c9;
 
 export interface ArenaView {
   group: THREE.Group;
+  /**
+   * One handle per jump pad. The client spins them by advancing `rotation.z`; the pads themselves are a single
+   * instanced mesh that reads the first handle's angle to spin, bob and pulse every ring and beam on the GPU.
+   */
   padRings: THREE.Mesh[];
   dispose(): void;
 }
+
+/** A toon material that picks a side texture or a top texture per face (attribute `aTop`), both in world metres. */
+function surfaceMaterial(color: number, surface: Surface, tex: (k: TexKey) => THREE.Texture): THREE.MeshToonMaterial {
+  const mat = new THREE.MeshToonMaterial({ color, gradientMap: toonRamp(), map: tex(surface.side), vertexColors: true });
+  const crate = surface.side === 'crate';
+  const topMap = tex(surface.top);
+  const sideScale = crate ? 1 : 1 / TEX_SIZE[surface.side];
+  const topScale = crate ? 1 : 1 / TEX_SIZE[surface.top];
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.topMap = { value: topMap };
+    shader.uniforms.sideScale = { value: sideScale };
+    shader.uniforms.topScale = { value: topScale };
+    shader.vertexShader = 'attribute float aTop;\nvarying float vTop;\n' + shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\nvTop = aTop;');
+    shader.fragmentShader =
+      'uniform sampler2D topMap;\nuniform float sideScale;\nuniform float topScale;\nvarying float vTop;\n' +
+      shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `vec4 sampledDiffuseColor = mix(texture2D(map, vMapUv * sideScale), texture2D(topMap, vMapUv * topScale), vTop);
+        diffuseColor *= sampledDiffuseColor;`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'arenaSurface';
+  return mat;
+}
+
+/** True for the one floor box that covers the whole map; it needs no outline. */
+const isShellFloor = (b: MapBox, half: number) => b.kind === 'floor' && b.min.x <= -half && b.max.x >= half && b.min.z <= -half && b.max.z >= half;
 
 export function buildArena(map: MapData): ArenaView {
   const group = new THREE.Group();
   const disposables: { dispose(): void }[] = [];
   const accent = map.accent ?? DEFAULT_ACCENT;
-  const floorTex = tileTexture(2, 5, true);
-  const wallTex = tileTexture(2, 3, false);
-  disposables.push(floorTex, wallTex);
+  const theme = themeOf(map);
+  const seed = map.id.length * 101 + map.half;
+  const textures = new Map<TexKey, THREE.Texture>();
+  const tex = (k: TexKey) => {
+    let t = textures.get(k);
+    if (!t) textures.set(k, (t = arenaTexture(k, seed)));
+    return t;
+  };
+  const rand = mulberry(seed);
 
   // ---- surfaces, merged per kind, plus one ink hull and one set of crease lines for everything ----
   const byKind = new Map<Visible, THREE.BufferGeometry[]>();
@@ -93,20 +89,40 @@ export function buildArena(map: MapData): ArenaView {
     const sy = b.max.y - b.min.y;
     const sz = b.max.z - b.min.z;
     const geo = new THREE.BoxGeometry(sx, sy, sz);
-    // Scale texture coordinates by world size so tiles stay square: 4 m tiles on floors, 2 m on everything else.
-    const tile = b.kind === 'floor' ? 4 : 2;
-    const uv = geo.attributes.uv as THREE.BufferAttribute;
-    const normal = geo.attributes.normal as THREE.BufferAttribute;
-    for (let i = 0; i < uv.count; i++) {
-      const nx = Math.abs(normal.getX(i));
-      const ny = Math.abs(normal.getY(i));
-      const w = ny > 0.5 ? sx : nx > 0.5 ? sz : sx;
-      const h = ny > 0.5 ? sz : sy;
-      uv.setXY(i, (uv.getX(i) * w) / tile, (uv.getY(i) * h) / tile);
-    }
     geo.translate((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2);
-    if (b.kind !== 'floor') hulls.push(hullGeometry(geo));
-    if (b.kind !== 'floor' && b.kind !== 'wall') creases.push(new THREE.EdgesGeometry(geo));
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const normal = geo.attributes.normal as THREE.BufferAttribute;
+    const uv = geo.attributes.uv as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    const top = new Float32Array(pos.count);
+    // Small crates get one picture per face; big boxes painted as crates tile it every 2.5 m.
+    const crateTile = b.kind === 'crate' && Math.max(sx, sy, sz) > 3 ? 2.5 : 0;
+    // A little brightness jitter per box so neighbouring blocks of one kind don't merge into a single slab.
+    const jitter = 0.95 + rand() * 0.08;
+    for (let i = 0; i < pos.count; i++) {
+      const nx = Math.abs(normal.getX(i));
+      const ny = normal.getY(i);
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      // World-metre uvs, so textures line up across neighbouring boxes; crates keep one picture per face.
+      if (b.kind !== 'crate' || crateTile) {
+        const k = crateTile ? 1 / crateTile : 1;
+        if (Math.abs(ny) > 0.5) uv.setXY(i, x * k, z * k);
+        else if (nx > 0.5) uv.setXY(i, z * k, y * k);
+        else uv.setXY(i, x * k, y * k);
+      }
+      // Undersides go dark and sides darken toward their foot: bridges and stairs read clearly from below.
+      const k = ny > 0.5 ? 1 : ny < -0.5 ? 0.42 : y > b.min.y + 0.01 ? 1 : sy < 1.2 ? 0.7 : 0.8;
+      colors.set([k * jitter, k * jitter, k * jitter], i * 3);
+      top[i] = ny > 0.5 ? 1 : 0;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('aTop', new THREE.BufferAttribute(top, 1));
+    if (!isShellFloor(b, map.half)) {
+      hulls.push(hullGeometry(geo));
+      if (b.kind !== 'wall') creases.push(new THREE.EdgesGeometry(geo));
+    }
     let list = byKind.get(b.kind);
     if (!list) byKind.set(b.kind, (list = []));
     list.push(geo);
@@ -116,14 +132,102 @@ export function buildArena(map: MapData): ArenaView {
     const merged = mergeGeometries(list, false);
     for (const g of list) g.dispose();
     if (!merged) continue;
-    const mat = new THREE.MeshToonMaterial({ color: map.tint?.[kind] ?? PALETTE[kind], gradientMap: toonRamp() });
-    if (kind === 'floor') mat.map = floorTex;
-    else if (kind !== 'crate' && kind !== 'pillar') mat.map = wallTex;
+    const mat = surfaceMaterial(map.tint?.[kind] ?? PALETTE[kind], theme.surfaces[kind] ?? BASE_SURFACES[kind], tex);
     const mesh = new THREE.Mesh(merged, mat);
     mesh.receiveShadow = true;
     mesh.castShadow = kind !== 'floor' && kind !== 'wall';
     group.add(mesh);
     disposables.push(merged, mat);
+  }
+  const crease = mergeGeometries(creases, false);
+  for (const g of creases) g.dispose();
+  if (crease) {
+    group.add(new THREE.LineSegments(crease, inkLineMaterial()));
+    disposables.push(crease);
+  }
+
+  // ---- decoration buckets: toon props, unlit glow, additive fades, ink decals ----
+  const solid = new Bucket();
+  const glow = new Bucket();
+  const fade = new Bucket();
+  const decal = new Bucket();
+  buildProps(map, theme, { solid, glow, fade });
+  const hazards = edgeHazards(map, fade);
+  if (hazards.stripes) {
+    const mat = new THREE.MeshToonMaterial({ color: 0xffffff, map: tex('hazard'), gradientMap: toonRamp(), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const mesh = new THREE.Mesh(hazards.stripes, mat);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    disposables.push(hazards.stripes, mat);
+  }
+
+  // ---- jump pads: a wide disc with a bright rim and an inner well, a beam of light, and a spinning arrow ring ----
+  const spin = { value: 0 };
+  const padRings: THREE.Mesh[] = [];
+  for (const pad of map.pads) {
+    const r = pad.radius * PAD_SCALE;
+    const { x, y, z } = pad.pos;
+    solid.add(at(new THREE.CylinderGeometry(r, r * 1.08, 0.16, 18), x, y + 0.08, z), accent);
+    glow.add(at(new THREE.TorusGeometry(r * 0.95, 0.08, 3, 24).rotateX(Math.PI / 2), x, y + 0.17, z), 0xffffff);
+    glow.add(at(new THREE.CylinderGeometry(r * 0.6, r * 0.6, 0.02, 18), x, y + 0.165, z), new THREE.Color(accent).multiplyScalar(0.55));
+    const beamH = 3.2;
+    fade.add(at(new THREE.CylinderGeometry(r * 0.8, r * 0.9, beamH, 18, 1, true), x, y + beamH / 2 + 0.1, z), accent, (_x, by) => (by < y + 0.2 ? 0.32 : 0));
+    padRings.push(new THREE.Mesh());
+  }
+  if (map.pads.length) {
+    const ring = new THREE.TorusGeometry(1, 0.07, 4, 6).rotateX(Math.PI / 2);
+    const arrows: THREE.BufferGeometry[] = [ring];
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      arrows.push(new THREE.ConeGeometry(0.16, 0.34, 4).translate(Math.cos(a), 0.12, Math.sin(a)));
+    }
+    const ringGeo = mergeGeometries(arrows, false);
+    for (const g of arrows) g.dispose();
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+    ringMat.onBeforeCompile = (shader) => {
+      shader.uniforms.spin = spin;
+      shader.vertexShader = 'uniform float spin;\n' + shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        float padPulse = sin(spin * 2.2 + float(gl_InstanceID) * 1.7);
+        float ca = cos(spin);
+        float sa = sin(spin);
+        transformed.xz = mat2(ca, -sa, sa, ca) * transformed.xz * (1.0 + 0.1 * padPulse);
+        transformed.y += 0.14 * (0.5 + 0.5 * padPulse);`,
+      );
+    };
+    ringMat.customProgramCacheKey = () => 'padRing';
+    const rings = new THREE.InstancedMesh(ringGeo, ringMat, map.pads.length);
+    const m = new THREE.Matrix4();
+    map.pads.forEach((pad, i) => {
+      const k = pad.radius * PAD_SCALE * 0.7;
+      rings.setMatrixAt(i, m.makeScale(k, k, k).setPosition(pad.pos.x, pad.pos.y + 0.3, pad.pos.z));
+    });
+    rings.frustumCulled = false;
+    rings.onBeforeRender = () => {
+      spin.value = padRings[0].rotation.z;
+    };
+    group.add(rings);
+    disposables.push(ringGeo, ringMat);
+  }
+
+  // ---- health pack beacons: a ring on the floor and a soft beam, so pickups read from range ----
+  for (const p of map.packs) {
+    glow.add(at(new THREE.TorusGeometry(0.8, 0.06, 3, 20).rotateX(Math.PI / 2), p.x, p.y + 0.04, p.z), PACK_COLOR);
+    fade.add(at(new THREE.CylinderGeometry(0.55, 0.65, 2.4, 14, 1, true), p.x, p.y + 1.2, p.z), PACK_COLOR, (_x, by) => (by < p.y + 0.1 ? 0.3 : 0));
+  }
+
+  // ---- spawn markers: inked hexagons on the floor ----
+  for (const sp of map.spawns) decal.add(at(new THREE.RingGeometry(0.5, 0.6, 6).rotateX(-Math.PI / 2), sp.pos.x, sp.pos.y + 0.02, sp.pos.z), INK, 0.25);
+
+  const solidGeo = solid.build();
+  if (solidGeo) {
+    const mat = new THREE.MeshToonMaterial({ color: 0xffffff, vertexColors: true, gradientMap: toonRamp() });
+    const mesh = new THREE.Mesh(solidGeo, mat);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    hulls.push(hullGeometry(solidGeo));
+    disposables.push(solidGeo, mat);
   }
   const hull = mergeGeometries(hulls, false);
   for (const g of hulls) g.dispose();
@@ -131,49 +235,34 @@ export function buildArena(map: MapData): ArenaView {
     group.add(new THREE.Mesh(hull, inkMaterial()));
     disposables.push(hull);
   }
-  const crease = mergeGeometries(creases, false);
-  for (const g of creases) g.dispose();
-  if (crease) {
-    const mat = new THREE.LineBasicMaterial({ color: INK });
-    group.add(new THREE.LineSegments(crease, mat));
-    disposables.push(crease, mat);
+  const glowGeo = glow.build();
+  if (glowGeo) {
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+    group.add(new THREE.Mesh(glowGeo, mat));
+    disposables.push(glowGeo, mat);
+  }
+  const fadeGeo = fade.build();
+  if (fadeGeo) {
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.spin = spin;
+      shader.fragmentShader = 'uniform float spin;\n' + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= 0.7 + 0.3 * sin(spin * 2.2);');
+    };
+    mat.customProgramCacheKey = () => 'arenaFade';
+    const mesh = new THREE.Mesh(fadeGeo, mat);
+    mesh.renderOrder = 2;
+    group.add(mesh);
+    disposables.push(fadeGeo, mat);
+  }
+  const decalGeo = decal.build();
+  if (decalGeo) {
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    group.add(new THREE.Mesh(decalGeo, mat));
+    disposables.push(decalGeo, mat);
   }
 
-  // ---- jump pads: a chunky disc with an arrow ring the client spins ----
-  const padRings: THREE.Mesh[] = [];
-  const padMat = new THREE.MeshToonMaterial({ color: accent, gradientMap: toonRamp() });
-  const ringMat = flat(0xffffff);
-  const ringGeo = new THREE.TorusGeometry(1, 0.07, 4, 6);
-  disposables.push(padMat, ringGeo);
-  for (const pad of map.pads) {
-    const geo = new THREE.CylinderGeometry(pad.radius, pad.radius * 1.12, 0.16, 10);
-    const disc = new THREE.Mesh(geo, padMat);
-    disc.position.set(pad.pos.x, pad.pos.y + 0.08, pad.pos.z);
-    disc.receiveShadow = true;
-    group.add(disc);
-    const outline = new THREE.Mesh(hullGeometry(geo), inkMaterial());
-    outline.position.copy(disc.position);
-    group.add(outline);
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.scale.setScalar(pad.radius * 0.7);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(pad.pos.x, pad.pos.y + 0.22, pad.pos.z);
-    group.add(ring);
-    padRings.push(ring);
-  }
-
-  // ---- spawn markers: inked hexagons on the floor ----
-  const spawnMat = new THREE.MeshBasicMaterial({ color: INK, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false });
-  const spawnGeo = new THREE.RingGeometry(0.5, 0.6, 6);
-  disposables.push(spawnMat, spawnGeo);
-  for (const s of map.spawns) {
-    const ring = new THREE.Mesh(spawnGeo, spawnMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(s.pos.x, s.pos.y + 0.02, s.pos.z);
-    group.add(ring);
-  }
-
-  group.add(buildSky(map, disposables));
+  group.add(buildSky(map, theme, disposables));
+  for (const t of textures.values()) disposables.push(t);
 
   return {
     group,
@@ -188,92 +277,13 @@ export function buildArena(map: MapData): ArenaView {
   };
 }
 
-/** A gradient dome (horizon to zenith) with a ring of puffy inked clouds; unaffected by fog. */
-function buildSky(map: MapData, disposables: { dispose(): void }[]): THREE.Group {
-  const sky = new THREE.Group();
-  const radius = 230;
-  const domeGeo = new THREE.SphereGeometry(radius, 24, 12);
-  const domeMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: { zenith: { value: new THREE.Color(map.skyColor) }, horizon: { value: new THREE.Color(map.fogColor) }, radius: { value: radius } },
-    vertexShader: /* glsl */ `
-      varying float vH;
-      uniform float radius;
-      void main() {
-        vH = position.y / radius;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }`,
-    fragmentShader: /* glsl */ `
-      varying float vH;
-      uniform vec3 zenith;
-      uniform vec3 horizon;
-      void main() {
-        // Banded rather than smooth, like a printed gradient.
-        float t = floor(smoothstep(-0.02, 0.6, vH) * 6.0) / 6.0;
-        gl_FragColor = vec4(mix(horizon, zenith, t), 1.0);
-        #include <colorspace_fragment>
-      }`,
-  });
-  const dome = new THREE.Mesh(domeGeo, domeMat);
-  dome.renderOrder = -10;
-  dome.frustumCulled = false;
-  sky.add(dome);
-  disposables.push(domeGeo, domeMat);
-
-  // Clouds: clusters of flattened icosahedra, toon-lit, with an ink hull, drawn without fog so they stay crisp.
-  const cloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: toonRamp(), fog: false });
-  const cloudInk = inkMaterial(0.0016, 0.2, false);
-  const puffs: THREE.BufferGeometry[] = [];
-  const hulls: THREE.BufferGeometry[] = [];
-  const rand = mulberry(map.id.length * 7919 + map.half);
-  const count = 14;
-  for (let c = 0; c < count; c++) {
-    const a = (c / count) * Math.PI * 2 + rand() * 0.3;
-    const dist = 150 + rand() * 40;
-    const cx = Math.cos(a) * dist;
-    const cz = Math.sin(a) * dist;
-    const cy = 30 + rand() * 45;
-    const blobs = 3 + Math.floor(rand() * 3);
-    for (let i = 0; i < blobs; i++) {
-      const r = 7 + rand() * 6;
-      const geo = new THREE.IcosahedronGeometry(r, 1);
-      geo.scale(1, 0.6, 1);
-      geo.translate(cx + (i - blobs / 2) * r * 0.9, cy + rand() * 3, cz + (rand() - 0.5) * 6);
-      hulls.push(hullGeometry(geo));
-      puffs.push(geo);
-    }
-  }
-  const cloudGeo = mergeGeometries(puffs, false);
-  const cloudHull = mergeGeometries(hulls, false);
-  for (const g of [...puffs, ...hulls]) g.dispose();
-  if (cloudGeo && cloudHull) {
-    sky.add(new THREE.Mesh(cloudGeo, cloudMat), new THREE.Mesh(cloudHull, cloudInk));
-    disposables.push(cloudGeo, cloudHull, cloudMat);
-  }
-  return sky;
-}
-
-/** Small seeded PRNG so a map's clouds look the same for everyone. */
-function mulberry(seed: number) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 export function addArenaLights(scene: THREE.Scene, map: MapData) {
   scene.background = new THREE.Color(map.fogColor);
   // Light haze only: comic art keeps the far side readable.
   scene.fog = new THREE.Fog(map.fogColor, map.half * 1.6, Math.max(120, map.half * 5.5));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a6a, 1.6));
   const sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
-  sun.position.set(18, 30, 12);
+  sun.position.copy(SUN_DIR).multiplyScalar(Math.hypot(18, 30, 12));
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const half = map.half + 4;
