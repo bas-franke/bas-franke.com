@@ -19,7 +19,7 @@ import { TouchInput } from '../../engine/touch';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { type ArenaView, addArenaLights, buildArena } from './arena';
 import { WARHEAD_REST_Z, buildDroid, buildLauncher, buildRocket } from './models';
-import { QUALITY, applyInput, applyQuality, settings, verticalFov } from './settings';
+import { QUALITY, type Quality, applyInput, applyQuality, settings, verticalFov } from './settings';
 
 export interface FeedLine {
   id: number;
@@ -90,7 +90,7 @@ type Models = Awaited<ReturnType<RocketsClient['loadModels']>>;
 const ROCKET_COLOR = 0xffa14a;
 /** Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the crosshair. */
 const VM_POS = { x: 0.235, y: -0.24, z: -0.34 };
-const VM_YAW = 0.1;
+const VM_YAW = 0.085;
 const VM_PITCH = 0.06;
 const VM_SCALE = 0.48;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */
@@ -272,8 +272,7 @@ export class RocketsClient implements GameClient {
       // The frame loop eases from here to the new FOV (plus any speed kick).
       eng.camera.fov = this.fov = verticalFov(s.fov);
       eng.camera.updateProjectionMatrix();
-      (eng as Engine & { setMaxPixelRatio?: (r: number) => void }).setMaxPixelRatio?.(QUALITY[s.quality].pixelRatio);
-      applyQuality(eng.scene, s.quality);
+      this.applyQualityNow(s.quality);
     });
     this.effects = new Effects(engine.scene);
     this.rocketLights = new LightPool(engine.scene, 3);
@@ -490,7 +489,7 @@ export class RocketsClient implements GameClient {
         }
         const pos = fromTuple(e.p);
         if (!this.rockets.has(e.id)) this.spawnRocket(e.id, pos, fromTuple(e.v), true, false);
-        sfx.play('fire', dist(pos));
+        sfx.playAt('fire', pos.x, pos.y, pos.z);
         break;
       }
       case 'boom': {
@@ -501,7 +500,7 @@ export class RocketsClient implements GameClient {
         fx?.flash(pos, 0xff7a1f, 1.7, 0.45, 30);
         const d = dist(pos);
         if (d < 40) fx?.boom(pos, 1.4 + d * 0.04);
-        sfx.play('boom', d);
+        sfx.playAt('boom', pos.x, pos.y, pos.z);
         // Nearby blasts shake the view; the falloff is steep so distant fights do not rattle you.
         if (d < 14) {
           const near = 1 - d / 14;
@@ -512,7 +511,7 @@ export class RocketsClient implements GameClient {
       case 'hurt':
         if (e.id === you) {
           this.hud.set({ hurtAt: this.time, hp: Math.max(0, this.hud.get().hp - e.dmg) });
-          sfx.play('hurt');
+          sfx.play('hurt', 0, e.dmg / 100);
           this.addTrauma(Math.min(0.45, e.dmg / 160));
           // Snap the view away from whoever hit us.
           const from = e.by !== you ? this.remotes.get(e.by) : undefined;
@@ -526,7 +525,7 @@ export class RocketsClient implements GameClient {
           this.punch(-1.1 * k, side * 1.3 * k);
         } else if (e.by === you) {
           this.hud.set({ hitAt: this.time });
-          sfx.play('hit');
+          sfx.play('hit', 0, e.dmg / 100);
           this.hitStop(0.045);
         }
         break;
@@ -537,6 +536,7 @@ export class RocketsClient implements GameClient {
         const r = this.remotes.get(e.v);
         if (r) fx?.burst(vadd(r.group.position, v3(0, 1, 0)), r.color, 40, 6, 1, 0.6);
         if (e.by === you && !e.self) {
+          sfx.play('kill');
           this.hitStop(0.09);
           this.addTrauma(0.12);
         }
@@ -554,22 +554,22 @@ export class RocketsClient implements GameClient {
         if (e.id === you) {
           sfx.play('spawn');
           this.hud.set({ dead: false, hp: RK.maxHealth });
-        } else sfx.play('spawn', dist(pos));
+        } else sfx.playAt('spawn', pos.x, pos.y, pos.z);
         break;
       }
       case 'pack': {
         const pos = this.map?.packs[e.i];
         if (pos) fx?.burst(vadd(pos, v3(0, 0.6, 0)), 0x7cf4c9, 20, 3, 0.5, 1);
         if (e.by === you) {
-          sfx.play('pickup');
+          sfx.play('health');
           this.hud.set({ hp: Math.min(RK.maxHealth, this.hud.get().hp + RK.healthPackAmount) });
-        } else if (pos) sfx.play('pickup', dist(pos));
+        } else if (pos) sfx.playAt('health', pos.x, pos.y, pos.z);
         break;
       }
       case 'pad': {
         if (e.id === you) break;
         const r = this.remotes.get(e.id);
-        if (r) sfx.play('pad', dist(r.group.position));
+        if (r) sfx.playAt('pad', r.group.position.x, r.group.position.y, r.group.position.z);
         break;
       }
     }
@@ -599,7 +599,7 @@ export class RocketsClient implements GameClient {
       this.packs.push(pack);
       this.packBase.push(pos.y + 0.3);
     }
-    applyQuality(engine.scene, settings.get().quality);
+    this.applyQualityNow(settings.get().quality);
   }
 
   private buildViewmodel() {
@@ -652,6 +652,15 @@ export class RocketsClient implements GameClient {
     this.raise.reset(-0.3);
   }
 
+  /** Pixel-ratio cap, shadows and outlines for a quality preset. applyQuality drops the shadow map, so redraw it. */
+  private applyQualityNow(q: Quality) {
+    const engine = this.engine;
+    if (!engine) return;
+    engine.setMaxPixelRatio(QUALITY[q].pixelRatio);
+    applyQuality(engine.scene, q);
+    engine.invalidateShadows();
+  }
+
   private remote(id: string): Remote | null {
     let r = this.remotes.get(id);
     if (r) return r;
@@ -659,6 +668,21 @@ export class RocketsClient implements GameClient {
     if (!info || !this.engine) return null;
     const group = buildDroid(info.color);
     group.rotation.order = 'YXZ';
+    // Shadow budget: one caster per droid (its biggest mesh) is plenty for a blob of shadow under it.
+    let biggest: THREE.Mesh | null = null;
+    let biggestR = 0;
+    group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.castShadow) return;
+      mesh.castShadow = false;
+      if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+      const rad = mesh.geometry.boundingSphere!.radius * Math.max(mesh.scale.x, mesh.scale.y, mesh.scale.z);
+      if (rad > biggestR) {
+        biggestR = rad;
+        biggest = mesh;
+      }
+    });
+    if (biggest) (biggest as THREE.Mesh).castShadow = true;
     const label = makeLabel(info.name, colorHex(info.color));
     label.position.y = RK.height + 0.2;
     group.add(label);
@@ -714,6 +738,7 @@ export class RocketsClient implements GameClient {
     if (!view) return;
     this.engine?.scene.remove(view.group);
     if (view.light) this.rocketLights?.give(view.light);
+    sfx.rocketEnd(view.group.id);
     this.rockets.delete(id);
   }
 
@@ -752,6 +777,9 @@ export class RocketsClient implements GameClient {
     }
 
     this.updateCamera(dt, now);
+    const cam = engine.camera;
+    sfx.listen(cam.position.x, cam.position.y, cam.position.z, cam.rotation.y);
+    sfx.heartbeat(this.me.dead ? 0 : this.hud.get().hp, RK.maxHealth);
     this.updateRemotes(dt, now);
     this.updateRockets(dt, now);
     if (this.arena) for (const ring of this.arena.padRings) ring.rotation.z += dt * 1.5;
@@ -813,6 +841,7 @@ export class RocketsClient implements GameClient {
       else if (inp.jump && wasGround && !me.body.onGround) sfx.play('jump');
       // Landing dip, scaled by how hard we came down (a bunny hop barely registers, a long fall thumps).
       if (!wasGround && me.body.onGround && fallSpeed > 3) this.land.v -= 0.25 + Math.min(1, (fallSpeed - 3) / 16) * 1.1;
+      if (!wasGround && me.body.onGround && fallSpeed > 4) sfx.play('land', 0, clamp((fallSpeed - 4) / 14, 0, 1));
       if (inp.fire && now >= me.nextFire) {
         me.nextFire = now + RK.fireInterval;
         const dir = lookDir(me.yaw, me.pitch);
@@ -1073,6 +1102,7 @@ export class RocketsClient implements GameClient {
         if (k < 0.01) view.off = null;
       }
       view.group.position.set(x, y, z);
+      sfx.rocket(view.group.id, x, y, z, v.x, v.y, v.z);
       if (view.light) {
         view.light.position.set(x, y, z);
         view.light.intensity = 6 + Math.sin(now * 40) * 2;
