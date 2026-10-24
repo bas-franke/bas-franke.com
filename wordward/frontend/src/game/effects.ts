@@ -195,7 +195,7 @@ function buildAtlas() {
     g.fill();
     const body = g.createRadialGradient(-r * 0.3, -r * 0.35, 1, 0, 0, r);
     body.addColorStop(0, '#2f8c90');
-    body.addColorStop(0.45, '#0f4d57');
+    body.addColorStop(0.45, '#1d5560');
     body.addColorStop(0.85, '#06262e');
     body.addColorStop(1, '#0b3a42');
     g.fillStyle = body;
@@ -256,36 +256,53 @@ function buildAtlas() {
     g.fillStyle = wet;
     g.fillRect(-h, -h, h * 2, h * 2);
   });
-  // Golden letters: a crisp serif letter (opaque: gold gradient over a thin amber outline) inside a warm translucent
-  // halo. The glow batch draws alpha > ~0.5 as solid and the halo as added light.
-  [...LETTERS].forEach((ch, i) =>
-    inCell(g, C_LETTER + i, (g, h) => {
+  // Golden letters: a thin regular-weight serif letter (opaque: pale gold-white body over a hairline amber outline)
+  // inside a soft warm halo. The glow batch draws alpha > ~0.5 as solid and the halo as added light. The halo is
+  // drawn on a scratch canvas and its alpha capped under the solid threshold, so a brighter halo never turns into an
+  // opaque blob around the letter.
+  const halo = document.createElement('canvas');
+  halo.width = halo.height = CELL;
+  const hg = halo.getContext('2d', { willReadFrequently: true })!;
+  [...LETTERS].forEach((ch, i) => {
+    const h = CELL / 2 - 4;
+    const font = `${Math.round(h * 1.05)}px Georgia, 'Times New Roman', serif`;
+    const y = h * 0.04;
+    hg.clearRect(0, 0, CELL, CELL);
+    hg.save();
+    hg.translate(CELL / 2, CELL / 2);
+    hg.textAlign = 'center';
+    hg.textBaseline = 'middle';
+    hg.font = font;
+    hg.shadowColor = 'rgba(255,140,25,0.9)';
+    hg.fillStyle = 'rgba(255,170,50,0.5)';
+    // A tight bright edge glow plus a wider soft one, so the letter shape still reads through its halo.
+    hg.shadowBlur = 14;
+    hg.fillText(ch, 0, y);
+    hg.shadowBlur = 5;
+    hg.fillText(ch, 0, y);
+    hg.fillText(ch, 0, y);
+    hg.restore();
+    const img = hg.getImageData(0, 0, CELL, CELL);
+    const d = img.data;
+    for (let k = 3; k < d.length; k += 4) if (d[k] > 100) d[k] = 100; // ≤ 0.39: stays light, never solid
+    hg.putImageData(img, 0, 0);
+    inCell(g, C_LETTER + i, (g) => {
+      g.drawImage(halo, -CELL / 2, -CELL / 2);
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.font = `bold ${Math.round(h * 1.05)}px Georgia, 'Times New Roman', serif`;
-      const y = h * 0.04;
-      // Halo: two blurred passes kept translucent (alpha well under the solid threshold).
-      g.shadowColor = 'rgba(255,150,30,0.55)';
-      g.shadowBlur = 16;
-      g.fillStyle = 'rgba(255,170,50,0.3)';
-      g.fillText(ch, 0, y);
-      g.fillText(ch, 0, y);
-      g.shadowBlur = 6;
-      g.fillText(ch, 0, y);
-      g.shadowColor = 'transparent';
-      g.shadowBlur = 0;
+      g.font = font;
       g.lineJoin = 'round';
-      g.lineWidth = 2;
-      g.strokeStyle = '#d07816';
+      g.lineWidth = 1;
+      g.strokeStyle = '#c86e10';
       g.strokeText(ch, 0, y);
       const fill = g.createLinearGradient(0, -h * 0.5, 0, h * 0.5);
-      fill.addColorStop(0, '#fff8c8');
-      fill.addColorStop(0.5, '#ffd04a');
-      fill.addColorStop(1, '#ffa02a');
+      fill.addColorStop(0, '#fff6d8');
+      fill.addColorStop(0.5, '#ffe9a8');
+      fill.addColorStop(1, '#ffc657');
       g.fillStyle = fill;
       g.fillText(ch, 0, y);
-    }),
-  );
+    });
+  });
   atlas = new THREE.CanvasTexture(c);
   atlas.colorSpace = THREE.SRGBColorSpace;
   atlas.anisotropy = 2;
@@ -377,7 +394,8 @@ class Batch {
           // Premultiplied: light added in proportion to alpha; solid particles also cover what is behind.
           float cover = vSolid * smoothstep( 0.42, 0.7, t.a ) * vCol.a;
           if ( a < 0.004 ) discard;
-          vec3 c = vCol.rgb * t.rgb;
+          // Letter halos glow twice as bright as their capped texture alpha (the letter body itself stays as drawn).
+          vec3 c = vCol.rgb * t.rgb * ( 1.0 + vSolid * ( 1.0 - smoothstep( 0.3, 0.6, t.a ) ) );
           gl_FragColor = vec4( c * a, cover );
           #include <colorspace_fragment>
         }`
@@ -497,6 +515,8 @@ export class Effects {
   private freeMeshes = new Map<string, MeshFx[]>();
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
+  /** The game camera (from `prewarm`): on a portrait phone the world is drawn small, so letters are drawn larger. */
+  private camera: THREE.Camera | null = null;
 
   constructor(private readonly scene: THREE.Scene) {
     if (!atlas) buildAtlas();
@@ -607,31 +627,62 @@ export class Effects {
     const src = letters || LETTERS;
     // About half as many letters as sparks pairs, so fast typing does not bury the creature under glyphs.
     const glyphs = Math.max(1, Math.round(count / 2));
+    // Spread the glyphs round the ring (a random start, then evenly apart) so they never stack on one side.
+    const a0 = Math.random() * Math.PI * 2;
     for (let i = 0; i < count; i++) {
-      if (i < glyphs) this.glyph(at, src[(Math.random() * src.length) | 0], speed * 0.9, size * 6.5);
+      if (i < glyphs) {
+        const a = a0 + (i / glyphs) * Math.PI * 2 + rand(-0.5, 0.5);
+        this.glyph(at, src[(Math.random() * src.length) | 0], speed * 0.9, size * 5, a);
+      }
       this.spark(at, GOLD, speed * 1.6, size * 1.1);
       this.spark(at, GOLD_PALE, speed * 2, size * 0.9);
     }
+    // Every hit splashes a little ink: 4–6 small teal droplets with thin tendril tails, flung outwards.
+    const drops = 4 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < drops; i++) this.inkDrop(at, speed * 1.6, size * 2.1);
+  }
+
+  /** A small hit droplet: flies out fast and flat-ish with a long thin tail, then falls and vanishes. */
+  private inkDrop(at: THREE.Vector3, speed: number, size: number) {
+    const p = this.particle('drop', C_DROP, false, at, 0xffffff);
+    const a = Math.random() * Math.PI * 2;
+    const h = speed * rand(0.6, 1);
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    // Out in a screen-facing ring (up the screen is +y and -z), like the glyphs.
+    // Starts at the creature's skin, a touch towards the camera, so the body does not hide the spray.
+    p.pos.x += ca * 0.5;
+    p.pos.y += sa * 0.3 + 0.1;
+    p.pos.z += 0.35 - sa * 0.2;
+    p.vel.set(ca * h, sa * h * 0.7 + speed * 0.25, -sa * h * 0.5);
+    p.grav = 14;
+    p.drag = 2.2;
+    p.size = size * rand(0.7, 1.15);
+    p.life = rand(0.45, 0.65);
+    p.stretch = 0.12;
   }
 
   /** One golden letter flying out of `at`, floating up and fading. Unknown characters fall back to a random letter. */
-  glyph(at: THREE.Vector3, ch: string, speed = 4, size = 1) {
+  glyph(at: THREE.Vector3, ch: string, speed = 4, size = 1, angle = Math.random() * Math.PI * 2) {
     let i = LETTERS.indexOf(ch.toLowerCase());
     if (i < 0) i = (Math.random() * 26) | 0;
     const p = this.particle('glyph', C_LETTER + i, true, at, 0xffffff);
     p.solid = true;
-    const a = Math.random() * Math.PI * 2;
     const h = speed * rand(0.8, 1.2);
-    const ca = Math.cos(a);
-    const sa = Math.sin(a);
-    // Start off the hit point and fly outwards, so letters ring the impact instead of stacking on the creature.
-    p.pos.x += ca * 0.5;
-    p.pos.y += rand(-0.1, 0.3);
-    p.pos.z += sa * 0.4;
-    p.vel.set(ca * h, speed * rand(0.3, 0.7), sa * h * 0.8);
-    p.grav = 3;
-    p.drag = 2.4;
-    p.size = size * rand(0.85, 1.15);
+    const ca = Math.cos(angle);
+    const sa = Math.sin(angle);
+    // Start off the hit point and fly outwards in a ring that faces the camera (up the screen is +y and -z), so the
+    // letters circle the impact instead of stacking on the creature.
+    p.pos.x += ca * 0.75;
+    p.pos.y += sa * 0.55 + 0.1;
+    p.pos.z -= sa * 0.4;
+    p.vel.set(ca * h, sa * h * 0.75 + speed * 0.2, -sa * h * 0.55);
+    p.grav = 1.5;
+    p.drag = 2.6;
+    // Portrait screens show the field narrower, so hit letters grow up to 1.4x to stay readable on a phone.
+    const cam = this.camera as THREE.PerspectiveCamera | null;
+    const portrait = cam && cam.isPerspectiveCamera && cam.aspect < 1 ? Math.min(1.4, 1 / cam.aspect) : 1;
+    p.size = size * portrait * rand(0.85, 1.15);
     p.life = rand(0.7, 1);
     p.rot = rand(-0.35, 0.35);
   }
@@ -710,7 +761,7 @@ export class Effects {
       this.star(this.tmp, s * rand(0.4, 0.7), GOLD_PALE, rand(0.3, 0.55));
     }
     for (let i = 0; i < 14; i++) this.spark(at, i % 3 ? GOLD : GOLD_PALE, 5.5 * s, 0.16 * s);
-    for (let i = 0; i < 3; i++) this.glyph(at, LETTERS[(Math.random() * 26) | 0], 4.5, 1.4);
+    for (let i = 0; i < 3; i++) this.glyph(at, LETTERS[(Math.random() * 26) | 0], 4.5, 0.8);
   }
 
   /** A bubble shield pops: a spinning golden rune circle bursts outward with a ring of sparks. */
@@ -745,6 +796,7 @@ export class Effects {
    * hit does not stutter. Uses parallel compile where the browser supports it. Call once after setup.
    */
   prewarm(renderer: THREE.WebGLRenderer, camera: THREE.Camera) {
+    this.camera = camera;
     const o = new THREE.Vector3(0, -1000, 0);
     this.beam(o, new THREE.Vector3(0, -999, 0));
     void renderer.compileAsync(this.root, camera, this.scene).catch(() => {});
