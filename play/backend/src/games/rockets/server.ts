@@ -22,9 +22,19 @@ import { RK } from '../../shared/rockets/constants.js';
 import { ITEM, type ItemSpawn, itemRespawn, itemsFor } from '../../shared/rockets/items.js';
 import type { MapData } from '../../shared/rockets/map.js';
 import { MAPS, mapById } from '../../shared/rockets/maps.js';
+import { CTF, ELIM, MODES, type ModeRules, TEAMS, sideOf, teamBases } from '../../shared/rockets/modes.js';
 import { type Body, eyePosition, playerAABB, splashKnock, stepBody } from '../../shared/rockets/physics.js';
-import type { PlayerSnap, RocketSnap, RocketsEvent, RocketsInput, RocketsServerMsg, ScoreRow } from '../../shared/rockets/protocol.js';
-import type { GameClientMsg } from '../../shared/protocol.js';
+import type {
+  FlagSnap,
+  PlayerSnap,
+  RocketSnap,
+  RocketsEvent,
+  RocketsInput,
+  RocketsServerMsg,
+  RoundSnap,
+  ScoreRow,
+} from '../../shared/rockets/protocol.js';
+import type { GameClientMsg, GameMode, Team } from '../../shared/protocol.js';
 import type { GameHost, GamePlayer, GameServer } from '../types.js';
 import { BOT_PARAMS, RocketsBot, type BotEnemy } from './bots.js';
 import { type NavGraph, navGraphFor } from './nav.js';
@@ -51,6 +61,8 @@ interface RPlayer extends GamePlayer {
   lastInputAt: number;
   frags: number;
   deaths: number;
+  /** CTF captures. */
+  caps: number;
   brain?: RocketsBot;
   shots: number;
   /** Who last hurt this player and when, so a knock into the void still credits the shooter. */
@@ -74,6 +86,20 @@ interface Rocket {
   vel: Vec3;
   born: number;
 }
+
+/** A CTF flag. Index in `flags` = the team it belongs to. */
+interface Flag {
+  state: 0 | 1 | 2;
+  pos: Vec3;
+  carrier?: string;
+  /** Dropped flags go home by themselves at this time. */
+  returnAt: number;
+}
+
+/** Spawn score penalty for a point on the enemy half (team modes): far bigger than any distance bonus. */
+const WRONG_SIDE = 60;
+/** CTF spawn score lost per metre from your own base. */
+const BASE_PULL = 0.25;
 
 const IDLE: Omit<RocketsInput, 'seq' | 'yaw' | 'pitch'> = { f: 0, s: 0, jump: false, fire: false };
 /** Seconds without commands before the server moves a player on its own (gravity, friction). */
@@ -111,15 +137,54 @@ class RocketsGame implements GameServer {
   private ended = false;
   private timer?: NodeJS.Timeout;
   private readonly graph: NavGraph;
+  private readonly mode: GameMode;
+  private readonly rules: ModeRules;
+  /** Team modes: [red, blue] base positions (CTF flags stand here). */
+  private readonly bases?: [Vec3, Vec3];
+  /** Team modes: frags (tdm), captures (ctf) or round wins (elim) per team. */
+  private readonly teamScore: [number, number] = [0, 0];
+  /** CTF only. */
+  private readonly flags?: [Flag, Flag];
+  /** Elimination round state; round 1 starts when the countdown ends. */
+  private readonly round: { n: number; state: 'play' | 'over'; endsAt: number; nextAt: number };
 
   constructor(private readonly host: GameHost) {
     this.map = pickMap(host, this.rng);
     lastMap.set(host, this.map.id);
-    this.packs = this.map.packs.map(() => ({ available: true, respawnAt: 0 }));
+    this.mode = host.settings.mode in MODES ? host.settings.mode : 'ffa';
+    this.round = { n: 1, state: 'play', endsAt: RocketsGame.COUNTDOWN + ELIM.roundSeconds, nextAt: 0 };
+    this.rules = MODES[this.mode];
+    // Elimination has no pickups at all: everyone starts each round with the same health and armor.
+    const pickups = this.mode !== 'elim';
+    this.packs = this.map.packs.map(() => ({ available: pickups, respawnAt: 0 }));
     this.items = itemsFor(this.map.id);
     // Quake rule: the big items are not there at the start, so nobody spawns next to a free mega health.
-    this.itemState = this.items.map((it) => ({ available: it.k === 'shard', respawnAt: it.k === 'shard' ? 0 : itemRespawn(it.k) / 2 }));
+    this.itemState = this.items.map((it) => ({
+      available: pickups && it.k === 'shard',
+      respawnAt: !pickups ? Infinity : it.k === 'shard' ? 0 : itemRespawn(it.k) / 2,
+    }));
+    if (!pickups) for (const pack of this.packs) pack.respawnAt = Infinity;
     this.graph = navGraphFor(this.map);
+    if (this.rules.teams) this.bases = teamBases(this.map);
+    if (this.mode === 'ctf' && this.bases) {
+      this.flags = [
+        { state: 0, pos: { ...this.bases[0] }, returnAt: 0 },
+        { state: 0, pos: { ...this.bases[1] }, returnAt: 0 },
+      ];
+    }
+  }
+
+  private get teams() {
+    return this.rules.teams;
+  }
+
+  private isElim() {
+    return this.mode === 'elim';
+  }
+
+  /** Two different players on the same team (team modes): no damage and no knockback between them. */
+  private friendly(a: RPlayer | null, b: RPlayer) {
+    return !!a && a !== b && this.teams && a.team !== undefined && a.team === b.team;
   }
 
   // ---- lifecycle --------------------------------------------------------------------------------------------
@@ -183,19 +248,64 @@ class RocketsGame implements GameServer {
       lastInputAt: this.now,
       frags: 0,
       deaths: 0,
+      caps: 0,
       shots: 0,
     };
+    if (this.teams) {
+      // The room always assigns a team; this only guards against a player arriving without one.
+      if (player.team !== 0 && player.team !== 1) player.team = this.teamSize(0) <= this.teamSize(1) ? 0 : 1;
+    } else delete player.team;
+    // Elimination: whoever joins after the countdown spectates until the next round.
+    if (this.isElim() && !this.frozen()) player.respawnAt = Infinity;
     if (p.bot) player.brain = new RocketsBot(BOT_PARAMS[this.host.botDifficulty()], this.graph, makeRng(Math.floor(this.rng() * 1e9)));
     this.players.set(p.id, player);
-    this.host.send(p.id, { k: 'init', map: this.map, mode: this.host.settings.mode ?? 'ffa', items: this.items, scores: this.scores(), left: this.timeLeft() });
+    this.host.send(p.id, {
+      k: 'init',
+      map: this.map,
+      mode: this.mode,
+      items: this.items,
+      scores: this.scores(),
+      left: this.timeLeft(),
+      ...(this.bases ? { bases: [toTuple(this.bases[0]), toTuple(this.bases[1])] as [Vec3Tuple, Vec3Tuple] } : {}),
+    });
     this.host.broadcast({ k: 'score', scores: this.scores() });
   }
 
   removePlayer(id: string) {
-    if (!this.players.delete(id)) return;
+    const p = this.players.get(id);
+    if (!p) return;
+    this.dropFlag(p);
+    this.players.delete(id);
     // A departed player's rockets would otherwise kill with no owner, which counts as a suicide for the victim.
     this.rockets = this.rockets.filter((r) => r.owner !== id);
     this.host.broadcast({ k: 'score', scores: this.scores() });
+  }
+
+  /**
+   * A player changed team mid-match: they die on the spot without penalty (no frag lost, no death counted), drop a
+   * carried flag, lose their rockets in flight, and respawn for the new team (elimination: at the next round).
+   */
+  setTeam(id: string, team: Team) {
+    const p = this.players.get(id);
+    if (!p || !this.teams || (team !== 0 && team !== 1) || p.team === team) return;
+    this.dropFlag(p);
+    this.rockets = this.rockets.filter((r) => r.owner !== id);
+    p.team = team;
+    p.lastHitBy = undefined;
+    if (!p.dead) {
+      p.dead = true;
+      p.hp = 0;
+      p.armor = 0;
+    }
+    p.respawnAt = this.isElim() && !this.frozen() ? Infinity : this.now + 1;
+    this.events.push({ k: 'team', id, team });
+    this.host.broadcast({ k: 'score', scores: this.scores() });
+  }
+
+  private teamSize(team: Team) {
+    let n = 0;
+    for (const p of this.players.values()) if (p.team === team) n++;
+    return n;
   }
 
   onMessage(id: string, m: GameClientMsg) {
@@ -247,6 +357,7 @@ class RocketsGame implements GameServer {
       }
       this.stepRockets(RK.dt, null);
       this.updatePacks();
+      this.updateFlags();
     }
     if (substeps === 0 || this.ended) return;
     const frozen = this.frozen();
@@ -363,6 +474,7 @@ class RocketsGame implements GameServer {
       if (!knock) continue;
       const self = owner === p;
       if (!self && this.now < p.protectedUntil) continue; // spawn protection: no damage and no knockback
+      if (this.friendly(owner, p)) continue; // no friendly fire: teammates feel nothing, not even the push
       let dmg = p === direct ? (this.isAirshot(p) ? RK.airshotDamage : RK.directDamage) : RK.splashDamage * knock.falloff;
       if (self) dmg *= RK.selfDamageScale;
 
@@ -386,6 +498,9 @@ class RocketsGame implements GameServer {
   private damage(p: RPlayer, dmg: number, by: RPlayer | null) {
     if (dmg <= 0 || p.dead) return;
     if (this.now < p.protectedUntil && by !== p) return;
+    if (this.friendly(by, p)) return;
+    // Elimination intermission: the round is decided, so nobody can die until the next one.
+    if (this.isElim() && this.round.state === 'over') return;
     p.hp -= this.absorb(p, dmg);
     if (by && by !== p) {
       p.lastHitBy = by.id;
@@ -399,18 +514,34 @@ class RocketsGame implements GameServer {
     // After the deciding frag nothing else counts (two kills in one tick would otherwise score after the end).
     if (victim.dead || this.ended) return;
     // Falling into the void soon after someone's rocket is their frag, not a suicide.
-    const killer = killedBy ?? this.recentAttacker(victim);
+    let killer = killedBy ?? this.recentAttacker(victim);
+    // A teammate (who could only have pushed you before switching sides) never scores off you.
+    if (killer && this.friendly(killer, victim)) killer = null;
+    const intermission = this.isElim() && this.round.state === 'over';
     victim.lastHitBy = undefined;
     victim.dead = true;
     victim.hp = 0;
-    victim.deaths++;
-    victim.respawnAt = this.now + RK.respawnDelay;
+    victim.respawnAt = this.isElim() ? Infinity : this.now + RK.respawnDelay;
+    this.dropFlag(victim);
     const self = !killer || killer === victim;
+    if (intermission) {
+      // A fall during the pause between rounds: out until the next round, but nothing scores.
+      this.events.push({ k: 'kill', v: victim.id, by: '', self: true });
+      return;
+    }
+    victim.deaths++;
     if (self) victim.frags--;
-    else killer.frags++;
+    else killer!.frags++;
+    // Team deathmatch keeps a team tally: a frag for the killer's team, a suicide costs the victim's team one.
+    if (this.mode === 'tdm') {
+      if (!self && killer!.team !== undefined) this.teamScore[killer!.team]++;
+      else if (self && victim.team !== undefined) this.teamScore[victim.team]--;
+    }
     this.events.push({ k: 'kill', v: victim.id, by: killer?.id ?? '', self });
     this.host.broadcast({ k: 'score', scores: this.scores() });
-    if (killer && !self && killer.frags >= RK.fragLimit) this.endMatch();
+    if (self || !killer) return;
+    if (this.mode === 'ffa' && killer.frags >= this.rules.limit) this.endMatch();
+    if (this.mode === 'tdm' && killer.team !== undefined && this.teamScore[killer.team] >= this.rules.limit) this.endMatch();
   }
 
   /** The player who hurt `p` within the last few seconds, if they are still in the game. */
@@ -431,7 +562,7 @@ class RocketsGame implements GameServer {
     let best = -Infinity;
     const scored: { i: number; score: number }[] = [];
     this.map.spawns.forEach((s, i) => {
-      const score = this.spawnScore(s.pos, alive, diedAt, i === last);
+      const score = this.spawnScore(p, s.pos, alive, diedAt, i === last);
       if (score === -Infinity) return;
       scored.push({ i, score });
       if (score > best) best = score;
@@ -449,7 +580,8 @@ class RocketsGame implements GameServer {
     p.body.onGround = false;
     p.yaw = choice.yaw;
     p.pitch = 0;
-    p.hp = RK.maxHealth;
+    p.hp = this.isElim() ? ELIM.health : RK.maxHealth;
+    p.armor = this.isElim() ? ELIM.armor : 0;
     p.dead = false;
     p.protectedUntil = this.now + RK.spawnProtection;
     p.nextFire = this.now + 0.3;
@@ -460,7 +592,7 @@ class RocketsGame implements GameServer {
   // ---- pickups --------------------------------------------------------------------------------------------
 
   private tryPickup(p: RPlayer) {
-    if (p.dead) return;
+    if (p.dead || this.isElim()) return;
     for (let i = 0; i < this.packs.length; i++) {
       const pack = this.packs[i];
       if (!pack.available || p.hp >= RK.maxHealth) continue;
@@ -506,7 +638,8 @@ class RocketsGame implements GameServer {
   private updatePacks() {
     for (const pack of this.packs) if (!pack.available && this.now >= pack.respawnAt) pack.available = true;
     for (const state of this.itemState) if (!state.available && this.now >= state.respawnAt) state.available = true;
-    const decay = this.now >= this.nextDecay;
+    // Elimination's round health is not overheal: it stays until the enemy takes it.
+    const decay = this.now >= this.nextDecay && !this.isElim();
     if (decay) this.nextDecay += 1;
     for (const p of this.players.values()) {
       if (p.dead) {
@@ -522,40 +655,215 @@ class RocketsGame implements GameServer {
     }
   }
 
+  // ---- capture the flag -------------------------------------------------------------------------------------
+
+  /** Touching a flag (or a base, for a capture): close horizontally and within a body height. */
+  private touches(p: RPlayer, at: Vec3) {
+    return hdist(p.body.pos, at) <= CTF.touchRadius && Math.abs(p.body.pos.y - at.y) < RK.height;
+  }
+
+  /** Runs every step: carried flags follow their carrier; touches take, return and capture; dropped flags time out. */
+  private updateFlags() {
+    const flags = this.flags;
+    if (!flags || !this.bases || this.frozen() || this.ended) return;
+    for (let t = 0 as Team; t < 2; t = (t + 1) as Team) {
+      const f = flags[t];
+      if (f.state === 1) {
+        const carrier = f.carrier ? this.players.get(f.carrier) : undefined;
+        if (carrier && !carrier.dead) f.pos = { ...carrier.body.pos };
+        else this.returnFlag(t, '');
+      } else if (f.state === 2 && this.now >= f.returnAt) this.returnFlag(t, '');
+    }
+    for (const p of this.players.values()) {
+      if (p.dead || p.team === undefined) continue;
+      const own = flags[p.team];
+      const enemyTeam: Team = p.team === 0 ? 1 : 0;
+      const enemy = flags[enemyTeam];
+      // Your own dropped flag goes home the moment you touch it.
+      if (own.state === 2 && this.touches(p, own.pos)) this.returnFlag(p.team, p.id);
+      // The enemy flag (at their base or lying around) is yours to take.
+      if (enemy.state !== 1 && this.touches(p, enemy.pos)) {
+        enemy.state = 1;
+        enemy.carrier = p.id;
+        enemy.pos = { ...p.body.pos };
+        this.events.push({ k: 'flag', team: enemyTeam, a: 'take', by: p.id });
+        this.host.systemChat(`${p.name} has the ${TEAMS[enemyTeam].name} flag`);
+      }
+      // Home with the enemy flag while your own is safe at base: a capture.
+      if (enemy.state === 1 && enemy.carrier === p.id && own.state === 0 && this.touches(p, this.bases[p.team])) {
+        this.resetFlag(enemyTeam);
+        p.caps++;
+        this.teamScore[p.team]++;
+        this.events.push({ k: 'flag', team: enemyTeam, a: 'capture', by: p.id });
+        this.host.systemChat(`${p.name} captured the ${TEAMS[enemyTeam].name} flag`);
+        this.host.broadcast({ k: 'score', scores: this.scores() });
+        if (this.teamScore[p.team] >= this.rules.limit) return this.endMatch();
+      }
+    }
+  }
+
+  private resetFlag(t: Team) {
+    const f = this.flags![t];
+    f.state = 0;
+    f.carrier = undefined;
+    f.pos = { ...this.bases![t] };
+  }
+
+  private returnFlag(t: Team, by: string) {
+    this.resetFlag(t);
+    this.events.push({ k: 'flag', team: t, a: 'return', by });
+  }
+
+  /**
+   * The carrier died, left or switched team: the flag falls to the floor below where they were, or goes straight
+   * home when there is no floor below (the void).
+   */
+  private dropFlag(p: RPlayer) {
+    if (!this.flags) return;
+    for (let t = 0 as Team; t < 2; t = (t + 1) as Team) {
+      const f = this.flags[t];
+      if (f.state !== 1 || f.carrier !== p.id) continue;
+      const from = p.body.pos;
+      const floor = from.y > this.map.killY ? segmentBoxes(v3(from.x, from.y + 0.1, from.z), v3(from.x, this.map.killY, from.z), this.map.boxes) : null;
+      if (!floor || floor.normal.y < 0.5) {
+        this.returnFlag(t, '');
+        continue;
+      }
+      f.state = 2;
+      f.carrier = undefined;
+      f.pos = v3(from.x, from.y + 0.1 + (this.map.killY - from.y - 0.1) * floor.t, from.z);
+      f.returnAt = this.now + CTF.returnSeconds;
+      this.events.push({ k: 'flag', team: t, a: 'drop', by: p.id });
+    }
+  }
+
+  // ---- elimination rounds -----------------------------------------------------------------------------------
+
+  /** Elimination: players still in the round per team (counting anyone whose round-start spawn is still pending). */
+  private aliveCount(): [number, number] {
+    const alive: [number, number] = [0, 0];
+    for (const p of this.players.values()) {
+      if (p.team === undefined) continue;
+      if (!p.dead || p.respawnAt !== Infinity) alive[p.team]++;
+    }
+    return alive;
+  }
+
+  /** Runs once per loop: ends a round on a wipe-out or its clock, then starts the next one after the pause. */
+  private updateRound() {
+    if (!this.isElim() || this.frozen() || this.ended) return;
+    const r = this.round;
+    if (r.state === 'over') {
+      if (this.now >= r.nextAt) this.startRound();
+      return;
+    }
+    const [red, blue] = this.aliveCount();
+    // Sudden death never outlasts its cap: the round in progress is cut short and judged on health.
+    const deadline = this.overtime ? Math.min(r.endsAt, this.overtimeAt + this.overtimeMax()) : r.endsAt;
+    if (red > 0 && blue > 0 && this.now < deadline) return;
+    let winner: Team | null;
+    if (red === 0 || blue === 0) winner = red > 0 ? 0 : blue > 0 ? 1 : null;
+    else {
+      // Time: the team with more health and armor left takes it.
+      const left: [number, number] = [0, 0];
+      for (const p of this.players.values()) if (!p.dead && p.team !== undefined) left[p.team] += p.hp + p.armor;
+      winner = left[0] === left[1] ? null : left[0] > left[1] ? 0 : 1;
+    }
+    r.state = 'over';
+    r.nextAt = this.now + ELIM.intermission;
+    this.rockets = [];
+    if (winner !== null) this.teamScore[winner]++;
+    this.events.push({ k: 'round', n: r.n, winner });
+    this.host.systemChat(winner === null ? `Round ${r.n} is a draw` : `${TEAMS[winner].name} takes round ${r.n}`);
+    this.host.broadcast({ k: 'score', scores: this.scores() });
+    if (winner !== null && this.teamScore[winner] >= this.rules.limit) this.endMatch();
+  }
+
+  /** Everyone back in: fresh bodies with the round loadout, each team on its own half. */
+  private startRound() {
+    const r = this.round;
+    r.n++;
+    r.state = 'play';
+    r.endsAt = this.now + ELIM.roundSeconds;
+    this.rockets = [];
+    for (const p of this.players.values()) {
+      p.dead = true;
+      p.hp = 0;
+      p.armor = 0;
+      p.lastHitBy = undefined;
+    }
+    for (const p of this.players.values()) this.spawn(p);
+  }
+
   // ---- bots -------------------------------------------------------------------------------------------------
 
   private botView(p: RPlayer) {
     const enemies: BotEnemy[] = [];
+    const allies: { id: string; pos: Vec3 }[] = [];
     for (const o of this.players.values()) {
       if (o === p || o.dead) continue;
-      enemies.push({ id: o.id, pos: o.body.pos, vel: o.body.vel, onGround: o.body.onGround });
+      // Team modes: teammates are never targets.
+      if (this.friendly(o, p)) allies.push({ id: o.id, pos: o.body.pos });
+      else enemies.push({ id: o.id, pos: o.body.pos, vel: o.body.vel, onGround: o.body.onGround });
     }
     return {
       now: this.now,
       self: { id: p.id, body: p.body, hp: p.hp, dead: p.dead, nextFire: p.nextFire },
       enemies,
-      // Items count as packs for the bots' pickup routing, so they contest armor and mega health too.
-      packs: [
-        ...this.map.packs.map((pos, i) => ({ pos, available: this.packs[i].available, item: false })),
-        ...this.items.map((it, i) => ({ pos: it.p, available: this.itemState[i].available, item: true })),
-      ],
+      // Items count as packs for the bots' pickup routing, so they contest armor and mega health too. None in elim.
+      packs: this.isElim()
+        ? []
+        : [
+            ...this.map.packs.map((pos, i) => ({ pos, available: this.packs[i].available, item: false })),
+            ...this.items.map((it, i) => ({ pos: it.p, available: this.itemState[i].available, item: true })),
+          ],
       map: this.map,
       canSee: (from: Vec3, to: Vec3) => !segmentBoxes(from, to, this.map.boxes),
       // Rockets in flight, so bots can dodge them.
       rockets: this.rockets,
       frozen: this.frozen(),
+      mode: this.mode,
+      ...(this.teams
+        ? {
+            team: p.team,
+            allies,
+            bases: this.bases,
+            ...(this.flags ? { flags: this.flags.map((f) => ({ state: f.state, pos: f.pos, ...(f.carrier ? { carrier: f.carrier } : {}) })) } : {}),
+            ...(this.isElim() ? { roundOver: this.round.state === 'over' } : {}),
+          }
+        : {}),
     };
   }
 
   // ---- output -----------------------------------------------------------------------------------------------
 
   private scores(): ScoreRow[] {
-    return [...this.players.values()].map((p) => ({ id: p.id, frags: p.frags, deaths: p.deaths }));
+    return [...this.players.values()].map((p) => ({
+      id: p.id,
+      frags: p.frags,
+      deaths: p.deaths,
+      ...(this.teams && p.team !== undefined ? { team: p.team } : {}),
+      ...(this.mode === 'ctf' ? { caps: p.caps } : {}),
+    }));
   }
 
   /** Match clock: full during the countdown, then counts down; sits at 0 through overtime. */
   private timeLeft() {
-    return clamp(RK.matchSeconds - (this.now - RocketsGame.COUNTDOWN), 0, RK.matchSeconds);
+    const total = this.rules.seconds;
+    return clamp(total - (this.now - RocketsGame.COUNTDOWN), 0, total);
+  }
+
+  private flagSnaps(): [FlagSnap, FlagSnap] | undefined {
+    if (!this.flags) return undefined;
+    const snap = (f: Flag): FlagSnap => ({ s: f.state, p: cm(f.pos), ...(f.carrier ? { by: f.carrier } : {}) });
+    return [snap(this.flags[0]), snap(this.flags[1])];
+  }
+
+  private roundSnap(): RoundSnap | undefined {
+    if (!this.isElim()) return undefined;
+    const r = this.round;
+    const left = r.state === 'over' ? r.nextAt - this.now : (this.frozen() ? ELIM.roundSeconds : r.endsAt - this.now);
+    return { n: r.n, alive: this.aliveCount(), left: Math.max(0, Math.round(left * 10) / 10), state: r.state };
   }
 
   private flush() {
@@ -585,6 +893,9 @@ class RocketsGame implements GameServer {
       rk,
       ...(this.frozen() ? { cd: Math.round((RocketsGame.COUNTDOWN - this.now) * 10) / 10 } : {}),
       ...(this.overtime ? { ot: 1 as const } : {}),
+      ...(this.teams ? { ts: [this.teamScore[0], this.teamScore[1]] as [number, number] } : {}),
+      ...(this.flags ? { fl: this.flagSnaps() } : {}),
+      ...(this.isElim() ? { rd: this.roundSnap() } : {}),
     };
 
     if (this.events.length) {
@@ -616,9 +927,17 @@ class RocketsGame implements GameServer {
     const top = scores[0];
     const tie = scores.length > 1 && scores[1].frags === top?.frags && scores[1].deaths === top?.deaths;
     const winner = top && !tie ? top.id : null;
-    const name = winner ? this.players.get(winner)?.name : undefined;
-    this.host.systemChat(name ? `${name} wins with ${top.frags} frags` : 'The match ends in a draw');
-    this.host.broadcast({ k: 'end', scores, winner });
+    if (this.teams) {
+      const [red, blue] = this.teamScore;
+      const winnerTeam: Team | null = red === blue ? null : red > blue ? 0 : 1;
+      const tally = `${Math.max(red, blue)}-${Math.min(red, blue)}`;
+      this.host.systemChat(winnerTeam === null ? `The match ends in a draw, ${red}-${blue}` : `${TEAMS[winnerTeam].name} wins ${tally}`);
+      this.host.broadcast({ k: 'end', scores, winner, winnerTeam });
+    } else {
+      const name = winner ? this.players.get(winner)?.name : undefined;
+      this.host.systemChat(name ? `${name} wins with ${top.frags} frags` : 'The match ends in a draw');
+      this.host.broadcast({ k: 'end', scores, winner });
+    }
     this.host.matchEnded();
   }
 
@@ -626,10 +945,15 @@ class RocketsGame implements GameServer {
 
   /** Seconds of 3-2-1 freeze at the start of a match: players can look around but not move or fire. */
   private static readonly COUNTDOWN = 3;
-  /** Longest overtime before a still-level match is settled on deaths (or declared a draw). */
-  private static readonly OVERTIME_MAX = 90;
   /** Spawn points scoring within this much of the best one are picked from at random. */
   private static readonly SPAWN_SLACK = 4;
+  /** Hard cap on a whole match, countdown and sudden death included, so a session never drags past 8.5 minutes. */
+  private static readonly MATCH_MAX = 510;
+
+  /** Sudden death length: the mode's overtime, cut short if the match would otherwise run past MATCH_MAX. */
+  private overtimeMax() {
+    return clamp(RocketsGame.MATCH_MAX - RocketsGame.COUNTDOWN - this.rules.seconds, 0, this.rules.overtime);
+  }
 
   private overtime = false;
   private overtimeAt = 0;
@@ -644,26 +968,35 @@ class RocketsGame implements GameServer {
     return { ...cmd, f: 0, s: 0, jump: false, fire: false };
   }
 
-  /** Countdown call, time limit, and overtime: tied leaders at the buzzer play on until one of them pulls ahead. */
+  /**
+   * Countdown call, elimination rounds, time limit, and overtime: a level match at the buzzer plays on (sudden death)
+   * until someone pulls ahead, for at most MODES[mode].overtime seconds, then it is a draw.
+   */
   private updateMatchFlow() {
     if (!this.countdownCalled && !this.frozen()) {
       this.countdownCalled = true;
       this.host.systemChat('Fight!');
     }
-    if (this.timeLeft() > 0) return;
+    this.updateRound();
+    if (this.ended || this.timeLeft() > 0) return;
     const leaders = this.leaders();
     if (!this.overtime) {
       if (leaders === 1) return this.endMatch();
       this.overtime = true;
       this.overtimeAt = this.now;
-      this.host.systemChat('Overtime! Next frag wins');
+      const next = { ffa: 'Next frag wins', tdm: 'Next team frag wins', ctf: 'Next capture wins', elim: 'Next round win takes it' }[this.mode];
+      this.host.systemChat(`Overtime! ${next}`);
       return;
     }
-    if (leaders === 1 || this.now - this.overtimeAt >= RocketsGame.OVERTIME_MAX) this.endMatch();
+    if (leaders === 1 || this.now - this.overtimeAt >= this.overtimeMax()) this.endMatch();
   }
 
-  /** How many players share the top frag count (1 with fewer than two players, so a lone player is never stuck). */
+  /**
+   * How many sides share the lead: players by frags in free for all (1 with fewer than two players, so a lone player
+   * is never stuck), teams by team score otherwise.
+   */
   private leaders() {
+    if (this.teams) return this.teamScore[0] === this.teamScore[1] ? 2 : 1;
     let top = -Infinity;
     let count = 0;
     for (const p of this.players.values()) {
@@ -676,13 +1009,15 @@ class RocketsGame implements GameServer {
   }
 
   /** Higher is better; -Infinity means the point is occupied (spawning there would telefrag). */
-  private spawnScore(pos: Vec3, alive: RPlayer[], diedAt: Vec3, sameAsLast: boolean) {
+  private spawnScore(p: RPlayer, pos: Vec3, alive: RPlayer[], diedAt: Vec3, sameAsLast: boolean) {
     const eye = v3(pos.x, pos.y + RK.eyeHeight, pos.z);
     const centre = v3(pos.x, pos.y + RK.height * 0.5, pos.z);
     let nearest = 40;
     let seen = 0;
     for (const o of alive) {
       if (hdist(o.body.pos, pos) < RK.halfWidth * 2 + 0.3 && Math.abs(o.body.pos.y - pos.y) < RK.height) return -Infinity;
+      // Teammates only block the point; being near or seen by them is fine.
+      if (this.friendly(o, p)) continue;
       nearest = Math.min(nearest, vdist(o.body.pos, pos));
       if (!segmentBoxes(eyePosition(o.body.pos), eye, this.map.boxes)) seen++;
     }
@@ -699,6 +1034,11 @@ class RocketsGame implements GameServer {
     score -= danger * 30;
     if (vdist(diedAt, pos) < 10) score -= 12;
     if (sameAsLast) score -= 8;
+    // Team modes: your own half of the map, and in CTF close to your own base.
+    if (this.teams && p.team !== undefined) {
+      if (sideOf(this.map, pos) !== p.team) score -= WRONG_SIDE;
+      if (this.mode === 'ctf' && this.bases) score -= vdist(pos, this.bases[p.team]) * BASE_PULL;
+    }
     return score;
   }
 }
