@@ -153,6 +153,9 @@ interface Slot {
   px?: number;
   py?: number;
   html?: string;
+  /** Measured tag size (CSS px) for tags that dodge each other (balaur heads); cleared when the tag changes. */
+  w?: number;
+  h?: number;
 }
 
 interface WordPart {
@@ -188,6 +191,8 @@ interface Enemy {
   speed: number;
   phase: number;
   mistakes: number;
+  /** Half the group's width in world units (the balaur's heads), so escorts keep out of it. */
+  half: number;
 }
 
 /** The "A wild … appeared!" toast per kind. */
@@ -272,7 +277,7 @@ export class Game {
   /** Canvas size in CSS pixels, read once per frame from the renderer (never from the DOM, which forces layout). */
   private view = new THREE.Vector2(1, 1);
   private projected = { x: 0, y: 0 };
-  private hurtCss = '';
+  private hurtShown = -1;
 
   state: GameState = {
     phase: 'idle',
@@ -621,22 +626,32 @@ export class Game {
     const startY = this.top + (kind === 'balaur' ? 5 : 2);
     // Spread out: of a few candidate lanes, take the one farthest from creatures already near the same depth.
     let x = 0;
+    // Lanes beside a balaur's row of heads (plus room for this creature, measured from the middle of its sway) win over
+    // lanes inside it; when it spans the whole field (it usually does), the escorts spread out as usual and
+    // `spawnBlocked` keeps them from appearing at its depth instead.
+    let clear = false;
     if (kind !== 'balaur') {
-      let best = -1;
+      let bossHalf = -1;
+      for (const o of this.enemies) if (o.kind === 'balaur') bossHalf = Math.max(bossHalf, o.half + this.balaurSway() + 1.6);
+      let best = -Infinity;
       const LANES = 9;
       for (let i = 0; i < LANES; i++) {
         const cx = -lim + ((i + 0.2 + Math.random() * 0.6) / LANES) * 2 * lim;
         let d = 99;
-        for (const o of this.enemies) d = Math.min(d, Math.abs(cx - this.laneX(o)) + Math.abs(startY - o.y) * 0.45);
+        for (const o of this.enemies) if (o.kind !== 'balaur') d = Math.min(d, Math.abs(cx - this.laneX(o)) + Math.abs(startY - o.y) * 0.45);
         d += Math.random() * 0.3;
+        const outside = bossHalf >= 0 && Math.abs(cx) > bossHalf;
+        if (outside) d += 1000;
         if (d > best) {
           best = d;
           x = cx;
+          clear = outside;
         }
       }
     }
-    // Drift a little towards the middle on the way down, never all into one column.
-    const aimX = group ? x * 0.6 : THREE.MathUtils.clamp(x * 0.85 + (Math.random() * 2 - 1) * 1.2, -lim, lim);
+    // Drift a little towards the middle on the way down, never all into one column (beside a balaur: straight down).
+    const drift = THREE.MathUtils.clamp(x * 0.85 + (Math.random() * 2 - 1) * 1.2, -lim, lim);
+    const aimX = group ? x * 0.6 : clear ? x : drift;
     const diff = DIFF[this.settings.difficulty];
     const waveFactor = Math.min(2.3, 1 + (this.state.wave - 1) * 0.08);
     // Never faster than a learner at this difficulty can type it, plus a few seconds to read.
@@ -658,6 +673,7 @@ export class Game {
       speed: (startY - IMPACT_Y) / time,
       phase: Math.random() * 10,
       mistakes: 0,
+      half: total / 2,
     };
     this.enemies.push(enemy);
     for (const s of slots) this.renderTag(enemy, s);
@@ -886,6 +902,7 @@ export class Game {
 
   private renderTag(e: Enemy, slot: Slot) {
     const isTarget = e.id === this.targetId;
+    if (slot.tag.classList.contains('target') !== isTarget) slot.w = undefined;
     slot.tag.classList.toggle('target', isTarget);
     slot.tag.classList.toggle('shielded', !!slot.bubble);
     const html = this.lines(e, slot.parts, slot.info)
@@ -906,6 +923,7 @@ export class Game {
       .join('');
     if (html !== slot.html) {
       slot.html = html;
+      slot.w = undefined;
       slot.tag.innerHTML = html;
     }
   }
@@ -984,6 +1002,8 @@ export class Game {
   }
 
   private frame(dt: number, t: number) {
+    // Layout reads first, before this frame writes any style.
+    this.measureTags();
     this.placeCamera();
     const playing = this.state.phase === 'playing';
     const step = playing ? dt : 0;
@@ -1002,7 +1022,7 @@ export class Game {
       } else if (this.waveLeft > 0) {
         this.spawnTimer -= dt;
         const maxAlive = Math.min(8, 3 + Math.floor(this.state.wave / 2));
-        if (this.spawnTimer <= 0 && this.enemies.length < maxAlive) {
+        if (this.spawnTimer <= 0 && this.enemies.length < maxAlive && !this.spawnBlocked()) {
           this.spawn();
           this.waveLeft--;
           const gap = Math.max(1.2, 3.6 - this.state.wave * 0.17) * DIFF[this.settings.difficulty].time;
@@ -1019,7 +1039,7 @@ export class Game {
       let x = this.laneX(e);
       if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 0.7;
       if (e.kind === 'ghost') x += Math.sin(t * 1.2 + e.phase) * 0.9;
-      if (e.kind === 'balaur') x = Math.sin(t * 0.5 + e.phase) * Math.max(0, this.halfWidth - 11) * 0.5;
+      if (e.kind === 'balaur') x = Math.sin(t * 0.5 + e.phase) * this.balaurSway();
       e.root.position.set(x, 0, fieldZ(e.y));
       for (const s of e.slots) {
         if (s.model && !s.done) s.model.animate(step, t);
@@ -1053,13 +1073,24 @@ export class Game {
       this.engine.camera.updateMatrixWorld();
     }
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt);
-    const hurt = this.hurtFlash.toFixed(3);
-    if (hurt !== this.hurtCss) {
-      this.hurtCss = hurt;
-      this.engine.container.parentElement?.style.setProperty('--hurt', hurt);
+    // Only touch the style while the flash runs (a style write invalidates the page's styles).
+    if (this.hurtFlash !== this.hurtShown) {
+      this.hurtShown = this.hurtFlash;
+      this.engine.container.parentElement?.style.setProperty('--hurt', this.hurtFlash.toFixed(3));
     }
 
     this.positionTags();
+  }
+
+  /** True while a balaur walks through the spawn depth: escorts would appear on top of its heads. */
+  private spawnBlocked() {
+    for (const o of this.enemies) if (o.kind === 'balaur' && Math.abs(o.y - (this.top + 2)) < 4.5) return true;
+    return false;
+  }
+
+  /** How far the balaur sways to either side of the middle (only on screens wide enough). */
+  private balaurSway() {
+    return Math.max(0, this.halfWidth - 11) * 0.5;
   }
 
   /** Where a creature walks across the field at its current distance (before any per-kind sway). */
@@ -1089,12 +1120,33 @@ export class Game {
     this.emit();
   }
 
-  /** Word tags float above their creatures like speech bubbles; a convoy's sentence banner floats above the pebbles' tags. */
-  // Only writes a tag's transform when its position (rounded to half pixels) moved, and never reads layout.
+  /** Measures the balaur heads' tags that changed (one layout read, only after a spawn, a keystroke or a retarget). */
+  private measureTags() {
+    for (const e of this.enemies) {
+      if (e.kind !== 'balaur') continue;
+      for (const s of e.slots) {
+        if (s.done || s.w !== undefined) continue;
+        s.w = s.tag.offsetWidth;
+        s.h = s.tag.offsetHeight;
+      }
+    }
+  }
+
+  /**
+   * Word tags float above their creatures like speech bubbles; a convoy's sentence banner floats above the pebbles'
+   * tags. A balaur's head tags dodge each other: when a tag would overlap its left neighbour's, it moves up above it
+   * (every other one, so a row of heads gets a zigzag of tags on a narrow screen).
+   * Only writes a tag's transform when its position (rounded to half pixels) moved, and never reads layout.
+   */
   private positionTags() {
     const v = this.tmp;
     const width = this.engine.renderer.getSize(this.view).x;
     for (const e of this.enemies) {
+      const dodge = e.kind === 'balaur';
+      let prevX = 0;
+      let prevW = -1;
+      let prevTop = 0;
+      let prevLifted = false;
       for (const s of e.slots) {
         if (s.done) continue;
         s.anchor.updateWorldMatrix(true, false);
@@ -1104,7 +1156,18 @@ export class Game {
         const p = this.project(v);
         // Keep the tag on screen and below the HUD (its bottom edge is at p.y).
         const x = Math.round(Math.min(width - 64, Math.max(64, p.x)) * 2) / 2;
-        const y = Math.round(Math.max(this.insets.top + 40, p.y) * 2) / 2;
+        let y = Math.round(Math.max(this.insets.top + 40, p.y) * 2) / 2;
+        if (dodge) {
+          // A little air between a head's tag and its horns.
+          y -= 8;
+          const w = s.w ?? 0;
+          const lift: boolean = prevW >= 0 && !prevLifted && Math.abs(x - prevX) < (w + prevW) / 2 + 6;
+          if (lift) y = Math.min(y, prevTop - 6);
+          prevX = x;
+          prevW = w;
+          prevTop = y - (s.h ?? 0);
+          prevLifted = lift;
+        }
         s.sx = x;
         s.sy = y - 18;
         if (x === s.px && y === s.py) continue;

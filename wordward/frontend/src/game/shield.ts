@@ -319,11 +319,12 @@ export function tickBubbles(t: number) {
     rings.instanceMatrix.clearUpdateRanges();
     rings.instanceMatrix.addUpdateRange(0, n * 16);
     rings.instanceMatrix.needsUpdate = true;
-    for (const a of [sizeAttr, lookAttr]) {
-      a.clearUpdateRanges();
-      a.addUpdateRange(0, n * 3);
-      a.needsUpdate = true;
-    }
+    sizeAttr.clearUpdateRanges();
+    sizeAttr.addUpdateRange(0, n * 3);
+    sizeAttr.needsUpdate = true;
+    lookAttr.clearUpdateRanges();
+    lookAttr.addUpdateRange(0, n * 3);
+    lookAttr.needsUpdate = true;
   }
 }
 
