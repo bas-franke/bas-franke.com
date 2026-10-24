@@ -91,7 +91,7 @@ export default function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) 
             {data.settings.active_hours_start !== null && data.settings.active_hours_end !== null
               ? `, ${data.settings.active_hours_start}:00–${data.settings.active_hours_end}:00 ${data.settings.timezone}`
               : ''}
-            . <Link to="/admin/settings">Change</Link>
+            . <Link to="/sudo/settings">Change</Link>
           </p>
           {data.blockers.length > 0 && (
             <ul className="blockers">

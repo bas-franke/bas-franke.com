@@ -9,7 +9,8 @@ import type { Site } from './types';
 export default function App() {
   const [site, setSite] = useState<Site | null>(null);
   const location = useLocation();
-  const isAdmin = location.pathname.startsWith('/admin');
+  // The admin lives at /sudo and is deliberately not linked from the public site.
+  const isAdmin = location.pathname.startsWith('/sudo');
 
   useEffect(() => {
     api<Site>('/api/site')
@@ -28,9 +29,6 @@ export default function App() {
         </Link>
         <nav className="topbar-nav">
           <Link to="/">Latest</Link>
-          <Link to="/admin" className="muted">
-            Admin
-          </Link>
         </nav>
       </header>
 

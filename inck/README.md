@@ -8,7 +8,7 @@ backend on port **3003**.
 | URL                       | What                                                                 |
 |---------------------------|----------------------------------------------------------------------|
 | `https://inck.ai`         | The magazine: latest articles, topic filter, search, article pages   |
-| `https://inck.ai/admin`   | Dashboard, "Generate now", settings, topics, article management      |
+| `https://inck.ai/sudo`   | Dashboard, "Generate now", settings, topics, article management      |
 
 ## How generation works
 
@@ -28,7 +28,7 @@ Charts are rendered in the browser from the data (Recharts), so numbers stay rea
 |------------------|----------|-------------------------------------------------------------------------|
 | `DATABASE_URL`   | yes      | `postgres://inck:<password>@<rds-endpoint>:5432/inck?sslmode=require`   |
 | `OPENAI_API_KEY` | yes      | From <https://platform.openai.com/api-keys>                             |
-| `ADMIN_PASSWORD` | yes      | Login for `/admin` (user `admin`, or set `ADMIN_USER`)                  |
+| `ADMIN_PASSWORD` | yes      | Login for `/sudo` (user `admin`, or set `ADMIN_USER`)                  |
 | `DATA_DIR`       | no       | Where images are stored; default `/srv/apps/inck/data`                  |
 
 Everything else (interval, hours, models, tone, topics, site name) is changed in the admin UI and stored in the database.
@@ -116,7 +116,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ## 6. Deploy
 
 Push a change under `inck/` to `master`, or GitHub → **Actions → Deploy inck → Run workflow**. Then open
-<https://inck.ai/admin>, sign in, and press **Generate now** for the first article. The scheduler takes over from there.
+<https://inck.ai/sudo>, sign in, and press **Generate now** for the first article. The scheduler takes over from there.
 
 The status page (<https://status.bas-franke.com>) shows every one of these steps as a check, with fix instructions,
 including the database connection and whether the backend reports a missing API key.
@@ -133,6 +133,6 @@ cp backend/.env.example backend/.env.local   # add your OPENAI_API_KEY to genera
 npm run dev
 ```
 
-- Site: <http://localhost:5173>, admin: <http://localhost:5173/admin> (password from `.env.local`)
+- Site: <http://localhost:5173>, admin: <http://localhost:5173/sudo> (password from `.env.local`)
 - Backend: <http://localhost:3003/api/health>
 - Dev database data lives in `backend/.pg/` (git-ignored); images in `backend/.data/`.

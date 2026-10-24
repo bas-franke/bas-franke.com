@@ -37,12 +37,12 @@ export default function AdminApp() {
           inck<span className="dot">.</span>
         </Link>
         <nav>
-          <NavLink to="/admin" end>
+          <NavLink to="/sudo" end>
             Dashboard
           </NavLink>
-          <NavLink to="/admin/articles">Articles</NavLink>
-          <NavLink to="/admin/topics">Topics</NavLink>
-          <NavLink to="/admin/settings">Settings</NavLink>
+          <NavLink to="/sudo/articles">Articles</NavLink>
+          <NavLink to="/sudo/topics">Topics</NavLink>
+          <NavLink to="/sudo/settings">Settings</NavLink>
         </nav>
         <div className="admin-side-foot">
           <span className="muted small">Signed in as {auth.user}</span>
@@ -53,10 +53,10 @@ export default function AdminApp() {
       </aside>
       <main className="admin-main">
         <Routes>
-          <Route path="/admin" element={<Dashboard onLoggedOut={onLoggedOut} />} />
-          <Route path="/admin/articles" element={<Articles onLoggedOut={onLoggedOut} />} />
-          <Route path="/admin/topics" element={<Topics onLoggedOut={onLoggedOut} />} />
-          <Route path="/admin/settings" element={<Settings onLoggedOut={onLoggedOut} />} />
+          <Route path="/sudo" element={<Dashboard onLoggedOut={onLoggedOut} />} />
+          <Route path="/sudo/articles" element={<Articles onLoggedOut={onLoggedOut} />} />
+          <Route path="/sudo/topics" element={<Topics onLoggedOut={onLoggedOut} />} />
+          <Route path="/sudo/settings" element={<Settings onLoggedOut={onLoggedOut} />} />
         </Routes>
       </main>
     </div>
