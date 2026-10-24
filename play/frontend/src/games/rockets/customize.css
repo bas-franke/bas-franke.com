@@ -1,0 +1,120 @@
+/* Rockets robot customiser: the site's dark modal, a preview on the left and pickers on the right. */
+
+.rk-custom {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 1.25fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.rk-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(124, 244, 201, 0.12), transparent 60%),
+    linear-gradient(180deg, #151d33, #0b1020);
+  cursor: grab;
+  touch-action: none;
+}
+.rk-preview:active {
+  cursor: grabbing;
+}
+
+.rk-custom-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rk-custom-controls h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.rk-custom-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.rk-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rk-swatch {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    transform 0.1s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.rk-swatch:hover {
+  transform: scale(1.08);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.rk-swatch.active {
+  border-color: var(--ink);
+  box-shadow:
+    0 0 0 2px var(--panel-solid),
+    0 0 0 4px var(--mint);
+}
+
+.rk-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rk-variant {
+  padding: 6px 12px;
+  font: 600 14px var(--font);
+  color: var(--ink-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.rk-variant:hover {
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.rk-variant.active {
+  color: #0b0f1a;
+  background: var(--mint);
+  border-color: transparent;
+}
+
+.rk-custom-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+.rk-custom-actions .btn.primary {
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .rk-custom {
+    grid-template-columns: 1fr;
+  }
+  .rk-preview {
+    max-width: 260px;
+    margin: 0 auto;
+  }
+}
