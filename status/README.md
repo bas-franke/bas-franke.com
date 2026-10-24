@@ -13,6 +13,9 @@ Vite + React frontend, Node.js + Express backend on port **3002**. No database o
 Checks run every 60 seconds; **Check now** forces a run. Projects are listed in
 [backend/src/projects.ts](backend/src/projects.ts). Add new projects there.
 
+The page has slots for custom illustrations (mascot, state scenes, icons). The prompts, sizes and filenames are in
+[ART.md](ART.md); finished PNGs go in `frontend/public/art/`. Missing images are simply left out.
+
 ### Configuration: `/srv/apps/status/.env` on the server
 
 | Variable          | Required | Purpose                                                                    |

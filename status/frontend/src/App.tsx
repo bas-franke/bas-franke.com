@@ -1,10 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
+import Art from './Art';
 import Login from './Login';
 import type { CheckGroup, CheckResult, CheckStatus, Fix, Report } from './types';
 
 const POLL_MS = 60_000;
 
 const LABEL: Record<CheckStatus, string> = { ok: 'OK', warn: 'Warning', fail: 'Action needed', skip: 'Skipped' };
+
+const HEADLINE: Record<CheckStatus, string> = {
+  ok: 'All systems operational',
+  warn: 'Running, with a few warnings',
+  fail: 'Some things need your attention',
+  skip: 'Nothing to check yet',
+};
+
+const PROVIDER_ART: Record<string, string> = {
+  'name.com': 'provider-dns',
+  AWS: 'provider-aws',
+  GitHub: 'provider-github',
+  Server: 'provider-server',
+  "Let's Encrypt": 'provider-tls',
+  Status: 'provider-status',
+};
 
 function worst(checks: CheckResult[]): CheckStatus {
   if (checks.some((c) => c.status === 'fail')) return 'fail';
@@ -14,7 +31,7 @@ function worst(checks: CheckResult[]): CheckStatus {
 }
 
 function timeAgo(iso: string) {
-  const s = Math.round((Date.now() - Date.parse(iso)) / 1000);
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
   if (s < 60) return `${s}s ago`;
   return `${Math.round(s / 60)} min ago`;
 }
@@ -79,79 +96,125 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
     onLoggedOut();
   }
 
-  const overall = report ? worst(report.groups.flatMap((g) => g.checks)) : undefined;
-
   return (
-    <main className="page">
-      <header className="header">
-        <div>
-          <p className="eyebrow">bas-franke.com</p>
-          <h1>System status</h1>
+    <div className="app">
+      <nav className="topbar">
+        <div className="brand">
+          <Art name="mascot" className="brand-mascot" />
+          <span className="mono">
+            bas-franke<span className="accent">.com</span>/status
+          </span>
         </div>
         <div className="actions">
-          <button className="refresh" onClick={() => load(true)} disabled={loading}>
-            {loading ? 'Checking…' : 'Check now'}
+          <button className="btn" onClick={() => load(true)} disabled={loading}>
+            <span className={loading ? 'spin' : ''}>↻</span> {loading ? 'Checking…' : 'Check now'}
           </button>
           {user && (
-            <button onClick={logout} title={`Signed in as ${user}`}>
+            <button className="btn btn-ghost" onClick={logout} title={`Signed in as ${user}`}>
               Sign out
             </button>
           )}
         </div>
-      </header>
+      </nav>
 
-      {error && (
-        <div className="banner banner-fail">
-          <strong>Cannot load status.</strong> {error} If this persists, the status backend is down. On the server run{' '}
-          <code>pm2 logs status --lines 50</code>.
+      <main className="page">
+        {error && (
+          <section className="state-card">
+            <Art name="state-offline" className="state-art" />
+            <h2>Can't reach the status API</h2>
+            <p className="muted">{error}</p>
+            <p className="muted">
+              If this persists, the status backend is down. On the server run <code>pm2 logs status --lines 50</code>.
+            </p>
+          </section>
+        )}
+
+        {!report && !error && (
+          <section className="state-card">
+            <Art name="state-loading" className="state-art" />
+            <h2>Running checks…</h2>
+            <p className="muted">Pinging DNS, certificates, servers and deploys.</p>
+          </section>
+        )}
+
+        {report && <Overview report={report} />}
+        {report && report.groups.map((g) => <Group key={g.id} group={g} />)}
+      </main>
+
+      <footer className="footer">
+        <Art name="footer-cat" className="footer-cat" />
+        <p className="mono muted">
+          checks run every 60s · <span className="accent">200 OK</span> is a lifestyle
+        </p>
+      </footer>
+    </div>
+  );
+}
+
+function Overview({ report }: { report: Report }) {
+  const checks = report.groups.flatMap((g) => g.checks);
+  const overall = worst(checks);
+  const counted = checks.filter((c) => c.status !== 'skip').length;
+  const passing = report.summary.ok;
+  const pct = counted ? Math.round((passing / counted) * 100) : 100;
+
+  return (
+    <section className={`hero hero-${overall}`}>
+      <div className="hero-text">
+        <span className={`status-tag tag-${overall}`}>
+          <span className="pulse" /> {LABEL[overall]}
+        </span>
+        <h1>{HEADLINE[overall]}</h1>
+        <p className="muted">
+          {passing} of {counted} checks passing · checked {timeAgo(report.generatedAt)} in{' '}
+          {(report.durationMs / 1000).toFixed(1)}s
+        </p>
+        <div className="progress" aria-label={`${pct}% of checks passing`}>
+          <span className={`progress-bar bar-${overall}`} style={{ width: `${pct}%` }} />
         </div>
-      )}
-
-      {report && overall && (
-        <>
-          <div className={`banner banner-${overall}`}>
-            <strong>
-              {overall === 'ok' ? 'All systems operational' : overall === 'warn' ? 'Running, with warnings' : 'Setup incomplete or something is down'}
-            </strong>
-            <span className="counts">
-              {(['fail', 'warn', 'ok', 'skip'] as const).map((s) =>
-                report.summary[s] ? (
-                  <span key={s} className={`count count-${s}`}>
-                    {report.summary[s]} {LABEL[s].toLowerCase()}
-                  </span>
-                ) : null,
-              )}
-            </span>
-            <span className="meta">
-              Checked {timeAgo(report.generatedAt)} in {(report.durationMs / 1000).toFixed(1)}s
-            </span>
-          </div>
-
-          {report.groups.map((g) => (
-            <Group key={g.id} group={g} />
+        <div className="stats">
+          {(['fail', 'warn', 'ok', 'skip'] as const).map((s) => (
+            <div key={s} className={`stat stat-${s}`}>
+              <span className="stat-value">{report.summary[s]}</span>
+              <span className="stat-label">{LABEL[s]}</span>
+            </div>
           ))}
-        </>
-      )}
-
-      {!report && !error && <p className="muted">Running checks…</p>}
-    </main>
+        </div>
+      </div>
+      <Art name={`state-${overall === 'skip' ? 'ok' : overall}`} className="hero-art" />
+    </section>
   );
 }
 
 function Group({ group }: { group: CheckGroup }) {
   const status = worst(group.checks);
+  const counted = group.checks.filter((c) => c.status !== 'skip');
+  const passing = counted.filter((c) => c.status === 'ok').length;
+  // Fully green groups start collapsed so problems stand out.
+  const [open, setOpen] = useState(status !== 'ok');
+
   return (
     <section className="group">
-      <div className="group-head">
-        <span className={`dot dot-${status}`} />
-        <h2>{group.title}</h2>
-        {group.subtitle && <span className="muted small">{group.subtitle}</span>}
-      </div>
-      <ul className="checks">
-        {group.checks.map((c) => (
-          <Check key={c.id} check={c} />
-        ))}
-      </ul>
+      <button className="group-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="group-icon">
+          <Art name={`group-${group.id}`} fallback="group-default" />
+        </span>
+        <span className="group-title">
+          <h2>{group.title}</h2>
+          {group.subtitle && <span className="muted small mono">{group.subtitle}</span>}
+        </span>
+        <span className={`count-pill tag-${status}`}>
+          {passing}/{counted.length} passing
+        </span>
+        <span className={`chevron ${open ? 'chevron-open' : ''}`}>›</span>
+      </button>
+      {open && (
+        <ul className="checks">
+          {group.checks.map((c) => (
+            <Check key={c.id} check={c} />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -159,13 +222,18 @@ function Group({ group }: { group: CheckGroup }) {
 function Check({ check }: { check: CheckResult }) {
   return (
     <li className={`check check-${check.status}`}>
-      <div className="check-row">
-        <span className={`pill pill-${check.status}`}>{LABEL[check.status]}</span>
-        <span className="check-title">{check.title}</span>
-        <span className="provider">{check.provider}</span>
+      <span className={`dot dot-${check.status}`} title={LABEL[check.status]} />
+      <div className="check-body">
+        <div className="check-row">
+          <span className="check-title">{check.title}</span>
+          <span className="provider">
+            <Art name={PROVIDER_ART[check.provider] ?? 'provider-status'} className="provider-icon" />
+            {check.provider}
+          </span>
+        </div>
+        <p className="detail mono">{check.detail}</p>
+        {check.fix && <FixBlock fix={check.fix} open={check.status === 'fail'} />}
       </div>
-      <p className="detail">{check.detail}</p>
-      {check.fix && <FixBlock fix={check.fix} open={check.status === 'fail'} />}
     </li>
   );
 }
@@ -173,7 +241,9 @@ function Check({ check }: { check: CheckResult }) {
 function FixBlock({ fix, open }: { fix: Fix; open: boolean }) {
   return (
     <details className="fix" open={open}>
-      <summary>How to fix: {fix.summary}</summary>
+      <summary>
+        <span className="fix-label">How to fix</span> {fix.summary}
+      </summary>
       <ol>
         {fix.steps.map((step, i) => (
           <li key={i}>
@@ -183,7 +253,7 @@ function FixBlock({ fix, open }: { fix: Fix; open: boolean }) {
         ))}
       </ol>
       {fix.doc && (
-        <a href={fix.doc} target="_blank" rel="noreferrer">
+        <a className="doc-link" href={fix.doc} target="_blank" rel="noreferrer">
           Full instructions ↗
         </a>
       )}
@@ -197,6 +267,7 @@ function CodeBlock({ code }: { code: string }) {
     <div className="code">
       <pre>{code}</pre>
       <button
+        className="copy"
         onClick={() =>
           navigator.clipboard.writeText(code).then(() => {
             setCopied(true);
@@ -204,7 +275,7 @@ function CodeBlock({ code }: { code: string }) {
           })
         }
       >
-        {copied ? 'Copied' : 'Copy'}
+        {copied ? 'Copied ✓' : 'Copy'}
       </button>
     </div>
   );
