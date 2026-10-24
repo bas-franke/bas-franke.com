@@ -12,6 +12,32 @@ interface Live extends WebSocket {
 
 const HEARTBEAT_MS = 15_000;
 
+/**
+ * Dev only: simulate a bad connection. SIM_LAG_MS=80-150 delays every message each way by a random amount in that
+ * range (order kept, like TCP, so jitter turns into bursts); SIM_LOSS=0.01 adds a 250 ms stall to that share of
+ * messages, which is what a lost TCP segment looks like. Ignored in production.
+ */
+const SIM = (() => {
+  const lag = process.env.SIM_LAG_MS;
+  if (!lag || process.env.NODE_ENV === 'production') return null;
+  const [lo, hi = lo] = lag.split('-').map(Number);
+  return { lo, hi, loss: Number(process.env.SIM_LOSS ?? 0) };
+})();
+
+/** An order-preserving delay line for one direction of one socket. */
+function simLane() {
+  let last = 0;
+  return (fn: () => void) => {
+    if (!SIM) return fn();
+    const now = performance.now();
+    let at = now + SIM.lo + Math.random() * (SIM.hi - SIM.lo);
+    if (Math.random() < SIM.loss) at += 250;
+    at = Math.max(at, last);
+    last = at;
+    setTimeout(fn, at - now);
+  };
+}
+
 function closeWith(ws: WebSocket, code: number, message: string) {
   try {
     ws.send(JSON.stringify({ t: 'error', message }));
@@ -33,7 +59,15 @@ export function attachWebSocket(server: Server, rooms: RoomManager) {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
+  if (SIM) console.log(`[net] simulating ${SIM.lo}-${SIM.hi} ms lag, ${SIM.loss * 100}% stalls`);
+
   wss.on('connection', (ws: Live, req: IncomingMessage) => {
+    const inLane = simLane();
+    if (SIM) {
+      const outLane = simLane();
+      const send = ws.send.bind(ws) as (data: unknown) => void;
+      (ws as unknown as { send: (data: unknown) => void }).send = (data) => outLane(() => ws.readyState === WebSocket.OPEN && send(data));
+    }
     ws.isAlive = true;
     ws.on('pong', () => (ws.isAlive = true));
 
@@ -58,7 +92,7 @@ export function attachWebSocket(server: Server, rooms: RoomManager) {
     let windowStart = Date.now();
     let count = 0;
 
-    ws.on('message', (data, isBinary) => {
+    const onMessage = (data: string, isBinary: boolean) => {
       if (isBinary) return;
       const now = Date.now();
       if (now - windowStart > 1000) {
@@ -71,7 +105,7 @@ export function attachWebSocket(server: Server, rooms: RoomManager) {
       }
       let msg: ClientMsg;
       try {
-        msg = JSON.parse(data.toString()) as ClientMsg;
+        msg = JSON.parse(data) as ClientMsg;
       } catch {
         return;
       }
@@ -82,6 +116,10 @@ export function attachWebSocket(server: Server, rooms: RoomManager) {
         if (err instanceof RoomError) ws.send(JSON.stringify({ t: 'error', message: err.message }));
         else console.error(`[room ${room.code}] message handler failed`, err);
       }
+    };
+    ws.on('message', (data, isBinary) => {
+      const text = data.toString();
+      inLane(() => onMessage(text, isBinary));
     });
 
     ws.on('close', () => room.removeMember(memberId, 'left'));
