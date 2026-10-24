@@ -4,6 +4,7 @@ import { ApiError, api, formatDate, mediaUrl } from '../api';
 import Art, { artSlug } from '../components/Art';
 import ArticleCard from '../components/ArticleCard';
 import Markdown from '../components/Markdown';
+import { applyCitations } from '../cite';
 import type { Article, ArticleCard as Card } from '../types';
 
 export default function ArticlePage() {
@@ -44,6 +45,7 @@ export default function ArticlePage() {
   if (!article) return <main className="article-page" aria-busy="true" />;
 
   const img = mediaUrl(article.hero_image);
+  const cited = applyCitations(article.body_md, article.sources);
 
   return (
     <main className="article-page">
@@ -79,7 +81,7 @@ export default function ArticlePage() {
           </figure>
         )}
 
-        <Markdown markdown={article.body_md} charts={article.charts} images={article.images} />
+        <Markdown markdown={cited.body} charts={article.charts} images={article.images} sourceCount={cited.sources.length} />
 
         <footer className="article-foot">
           {article.tags.length > 0 && (
@@ -91,12 +93,12 @@ export default function ArticlePage() {
               ))}
             </p>
           )}
-          {article.sources.length > 0 && (
+          {cited.sources.length > 0 && (
             <div className="sources">
               <h3>Sources</h3>
               <ol>
-                {article.sources.map((s, i) => (
-                  <li key={i}>
+                {cited.sources.map((s, i) => (
+                  <li key={i} id={`src-${i + 1}`}>
                     <a href={s.url} target="_blank" rel="noreferrer noopener">
                       {s.title || s.url}
                     </a>

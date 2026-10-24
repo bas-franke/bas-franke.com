@@ -130,6 +130,30 @@ export function tidyBody(body: string) {
     .trim();
 }
 
+const normaliseUrl = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase();
+
+/**
+ * Turns links the writer left in the body into numbered citations: "[text](url)" becomes "text [n]" and bare
+ * URLs become "[n]", where n is the source's position (new URLs are appended to the source list).
+ */
+export function numberCitations(body: string, sources: { title: string; url: string }[]) {
+  const list = sources.map((s) => ({ title: s.title, url: s.url }));
+  const indexOf = (url: string, title: string) => {
+    const key = normaliseUrl(url);
+    let i = list.findIndex((s) => normaliseUrl(s.url) === key);
+    if (i === -1) {
+      list.push({ title: title || url, url });
+      i = list.length - 1;
+    }
+    return i + 1;
+  };
+  const out = body
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, text: string, url: string) => `${text} [${indexOf(url, text)}]`)
+    .replace(/(^|[\s(])<?(https?:\/\/[^\s<>)]+)>?/g, (_, lead: string, url: string) => `${lead}[${indexOf(url, '')}]`)
+    .replace(/ \[(\d+)\]([.,;:])/g, '$2 [$1]');
+  return { body: out, sources: list };
+}
+
 /** Images the writer forgot to place get a slot before successive "## " headings. */
 function placeUnusedImages(body: string, imageCount: number) {
   const used = new Set([...body.matchAll(/\[\[image:(\d+)\]\]/g)].map((m) => Number(m[1])));
@@ -215,7 +239,9 @@ async function runGeneration(trigger: Run['trigger'], opts: { topicId?: number; 
     if (!settings.charts_enabled) draft.charts = [];
 
     let images: ArticleImage[] = [];
-    let body = tidyBody(draft.body_markdown);
+    const cited = numberCitations(tidyBody(draft.body_markdown), draft.sources);
+    draft.sources = cited.sources;
+    let body = cited.body;
     if (settings.images_enabled) {
       const specs = draft.images.slice(0, Math.max(1, settings.images_max));
       await setStep(run.id, `illustrating 0/${specs.length}`);

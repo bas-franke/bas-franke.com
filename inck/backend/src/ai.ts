@@ -230,6 +230,8 @@ export async function writeArticle(opts: {
     imagesWanted,
     'Every [[chart:N]] or [[image:N]] marker goes on a line of its own, never inside a heading or sentence. ' +
       'Do not add a "Sources" or "References" section to the body: sources go only in the sources field.',
+    'Citations: never put links or URLs in the body. Cite inline with bracketed numbers like [1] or [2] right after the claim, ' +
+      'where the number is the 1-based position in the sources array. Every number must exist in sources; most sources should be cited at least once.',
     'Be accurate. Prefer well-established facts; when numbers are estimates, say so. Never invent studies, quotes or URLs.',
     settings.charts_enabled
       ? 'Include 1 to 3 charts only when there is real quantitative data worth showing, and place [[chart:N]] markers in the body.'

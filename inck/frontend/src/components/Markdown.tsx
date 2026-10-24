@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { Fragment, useMemo } from 'react';
 import { mediaUrl } from '../api';
+import { markCitations } from '../cite';
 import type { ArticleImage, Chart as ChartData } from '../types';
 import Chart from './Chart';
 
@@ -24,12 +25,22 @@ function normalise(markdown: string) {
 }
 
 /** Renders article Markdown, replacing [[chart:N]] and [[image:N]] lines with real charts and figures. */
-export default function Markdown({ markdown, charts, images = [] }: { markdown: string; charts: ChartData[]; images?: ArticleImage[] }) {
+export default function Markdown({
+  markdown,
+  charts,
+  images = [],
+  sourceCount = 0,
+}: {
+  markdown: string;
+  charts: ChartData[];
+  images?: ArticleImage[];
+  sourceCount?: number;
+}) {
   const parts = useMemo(() => {
     const out: Part[] = [];
     const usedCharts = new Set<number>();
     const usedImages = new Set<number>();
-    const chunks = normalise(markdown).split(/^\s*(\[\[(?:chart|image):\d+\]\])\s*$/m);
+    const chunks = markCitations(normalise(markdown), sourceCount).split(/^\s*(\[\[(?:chart|image):\d+\]\])\s*$/m);
     for (const chunk of chunks) {
       const m = chunk.match(MARKER);
       if (m) {
@@ -57,7 +68,7 @@ export default function Markdown({ markdown, charts, images = [] }: { markdown: 
       if (!usedCharts.has(i)) out.push({ chart });
     });
     return out;
-  }, [markdown, charts, images]);
+  }, [markdown, charts, images, sourceCount]);
 
   return (
     <div className="prose">
