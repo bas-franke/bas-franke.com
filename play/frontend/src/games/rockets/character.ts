@@ -1,19 +1,21 @@
-// The Rockets player robot, after the concept art: a chunky low-poly biped in chamfered orange armour with cream
-// trim, a gunmetal under-suit, a round helmet with a cream stripe, cyan-ringed ear pods, a black visor with glowing
-// "^ ^" eyes, layered shoulder pads and big boots. It holds the launcher with both hands, its stock tucked under the
-// right arm. Every look (colours, helmet, face, shoulders) is built from the same parts.
+// The Rockets player robot, after the concept art: a chunky, heroic low-poly biped in chamfered orange armour with
+// cream panels, a gunmetal under-suit, a big round helmet with a wide black visor, glowing "^ ^" eyes and cyan-ringed
+// ear pods, wide layered shoulder pads, gauntlet forearms with big hands, thick thighs and big boots with cream toe
+// caps. It holds the launcher with both hands: the right on the main grip, its stock tucked under the arm, the left
+// on the front grip. Every look (colours, paint pattern, helmet, face, shoulders, backpack, boots, emblem) is built
+// from the same parts, here, for the customiser preview and the game alike.
 //
 // Draw calls are the budget: the whole robot, launcher included, is ONE skinned mesh plus ONE skinned ink hull.
 // Every rigid part is weighted fully to one bone, so a "skin" is just a cheap way to move a dozen parts in one draw.
 // Lit and glowing parts share a material: a vertex colour above 2 means "unlit", and a negative one means "take the
-// body, trim or visor colour from the material". So geometry is shared by every colour; each look only costs one
-// material (all looks share one shader program), and each helmet/face/shoulder combination one template.
+// body, trim or visor colour from the material". So geometry is shared by every colour and paint pattern; each look
+// only costs one material (all looks share one shader program), and each part combination one template.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import type { Face, Helmet, Look, Shoulders } from '@shared/rockets/cosmetics';
+import { type Backpack, type Boots, DEFAULT_LOOK, type Emblem, type Face, type Helmet, type Look, PATTERNS, type Pattern, type Shoulders } from '@shared/rockets/cosmetics';
 import { hullGeometry, inkMaterial, toonRamp } from '../../engine/toon';
 import { buildLauncher } from './models';
 
@@ -23,6 +25,14 @@ type V3 = [number, number, number];
 const BODY = -1;
 const TRIM = -2;
 const VISOR = -3;
+/**
+ * Secondary plates: body and trim that the two-tone pattern swaps (BODY2 turns trim, TRIM2 turns body). The
+ * vertex colour's blue channel carries the plate kind: 0 primary, 1 secondary, 2 never patterned (the launcher), 3
+ * the helmet shell (SHELL: two-tone like a primary plate, but kept clean of stripes, chevrons and camo).
+ */
+const BODY2 = -4;
+const TRIM2 = -5;
+const SHELL = -6;
 /** Under-suit, joints and the visor glass. */
 const SUIT = 0x30343d;
 const JOINT = 0x1d1f25;
@@ -31,8 +41,32 @@ const GLASS = 0x0b0d12;
 // ---- materials ---------------------------------------------------------------------------------------------------
 
 /**
- * Decodes the vertex colour: slot vertices (r < 0) take a look colour, with g > 0.5 marking them unlit; fixed
- * colours above 2 are unlit too. `rkGlow` then swaps the cel-shaded result for the flat colour.
+ * The paint pattern for a lit body or trim vertex, from its plate kind and its rest-pose position (`vRkRest`, model
+ * space, so the paint stays put on a moving limb). 0 plain, 1 two-tone, 2 stripes, 3 chevrons, 4 camo blocks.
+ */
+const PAINT = /* glsl */ `
+uniform vec3 rkBody;
+uniform vec3 rkTrim;
+uniform vec3 rkVisor;
+uniform float rkPattern;
+varying vec3 vRkRest;
+vec3 rkPaint( float slot, float plate ) {
+	bool trim = slot < -1.5;
+	if ( rkPattern < 0.5 || abs( plate - 2.0 ) < 0.5 ) return trim ? rkTrim : rkBody;
+	if ( rkPattern < 1.5 ) return ( trim != ( abs( plate - 1.0 ) < 0.5 ) ) ? rkTrim : rkBody;
+	if ( trim || plate > 2.5 ) return trim ? rkTrim : rkBody;
+	vec3 p = vRkRest;
+	if ( rkPattern < 2.5 ) return fract( ( p.y + p.x * 0.4 ) * 3.6 ) < 0.3 ? rkTrim : rkBody;
+	if ( rkPattern < 3.5 ) return fract( ( p.y - abs( p.x ) * 0.9 ) * 4.0 + 0.3 ) < 0.3 ? rkTrim : rkBody;
+	float h = fract( sin( dot( floor( p * vec3( 6.0, 5.0, 6.0 ) ), vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
+	return h < 0.15 ? rkTrim : ( h < 0.5 ? rkBody * 0.6 : rkBody );
+}
+`;
+
+/**
+ * Decodes the vertex colour: slot vertices (r < 0) take a look colour, with g > 0.5 marking them unlit and b the
+ * plate kind for the paint pattern; fixed colours above 2 are unlit too. `rkGlow` then swaps the cel-shaded result
+ * for the flat colour.
  */
 const COLOR_FRAGMENT = /* glsl */ `
 float rkGlow = 0.0;
@@ -40,7 +74,7 @@ float rkGlow = 0.0;
 	vec3 rkC = vColor.rgb;
 	if ( rkC.r < 0.0 ) {
 		rkGlow = step( 0.5, rkC.g );
-		rkC = rkC.r > -1.5 ? rkBody : ( rkC.r > -2.5 ? rkTrim : rkVisor );
+		rkC = rkC.r > -2.5 ? rkPaint( rkC.r, rkGlow > 0.5 ? 2.0 : rkC.b ) : rkVisor;
 	} else if ( rkC.r > 1.5 ) {
 		rkGlow = 1.0;
 		rkC -= 2.0;
@@ -49,18 +83,26 @@ float rkGlow = 0.0;
 #endif`;
 
 const looks = new Map<string, THREE.MeshToonMaterial>();
-/** The robot material for one set of colours, cached. Cel-shaded with the toon rim band; glow parts unlit. */
-function lookMaterial(body: number, trim: number, visor: number): THREE.MeshToonMaterial {
-  const key = `${body}:${trim}:${visor}`;
+/** The robot material for one set of colours and a paint pattern, cached. Cel-shaded with the toon rim band; glow parts unlit. */
+function lookMaterial(body: number, trim: number, visor: number, pattern: Pattern = 'plain'): THREE.MeshToonMaterial {
+  const key = `${body}:${trim}:${visor}:${pattern}`;
   let m = looks.get(key);
   if (m) return m;
   m = new THREE.MeshToonMaterial({ color: 0xffffff, vertexColors: true, gradientMap: toonRamp() });
   m.defines = { TOON_RIM: '' };
-  const uniforms = { rkBody: { value: new THREE.Color(body) }, rkTrim: { value: new THREE.Color(trim) }, rkVisor: { value: new THREE.Color(visor) } };
+  const uniforms = {
+    rkBody: { value: new THREE.Color(body) },
+    rkTrim: { value: new THREE.Color(trim) },
+    rkVisor: { value: new THREE.Color(visor) },
+    rkPattern: { value: Math.max(0, PATTERNS.indexOf(pattern)) },
+  };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'attribute vec3 rkRest;\nvarying vec3 vRkRest;\nvoid main() {')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRkRest = rkRest;');
     shader.fragmentShader =
-      'uniform vec3 rkBody;\nuniform vec3 rkTrim;\nuniform vec3 rkVisor;\n' +
+      PAINT +
       shader.fragmentShader
         .replace('#include <color_fragment>', COLOR_FRAGMENT)
         .replace('#include <opaque_fragment>', 'outgoingLight = mix( outgoingLight, diffuseColor.rgb, rkGlow );\n#include <opaque_fragment>');
@@ -115,6 +157,8 @@ function skinnedInk(): THREE.MeshBasicMaterial {
 
 /** Colour attribute values for `color` (a hex or a paint slot), lit or unlit. */
 function encode(color: number, glow: boolean): V3 {
+  if (color === BODY2 || color === TRIM2) return [color === BODY2 ? BODY : TRIM, glow ? 1 : 0, 1];
+  if (color === SHELL) return [BODY, glow ? 1 : 0, 3];
   if (color < 0) return [color, glow ? 1 : 0, 0];
   const c = new THREE.Color(color);
   return glow ? [c.r + 2, c.g + 2, c.b + 2] : [c.r, c.g, c.b];
@@ -161,12 +205,12 @@ class Kit {
         return;
       }
       const flat = keepOnly(g.index ? g.toNonIndexed() : g, ['position', 'normal', 'color']);
-      if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
-        const c = flat.getAttribute('color') as THREE.BufferAttribute;
-        for (let i = 0; i < c.count; i++) {
-          if (c.getX(i) < 0) c.setY(i, 1);
-          else c.setXYZ(i, c.getX(i) + 2, c.getY(i) + 2, c.getZ(i) + 2);
-        }
+      const glow = (mat as THREE.MeshBasicMaterial).isMeshBasicMaterial;
+      const c = flat.getAttribute('color') as THREE.BufferAttribute;
+      for (let i = 0; i < c.count; i++) {
+        // Paint slots stay unpatterned (plate kind 2); fixed glow colours move above 2.
+        if (c.getX(i) < 0) c.setXYZ(i, c.getX(i), glow ? 1 : 0, 2);
+        else if (glow) c.setXYZ(i, c.getX(i) + 2, c.getY(i) + 2, c.getZ(i) + 2);
       }
       this.lit.push(flat);
     });
@@ -196,6 +240,11 @@ class Kit {
 
   part(bone: BoneName): Part {
     const lit = mergeGeometries(this.lit, false);
+    // The rest-pose model-space position, for the paint pattern: base is a pure translation by -origin.
+    const rest = (lit.getAttribute('position') as THREE.BufferAttribute).clone();
+    const o = new THREE.Vector3().setFromMatrixPosition(this.base);
+    for (let i = 0; i < rest.count; i++) rest.setXYZ(i, rest.getX(i) - o.x, rest.getY(i) - o.y, rest.getZ(i) - o.z);
+    lit.setAttribute('rkRest', rest);
     const hull = this.hulls.length ? mergeGeometries(this.hulls, false) : null;
     for (const g of [...this.lit, ...this.hulls]) g.dispose();
     return { bone, lit, hull };
@@ -277,15 +326,15 @@ const PARENT: Record<BoneName, BoneName | null> = {
 
 /** Joint positions in model space (feet at the origin, facing -Z, about 1.8 m tall). */
 const HIP_Y = 0.92;
-const LEG_X = 0.14;
+const LEG_X = 0.15;
 const PIVOT: Record<BoneName, V3> = {
   hips: [0, HIP_Y, 0],
   torso: [0, 1.02, 0],
-  head: [0, 1.43, 0],
-  armL: [-0.34, 1.34, 0],
-  foreL: [-0.37, 1.07, 0],
-  aim: [0.34, 1.34, 0],
-  recoil: [0.34, 1.34, 0],
+  head: [0, 1.42, 0],
+  armL: [-0.36, 1.33, 0],
+  foreL: [-0.385, 1.02, 0],
+  aim: [0.36, 1.33, 0],
+  recoil: [0.36, 1.33, 0],
   legL: [-LEG_X, 0.88, 0],
   shinL: [-LEG_X, 0.49, 0],
   footL: [-LEG_X, 0.12, 0],
@@ -294,19 +343,23 @@ const PIVOT: Record<BoneName, V3> = {
   footR: [LEG_X, 0.12, 0],
 };
 /** The left hand's centre at rest (end of the foreL bone). */
-const HAND_L: V3 = [-0.38, 0.71, -0.01];
+const HAND_L: V3 = [-0.395, 0.6, -0.01];
 
 /**
  * The hold: the upper body turns this far (radians, to the right) at the waist, like a rifle stance, so the left
  * shoulder comes forward and the left hand reaches the launcher; the gun arm and the head turn back to face ahead.
  */
-const TWIST = -0.5;
-/** The launcher's size in the robot's hands, its grip origin in the hold (model space), and where the left hand goes (gun space). */
+const TWIST = -0.6;
+/**
+ * The launcher's size in the robot's hands, its grip origin in the hold (model space), and where the left hand goes
+ * (gun space: the front grip under the coupling, the hand wrapping it from the left).
+ */
 const GUN_SCALE = 0.8;
-const GUN_AT: V3 = [0.24, 1.18, -0.47];
-const LEFT_GRIP: V3 = [0, -0.15, -0.2];
+const GUN_AT: V3 = [0.22, 1.15, -0.36];
+const LEFT_GRIP: V3 = [-0.02, -0.13, -0.48];
+const BACK_GRIP: V3 = [-0.03, -0.13, -0.24];
 /** How far the left shoulder reaches forward while holding the gun. */
-const REACH = 0.09;
+const REACH = 0.14;
 
 /** Where a point attached to the torso ends up after the hold twist. */
 function twisted(p: V3): THREE.Vector3 {
@@ -335,125 +388,241 @@ function solveElbow(s: THREE.Vector3, t: THREE.Vector3, l1: number, l2: number, 
 
 /** Hips: gunmetal pelvis, an orange belt with round hip discs, a front plate. */
 function hipParts(k: Kit) {
-  k.add(block(0.36, 0.2, 0.26, 0.06, 1.1, 0.8), SUIT, [0, 0.9, 0]);
-  k.add(block(0.44, 0.08, 0.3, 0.03), BODY, [0, 0.99, 0]);
-  k.add(block(0.18, 0.15, 0.07, 0.03, [1.25, 1], [0.7, 1]), BODY, [0, 0.9, -0.15]);
-  k.add(box(0.08, 0.04, 0.02), JOINT, [0, 0.99, -0.155], undefined, undefined, false);
-  k.add(block(0.28, 0.12, 0.06, 0.02), BODY, [0, 0.93, 0.14]);
+  k.add(block(0.38, 0.2, 0.28, 0.06, 1.1, 0.8), SUIT, [0, 0.9, 0]);
+  k.add(block(0.48, 0.09, 0.32, 0.03), BODY, [0, 0.99, 0]);
+  k.add(block(0.21, 0.17, 0.08, 0.03, [1.25, 1], [0.65, 1]), BODY, [0, 0.89, -0.165]);
+  k.add(block(0.1, 0.05, 0.02, 0.008), TRIM, [0, 0.925, -0.207], undefined, undefined, false);
+  k.add(box(0.09, 0.04, 0.02), JOINT, [0, 0.99, -0.165], undefined, undefined, false);
+  k.add(block(0.3, 0.13, 0.07, 0.02), BODY, [0, 0.93, 0.15]);
   for (const s of [-1, 1]) {
-    k.add(cyl(0.075, 0.075, 0.05, 12), BODY, [s * 0.24, 0.96, 0], ALONG_X);
-    k.add(cyl(0.04, 0.04, 0.02, 10), JOINT, [s * 0.27, 0.96, 0], ALONG_X, undefined, false);
+    k.add(cyl(0.088, 0.088, 0.06, 12), BODY2, [s * 0.26, 0.96, 0], ALONG_X);
+    k.add(cyl(0.045, 0.045, 0.02, 10), JOINT, [s * 0.295, 0.96, 0], ALONG_X, undefined, false);
   }
 }
 
 /** Thigh: dark core under a thick orange plate with a cream outer panel. `s` is -1 left, 1 right. */
 function thighParts(k: Kit, s: number) {
   const x = s * LEG_X;
-  k.add(cyl(0.095, 0.08, 0.42, 8), SUIT, [x, 0.68, 0.01]);
-  k.add(block(0.26, 0.3, 0.28, 0.06, [1.05, 1], [0.85, 0.9]), BODY, [x + s * 0.01, 0.69, -0.01]);
-  k.add(block(0.03, 0.2, 0.15, 0.012), TRIM, [x + s * 0.147, 0.7, -0.01]);
-  k.add(box(0.07, 0.09, 0.012), JOINT, [x + s * 0.01, 0.63, -0.143], undefined, undefined, false);
+  k.add(cyl(0.1, 0.085, 0.42, 8), SUIT, [x, 0.68, 0.01]);
+  k.add(block(0.29, 0.33, 0.31, 0.07, [1.05, 1], [0.82, 0.88]), BODY, [x + s * 0.01, 0.69, -0.01]);
+  k.add(block(0.035, 0.22, 0.17, 0.014), TRIM, [x + s * 0.163, 0.7, -0.01]);
+  k.add(box(0.08, 0.1, 0.012), JOINT, [x + s * 0.01, 0.63, -0.16], undefined, undefined, false);
 }
 
-/** Shin: orange greave with a cyan slit, cream side panel, knee pad and joint. */
+/** Shin: orange greave with a cyan slit, cream side panel, a cream knee pad and the knee joint. */
 function shinParts(k: Kit, s: number) {
   const x = s * LEG_X;
-  k.add(cyl(0.075, 0.065, 0.36, 8), SUIT, [x, 0.3, 0.02]);
-  k.add(block(0.23, 0.28, 0.24, 0.05, [1.05, 1.1], [0.85, 0.85]), BODY, [x, 0.33, -0.01]);
-  slit(k, vec([x, 0.33, -0.138]), new THREE.Quaternion(), [0.024, 0.12, 0.01], [0, 0, -1]);
-  k.add(block(0.025, 0.2, 0.13, 0.01), TRIM, [x + s * 0.116, 0.32, 0]);
-  k.add(cyl(0.075, 0.075, 0.17, 10), JOINT, [x, 0.49, 0.02], ALONG_X);
-  k.add(block(0.17, 0.15, 0.09, 0.035, [0.85, 1]), BODY, [x, 0.51, -0.1], [0.15, 0, 0]);
+  k.add(cyl(0.08, 0.07, 0.36, 8), SUIT, [x, 0.3, 0.02]);
+  k.add(block(0.25, 0.3, 0.26, 0.055, [1.05, 1.1], [0.85, 0.85]), BODY2, [x, 0.32, -0.01]);
+  slit(k, vec([x, 0.32, -0.148]), new THREE.Quaternion(), [0.026, 0.13, 0.01], [0, 0, -1]);
+  k.add(block(0.028, 0.21, 0.14, 0.01), TRIM2, [x + s * 0.126, 0.31, 0]);
+  k.add(cyl(0.08, 0.08, 0.19, 10), JOINT, [x, 0.49, 0.02], ALONG_X);
+  k.add(block(0.19, 0.17, 0.1, 0.04, [0.85, 1]), TRIM, [x, 0.51, -0.11], [0.15, 0, 0]);
 }
 
-/** Boot: orange upper on a black sole, cream toe cap, an ankle disc with a cyan ring. */
-function bootParts(k: Kit, s: number) {
+/** An ankle disc with a cyan ring on the outside of the boot. */
+function ankle(k: Kit, x: number, s: number, y: number, out: number) {
+  k.add(cyl(0.068, 0.068, 0.03, 12), JOINT, [x + s * out, y, 0], ALONG_X);
+  k.glow(new THREE.TorusGeometry(0.046, 0.011, 4, 12), VISOR, [x + s * (out + 0.017), y, 0], FACE_X);
+}
+
+/**
+ * Boots. Standard (the concept): orange upper on a black sole, a big cream toe cap. Heavy: wider and taller with a
+ * tread sole, armoured cuff and a cream band. Spring: a slim boot on a coil and a sole pad.
+ */
+function bootParts(k: Kit, s: number, kind: Boots) {
   const x = s * LEG_X;
-  k.add(block(0.27, 0.05, 0.46, 0.015), JOINT, [x, 0.025, -0.06]);
-  k.add(block(0.26, 0.15, 0.42, 0.05, [0.9, 0.75]), BODY, [x, 0.12, -0.05]);
-  k.add(block(0.23, 0.1, 0.15, 0.04, [0.8, 0.65]), TRIM, [x, 0.11, -0.2], [-0.12, 0, 0]);
-  k.add(block(0.22, 0.1, 0.08, 0.02), JOINT, [x, 0.075, 0.15]);
-  k.add(block(0.23, 0.07, 0.25, 0.025), BODY, [x, 0.21, 0]);
-  k.add(cyl(0.065, 0.065, 0.03, 12), JOINT, [x + s * 0.13, 0.16, 0], ALONG_X);
-  k.glow(new THREE.TorusGeometry(0.044, 0.01, 4, 12), VISOR, [x + s * 0.147, 0.16, 0], FACE_X);
+  if (kind === 'heavy') {
+    k.add(block(0.34, 0.07, 0.6, 0.02), JOINT, [x, 0.035, -0.08]);
+    for (const z of [-0.3, -0.16, 0.02, 0.16]) k.add(box(0.35, 0.03, 0.05), JOINT, [x, 0.02, z], undefined, undefined, false);
+    k.add(block(0.33, 0.2, 0.52, 0.07, [0.88, 0.75]), BODY, [x, 0.165, -0.07]);
+    k.add(block(0.31, 0.15, 0.2, 0.05, [0.8, 0.6]), TRIM, [x, 0.14, -0.27], [-0.15, 0, 0]);
+    k.add(block(0.3, 0.15, 0.31, 0.045, 0.9), BODY2, [x, 0.3, 0]);
+    k.add(block(0.31, 0.03, 0.32, 0.01), TRIM2, [x, 0.36, 0]);
+    k.add(block(0.26, 0.1, 0.09, 0.02), JOINT, [x, 0.09, 0.17]);
+    slit(k, vec([x, 0.3, -0.158]), new THREE.Quaternion(), [0.1, 0.016, 0.01], [0, 0, -1]);
+    ankle(k, x, s, 0.21, 0.155);
+    return;
+  }
+  if (kind === 'spring') {
+    k.add(block(0.25, 0.04, 0.4, 0.015), JOINT, [x, 0.02, -0.05]);
+    for (const [i, y] of [0.055, 0.08, 0.105].entries()) {
+      if (i === 1) k.glow(new THREE.TorusGeometry(0.075, 0.012, 4, 14), VISOR, [x, y, 0.0], ALONG_Z);
+      else k.add(new THREE.TorusGeometry(0.075, 0.016, 4, 14), SUIT, [x, y, 0.0], ALONG_Z);
+    }
+    k.add(block(0.25, 0.12, 0.4, 0.05, [0.85, 0.7]), BODY, [x, 0.17, -0.05]);
+    k.add(block(0.23, 0.09, 0.14, 0.035, [0.8, 0.6]), TRIM, [x, 0.17, -0.19], [-0.12, 0, 0]);
+    k.add(block(0.23, 0.07, 0.25, 0.025), BODY2, [x, 0.25, 0]);
+    ankle(k, x, s, 0.19, 0.125);
+    return;
+  }
+  k.add(block(0.3, 0.06, 0.52, 0.02), JOINT, [x, 0.03, -0.07]);
+  k.add(block(0.29, 0.17, 0.46, 0.06, [0.88, 0.72]), BODY, [x, 0.14, -0.06]);
+  k.add(block(0.27, 0.12, 0.17, 0.045, [0.8, 0.6]), TRIM, [x, 0.12, -0.23], [-0.15, 0, 0]);
+  k.add(block(0.25, 0.1, 0.09, 0.02), JOINT, [x, 0.08, 0.16]);
+  k.add(block(0.26, 0.08, 0.27, 0.03), BODY2, [x, 0.24, 0]);
+  ankle(k, x, s, 0.17, 0.145);
 }
 
-/** Torso: segmented dark abdomen, the big orange chest with a cream centre plate and cyan lights, a backpack. */
+/** Torso: segmented dark abdomen, the big orange chest with a cream centre plate and cyan lights, a back plate. */
 function torsoParts(k: Kit) {
-  k.add(block(0.3, 0.16, 0.22, 0.04), SUIT, [0, 1.08, 0]);
-  k.add(block(0.32, 0.025, 0.235, 0.008), JOINT, [0, 1.07, 0], undefined, undefined, false);
-  for (const s of [-1, 1]) k.glow(box(0.05, 0.013, 0.012), VISOR, [s * 0.12, 1.1, -0.11], [0, s * 0.35, 0]);
-  k.add(block(0.56, 0.28, 0.36, 0.07, [1, 0.95], [0.78, 0.85]), BODY, [0, 1.28, 0]);
-  k.add(block(0.19, 0.17, 0.06, 0.03, [1.15, 1], [0.7, 1]), TRIM, [0, 1.24, -0.172], [0.1, 0, 0]);
-  const q = new THREE.Quaternion();
-  slit(k, vec([0, 1.36, -0.182]), q, [0.12, 0.016, 0.01], [0, 0, -1]);
-  for (const s of [-1, 1]) slit(k, vec([s * 0.17, 1.19, -0.152]), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, s * 0.5, s * -0.3)), [0.06, 0.012, 0.01], [0, 0, -1]);
-  k.add(block(0.3, 0.06, 0.24, 0.02), SUIT, [0, 1.43, 0]);
-  k.add(block(0.36, 0.26, 0.12, 0.04), BODY, [0, 1.27, 0.22]);
-  k.add(block(0.2, 0.1, 0.03, 0.01), TRIM, [0, 1.3, 0.285]);
-  for (const s of [-1, 1]) k.add(cyl(0.035, 0.035, 0.06, 8), JOINT, [s * 0.1, 1.17, 0.27], ALONG_Z);
-  for (const s of [-1, 1]) k.add(new THREE.SphereGeometry(0.1, 8, 6), JOINT, [s * 0.31, 1.34, 0]);
+  k.add(block(0.32, 0.17, 0.24, 0.04), SUIT, [0, 1.08, 0]);
+  for (const y of [1.05, 1.1]) k.add(block(0.34, 0.02, 0.255, 0.007), JOINT, [0, y, 0], undefined, undefined, false);
+  for (const s of [-1, 1]) {
+    k.add(block(0.07, 0.15, 0.2, 0.025), BODY2, [s * 0.165, 1.08, -0.01]);
+    k.glow(box(0.012, 0.07, 0.012), VISOR, [s * 0.2, 1.08, -0.06]);
+  }
+  k.add(block(0.62, 0.32, 0.4, 0.08, [1, 0.95], [0.75, 0.82]), BODY, [0, 1.29, 0]);
+  // The cream centre plate: a tall hexagon over the sternum, lower and wider at the top.
+  k.add(block(0.25, 0.24, 0.07, 0.035, [1.12, 1], [0.6, 1]), TRIM, [0, 1.25, -0.185], [0.12, 0, 0]);
+  slit(k, vec([0, 1.405, -0.19]), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.35, 0, 0)), [0.13, 0.018, 0.01], [0, 0, -1]);
+  for (const s of [-1, 1]) slit(k, vec([s * 0.2, 1.2, -0.168]), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, s * 0.5, s * -0.3)), [0.07, 0.013, 0.01], [0, 0, -1]);
+  k.add(block(0.32, 0.06, 0.26, 0.02), SUIT, [0, 1.45, 0]);
+  k.add(block(0.4, 0.28, 0.12, 0.04), BODY, [0, 1.28, 0.24]);
+  k.add(block(0.22, 0.1, 0.03, 0.01), TRIM, [0, 1.31, 0.305]);
+  for (const s of [-1, 1]) k.add(new THREE.SphereGeometry(0.11, 8, 6), JOINT, [s * 0.34, 1.33, 0]);
 }
 
-/** Shoulder pads (on the torso, so the arms swing under them). */
+/** The backpack on the back plate (torso bone). */
+function backpackParts(k: Kit, kind: Backpack) {
+  if (kind === 'thrusters') {
+    // Two jump-jet pods, cream-capped, with glowing nozzles pointing down.
+    for (const s of [-1, 1]) {
+      const x = s * 0.12;
+      k.add(cyl(0.075, 0.085, 0.3, 8), BODY2, [x, 1.25, 0.37]);
+      k.add(cyl(0.06, 0.08, 0.05, 8), TRIM, [x, 1.42, 0.37]);
+      k.add(cyl(0.085, 0.06, 0.08, 8), JOINT, [x, 1.07, 0.37]);
+      k.glow(cyl(0.045, 0.045, 0.01, 8), VISOR, [x, 1.028, 0.37]);
+      k.glow(box(0.012, 0.12, 0.012), VISOR, [x, 1.26, 0.452]);
+    }
+    k.add(block(0.18, 0.12, 0.08, 0.02), JOINT, [0, 1.3, 0.33]);
+  } else if (kind === 'antenna-pack') {
+    // A radio box with a tall whip antenna and a stubby one.
+    k.add(block(0.32, 0.3, 0.15, 0.04, 0.92), BODY2, [0, 1.27, 0.37]);
+    k.add(block(0.2, 0.1, 0.02, 0.008), TRIM, [0, 1.3, 0.448]);
+    for (const x of [-0.06, 0, 0.06]) k.glow(box(0.02, 0.02, 0.01), VISOR, [x, 1.19, 0.448]);
+    k.add(cyl(0.009, 0.014, 0.5, 6), JOINT, [0.1, 1.65, 0.38], [0.08, 0, -0.05]);
+    k.glow(new THREE.IcosahedronGeometry(0.032, 0), VISOR, [0.112, 1.9, 0.4], undefined, undefined, true);
+    k.add(cyl(0.012, 0.016, 0.18, 6), JOINT, [-0.1, 1.49, 0.38], [0.1, 0, 0.15]);
+    k.add(block(0.05, 0.03, 0.05, 0.01), TRIM, [-0.113, 1.58, 0.389]);
+  } else if (kind === 'tank') {
+    // A fat cream tank, strapped across, with orange end caps and a glowing gauge.
+    k.add(cyl(0.13, 0.13, 0.3, 10), TRIM2, [0, 1.27, 0.4]);
+    for (const y of [1.44, 1.1]) k.add(cyl(y > 1.2 ? 0.08 : 0.13, y > 1.2 ? 0.13 : 0.08, 0.06, 10), BODY2, [0, y, 0.4]);
+    k.add(cyl(0.03, 0.03, 0.06, 6), JOINT, [0, 1.49, 0.4]);
+    for (const y of [1.2, 1.34]) k.add(cyl(0.136, 0.136, 0.025, 10), JOINT, [0, y, 0.4], undefined, undefined, false);
+    k.glow(box(0.06, 0.02, 0.012), VISOR, [0, 1.27, 0.534]);
+  }
+}
+
+/** Shoulder pads (on the torso, so the arms swing under them): a big plate with a cream cap over a second layer. */
+function padFrame(kind: Shoulders, s: number) {
+  const block = kind === 'block';
+  const at = vec([s * (block ? 0.43 : 0.42), 1.39, 0]);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * (block ? 0.12 : 0.14)));
+  /** Half the pad's width at its middle, where the emblem goes. */
+  return { at, q, half: block ? 0.145 : 0.142 };
+}
+
 function padParts(k: Kit, kind: Shoulders) {
   for (const s of [-1, 1]) {
+    const { at, q } = padFrame(kind, s);
     if (kind === 'block') {
-      const at = vec([s * 0.42, 1.42, 0]);
-      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * 0.12));
-      k.add(block(0.28, 0.24, 0.36, 0.03, 0.92), BODY, tuple(at), q);
-      k.add(block(0.3, 0.035, 0.38, 0.01), TRIM, local(at, q, [0, 0.135, 0]), q);
-      k.add(block(0.25, 0.1, 0.32, 0.025), BODY, [s * 0.47, 1.26, 0], [0, 0, -s * 0.25]);
-      for (const y of [0.04, -0.03]) slit(k, vec(local(at, q, [s * 0.14, y, 0])), q, [0.01, 0.014, 0.2], [s, 0, 0]);
-      continue;
+      k.add(block(0.3, 0.26, 0.4, 0.03, 0.92), BODY, tuple(at), q);
+      k.add(block(0.32, 0.04, 0.42, 0.01), TRIM, local(at, q, [0, 0.145, 0]), q);
+      k.add(block(0.27, 0.11, 0.36, 0.025), BODY2, [s * 0.48, 1.23, 0], [0, 0, -s * 0.25]);
+    } else {
+      // Round (the concept) and spike: a big bevelled pad with a cream cap and a second layer.
+      k.add(block(0.3, 0.25, 0.38, 0.05, [0.85, 0.9]), BODY, tuple(at), q);
+      k.add(block(0.17, 0.045, 0.27, 0.015), TRIM, local(at, q, [s * 0.005, 0.118, 0]), q);
+      k.add(block(0.26, 0.11, 0.34, 0.04, 1, 0.85), BODY2, [s * 0.46, 1.245, 0], [0, 0, -s * 0.22]);
+      k.add(block(0.03, 0.08, 0.16, 0.01), TRIM2, [s * 0.46, 1.245, -0.165], [0, 0, -s * 0.22]);
+      if (kind === 'spike') {
+        for (const z of [-0.08, 0.08]) k.add(new THREE.ConeGeometry(0.06, 0.18, 6), TRIM, local(at, q, [s * 0.03, 0.2, z]), [0, 0, -s * 0.35]);
+      }
     }
-    // Round (the concept) and spike: a big bevelled pad with a cream cap, a second layer and a cyan slit.
-    const at = vec([s * 0.4, 1.42, 0]);
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * 0.14));
-    k.add(block(0.27, 0.22, 0.34, 0.045, [0.85, 0.9]), BODY, tuple(at), q);
-    k.add(block(0.15, 0.04, 0.24, 0.014), TRIM, local(at, q, [s * 0.005, 0.104, 0]), q);
-    k.add(block(0.23, 0.1, 0.3, 0.035, 1, 0.85), BODY, [s * 0.43, 1.28, 0], [0, 0, -s * 0.22]);
-    slit(k, vec(local(at, q, [s * 0.136, -0.015, -0.03])), q, [0.01, 0.09, 0.022], [s, 0, 0]);
-    if (kind === 'spike') {
-      for (const z of [-0.075, 0.075]) k.add(new THREE.ConeGeometry(0.055, 0.16, 6), TRIM, local(at, q, [s * 0.03, 0.18, z]), [0, 0, -s * 0.35]);
+    // A cyan slit along the outside of the lower layer.
+    const lq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * (kind === 'block' ? 0.25 : 0.22)));
+    slit(k, vec([s * (kind === 'block' ? 0.48 : 0.46), kind === 'block' ? 1.23 : 1.245, 0]), lq, [0.01, 0.016, 0.2], [s, 0, 0]);
+  }
+}
+
+/** The emblem's outline, about 1 across, centred. */
+function emblemShape(kind: Emblem): THREE.Shape {
+  const poly = (pts: [number, number][]) => new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+  const around = (n: number, r: (i: number) => number, turn = 0) =>
+    poly(Array.from({ length: n }, (_, i) => [Math.sin((i / n) * Math.PI * 2 + turn) * r(i), Math.cos((i / n) * Math.PI * 2 + turn) * r(i)] as [number, number]));
+  switch (kind) {
+    case 'star':
+      return around(10, (i) => (i % 2 ? 0.21 : 0.52));
+    case 'bolt':
+      return poly([[0.14, 0.52], [-0.26, -0.02], [-0.02, -0.02], [-0.14, -0.52], [0.26, 0.08], [0.02, 0.08]]);
+    case 'ring': {
+      const sh = around(16, () => 0.5);
+      sh.holes.push(new THREE.Path(Array.from({ length: 16 }, (_, i) => new THREE.Vector2(Math.sin((-i / 16) * Math.PI * 2) * 0.27, Math.cos((-i / 16) * Math.PI * 2) * 0.27))));
+      return sh;
+    }
+    case 'diamond':
+      return poly([[0, 0.52], [0.34, 0], [0, -0.52], [-0.34, 0]]);
+    case 'cross':
+      return poly([[-0.15, 0.5], [0.15, 0.5], [0.15, 0.15], [0.5, 0.15], [0.5, -0.15], [0.15, -0.15], [0.15, -0.5], [-0.15, -0.5], [-0.15, -0.15], [-0.5, -0.15], [-0.5, 0.15], [-0.15, 0.15]]);
+    default: {
+      // Heart: the classic parametric curve.
+      const pts: [number, number][] = [];
+      for (let i = 0; i < 24; i++) {
+        const t = (i / 24) * Math.PI * 2;
+        pts.push([(16 * Math.sin(t) ** 3) / 33, (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) / 33 + 0.08]);
+      }
+      return poly(pts);
     }
   }
+}
+
+/** The emblem decal on the outside of the left shoulder pad: trim on a thin black backing. */
+function emblemParts(k: Kit, kind: Emblem, shoulders: Shoulders) {
+  if (kind === 'none') return;
+  const { at, q, half } = padFrame(shoulders, -1);
+  const face = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -Math.PI / 2, 0)));
+  const flat = () => new THREE.ExtrudeGeometry(emblemShape(kind), { depth: 1, bevelEnabled: false, curveSegments: 4 }).translate(0, 0, -0.5);
+  k.add(flat(), JOINT, local(at, q, [-half - 0.002, -0.005, 0]), face, [0.155, 0.155, 0.008], false);
+  k.add(flat(), TRIM, local(at, q, [-half - 0.007, -0.005, 0]), face, [0.125, 0.125, 0.006], false);
 }
 
 /** The free-hanging pose of the left upper arm: dark sleeve under an orange bicep plate. */
 function upperArmL(k: Kit) {
-  k.add(cyl(0.065, 0.06, 0.26, 8), SUIT, [-0.35, 1.2, 0]);
-  k.add(block(0.15, 0.17, 0.16, 0.04), BODY, [-0.36, 1.17, 0]);
+  k.add(cyl(0.07, 0.065, 0.3, 8), SUIT, [-0.372, 1.18, 0]);
+  k.add(block(0.17, 0.18, 0.18, 0.045), BODY, [-0.375, 1.15, 0]);
 }
 
 /** A hand: dark palm, orange back plate, four fingers with orange tips and a thumb. Built hanging down, palm toward +X. */
 function hand(k: Kit, at: THREE.Vector3, q: THREE.Quaternion, s: number, curl: number) {
-  k.add(block(0.08, 0.11, 0.11, 0.02), JOINT, tuple(at), q);
-  k.add(block(0.035, 0.09, 0.1, 0.012), BODY, local(at, q, [s * 0.045, 0, 0]), q);
+  k.add(block(0.1, 0.13, 0.13, 0.025), JOINT, tuple(at), q);
+  k.add(block(0.04, 0.11, 0.12, 0.014), BODY, local(at, q, [s * 0.055, 0, 0]), q);
   const fq = q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * curl)));
-  for (const z of [-0.042, -0.014, 0.014, 0.042]) {
-    k.add(box(0.028, 0.075, 0.025), JOINT, local(at, q, [-s * 0.006, -0.085, z]), fq);
-    k.add(block(0.03, 0.03, 0.027, 0.008), BODY, local(at, q, [-s * (0.006 + curl * 0.05), -0.13, z]), fq, undefined, false);
+  for (const z of [-0.05, -0.017, 0.017, 0.05]) {
+    k.add(box(0.034, 0.09, 0.03), JOINT, local(at, q, [-s * 0.008, -0.1, z]), fq);
+    k.add(block(0.036, 0.036, 0.032, 0.009), BODY, local(at, q, [-s * (0.008 + curl * 0.06), -0.155, z]), fq, undefined, false);
   }
-  k.add(box(0.03, 0.07, 0.03), JOINT, local(at, q, [-s * 0.04, -0.03, -0.065]), q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, 0, -s * 0.5))));
+  k.add(box(0.036, 0.085, 0.036), JOINT, local(at, q, [-s * 0.05, -0.035, -0.078]), q.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, 0, -s * 0.5))));
 }
 
-/** A gauntlet forearm from `elbow` to `wrist`: big orange block, cream panel, cyan slit on the outside (`s` side). */
+/** A gauntlet forearm from `elbow` to `wrist`: a big orange block, a cream panel, a cyan slit on the outside (`s` side). */
 function forearm(k: Kit, elbow: THREE.Vector3, wrist: THREE.Vector3, s: number) {
   const q = toward(elbow.clone().sub(wrist));
   const mid = elbow.clone().add(wrist).multiplyScalar(0.5);
   const len = elbow.distanceTo(wrist);
-  k.add(new THREE.SphereGeometry(0.072, 8, 6), JOINT, tuple(elbow));
-  k.add(block(0.19, len, 0.2, 0.05, 1.05, 0.88), BODY, tuple(mid), q);
-  k.add(block(0.14, len * 0.72, 0.03, 0.012), TRIM, local(mid, q, [0, 0, -0.1]), q);
-  slit(k, vec(local(mid, q, [s * 0.096, 0, 0.02])), q, [0.01, len * 0.5, 0.022], [s, 0, 0]);
-  k.add(cyl(0.05, 0.05, 0.05, 8), JOINT, tuple(wrist), q);
+  k.add(new THREE.SphereGeometry(0.078, 8, 6), JOINT, tuple(elbow));
+  k.add(block(0.23, len, 0.24, 0.06, 1.05, 0.86), BODY2, tuple(mid), q);
+  k.add(block(0.17, len * 0.72, 0.035, 0.014), TRIM2, local(mid, q, [0, 0.01, -0.12]), q);
+  k.add(block(0.035, len * 0.4, 0.15, 0.012), TRIM2, local(mid, q, [s * 0.115, len * 0.2, 0.01]), q);
+  slit(k, vec(local(mid, q, [s * 0.116, -len * 0.15, 0.02])), q, [0.01, len * 0.32, 0.024], [s, 0, 0]);
+  k.add(cyl(0.058, 0.058, 0.06, 8), JOINT, tuple(wrist), q);
 }
 
 /** Left forearm and hand, hanging at rest (the hold pose comes from IK at runtime). */
 function foreArmL(k: Kit) {
   const elbow = vec(PIVOT.foreL);
-  const wrist = vec([-0.375, 0.8, -0.005]);
+  const wrist = vec([-0.39, 0.705, -0.005]);
   forearm(k, elbow, wrist, -1);
   hand(k, vec(HAND_L), new THREE.Quaternion(), -1, 0.35);
 }
@@ -464,13 +633,13 @@ function gunArmParts(k: Kit) {
   const s = GUN_SCALE;
   k.graft(buildLauncher(BODY), new THREE.Matrix4().compose(gun, new THREE.Quaternion(), new THREE.Vector3(s, s, s)));
   // Hand on the main grip, wrist behind it, elbow solved out and down.
-  const palm = gun.clone().add(new THREE.Vector3(0.035, -0.09, 0.02).multiplyScalar(s));
-  const wrist = palm.clone().add(new THREE.Vector3(0.025, 0.04, 0.09));
-  const elbow = solveElbow(AIM_HELD, wrist, 0.27, 0.27, new THREE.Vector3(1, -0.7, 0.4), new THREE.Vector3());
+  const palm = gun.clone().add(new THREE.Vector3(0.04, -0.09, 0.02).multiplyScalar(s));
+  const wrist = palm.clone().add(new THREE.Vector3(0.03, 0.05, 0.1));
+  const elbow = solveElbow(AIM_HELD, wrist, 0.31, 0.31, new THREE.Vector3(1, -0.7, 0.4), new THREE.Vector3());
   const upper = toward(AIM_HELD.clone().sub(elbow));
   const umid = AIM_HELD.clone().add(elbow).multiplyScalar(0.5);
-  k.add(cyl(0.062, 0.058, AIM_HELD.distanceTo(elbow), 8), SUIT, tuple(umid), upper);
-  k.add(block(0.15, 0.17, 0.16, 0.04), BODY, local(umid, upper, [0.01, -0.02, 0]), upper);
+  k.add(cyl(0.068, 0.062, AIM_HELD.distanceTo(elbow), 8), SUIT, tuple(umid), upper);
+  k.add(block(0.17, 0.18, 0.18, 0.045), BODY, local(umid, upper, [0.01, -0.02, 0]), upper);
   forearm(k, elbow, wrist, 1);
   // The hand wraps the grip from the right: palm on the outside, fingers across the front.
   hand(k, palm, toward(wrist.clone().sub(palm)), 1, 1.2);
@@ -478,78 +647,80 @@ function gunArmParts(k: Kit) {
 
 /** Helmet centre, scale and visor radius: the face glyphs sit on the visor. */
 const HEAD_C: V3 = [0, 1.6, 0.01];
-const HEAD_S: V3 = [1, 0.96, 1.03];
-const SHELL_R = 0.235;
-const VISOR_R = 0.247;
+const HEAD_S: V3 = [1.05, 0.9, 1];
+const SHELL_R = 0.27;
+const VISOR_R = 0.283;
 
 /** Position and rotation on the visor's surface at (x, y), facing out. */
 function onVisor(x: number, y: number, lift = 0.004): { pos: V3; rot: V3 } {
+  const nx = x / HEAD_S[0];
   const ny = (y - HEAD_C[1]) / HEAD_S[1];
   const r = VISOR_R + lift;
-  const z = Math.sqrt(Math.max(0, r * r - x * x - ny * ny));
-  return { pos: [x, y, HEAD_C[2] - z * HEAD_S[2]], rot: [Math.asin(ny / r), -Math.asin(x / r), 0] };
+  const z = Math.sqrt(Math.max(0, r * r - nx * nx - ny * ny));
+  return { pos: [x, y, HEAD_C[2] - z * HEAD_S[2]], rot: [Math.asin(ny / r), -Math.asin(nx / r), 0] };
 }
 
-/** Neck, the round helmet shell, the black visor, chin guard and the ear pods with cyan rings. */
+/** Neck, the big round helmet shell, the wide black visor, a chin guard and the ear pods with cyan rings. */
 function headParts(k: Kit) {
-  k.add(cyl(0.07, 0.08, 0.1), SUIT, [0, 1.44, 0]);
-  k.add(new THREE.SphereGeometry(SHELL_R, 16, 12), BODY, HEAD_C, undefined, HEAD_S);
-  // Visor: a sector of a slightly bigger sphere across the front, from just above the eyes to the chin.
-  k.add(new THREE.SphereGeometry(VISOR_R, 18, 6, Math.PI * 1.5 - 1.15, 2.3, 1.27, 0.78), GLASS, HEAD_C, undefined, HEAD_S, false);
-  k.add(block(0.2, 0.07, 0.09, 0.03, [1, 1.1], [0.75, 1]), BODY, [0, 1.455, -0.19], [-0.35, 0, 0]);
+  k.add(cyl(0.08, 0.09, 0.1), SUIT, [0, 1.43, 0]);
+  k.add(new THREE.SphereGeometry(SHELL_R, 18, 14), SHELL, HEAD_C, undefined, HEAD_S);
+  // Visor: a wide sector of a slightly bigger sphere across the lower front, ear to ear.
+  k.add(new THREE.SphereGeometry(VISOR_R, 20, 6, Math.PI * 1.5 - 1.25, 2.5, 1.33, 0.8), GLASS, HEAD_C, undefined, HEAD_S, false);
+  k.add(block(0.26, 0.08, 0.1, 0.035, [1, 1.1], [0.7, 1]), BODY2, [0, 1.405, -0.2], [-0.4, 0, 0]);
+  k.add(box(0.1, 0.018, 0.02), JOINT, [0, 1.42, -0.252], [-0.4, 0, 0], undefined, false);
   for (const s of [-1, 1]) {
-    k.add(cyl(0.088, 0.088, 0.07, 14), BODY, [s * 0.232, 1.6, 0.02], ALONG_X);
-    k.add(cyl(0.064, 0.064, 0.02, 14), JOINT, [s * 0.27, 1.6, 0.02], ALONG_X, undefined, false);
-    k.glow(new THREE.TorusGeometry(0.052, 0.011, 4, 16), VISOR, [s * 0.281, 1.6, 0.02], FACE_X);
-    k.add(cyl(0.024, 0.024, 0.02, 10), SUIT, [s * 0.283, 1.6, 0.02], ALONG_X, undefined, false);
+    k.add(cyl(0.1, 0.1, 0.08, 16), BODY2, [s * 0.27, 1.585, 0.0], ALONG_X);
+    k.add(cyl(0.074, 0.074, 0.02, 16), JOINT, [s * 0.315, 1.585, 0.0], ALONG_X, undefined, false);
+    k.glow(new THREE.TorusGeometry(0.06, 0.012, 4, 16), VISOR, [s * 0.326, 1.585, 0.0], FACE_X);
+    k.add(cyl(0.028, 0.028, 0.02, 10), SUIT, [s * 0.328, 1.585, 0.0], ALONG_X, undefined, false);
   }
 }
 
-/** The cream stripe over the top of the helmet, front to back. */
+/** The wide cream stripe over the top of the helmet, front to back. */
 function stripe(k: Kit, color: number) {
-  const g = new THREE.TorusGeometry(SHELL_R - 0.011, 0.022, 4, 20, 3.25).rotateZ(0.55);
-  k.add(g, color, HEAD_C, FACE_X, [HEAD_S[2], HEAD_S[1], 2.4]);
+  const g = new THREE.TorusGeometry(SHELL_R - 0.012, 0.024, 4, 20, 3.2).rotateZ(0.35);
+  k.add(g, color, HEAD_C, FACE_X, [HEAD_S[2], HEAD_S[1], 2.6]);
 }
 
 function helmetParts(k: Kit, kind: Helmet) {
   stripe(k, TRIM);
   const top = HEAD_C[1] + SHELL_R * HEAD_S[1];
   if (kind === 'crest') {
-    k.add(block(0.045, 0.13, 0.36, 0.015, [1, 0.6], [1, 1]), TRIM, [0, top + 0.03, 0.03], [-0.1, 0, 0]);
+    k.add(block(0.05, 0.15, 0.4, 0.016, [1, 0.6], [1, 1]), TRIM, [0, top + 0.035, 0.03], [-0.1, 0, 0]);
   } else if (kind === 'antenna') {
-    k.add(cyl(0.008, 0.012, 0.24, 6), JOINT, [0.25, 1.75, 0.04], [0, 0, -0.12]);
-    k.glow(new THREE.IcosahedronGeometry(0.03, 0), VISOR, [0.265, 1.875, 0.04], undefined, undefined, true);
+    k.add(cyl(0.009, 0.013, 0.26, 6), JOINT, [0.29, 1.76, 0.03], [0, 0, -0.12]);
+    k.glow(new THREE.IcosahedronGeometry(0.033, 0), VISOR, [0.306, 1.895, 0.03], undefined, undefined, true);
   } else if (kind === 'horns') {
-    for (const s of [-1, 1]) k.add(new THREE.ConeGeometry(0.045, 0.2, 6), TRIM, [s * 0.15, top - 0.01, 0], [0.15, 0, -s * 0.55]);
+    for (const s of [-1, 1]) k.add(new THREE.ConeGeometry(0.05, 0.22, 6), TRIM, [s * 0.17, top - 0.015, 0], [0.15, 0, -s * 0.55]);
   }
 }
 
 /** Glowing face shapes on the visor, in the visor colour. */
 function faceParts(k: Kit, kind: Face) {
+  const eyeY = 1.565;
   if (kind === 'smile') {
     // "^ ^": two upturned arcs.
     for (const s of [-1, 1]) {
-      const p = onVisor(s * 0.085, 1.585);
-      k.glow(new THREE.TorusGeometry(0.036, 0.011, 4, 10, Math.PI), VISOR, p.pos, p.rot, [1, 1, 0.4]);
+      const p = onVisor(s * 0.1, eyeY - 0.01);
+      k.glow(new THREE.TorusGeometry(0.044, 0.013, 4, 10, Math.PI), VISOR, p.pos, p.rot, [1, 1, 0.4]);
     }
   } else if (kind === 'visor') {
     // One glowing band across, curved with the glass.
-    const ny = 0.0;
-    const theta = Math.acos(ny / VISOR_R);
-    k.glow(new THREE.SphereGeometry(VISOR_R + 0.003, 18, 1, Math.PI * 1.5 - 0.8, 1.6, theta - 0.06, 0.12), VISOR, HEAD_C, undefined, HEAD_S);
+    const theta = Math.acos((eyeY - HEAD_C[1]) / HEAD_S[1] / VISOR_R);
+    k.glow(new THREE.SphereGeometry(VISOR_R + 0.003, 20, 1, Math.PI * 1.5 - 0.9, 1.8, theta - 0.06, 0.12), VISOR, HEAD_C, undefined, HEAD_S);
   } else if (kind === 'cyclops') {
-    const p = onVisor(0, 1.595);
-    k.glow(new THREE.TorusGeometry(0.05, 0.013, 4, 16), VISOR, p.pos, p.rot, [1, 1, 0.4]);
-    const c = onVisor(0, 1.595, 0.006);
-    k.glow(cyl(0.022, 0.022, 0.006, 10), VISOR, c.pos, [c.rot[0] + Math.PI / 2, c.rot[1], 0]);
+    const p = onVisor(0, eyeY);
+    k.glow(new THREE.TorusGeometry(0.06, 0.015, 4, 16), VISOR, p.pos, p.rot, [1, 1, 0.4]);
+    const c = onVisor(0, eyeY, 0.006);
+    k.glow(cyl(0.026, 0.026, 0.006, 10), VISOR, c.pos, [c.rot[0] + Math.PI / 2, c.rot[1], 0]);
   } else {
     // Grin: two tall eyes over a wide smile.
     for (const s of [-1, 1]) {
-      const p = onVisor(s * 0.075, 1.625);
-      k.glow(box(0.026, 0.05, 0.01), VISOR, p.pos, p.rot);
+      const p = onVisor(s * 0.085, eyeY + 0.03);
+      k.glow(box(0.03, 0.058, 0.01), VISOR, p.pos, p.rot);
     }
-    const m = onVisor(0, 1.585);
-    k.glow(new THREE.TorusGeometry(0.075, 0.011, 4, 14, Math.PI).rotateZ(Math.PI), VISOR, m.pos, m.rot, [1, 1, 0.4]);
+    const m = onVisor(0, eyeY - 0.015);
+    k.glow(new THREE.TorusGeometry(0.088, 0.012, 4, 14, Math.PI).rotateZ(Math.PI), VISOR, m.pos, m.rot, [1, 1, 0.4]);
   }
 }
 
@@ -570,7 +741,10 @@ function part(key: string, bone: BoneName, build: (k: Kit) => void, origin: THRE
 }
 
 function partsFor(look: Look): Part[] {
-  return [
+  const backpack = look.backpack ?? DEFAULT_LOOK.backpack;
+  const boots = look.boots ?? DEFAULT_LOOK.boots;
+  const emblem = look.emblem ?? DEFAULT_LOOK.emblem;
+  const list = [
     part('hips', 'hips', hipParts),
     part('torso', 'torso', torsoParts),
     part(`pads:${look.shoulders}`, 'torso', (k) => padParts(k, look.shoulders)),
@@ -582,14 +756,22 @@ function partsFor(look: Look): Part[] {
     part('gun', 'recoil', gunArmParts, AIM_HELD),
     part('legL', 'legL', (k) => thighParts(k, -1)),
     part('shinL', 'shinL', (k) => shinParts(k, -1)),
-    part('footL', 'footL', (k) => bootParts(k, -1)),
+    part(`footL:${boots}`, 'footL', (k) => bootParts(k, -1, boots)),
     part('legR', 'legR', (k) => thighParts(k, 1)),
     part('shinR', 'shinR', (k) => shinParts(k, 1)),
-    part('footR', 'footR', (k) => bootParts(k, 1)),
+    part(`footR:${boots}`, 'footR', (k) => bootParts(k, 1, boots)),
   ];
+  if (backpack !== 'none') list.push(part(`pack:${backpack}`, 'torso', (k) => backpackParts(k, backpack)));
+  if (emblem !== 'none') list.push(part(`emblem:${emblem}:${look.shoulders}`, 'torso', (k) => emblemParts(k, emblem, look.shoulders)));
+  return list;
 }
 
-const variantKey = (look: Look) => `${look.helmet}|${look.face}|${look.shoulders}`;
+/** Identifies the geometry (template) of a look: everything but the colours and the paint pattern. */
+const variantKey = (look: Look) =>
+  `${look.helmet}|${look.face}|${look.shoulders}|${look.backpack ?? DEFAULT_LOOK.backpack}|${look.boots ?? DEFAULT_LOOK.boots}|${look.emblem ?? DEFAULT_LOOK.emblem}`;
+/** Identifies the material of a look in `body` (the team colour in team modes). */
+const paintKey = (look: Look, body: number) => `${body}|${look.trim}|${look.visor}|${look.pattern ?? DEFAULT_LOOK.pattern}`;
+const paint = (look: Look, body: number) => lookMaterial(body, look.trim, look.visor, look.pattern ?? DEFAULT_LOOK.pattern);
 
 /** Skin attributes binding every vertex of `g` fully to bone `index`. */
 function skin(g: THREE.BufferGeometry, index: number) {
@@ -679,7 +861,7 @@ interface Rig {
  */
 export function buildCharacter(look: Look, teamColor?: number): THREE.Group {
   const root = cloneSkinned(template(look)) as THREE.Group;
-  const mat = lookMaterial(teamColor ?? look.body, look.trim, look.visor);
+  const mat = paint(look, teamColor ?? look.body);
   root.traverse((o) => {
     const mesh = o as THREE.SkinnedMesh;
     if (!mesh.isSkinnedMesh) return;
@@ -690,13 +872,13 @@ export function buildCharacter(look: Look, teamColor?: number): THREE.Group {
   for (const name of BONES) b[name] = root.getObjectByName(name) as THREE.Bone;
   const rig: Rig = { b, phase: Math.random() * 6, amp: 0, air: 0, squash: 0, legYaw: 0, ground: true, fallVy: 0 };
   root.userData.rig = rig;
-  root.userData.lookKey = `${variantKey(look)}|${teamColor ?? look.body}|${look.trim}|${look.visor}`;
+  root.userData.lookKey = characterKey(look, teamColor);
   animateCharacter(root, { speed: 0, vx: 0, vz: 0, yaw: 0, onGround: true, vy: 0, pitch: 0, t: 0, dt: 0 });
   return root;
 }
 
 /** Identifies what buildCharacter(look, teamColor) would build, to tell when a remote needs rebuilding. */
-export const characterKey = (look: Look, teamColor?: number) => `${variantKey(look)}|${teamColor ?? look.body}|${look.trim}|${look.visor}`;
+export const characterKey = (look: Look, teamColor?: number) => `${variantKey(look)}|${paintKey(look, teamColor ?? look.body)}`;
 
 export interface CharacterState {
   /** Horizontal speed (m/s) and velocity; yaw is the facing (the root's rotation.y). */
@@ -725,6 +907,9 @@ const ARM_DIR = vec(PIVOT.foreL).sub(vec(PIVOT.armL)).normalize();
 const FORE_DIR = vec(HAND_L).sub(vec(PIVOT.foreL)).normalize();
 /** The left hand's grip on the launcher, in the recoil bone's space. */
 const GRIP_IN_GUN = vec(GUN_AT).add(vec(LEFT_GRIP).multiplyScalar(GUN_SCALE)).sub(AIM_HELD);
+/** The fallback hold under the receiver, and how far the arm reaches before the hand slides back to it. */
+const BACK_IN_GUN = vec(GUN_AT).add(vec(BACK_GRIP).multiplyScalar(GUN_SCALE)).sub(AIM_HELD);
+const ARM_REACH = (ARM_UPPER + ARM_LOWER) * 0.97;
 const SHOULDER_L = vec(PIVOT.armL).sub(vec(PIVOT.torso));
 const ELBOW_POLE = new THREE.Vector3(-0.6, -1, 0.5).normalize();
 
@@ -803,7 +988,8 @@ export function animateCharacter(obj: THREE.Object3D, s: CharacterState) {
 
   // Upper body: the hold twist, turned back from the legs so it faces ahead, a run lean and a little sway.
   // Looking up or down bends the chest along a little, so the long launcher does not swing across the face.
-  const lean = -0.18 * run * amp * dir - 0.08 * r.air + breathe * 0.015 - squash * 0.15 + clamp(s.pitch, -1, 1) * 0.3;
+  // Aiming down bends the chest further, so the left hand can stay on the gun.
+  const lean = -0.18 * run * amp * dir - 0.08 * r.air + breathe * 0.015 - squash * 0.15 + clamp(s.pitch, -1.2, 1) * (s.pitch < 0 ? 0.42 : 0.3);
   b.torso.rotation.set(lean, TWIST - r.legYaw - (s.firing ?? 0) * 0.06, sp * 0.03 * amp);
   b.head.rotation.set(clamp(s.pitch * 0.6, -0.55, 0.55) - lean, -TWIST, 0);
   b.aim.rotation.set(s.pitch - lean + cp * 0.03 * amp, -TWIST, 0);
@@ -811,10 +997,20 @@ export function animateCharacter(obj: THREE.Object3D, s: CharacterState) {
   b.recoil.position.set(0, 0, kick * 0.1);
   b.recoil.rotation.set(kick * 0.3, 0, 0);
 
-  // Left hand on the launcher: two-bone IK in torso space toward the grip point on the gun.
+  // Left hand on the launcher: two-bone IK in torso space toward the front grip. Aiming far down swings the front
+  // grip out of reach, so the hand slides back along the gun toward the receiver just enough to keep hold.
   b.armL.position.set(SHOULDER_L.x, SHOULDER_L.y, SHOULDER_L.z - REACH);
   _s.copy(b.armL.position);
   _t.copy(GRIP_IN_GUN).applyQuaternion(b.recoil.quaternion).add(b.recoil.position).applyQuaternion(b.aim.quaternion).add(b.aim.position);
+  const front = _t.distanceTo(_s);
+  if (front > ARM_REACH) {
+    _e.copy(BACK_IN_GUN).applyQuaternion(b.recoil.quaternion).add(b.recoil.position).applyQuaternion(b.aim.quaternion).add(b.aim.position);
+    const back = _e.distanceTo(_s);
+    if (back < front) _t.lerp(_e, Math.min(1, (front - ARM_REACH) / (front - back)));
+    // Still short (aiming steeply down): the shoulder reaches after it a little.
+    const d = _t.distanceTo(_s);
+    if (d > ARM_REACH) b.armL.position.copy(_s.lerp(_t, Math.min(0.12, d - ARM_REACH) / d));
+  }
   solveElbow(_s, _t, ARM_UPPER, ARM_LOWER, ELBOW_POLE, _e);
   _u.subVectors(_e, _s).normalize();
   b.armL.quaternion.setFromUnitVectors(ARM_DIR, _u);
@@ -877,7 +1073,7 @@ export function buildCharacterPieces(look: Look, teamColor: number | undefined, 
   obj.updateWorldMatrix(true, true);
   const rig = obj.userData.rig as Rig | undefined;
   const origin = obj.getWorldPosition(new THREE.Vector3());
-  const mat = lookMaterial(teamColor ?? look.body, look.trim, look.visor);
+  const mat = paint(look, teamColor ?? look.body);
   return wreckTemplates(look).map((t) => {
     const object = t.clone(true);
     (object.children[0] as THREE.Mesh).material = mat;

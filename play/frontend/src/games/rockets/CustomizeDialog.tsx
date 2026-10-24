@@ -1,21 +1,48 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { BODY_COLORS, DEFAULT_LOOK, FACES, HELMETS, type Look, SHOULDERS, TRIM_COLORS, VISOR_COLORS, randomLook } from '@shared/rockets/cosmetics';
+import {
+  BACKPACKS,
+  BODY_COLORS,
+  BOOTS,
+  DEFAULT_LOOK,
+  EMBLEMS,
+  FACES,
+  HELMETS,
+  type Look,
+  PATTERNS,
+  SHOULDERS,
+  TRIM_COLORS,
+  VISOR_COLORS,
+  randomLook,
+} from '@shared/rockets/cosmetics';
 import { Modal } from '../../ui/Modal';
 import { animateCharacter, buildCharacter } from './character';
 import { loadLook, saveLook } from './look';
 import './customize.css';
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
-const label = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const label = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace('-', ' ');
+
+type Choice = 'helmet' | 'face' | 'shoulders' | 'pattern' | 'backpack' | 'boots' | 'emblem';
+/** The part pickers, in order, with their headings. */
+const CHOICES: [Choice, string, readonly string[]][] = [
+  ['helmet', 'Helmet', HELMETS],
+  ['face', 'Face', FACES],
+  ['shoulders', 'Shoulders', SHOULDERS],
+  ['pattern', 'Paint', PATTERNS],
+  ['backpack', 'Backpack', BACKPACKS],
+  ['boots', 'Boots', BOOTS],
+  ['emblem', 'Emblem', EMBLEMS],
+];
 
 /**
  * The robot customiser: a live, turning 3D preview next to colour swatches and part pickers. Every change is saved
- * in this browser (look.ts) and handed to `onChange`, which tells the room.
+ * in this browser (look.ts) and handed to `onChange`, which tells the room. The preview is the game's own robot
+ * (character.ts buildCharacter), so what you see here is what other players see.
  */
 export function CustomizeDialog({ onChange, onClose }: { onChange: (look: Look) => void; onClose: () => void }) {
-  const [look, setLook] = useState<Look>(loadLook);
-  const update = (next: Look) => {
+  const [look, setLook] = useState<Required<Look>>(loadLook);
+  const update = (next: Required<Look>) => {
     setLook(next);
     saveLook(next);
     onChange(next);
@@ -38,10 +65,17 @@ export function CustomizeDialog({ onChange, onClose }: { onChange: (look: Look) 
       ))}
     </div>
   );
-  const variants = <K extends 'helmet' | 'face' | 'shoulders'>(key: K, list: readonly Look[K][]) => (
-    <div className="rk-variants" role="radiogroup" aria-label={label(key)}>
+  const variants = (key: Choice, name: string, list: readonly string[]) => (
+    <div className="rk-variants" role="radiogroup" aria-label={name}>
       {list.map((v) => (
-        <button key={v} type="button" role="radio" aria-checked={look[key] === v} className={`rk-variant${look[key] === v ? ' active' : ''}`} onClick={() => set(key, v)}>
+        <button
+          key={v}
+          type="button"
+          role="radio"
+          aria-checked={look[key] === v}
+          className={`rk-variant${look[key] === v ? ' active' : ''}`}
+          onClick={() => set(key, v as Look[Choice])}
+        >
           {label(v)}
         </button>
       ))}
@@ -75,18 +109,14 @@ export function CustomizeDialog({ onChange, onClose }: { onChange: (look: Look) 
             <h3>Lights</h3>
             {swatches('visor', VISOR_COLORS)}
           </section>
-          <section>
-            <h3>Helmet</h3>
-            {variants('helmet', HELMETS)}
-          </section>
-          <section>
-            <h3>Face</h3>
-            {variants('face', FACES)}
-          </section>
-          <section>
-            <h3>Shoulders</h3>
-            {variants('shoulders', SHOULDERS)}
-          </section>
+          <div className="rk-custom-parts">
+            {CHOICES.map(([key, name, list]) => (
+              <section key={key}>
+                <h3>{name}</h3>
+                {variants(key, name, list)}
+              </section>
+            ))}
+          </div>
           <div className="rk-custom-actions">
             <button type="button" className="btn small" onClick={() => update(randomLook())}>
               Randomize
