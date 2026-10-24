@@ -193,8 +193,8 @@ const WIZARD_SCALE = 1.15;
 const FLOOR_HALF = FIELD_HALF + 7;
 const FLOOR_NEAR = LINE_Z + 14;
 const FLOOR_FAR = LINE_Z - FIELD_LENGTH - 4;
-/** Flagstone size: square slabs, about a dozen across the field (one in twenty split in halves). */
-const TILE = 1.5;
+/** Flagstone size: big square slabs, about ten across the visible floor (one in twenty split in halves). */
+const TILE = 1.95;
 
 /** Floor texture resolution, texels per world unit: 40 on 'high' (1200×2320), 24 on 'low' (720×1392, 36% the memory). */
 const FLOOR_PX = { high: 40, low: 24 } as const;
@@ -234,13 +234,13 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
 
   // ---- flagstones
   // Mortar first: the whole floor dark, so the deep gaps are what the slabs leave uncovered.
-  g.fillStyle = 'rgb(30,31,28)';
+  g.fillStyle = 'rgb(62,62,46)';
   g.fillRect(0, 0, W, H);
   const joints: [number, number, number, number][] = [];
   /** A slab's outline: a rectangle inset by half the gap, its corners nudged and rounded, so no two gaps match. */
   const slabPath = (x: number, y: number, w: number, h: number) => {
-    const gap = 1.7;
-    const j = () => (rnd() - 0.5) * 2.4;
+    const gap = 1.1;
+    const j = () => (rnd() - 0.5) * 2;
     const ax = x + gap + j();
     const ay = y + gap + j();
     const bx = x + w - gap + j();
@@ -260,10 +260,10 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
   };
   const stone = (x: number, y: number, w: number, h: number) => {
     joints.push([x, y, w, h]);
-    // Slate: cool grey with a hint of blue or green, never warm (the lamps add that).
-    const hue = 170 + rnd() * 45;
-    const sat = 5 + rnd() * 6;
-    const lit = 42 + rnd() * 8;
+    // Flat worn slate: grey-olive to khaki-grey, low contrast from slab to slab (the lamps add the warmth).
+    const hue = 60 + rnd() * 110;
+    const sat = 4 + rnd() * 4;
+    const lit = 40 + rnd() * 6;
     g.save();
     slabPath(x, y, w, h);
     g.clip();
@@ -317,19 +317,19 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
     const cx = x + w / 2;
     const cy = y + h / 2;
     const dome = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.62);
-    dome.addColorStop(0, 'rgba(236,240,236,0.09)');
-    dome.addColorStop(0.6, 'rgba(236,240,236,0.02)');
-    dome.addColorStop(1, 'rgba(12,14,14,0.1)');
+    dome.addColorStop(0, 'rgba(236,240,236,0.04)');
+    dome.addColorStop(0.6, 'rgba(236,240,236,0.01)');
+    dome.addColorStop(1, 'rgba(12,14,14,0.04)');
     g.fillStyle = dome;
     g.fillRect(x, y, w, h);
     slabPath(x, y, w, h);
-    // (two strokes, so the rim darkens gradually towards the gap: 0.22 at the edge)
-    g.strokeStyle = 'rgba(14,16,16,0.11)';
+    // (two strokes, so the rim darkens gradually towards the gap: 0.1 at the edge)
+    g.strokeStyle = 'rgba(14,16,16,0.05)';
     g.lineWidth = 10;
     g.stroke();
     g.lineWidth = 5;
     g.stroke();
-    g.strokeStyle = 'rgba(230,234,226,0.06)';
+    g.strokeStyle = 'rgba(230,234,226,0.03)';
     g.lineWidth = 3;
     g.strokeRect(x + 6, y + 6, w - 12, h - 12);
     // A hairline crack now and then.
@@ -474,7 +474,7 @@ function floorTexture(texels: number, candleGlow: boolean): THREE.CanvasTexture 
     // Threads along the top and left joints of this slab.
     for (let i = 0; i < 2; i++) {
       if (rnd() < 0.38 + edge * 0.5) {
-        const len = 20 + rnd() * 40;
+        const len = 30 + rnd() * 60;
         const horiz = rnd() < 0.5;
         if (horiz) thread(x + rnd() * Math.max(1, w - len), y, 1, 0, Math.min(len, w));
         else thread(x, y + rnd() * Math.max(1, h - len), 0, 1, Math.min(len, h));
@@ -710,58 +710,65 @@ function bendTip(geo: THREE.BufferGeometry, h: number, side: number, droop: numb
 }
 
 /**
- * The little wizard, seen from behind: a tall dark green knitted hat with a wide floppy brim and its tip curled over,
- * a thick cream knitted scarf wound round his neck with two striped, fringed ends hanging down his back, a green
- * knitted coat with round shoulders, and a candle on a stick raised at his side. Matte wool all over: no rim shine.
+ * The little wizard, seen from behind and above: a squat green knitted coat, a knitted hat with a wide floppy brim
+ * whose tip flops over sideways to screen left, a cream knitted scarf wound twice round his neck with two striped,
+ * fringed ends hanging over his front-left, a mitten hand at his left side and a candle on a stick raised in his
+ * right. Matte wool all over: no rim shine.
  */
 function makeWizard(candleLight: boolean) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
   const ROBE = 0x3b5843;
-  const HAT = 0x2a4a40;
-  const BRIM = 0x2f5247;
+  const HAT = 0x34584a;
+  const BRIM = 0x36594b;
   const SCARF = 0xe8dcc0;
   const SAGE = 0x6f8a66;
   const b = new Baker(true, false);
+  /** The coat is squat: wide and low, so from above he reads as a little knitted lump, not a post. */
+  const SX = 1.15;
+  const SY = 0.85;
+  const squat = (geo: THREE.BufferGeometry) => geo.scale(SX, SY, SX);
   // Coat: a knitted bell with broad round shoulders, darker at the hem, with vertical cable stripes.
   const robeKnit = knit(10, 22, 0.24);
   b.add(
-    softLathe([[0, 0], [0.8, 0.02], [0.88, 0.2], [0.84, 0.6], [0.8, 0.98], [0.74, 1.2], [0.56, 1.36], [0.28, 1.46], [0, 1.48]], 22, 32),
+    squat(softLathe([[0, 0], [0.8, 0.02], [0.88, 0.2], [0.84, 0.6], [0.8, 0.98], [0.74, 1.2], [0.56, 1.36], [0.28, 1.46], [0, 1.48]], 22, 32)),
     ROBE,
     (x, y, z) => robeKnit(x, y, z) * (y < 0.14 ? 0.72 : 1) * (0.92 + 0.08 * Math.cos(Math.atan2(x, z) * 6)),
   );
   // Shoulders: two knitted pads, so he is not an egg.
-  for (const sx of [-1, 1]) b.add(new THREE.SphereGeometry(0.34, 12, 10).scale(1.1, 0.8, 1).translate(sx * 0.56, 1.2, 0.02), ROBE, robeKnit);
+  for (const sx of [-1, 1]) b.add(squat(new THREE.SphereGeometry(0.34, 12, 10).scale(1.1, 0.8, 1).translate(sx * 0.56, 1.2, 0.02)), ROBE, robeKnit);
   // A darker hem band.
-  b.add(new THREE.TorusGeometry(0.82, 0.07, 6, 32).rotateX(Math.PI / 2).translate(0, 0.08, 0), 0x2c4433, knit(0, 32, 0.2));
-  // Scarf: a thick knitted cream torus round the neck, ribbed, and two ends hanging down his back (towards the
-  // camera), each with sage stripes near the end and a fringe.
-  // Shaded in wound bands (darker where one wrap tucks under the next) with fine ribs.
-  b.add(new THREE.TorusGeometry(0.47, 0.21, 10, 32).rotateX(Math.PI / 2).scale(1, 0.9, 1).translate(0, 1.44, 0.04), SCARF, (x, y, z) => {
+  b.add(squat(new THREE.TorusGeometry(0.82, 0.07, 6, 32).rotateX(Math.PI / 2).translate(0, 0.08, 0)), 0x2c4433, knit(0, 32, 0.2));
+  // Scarf: a knitted cream band wound twice round the neck (two snug rolls, the upper one a little smaller and
+  // tilted), with two striped, fringed ends hanging down over his front-left (towards the camera and screen left).
+  const NECK = 1.48 * SY;
+  const scarfShade = (x: number, y: number, z: number) => {
     const a = Math.atan2(x, z);
-    const band = 0.5 + 0.5 * Math.cos(a * 3 + y * 14);
-    return (0.72 + 0.28 * band) * (0.93 + 0.07 * Math.cos(a * 24));
-  });
+    return (0.82 + 0.18 * Math.cos(a * 3 + y * 14)) * (0.93 + 0.07 * Math.cos(a * 24));
+  };
+  b.add(new THREE.TorusGeometry(0.6, 0.15, 8, 28).rotateX(Math.PI / 2).translate(0, NECK - 0.02, 0.12), SCARF, scarfShade);
+  b.add(new THREE.TorusGeometry(0.5, 0.13, 8, 28).rotateX(Math.PI / 2).rotateZ(0.12).translate(0, NECK + 0.2, 0.1), SCARF, scarfShade);
   const scarfKnit = (_x: number, y: number) => 0.9 + 0.1 * Math.cos(y * 50);
   const tail = (x: number, len: number, tilt: number, twist: number) => {
-    const at = (geo: THREE.BufferGeometry) => geo.rotateX(-tilt).rotateZ(twist).translate(x, 1.4, 0.64);
-    b.add(at(new THREE.BoxGeometry(0.4, len, 0.12, 1, 8, 1).translate(0, -len / 2, 0)), SCARF, scarfKnit);
-    for (const f of [0.6, 0.7, 0.8]) b.add(at(new THREE.BoxGeometry(0.41, 0.045, 0.13).translate(0, -len * f, 0)), SAGE);
+    const at = (geo: THREE.BufferGeometry) => geo.rotateX(-tilt).rotateZ(twist).translate(x, NECK, 0.7);
+    b.add(at(new THREE.BoxGeometry(0.34, len, 0.1, 1, 8, 1).translate(0, -len / 2, 0)), SCARF, scarfKnit);
+    for (const f of [0.62, 0.72, 0.82]) b.add(at(new THREE.BoxGeometry(0.35, 0.04, 0.11).translate(0, -len * f, 0)), SAGE);
     // Fringe: little tassels hanging off the end.
-    for (let f = 0; f < 6; f++) {
-      b.add(at(new THREE.CylinderGeometry(0.026, 0.015, 0.2, 4).translate(-0.16 + f * 0.064, -len - 0.09, 0)), SCARF);
+    for (let f = 0; f < 5; f++) {
+      b.add(at(new THREE.CylinderGeometry(0.026, 0.015, 0.17, 4).translate(-0.14 + f * 0.07, -len - 0.07, 0)), SCARF);
     }
   };
-  tail(0.13, 1.1, 0.52, 0.06);
-  tail(-0.11, 0.9, 0.58, -0.04);
-  // Left sleeve hanging, with a little satchel at the hip.
-  b.add(new THREE.CapsuleGeometry(0.22, 0.45, 4, 10).rotateZ(0.25).translate(-0.76, 0.86, 0.05), ROBE, robeKnit);
-  b.add(new THREE.BoxGeometry(0.34, 0.4, 0.16).rotateY(0.3).translate(-0.86, 0.5, -0.12), 0x5a3c24);
+  tail(-0.3, 0.85, 0.5, -0.22);
+  tail(-0.08, 0.7, 0.62, -0.08);
+  // Left arm hanging out at his side with a mitten hand, and a little satchel at the hip.
+  b.add(new THREE.CapsuleGeometry(0.2, 0.42, 4, 10).rotateZ(-0.55).translate(-0.98, 0.78, 0.18), ROBE, robeKnit);
+  b.add(new THREE.SphereGeometry(0.14, 10, 8).translate(-1.2, 0.42, 0.2), PAL.skin);
+  b.add(new THREE.BoxGeometry(0.34, 0.36, 0.16).rotateY(0.3).translate(-0.9, 0.42, -0.2), 0x5a3c24);
   b.bake(body);
 
   const head = new THREE.Group();
-  head.position.y = 1.7;
+  head.position.y = NECK + 0.3;
   // Hat tipped forward a little, so the camera behind him sees the scarf under the brim.
   head.rotation.x = -0.18;
   body.add(head);
@@ -770,8 +777,8 @@ function makeWizard(candleLight: boolean) {
   // White beard tufts peeking out at the sides of the face (front is -z).
   hb.add(new THREE.SphereGeometry(0.34, 12, 10).scale(1.25, 1.1, 0.8).translate(0, -0.08, -0.22), 0xf4efe6);
   for (const sx of [-1, 1]) hb.add(new THREE.SphereGeometry(0.15, 8, 6).translate(sx * 0.4, 0.04, -0.14), 0xf4efe6);
-  // Hat: a wide floppy brim (wavy, drooping at the back and sides) and a tall knitted cone whose tip curls over
-  // backwards and to his left.
+  // Hat: a wide floppy brim (wavy, drooping at the back and sides) and a knitted cone whose tip flops over
+  // sideways to screen left (-x), so from above it reads as a hat and not a dark cone pointing at the camera.
   const brim = softLathe([[0.4, 0.06], [0.64, 0.04], [0.82, -0.05], [0.9, -0.12], [0.85, -0.17], [0.62, -0.08], [0.42, -0.02]], 10, 32);
   {
     const p = brim.attributes.position;
@@ -780,21 +787,24 @@ function makeWizard(candleLight: boolean) {
       const r = Math.hypot(p.getX(i), p.getZ(i));
       p.setY(i, p.getY(i) - Math.max(0, r - 0.55) * (0.14 + 0.12 * Math.sin(a * 3 + 1)));
     }
+    brim.scale(1.05, 1, 1.05);
     brim.computeVertexNormals();
   }
   hb.add(brim.translate(0, 0.4, 0), BRIM, knit(14, 40, 0.24));
-  const HAT_H = 2.0;
-  const cone = softLathe([[0.6, 0], [0.5, 0.45], [0.36, 0.95], [0.22, 1.4], [0.11, 1.75], [0.05, 1.93], [0, HAT_H]], 24, 24);
+  const HAT_H = 1.75;
+  const cone = softLathe([[0.6, 0], [0.52, 0.4], [0.4, 0.8], [0.26, 1.2], [0.14, 1.5], [0.07, 1.68], [0, HAT_H]], 24, 24);
   hb.add(cone, HAT, knit(9, 26, 0.28));
-  bendTip(cone, HAT_H, -0.55, 0.85, 0.5);
+  const TIP_SIDE = -1.05;
+  const TIP_DROOP = 0.95;
+  bendTip(cone, HAT_H, TIP_SIDE, TIP_DROOP, -0.05);
   cone.translate(0, 0.4, 0);
-  // The curl at the tip: a small knitted roll.
-  hb.add(new THREE.TorusGeometry(0.1, 0.055, 6, 12, Math.PI * 1.4).rotateY(Math.PI / 2).translate(-0.55, 0.4 + HAT_H - 0.92, 0.6), HAT);
+  // A little knitted bobble on the drooping tip.
+  hb.add(new THREE.SphereGeometry(0.1, 8, 6).translate(TIP_SIDE, 0.4 + HAT_H - TIP_DROOP - 0.04, -0.05), BRIM, knit(30, 10, 0.2));
   hb.bake(head);
 
   // Right arm with the candle (the side next to the robot).
   const arm = new THREE.Group();
-  arm.position.set(0.66, 1.0, -0.05);
+  arm.position.set(0.76, 0.86, 0.08);
   body.add(arm);
   const ab = new Baker(true, false);
   ab.add(new THREE.CapsuleGeometry(0.2, 0.5, 4, 10).rotateZ(-1.1).translate(0.3, 0.1, 0), ROBE, robeKnit);
