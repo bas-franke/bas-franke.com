@@ -227,7 +227,7 @@ class RocketsGame implements GameServer {
         n++;
       }
       // Nobody at the keyboard (or a stalled connection): keep gravity honest.
-      if (n === 0 && this.now - p.lastInputAt > 0.15) {
+      if (n === 0 && this.now - p.lastInputAt > 0.3) {
         for (let i = 0; i < substeps; i++) this.applyInput(p, { ...IDLE, seq: p.lastSeq, yaw: p.yaw, pitch: p.pitch }, true);
       }
     }
