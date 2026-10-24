@@ -35,13 +35,7 @@ jobs:
 
       - name: Build frontend
         working-directory: ${{ env.PROJECT }}/frontend
-        env:
-          # Google Analytics measurement ID (G-XXXXXXXXXX). GA_MEASUREMENT_ID is a repository variable shared by
-          # every project; GA_MEASUREMENT_ID_PLAY overrides it for this one. Unset: built without analytics.
-          VITE_GA_MEASUREMENT_ID: ${{ vars.GA_MEASUREMENT_ID_PLAY || vars.GA_MEASUREMENT_ID }}
-        run: |
-          [ -n "$VITE_GA_MEASUREMENT_ID" ] || echo "::warning::GA_MEASUREMENT_ID repository variable is not set: building without Google Analytics."
-          npm ci && npm run build
+        run: npm ci && npm run build
 
       - name: Build backend
         working-directory: ${{ env.PROJECT }}/backend

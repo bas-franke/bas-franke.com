@@ -70,3 +70,34 @@ export const ok = (detail: string): Outcome => ({ status: 'ok', detail });
 export const warn = (detail: string, fix?: Fix): Outcome => ({ status: 'warn', detail, fix });
 export const fail = (detail: string, fix?: Fix): Outcome => ({ status: 'fail', detail, fix });
 export const skip = (detail: string, fix?: Fix): Outcome => ({ status: 'skip', detail, fix });
+
+// Visitor analytics (see analytics.ts). "visitors" are unique per day: the visitor hash changes every day.
+export interface AnalyticsPoint {
+  views: number;
+  visitors: number;
+}
+
+export interface SiteAnalytics {
+  site: string;
+  domain: string;
+  /** Totals for the selected range and for the range before it, so the page can show a trend. */
+  totals: AnalyticsPoint & { previousViews: number; previousVisitors: number };
+  /** One entry per day in the range (oldest first), zero-filled. */
+  daily: (AnalyticsPoint & { day: string })[];
+  /** The last 12 calendar months (oldest first), zero-filled. */
+  monthly: (AnalyticsPoint & { month: string })[];
+  pages: (AnalyticsPoint & { path: string })[];
+  referrers: (AnalyticsPoint & { referrer: string })[];
+  devices: (AnalyticsPoint & { device: string })[];
+}
+
+export interface AnalyticsReport {
+  /** False when the status backend has no database; `detail` and `fix` then say what to do. */
+  enabled: boolean;
+  generatedAt: string;
+  days: number;
+  timezone: string;
+  sites: SiteAnalytics[];
+  detail?: string;
+  fix?: Fix;
+}

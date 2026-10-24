@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AnalyticsPanel, HeadlineStats } from './Visitors';
 import Art from './Art';
 import Login from './Login';
-import type { CheckGroup, CheckResult, CheckStatus, Fix, Report } from './types';
+import type { AnalyticsReport, CheckGroup, CheckResult, CheckStatus, Fix, Report, SiteAnalytics } from './types';
 
 const POLL_MS = 60_000;
+
+/** Visitor-number ranges offered above the project blocks (the backend accepts exactly these). */
+const RANGES = [
+  { days: 7, label: '7d' },
+  { days: 30, label: '30d' },
+  { days: 90, label: '90d' },
+  { days: 365, label: '1y' },
+];
 
 const LABEL: Record<CheckStatus, string> = { ok: 'OK', warn: 'Warning', fail: 'Action needed', skip: 'Skipped' };
 
@@ -36,6 +45,16 @@ function timeAgo(iso: string) {
   return `${Math.round(s / 60)} min ago`;
 }
 
+/** Shared infrastructure first, then the projects with the most visitors in the selected range. */
+function orderGroups(groups: CheckGroup[], sites: Map<string, SiteAnalytics>) {
+  const visitors = (g: CheckGroup) => sites.get(g.id)?.totals.visitors ?? -1;
+  return [...groups].sort((a, b) => {
+    if (a.id === 'shared') return -1;
+    if (b.id === 'shared') return 1;
+    return visitors(b) - visitors(a);
+  });
+}
+
 type Auth = { state: 'checking' } | { state: 'login' } | { state: 'in'; user: string | null };
 
 export default function App() {
@@ -61,6 +80,10 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
   const [report, setReport] = useState<Report>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
+  const [days, setDays] = useState(30);
+  const [analytics, setAnalytics] = useState<AnalyticsReport>();
+  const [analyticsError, setAnalyticsError] = useState<string>();
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [, tick] = useState(0);
 
   const load = useCallback(
@@ -81,6 +104,21 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
     [onLoggedOut],
   );
 
+  const loadAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetch(`/api/analytics?days=${days}`);
+      if (res.status === 401) return onLoggedOut();
+      if (!res.ok) throw new Error(`The analytics API returned HTTP ${res.status}.`);
+      setAnalytics(await res.json());
+      setAnalyticsError(undefined);
+    } catch (err) {
+      setAnalyticsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [days, onLoggedOut]);
+
   useEffect(() => {
     load();
     const poll = setInterval(() => load(), POLL_MS);
@@ -91,10 +129,20 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
     };
   }, [load]);
 
+  useEffect(() => {
+    loadAnalytics();
+    const poll = setInterval(loadAnalytics, POLL_MS);
+    return () => clearInterval(poll);
+  }, [loadAnalytics]);
+
   async function logout() {
     await fetch('/api/logout', { method: 'POST' }).catch(() => {});
     onLoggedOut();
   }
+
+  const sites = new Map((analytics?.sites ?? []).map((s) => [s.site, s]));
+  // Wait for the visitor numbers as well, so the project blocks appear in their final order straight away.
+  const shown = report && (analytics || analyticsError) ? report : undefined;
 
   return (
     <div className="app">
@@ -129,7 +177,7 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
           </section>
         )}
 
-        {!report && !error && (
+        {!shown && !error && (
           <section className="state-card">
             <Art name="state-loading" className="state-art" />
             <h2>Running checks…</h2>
@@ -137,9 +185,28 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
           </section>
         )}
 
-        {report && <Overview report={report} />}
-        {report && <h2 className="section-label">Infrastructure &amp; projects</h2>}
-        {report && report.groups.map((g) => <Group key={g.id} group={g} />)}
+        {shown && <Overview report={shown} />}
+
+        {shown && (
+          <div className="section-row">
+            <h2 className="section-label">Infrastructure &amp; projects</h2>
+            <div className="seg" role="group" aria-label="Visitor numbers for the last">
+              {RANGES.map((r) => (
+                <button key={r.days} className={days === r.days ? 'on' : ''} aria-pressed={days === r.days} onClick={() => setDays(r.days)}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {shown && analytics && !analytics.enabled && <AnalyticsSetup analytics={analytics} />}
+        {shown && analyticsError && <p className="muted small">Visitor numbers are unavailable: {analyticsError}</p>}
+
+        {shown &&
+          orderGroups(shown.groups, sites).map((g) => (
+            <Group key={g.id} group={g} site={sites.get(g.id)} days={days} timezone={analytics?.timezone} dim={analyticsLoading} />
+          ))}
       </main>
 
       <footer className="footer">
@@ -185,12 +252,24 @@ function Overview({ report }: { report: Report }) {
   );
 }
 
-function Group({ group }: { group: CheckGroup }) {
+/** Shown while the status backend has no database: page views are dropped until it gets one. */
+function AnalyticsSetup({ analytics }: { analytics: AnalyticsReport }) {
+  return (
+    <section className="analytics-setup">
+      <p>
+        <strong>Visitor analytics are off.</strong> <span className="muted">{analytics.detail}</span>
+      </p>
+      {analytics.fix && <FixBlock fix={analytics.fix} open={false} />}
+    </section>
+  );
+}
+
+function Group({ group, site, days, timezone, dim }: { group: CheckGroup; site?: SiteAnalytics; days: number; timezone?: string; dim: boolean }) {
   const status = worst(group.checks);
   const counted = group.checks.filter((c) => c.status !== 'skip');
   const passing = counted.filter((c) => c.status === 'ok').length;
-  // Fully green groups start collapsed so problems stand out.
-  const [open, setOpen] = useState(status !== 'ok');
+  // Blocks always start collapsed: the header already carries the state and the headline visitor numbers.
+  const [open, setOpen] = useState(false);
 
   return (
     <section className="group">
@@ -202,11 +281,13 @@ function Group({ group }: { group: CheckGroup }) {
           <h2>{group.title}</h2>
           {group.subtitle && <span className="muted small mono">{group.subtitle}</span>}
         </span>
+        {site && <HeadlineStats site={site} days={days} dim={dim} />}
         <span className={`count-pill tag-${status}`}>
           {passing}/{counted.length} passing
         </span>
         <span className={`chevron ${open ? 'chevron-open' : ''}`}>›</span>
       </button>
+      {open && site && <AnalyticsPanel site={site} days={days} timezone={timezone} dim={dim} />}
       {open && (
         <ul className="checks">
           {group.checks.map((c) => (

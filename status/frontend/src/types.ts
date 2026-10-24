@@ -35,3 +35,30 @@ export interface Report {
   summary: Record<CheckStatus, number>;
   groups: CheckGroup[];
 }
+
+// Visitor analytics (mirrors the backend). "visitors" are unique per day: the visitor hash changes daily.
+export interface AnalyticsPoint {
+  views: number;
+  visitors: number;
+}
+
+export interface SiteAnalytics {
+  site: string;
+  domain: string;
+  totals: AnalyticsPoint & { previousViews: number; previousVisitors: number };
+  daily: (AnalyticsPoint & { day: string })[];
+  monthly: (AnalyticsPoint & { month: string })[];
+  pages: (AnalyticsPoint & { path: string })[];
+  referrers: (AnalyticsPoint & { referrer: string })[];
+  devices: (AnalyticsPoint & { device: string })[];
+}
+
+export interface AnalyticsReport {
+  enabled: boolean;
+  generatedAt: string;
+  days: number;
+  timezone: string;
+  sites: SiteAnalytics[];
+  detail?: string;
+  fix?: Fix;
+}

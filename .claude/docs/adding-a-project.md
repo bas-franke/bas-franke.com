@@ -5,7 +5,8 @@ Example: a project called `notes` on `notes.bas-franke.com`, backend port `3003`
 ## 1. Code (in this repo)
 
 1. Copy the template: `cp -r portfolio notes` then delete `notes/frontend/node_modules`, `notes/backend/node_modules`,
-   `dist/` folders, and the portfolio-specific content in `notes/frontend/src`.
+   `dist/` folders, and the portfolio-specific content in `notes/frontend/src`. Keep `frontend/src/analytics.ts` and
+   its `trackPageViews()` call in `main.tsx`.
 2. Rename everything `portfolio` → `notes`:
    - `notes/*/package.json` → `name`
    - `notes/deploy/ecosystem.config.cjs` → `name`, `cwd`, env file path, `PORT`
@@ -16,7 +17,8 @@ Example: a project called `notes` on `notes.bas-franke.com`, backend port `3003`
    the `paths:` filter and the workflow `name`.
 4. Add a row to the project table in `.claude/CLAUDE.md`.
 5. Register the project in `status/backend/src/projects.ts` (name, domains, port, `database: true` if it has one)
-   and redeploy `status`. The status page then shows exactly what is still missing for the new project.
+   and redeploy `status`. The status page then shows exactly what is still missing for the new project. This is also
+   what makes the status backend accept page views from the new domain and show it in the visitor graphs.
 6. Rewrite `notes/README.md` from the portfolio README, replacing the domain and names.
 
 ## 2. Database (only if needed)

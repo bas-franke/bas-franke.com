@@ -1,6 +1,7 @@
 import { config, statusEnvFile } from '../config.js';
 import { projects } from '../projects.js';
 import { ok, warn, type CheckDef, type Project } from '../types.js';
+import { analyticsCheck } from './analytics.js';
 import { databaseCheck, rdsCheck } from './database.js';
 import { dnsCheck, expectedIpCheck } from './dns.js';
 import { ec2InstanceCheck, elasticIpCheck, resourcesCheck } from './ec2.js';
@@ -50,6 +51,7 @@ export const sharedChecks: CheckDef[] = [
   secretsCheck,
   rdsCheck,
   accessCheck,
+  analyticsCheck,
 ];
 
 export function projectChecks(project: Project): CheckDef[] {

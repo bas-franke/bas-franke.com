@@ -1,17 +1,36 @@
 # status: status.bas-franke.com
 
 Checks that every part of the bas-franke.com setup is done and working, and shows **how to fix** whatever is not.
-Vite + React frontend, Node.js + Express backend on port **3002**. No database of its own.
+Vite + React frontend, Node.js + Express backend on port **3002**. Its own `status` database in the shared RDS stores the visitor analytics.
 
 ## What it checks
 
 | Group                 | Checks                                                                                           |
 |-----------------------|--------------------------------------------------------------------------------------------------|
-| Shared infrastructure | Running on EC2 (IMDSv2), Elastic IP matches, Nginx + port-80 site, certbot renewal timer, PM2 boot service, Node version, disk/memory, GitHub deploy secrets, RDS reachable, page password |
+| Shared infrastructure | Running on EC2 (IMDSv2), Elastic IP matches, Nginx + port-80 site, certbot renewal timer, PM2 boot service, Node version, disk/memory, GitHub deploy secrets, RDS reachable, page password, visitor analytics storage |
 | Each project          | name.com DNS per domain, latest GitHub deploy, files deployed, `.env` present, PM2 process online, backend `/api/health`, TLS certificate per domain, Nginx site enabled, website loads over HTTPS, `/api` through Nginx, database connection (if the project has one) |
 
 Checks run every 60 seconds; **Check now** forces a run. Projects are listed in
 [backend/src/projects.ts](backend/src/projects.ts). Add new projects there.
+
+## Visitor analytics
+
+The page also shows how many people visit each site: visitors and page views per day and per month, the most-read
+pages, referrers and device types, for the last 7, 30, 90 or 365 days. Project blocks are ordered by visitors and
+each block header shows the headline numbers; open a block for the graphs.
+
+It is first-party and cookie-free. Every frontend has the same small `src/analytics.ts`, called once from `main.tsx`,
+which posts each page view (including route changes inside the single-page apps) to
+`https://status.bas-franke.com/api/page`. The status backend keeps the path, the external referrer, the device class
+and a visitor hash of salt + day + IP address + user agent, so the hash changes every day and the IP itself is never
+stored. "Visitors" are therefore unique per day; monthly visitors add up the daily uniques. Requests from hosts that
+are not in `projects.ts` are dropped, as are known bots, so local builds cannot pollute the numbers; the snippet also
+sends nothing from localhost.
+
+To turn it on, the status project needs its own database (the **Visitor analytics** check shows the exact steps):
+create the `status` database and user in RDS and put `DATABASE_URL` in `/srv/apps/status/.env`. The table is created
+automatically at startup. New projects need nothing beyond their registration in `projects.ts`.
+
 
 The page has slots for custom illustrations (mascot, state scenes, icons). The prompts, sizes and filenames are in
 [ART.md](ART.md); finished PNGs go in `frontend/public/art/`. Missing images are simply left out.
@@ -24,6 +43,9 @@ The page has slots for custom illustrations (mascot, state scenes, icons). The p
 | `STATUS_PASSWORD` | advised  | Enables the login page (user `admin`, or set `STATUS_USER`). Changing it signs everyone out. |
 | `RDS_HOST`        | when you have RDS | RDS endpoint, for the reachability check                          |
 | `GITHUB_TOKEN`    | optional | Fine-grained token (Actions: read, Secrets: read) to verify repo secrets   |
+| `DATABASE_URL`    | for analytics | `postgres://status:<password>@<rds-endpoint>:5432/status?sslmode=require`; without it page views are dropped |
+| `ANALYTICS_SALT`  | optional | Salt for the daily visitor hashes (defaults to a value derived from `STATUS_PASSWORD`) |
+| `ANALYTICS_TZ`    | optional | Time zone for day and month boundaries, default `Europe/Amsterdam`              |
 
 After editing: `pm2 restart status --update-env`.
 
@@ -189,6 +211,8 @@ Right after this guide you should expect:
 - **portfolio**: certificate and Nginx site missing. Follow its README's "First-time server setup".
 - **RDS reachable**: *skipped* until a project needs a database ([infra/README.md §6](../infra/README.md#6-aws-rds-only-when-the-first-project-needs-a-database)).
 - **Deploy secrets configured**: *skipped* unless you add a `GITHUB_TOKEN` (optional).
+- **Visitor analytics storing page views**: red until the `status` database exists. Create RDS first, then follow
+  the check's fix steps; the graphs fill up from the first deploy after that.
 
 When everything is green, the setup is complete.
 

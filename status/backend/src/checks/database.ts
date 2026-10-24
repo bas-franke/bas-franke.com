@@ -57,7 +57,7 @@ export const rdsCheck: CheckDef = {
   },
 };
 
-function databaseFix(project: Project): Fix {
+export function databaseFix(project: Project): Fix {
   const db = project.name.replaceAll('-', '_');
   return {
     summary: `Create the "${db}" database and user in RDS and store the connection string on the server.`,

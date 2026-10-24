@@ -4,7 +4,7 @@ import type { Project } from './types.js';
 // (keep in sync with the table in .claude/CLAUDE.md).
 export const projects: Project[] = [
   { name: 'portfolio', domains: ['bas-franke.com', 'www.bas-franke.com'], port: 3001, database: false },
-  { name: 'status', domains: ['status.bas-franke.com'], port: 3002, database: false },
+  { name: 'status', domains: ['status.bas-franke.com'], port: 3002, database: true },
   { name: 'inck', domains: ['inck.ai', 'www.inck.ai'], port: 3003, database: true, registrar: 'name.com' },
   { name: 'play', domains: ['play.bas-franke.com'], port: 3004, database: false, websocket: '/api/ws' },
 ];

@@ -48,6 +48,8 @@ Backends listen on `127.0.0.1` with ports starting at **3001**, one per project,
 - Use relative API URLs (`fetch('/api/...')`), never hard-coded hosts.
 - Build output goes to `frontend/dist/` (Vite default).
 - Only `VITE_`-prefixed env vars reach the browser; never put secrets in them.
+- Every frontend has the same `src/analytics.ts` and calls `trackPageViews()` once from `main.tsx`, so its page views
+  show up on the status page. No third-party analytics scripts.
 
 ## Tooling
 

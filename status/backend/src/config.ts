@@ -17,6 +17,13 @@ export const config = {
   /** Optional fine-grained token (Actions: read, Secrets: read). Without it, secrets cannot be checked. */
   githubToken: optional(env.GITHUB_TOKEN),
 
+  /** Postgres connection string for the visitor analytics (database "status" in the shared RDS). Without it, page views are dropped. */
+  databaseUrl: optional(env.DATABASE_URL),
+  /** Salt for the daily-rotating visitor hashes; falls back to the status password. */
+  analyticsSalt: optional(env.ANALYTICS_SALT),
+  /** Time zone that decides where a day (and month) starts in the analytics. */
+  timezone: env.ANALYTICS_TZ ?? 'Europe/Amsterdam',
+
   /** Login for the status page. Without a password the page is public. */
   statusUser: env.STATUS_USER ?? 'admin',
   statusPassword: optional(env.STATUS_PASSWORD),

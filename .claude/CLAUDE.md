@@ -7,7 +7,7 @@ database inside a **shared RDS instance**.
 | Project     | Folder        | Domain                                  | Backend port | Database |
 |-------------|---------------|-----------------------------------------|--------------|----------|
 | portfolio   | `portfolio/`  | `bas-franke.com`, `www.bas-franke.com`  | 3001         | none     |
-| status      | `status/`     | `status.bas-franke.com`                 | 3002         | none     |
+| status      | `status/`     | `status.bas-franke.com`                 | 3002         | `status` |
 | inck        | `inck/`       | `inck.ai`, `www.inck.ai`                | 3003         | `inck`   |
 | play        | `play/`       | `play.bas-franke.com`                   | 3004         | none     |
 
