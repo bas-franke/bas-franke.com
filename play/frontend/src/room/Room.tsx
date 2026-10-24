@@ -100,9 +100,12 @@ export function RoomPage() {
           }
           break;
         }
-        case 'chat':
-          setChat((c) => [...c.slice(-120), { id: ++chatId.current, from: msg.from, text: msg.text, system: msg.system }]);
+        case 'chat': {
+          // The id is taken outside the updater: StrictMode runs updaters twice, which used to hand out duplicate keys.
+          const line = { id: ++chatId.current, from: msg.from, text: msg.text, system: msg.system };
+          setChat((c) => [...c.slice(-120), line]);
           break;
+        }
         case 'error':
           setNotice(msg.message);
           break;

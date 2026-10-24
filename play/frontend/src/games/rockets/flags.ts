@@ -48,7 +48,7 @@ function clothMaterial(team: Team) {
 
 /** The cloth's own ink: same wave, pushed out along the welded normals (a flat plane has no hull to push). */
 function clothInkMaterial() {
-  return (clothInk ??= waving(new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }), 0.035));
+  return (clothInk ??= waving(new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }), 0.05));
 }
 
 function cloth() {

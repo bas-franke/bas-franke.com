@@ -1684,7 +1684,7 @@ export class RocketsClient implements GameClient {
           r.label.position.y = top;
           if (r.ally) {
             // Teammates: the diamond sits above the name at a steady screen size (never smaller than up close).
-            const a = Math.max(0.32, d * 0.02);
+            const a = Math.max(0.24, d * 0.02);
             r.ally.scale.set(a, a, 1);
             r.ally.position.y = top + r.labelH * k * 0.5 + a * 0.6;
           }
