@@ -997,7 +997,7 @@ export class Effects {
       let r = s * this.pSize[i];
       // A puff never swallows the camera (its ink hull would black out the screen): it stays clear of the eye.
       const d = Math.hypot(pos[i * 3] - cam.x, pos[i * 3 + 1] - cam.y, pos[i * 3 + 2] - cam.z);
-      const room = (d - 0.35) * 0.6;
+      const room = (d - 0.4) * 0.4;
       if (r > room) r = Math.max(0, room);
       writeTRS(m, i * 16, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], q[i * 4], q[i * 4 + 1], q[i * 4 + 2], q[i * 4 + 3], r);
       // Colour phase: hot puffs run the whole ramp, cool ones start at cream.
