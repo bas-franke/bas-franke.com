@@ -138,10 +138,10 @@ const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; colo
 
 const ROCKET_COLOR = 0xffa14a;
 /** Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the crosshair. */
-const VM_POS = { x: 0.252, y: -0.252, z: -0.34 };
-const VM_YAW = 0.1;
+const VM_POS = { x: 0.43, y: -0.33, z: -0.68 };
+const VM_YAW = 0.38;
 const VM_PITCH = 0.06;
-const VM_SCALE = 0.48;
+const VM_SCALE = 1.0;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */
 const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.93);
 /** The viewmodel draws last, after a depth clear, so it never pokes into walls. */
