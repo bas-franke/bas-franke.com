@@ -3,7 +3,7 @@ import { aiConfigured } from '../ai.js';
 import { login, logout, me, requireAdmin } from '../auth.js';
 import { config, estimateCostUsd } from '../config.js';
 import { dbReady, one, query } from '../db.js';
-import { deleteImages, generate, isGenerating, planRun, regenerateImages, type GenerateMode } from '../generator.js';
+import { deleteImages, generate, isGenerating, planRun, radarRun, regenerateImages, type GenerateMode } from '../generator.js';
 import { schedulerState } from '../scheduler.js';
 import { createTopic, planProgress } from '../topics.js';
 import { CATEGORIES, type Settings, type Story, type Topic } from '../types.js';
@@ -49,10 +49,16 @@ adminRouter.get('/overview', async (_req, res) => {
     ),
     query(`SELECT ${RUN_COLUMNS} ${RUN_JOINS} ORDER BY r.started_at DESC LIMIT 12`),
   ]);
+  const { rows: trending } = await query(
+    `SELECT t.id, t.slug, t.name, t.kind, t.category, t.heat, t.heat_reason, t.heat_at, count(s.id)::int AS stories
+     FROM topics t LEFT JOIN stories s ON s.topic_id = t.id WHERE t.heat > 0
+     GROUP BY t.id ORDER BY t.heat DESC, t.heat_at DESC LIMIT 12`,
+  );
   const succeeded = Number(counts.succeeded);
   const totalUsd = estimateCostUsd(usageOf(all));
   res.json({
     ...state,
+    trending,
     env: { database: await dbReady(), openai: aiConfigured(), admin_password: Boolean(config.adminPassword), data_dir: config.dataDir },
     counts: { published: Number(counts.published), hidden: Number(counts.hidden), views: Number(counts.views), topics: Number(counts.topics) },
     tokens: { input: Number(all.input), output: Number(all.output), images: Number(all.images), searches: Number(all.searches), failed_runs: Number(counts.failed) },
@@ -65,7 +71,7 @@ adminRouter.get('/overview', async (_req, res) => {
 const SETTINGS_FIELDS: (keyof Settings)[] = [
   'enabled', 'interval_minutes', 'max_per_day', 'active_hours_start', 'active_hours_end', 'timezone',
   'text_model', 'image_model', 'image_quality', 'images_enabled', 'images_max', 'web_search_enabled',
-  'language', 'tone', 'audience', 'target_words', 'extra_instructions', 'trending_share', 'trending_guidance', 'site_name', 'tagline',
+  'language', 'tone', 'audience', 'target_words', 'extra_instructions', 'trending_share', 'trending_guidance', 'radar_hours', 'site_name', 'tagline',
 ];
 
 adminRouter.get('/settings', async (_req, res) => {
@@ -123,7 +129,7 @@ adminRouter.patch('/topics/:id', async (req, res) => {
   const body = (req.body ?? {}) as Partial<Topic>;
   const sets: string[] = [];
   const params: unknown[] = [];
-  for (const field of ['name', 'description', 'category', 'kind', 'weight', 'enabled'] as const) {
+  for (const field of ['name', 'description', 'category', 'kind', 'weight', 'enabled', 'heat', 'heat_reason'] as const) {
     if (field in body) params.push(body[field]), sets.push(`${field} = $${params.length}`);
   }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update.' });
@@ -149,6 +155,13 @@ adminRouter.post('/topics/:id/plan', async (req, res) => {
   if (!aiConfigured()) return res.status(503).json({ error: 'OPENAI_API_KEY is not set on the server.' });
   const run = await planRun(Number(req.params.id), Boolean(req.body?.extend));
   run.status === 'succeeded' ? res.json(run) : res.status(500).json({ error: run.error ?? 'Planning failed.' });
+});
+
+/** Rescans what is trending now (the scheduler does this by itself every radar_hours before a "right now" story). */
+adminRouter.post('/radar', async (_req, res) => {
+  if (!aiConfigured()) return res.status(503).json({ error: 'OPENAI_API_KEY is not set on the server.' });
+  const run = await radarRun();
+  run.status === 'succeeded' ? res.json(run) : res.status(500).json({ error: run.error ?? 'The scan failed.' });
 });
 
 /* Generation */

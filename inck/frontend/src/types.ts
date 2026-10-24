@@ -32,8 +32,23 @@ export interface FeedTopic {
   name: string;
   category: Category;
   kind: TopicKind;
+  /** 0 = not trending; 1–5 from the trend radar. */
+  heat: number;
+  heat_reason: string;
   /** Published stories in the topic. */
   stories: number;
+}
+
+/** A hot topic as listed in the trending strip and rail. */
+export interface TrendingTopic {
+  slug: string;
+  name: string;
+  category: Category;
+  kind: TopicKind;
+  heat: number;
+  heat_reason: string;
+  stories: number;
+  latest_slug: string | null;
 }
 
 export interface Story {
@@ -75,6 +90,7 @@ export interface Site {
   next_story_at: string | null;
   stories: number;
   topics: number;
+  trending: TrendingTopic[];
 }
 
 export interface TopicSummary {
@@ -84,6 +100,8 @@ export interface TopicSummary {
   description: string;
   category: Category;
   kind: TopicKind;
+  heat: number;
+  heat_reason: string;
   intro: string | null;
   stories: number;
   updated_at: string | null;
@@ -116,7 +134,18 @@ export interface HubStory {
 }
 
 export interface Hub {
-  topic: { id: number; slug: string; name: string; description: string; category: Category; kind: TopicKind; intro: string; created_at: string };
+  topic: {
+    id: number;
+    slug: string;
+    name: string;
+    description: string;
+    category: Category;
+    kind: TopicKind;
+    intro: string;
+    heat: number;
+    heat_reason: string;
+    created_at: string;
+  };
   sections: HubSection[];
   stories: HubStory[];
 }
@@ -143,6 +172,8 @@ export interface Settings {
   extra_instructions: string;
   trending_share: number;
   trending_guidance: string;
+  radar_hours: number;
+  radar_at: string | null;
   site_name: string;
   tagline: string;
   last_run_at: string | null;
@@ -157,6 +188,9 @@ export interface AdminTopic {
   kind: TopicKind;
   weight: number;
   enabled: boolean;
+  heat: number;
+  heat_reason: string;
+  heat_at: string | null;
   planned_at: string | null;
   stories: number;
   sections: number;
@@ -169,7 +203,7 @@ export interface Run {
   trigger: 'schedule' | 'manual';
   status: 'running' | 'succeeded' | 'failed';
   step: string;
-  kind: StoryKind | 'plan';
+  kind: StoryKind | 'plan' | 'radar';
   detail: string | null;
   topic_name: string | null;
   story_title: string | null;
@@ -191,6 +225,7 @@ export interface Overview {
   tokens: { input: number; output: number; images: number; searches: number; failed_runs: number };
   cost: { total_usd: number; last_24h_usd: number; per_story_usd: number };
   recent_runs: Run[];
+  trending: { id: number; slug: string; name: string; kind: TopicKind; category: Category; heat: number; heat_reason: string; heat_at: string | null; stories: number }[];
 }
 
 export interface AdminStory {

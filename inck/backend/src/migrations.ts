@@ -270,4 +270,25 @@ export const migrations: { name: string; sql: string }[] = [
       CREATE INDEX runs_started_idx ON runs (started_at DESC);
     `,
   },
+  {
+    // The trend radar: the model discovers what the world is talking about, creates topics for it and scores them
+    // with a "heat"; hot topics get more stories and a prominent place on the site.
+    name: '008_trend_radar',
+    sql: `
+      ALTER TABLE topics
+        ADD COLUMN heat        int NOT NULL DEFAULT 0 CHECK (heat BETWEEN 0 AND 5),
+        ADD COLUMN heat_reason text NOT NULL DEFAULT '',
+        ADD COLUMN heat_at     timestamptz;
+      CREATE INDEX topics_heat_idx ON topics (heat DESC) WHERE heat > 0;
+
+      ALTER TABLE settings
+        ADD COLUMN radar_hours int NOT NULL DEFAULT 3 CHECK (radar_hours BETWEEN 1 AND 48),
+        ADD COLUMN radar_at    timestamptz;
+      ALTER TABLE settings ALTER COLUMN trending_share SET DEFAULT 60;
+      UPDATE settings SET trending_share = 60 WHERE trending_share = 40;
+
+      ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_kind_check;
+      ALTER TABLE runs ADD CONSTRAINT runs_kind_check CHECK (kind IN ('planned','trending','plan','radar'));
+    `,
+  },
 ];

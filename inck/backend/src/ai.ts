@@ -162,6 +162,74 @@ function cleanSection(s: PlanSection): PlanSection {
   };
 }
 
+/* ------------------------------------------------------------------ trend radar */
+
+const RADAR_SCHEMA: Schema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['trends'],
+  properties: {
+    trends: {
+      type: 'array',
+      description: '6 to 10 subjects the world is talking about and trying to understand right now, hottest first.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'existing_slug', 'category', 'kind', 'heat', 'why_now', 'description'],
+        properties: {
+          name: { type: 'string', description: 'Neutral, specific topic name of at most 40 characters, e.g. "The Sudan civil war" or "The 2026 oil price shock".' },
+          existing_slug: { type: 'string', description: 'Slug of the existing topic this trend belongs to, or empty when it is new.' },
+          category: { type: 'string', enum: ['technology', 'science', 'money', 'world', 'society'] },
+          kind: { type: 'string', enum: ['field', 'event'], description: 'event = something happening; field = a lasting subject that is suddenly hot.' },
+          heat: { type: 'integer', description: '5 = everyone worldwide is talking about it, 3 = big in several countries or communities, 1 = notable in one.' },
+          why_now: { type: 'string', description: 'One sentence for readers: what is happening and why people care today.' },
+          description: { type: 'string', description: 'One sentence on what the topic covers, for the planner.' },
+        },
+      },
+    },
+  },
+};
+
+export interface Trend {
+  name: string;
+  existing_slug: string;
+  category: Category;
+  kind: TopicKind;
+  heat: number;
+  why_now: string;
+  description: string;
+}
+
+/**
+ * The radar discovers, on its own, what the world is talking about right now: live signals plus web search, no
+ * menu. Each trend becomes (or updates) a topic with a heat score; the existing list is only there for matching.
+ */
+export async function scanTrends(opts: {
+  settings: Settings;
+  signals: string;
+  topics: Pick<Topic, 'slug' | 'name' | 'kind' | 'category' | 'heat'>[];
+}): Promise<{ trends: Trend[]; usage: Usage }> {
+  const { settings } = opts;
+  const instructions = [
+    `You are the trend radar for ${settings.site_name}, a learning feed that explains complicated things to anyone. Today is ${new Date().toISOString().slice(0, 10)}.`,
+    'Discover, on your own, the 6 to 10 subjects the world is talking about and trying to UNDERSTAND right now, hottest first. Use the live signals as evidence of attention and use web search to confirm what is actually happening and to find big stories the signals miss (other regions, markets, science, technology).',
+    'Good: wars and conflicts, elections and political crises, market crashes and rallies, inflation and rate decisions, bankruptcies and trade disputes, disasters and their causes, scientific results, technology everyone suddenly uses, cultural moments with substance behind them.',
+    'Skip: celebrity gossip and scandals, individual crime cases, sports results, unverified rumours, anything where the only story is graphic detail.',
+    'Each trend becomes a topic of the site: an "event" for something happening (a specific war, election, crisis, crash, disaster, trial, launch) or a "field" for a lasting subject that is suddenly hot. Name topics neutrally and specifically; never a headline, never a person\'s name alone.',
+    'The EXISTING TOPICS list is not a menu: never pick from it. It is only there so that a trend that is a development inside an existing topic (a new offensive in an ongoing war, a new model in Artificial intelligence) returns that topic\'s slug in existing_slug instead of creating a duplicate.',
+    settings.trending_guidance,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const input =
+    `LIVE SIGNALS\n\n${opts.signals}\n\n` +
+    `EXISTING TOPICS (slug: name)\n${opts.topics.map((t) => `- ${t.slug}: ${t.name} (${t.kind}, ${t.category}${t.heat ? `, currently hot ${t.heat}/5` : ''})`).join('\n')}`;
+  const { data, usage } = await structured<{ trends: Trend[] }>({ settings, name: 'radar', schema: RADAR_SCHEMA, instructions, input, webSearch: settings.web_search_enabled });
+  const trends = (data.trends ?? []).filter((t) => t.name?.trim()).map((t) => ({ ...t, name: t.name.trim().slice(0, 60), heat: Math.min(5, Math.max(1, Math.round(Number(t.heat) || 1))) }));
+  if (!trends.length) throw new Error('The radar found no trends.');
+  return { trends, usage };
+}
+
 /* ------------------------------------------------------------------ trend scout */
 
 const SCOUT_SCHEMA: Schema = {
@@ -231,14 +299,20 @@ export async function scoutTrends(opts: {
   signals: string;
   recentTitles: string[];
   topics: Pick<Topic, 'slug' | 'name' | 'kind' | 'category'>[];
+  /** When set, the scout stays inside this hot topic and only picks what to explain about it today. */
+  focus?: Pick<Topic, 'slug' | 'name' | 'heat_reason'>;
 }): Promise<{ pick: TrendPick; usage: Usage }> {
   const { settings } = opts;
   const instructions = [
     `You are the trend scout for ${settings.site_name}, a learning feed of very short stories that explain complicated things to anyone. Today is ${new Date().toISOString().slice(0, 10)}.`,
-    'Find what many people are trying to UNDERSTAND right now and pick ONE subject. Good: wars and conflicts, elections and political crises, market crashes and rallies, inflation and rate decisions, bankruptcies, trade disputes, disasters and their causes, scientific results, technology everyone suddenly uses, cultural moments with substance behind them.',
+    opts.focus
+      ? `The topic "${opts.focus.name}" is trending (${opts.focus.heat_reason || 'in the news'}). Pick the ONE thing about it that most people would want to understand today: the newest development, a mechanism behind it, a term everyone is using, or a piece of history that explains the present. Use web search to get the current facts. Return topic_slug "${opts.focus.slug}" and no new topic.`
+      : 'Find what many people are trying to UNDERSTAND right now and pick ONE subject. Good: wars and conflicts, elections and political crises, market crashes and rallies, inflation and rate decisions, bankruptcies, trade disputes, disasters and their causes, scientific results, technology everyone suddenly uses, cultural moments with substance behind them.',
     'Skip: celebrity gossip and scandals, individual crime cases, sports results, unverified rumours, anything where the only story is graphic detail.',
     'Use the live signals as evidence of attention; use web search to check what actually happened and to find things the signals miss.',
-    'Then decide where it lives: if it fits one of the existing topics, give its slug (a new development in an ongoing war belongs to that war\'s topic; a new AI model belongs to Artificial intelligence). Otherwise describe a new topic: an "event" for something happening (a specific conflict, crisis or crash), a "field" for a lasting subject. Give new topics neutral names.',
+    opts.focus
+      ? ''
+      : 'Then decide where it lives: if it fits one of the existing topics, give its slug (a new development in an ongoing war belongs to that war\'s topic; a new AI model belongs to Artificial intelligence). Otherwise describe a new topic: an "event" for something happening (a specific conflict, crisis or crash), a "field" for a lasting subject. Give new topics neutral names.',
     'The angle must be explanatory, not a news summary: the mechanism, the history, who the parties are, why it matters. Avoid subjects already covered recently.',
     settings.trending_guidance,
   ]
@@ -314,6 +388,26 @@ export interface StoryDraft {
   sources: Source[];
 }
 
+/** How many pictures a story gets and how useful they must be; decided by how hot its topic is (see picturePolicy). */
+export interface PicturePolicy {
+  min: number;
+  max: number;
+  /** Lowest relevance that still gets rendered. */
+  accept: ImageSpec['relevance'][];
+}
+
+/**
+ * The most relevant topics get pictures, the rest mostly do not: a story in a topic everyone is talking about
+ * (heat 4–5) always gets at least one; a warm topic (2–3) gets one when it helps; a cool topic only when essential.
+ */
+export function picturePolicy(settings: Settings, heat: number): PicturePolicy {
+  const cap = settings.images_enabled ? Math.max(0, Math.min(2, settings.images_max)) : 0;
+  if (!cap) return { min: 0, max: 0, accept: [] };
+  if (heat >= 4) return { min: 1, max: cap, accept: ['essential', 'helpful', 'decorative'] };
+  if (heat >= 2) return { min: 0, max: Math.min(1, cap), accept: ['essential', 'helpful'] };
+  return { min: 0, max: Math.min(1, cap), accept: ['essential'] };
+}
+
 export async function writeStory(opts: {
   settings: Settings;
   topic: Topic;
@@ -323,10 +417,16 @@ export async function writeStory(opts: {
   /** Trending stories: what the scout picked. */
   trend?: TrendPick;
   recentTitles: string[];
+  pictures: PicturePolicy;
 }): Promise<{ draft: StoryDraft; usage: Usage; model: string }> {
-  const { settings, topic, plan } = opts;
+  const { settings, topic, plan, pictures } = opts;
   const sectionNames = plan.sections.map((s) => s.name);
   const maxWords = Math.round(settings.target_words * 1.3);
+  const pictureRules = !pictures.max
+    ? 'PICTURES. Return an empty images array.'
+    : pictures.min > 0
+      ? `PICTURES. This topic is what everyone is talking about and the story will be seen by many readers: include at least one picture (at most ${pictures.max}) that anchors it, such as the place, the object, the machine or the scene at the heart of the story. Never the face of a real person, no text in the image. Mark each as essential, helpful or decorative.`
+      : `PICTURES. Most stories need none. Add at most ${pictures.max}, and only when a picture genuinely helps understanding: a real place, object, machine, map-like scene or physical process. Never for abstract ideas, never as decoration, never the face of a real person. Mark each as essential, helpful or decorative.`;
 
   const instructions = [
     `You write for ${settings.site_name}, a learning feed: people scroll through very short stories, and each one makes a single complicated idea click.`,
@@ -338,9 +438,7 @@ export async function writeStory(opts: {
     'Be accurate. Prefer well-established facts; say "roughly" for estimates; never invent studies, quotes, figures or URLs.',
     'On contested matters (wars, politics, economics): be neutral and fair, attribute claims to who makes them, describe what each side says and what is known, no advocacy.',
     `Title: at most 60 characters, concrete, no clickbait. Hook: one sentence, at most 140 characters. Takeaway: the idea in one plain sentence. tags: 3 to 5 lowercase. Sources: 1 to 4 pages you relied on (in the sources field only).`,
-    settings.images_enabled && settings.images_max > 0
-      ? `PICTURES. Most stories need none. Add at most ${settings.images_max}, and only when a picture genuinely helps understanding: a real place, object, machine, map-like scene or physical process. Never for abstract ideas, never as decoration, never the face of a real person. Mark each as essential, helpful or decorative.`
-      : 'PICTURES. Return an empty images array.',
+    pictureRules,
     opts.trend
       ? `THIS STORY is about something happening right now. Subject: ${opts.trend.subject}. The one thing to make click: ${opts.trend.angle}. Why people care today: ${opts.trend.why_now}. ` +
         'Use web search to get the current facts right. State what happened in one or two sentences, then spend most words on the explanation (history, mechanism, who and why) so the story still reads well next month. ' +

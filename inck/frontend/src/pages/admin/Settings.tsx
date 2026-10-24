@@ -129,17 +129,22 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
         <fieldset className="panel">
           <legend>Right now</legend>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Part of the stories follow what the world is trying to understand today. The scout reads news headlines (BBC, NYT), Google Trends,
-            Wikipedia's most-read pages and Hacker News, searches the web, picks one subject and files it into an existing topic or creates a
-            new one (a conflict, a crash, a crisis) with its own curriculum, history included.
+            The trend radar discovers by itself what the world is talking about: it reads news headlines (BBC, NYT), Google Trends, Wikipedia's
+            most-read pages and Hacker News, searches the web, and turns each trend into a topic with a heat score (a conflict, a crash, a
+            crisis, a technology), curriculum and history included. “Right now” stories serve those hot topics, hottest first, and curriculum
+            runs favour them too; hot topics are shown prominently on the site.
           </p>
           <label className="slider">
             Share of “right now” stories: <strong>{s.trending_share}%</strong>
             <input type="range" min={0} max={100} step={5} value={s.trending_share} onChange={(e) => set('trending_share', Number(e.target.value))} />
           </label>
           <div className="fields">
+            <label>
+              Rescan trends every (hours)
+              <input type="number" min={1} max={48} value={s.radar_hours} onChange={(e) => set('radar_hours', Number(e.target.value))} />
+            </label>
             <label className="wide">
-              Guidance for the scout
+              Guidance for the radar and scout
               <textarea rows={3} value={s.trending_guidance} onChange={(e) => set('trending_guidance', e.target.value)} />
             </label>
           </div>
@@ -149,8 +154,12 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
           <legend>Pictures</legend>
           <label className="row">
             <input type="checkbox" checked={s.images_enabled} onChange={(e) => set('images_enabled', e.target.checked)} />
-            Allow pictures (the writer adds one only when it genuinely helps; most stories get none)
+            Allow pictures
           </label>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Pictures follow relevance: a story in a topic everyone is talking about (heat 4–5) always gets at least one, a warm topic (2–3)
+            gets one when it helps, and stories in cool topics only get one when it is essential.
+          </p>
           <div className="fields">
             <label>
               At most per story

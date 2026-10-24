@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, api, readLabel, timeUntil } from '../api';
-import Art, { CategoryIcon } from '../components/Art';
+import Art, { CategoryIcon, Flame } from '../components/Art';
 import StoryCard, { storyPath } from '../components/StoryCard';
 import type { FeedPage, Site, Story } from '../types';
 
@@ -170,9 +170,22 @@ export default function Feed({ site }: { site: Site | null }) {
 
   const topic = page.topic;
   const first = stories[0];
+  const trending = !topic && site?.trending.length ? site.trending : [];
 
   return (
-    <div className={`feed-shell ${topic ? 'feed-topic-mode' : ''}`}>
+    <div className={`feed-shell ${topic ? 'feed-topic-mode' : ''} ${trending.length ? 'feed-has-strip' : ''}`}>
+      {trending.length > 0 && (
+        <div className="trend-strip" aria-label="Trending now">
+          <span className="trend-label mono">
+            <Flame /> trending
+          </span>
+          {trending.map((t) => (
+            <Link key={t.slug} to={t.latest_slug ? storyPath(t.latest_slug, t.slug) : `/t/${t.slug}`} className={`trend-chip heat-${t.heat}`} title={t.heat_reason}>
+              {t.name}
+            </Link>
+          ))}
+        </div>
+      )}
       {topic && (
         <div className="mode-bar">
           <CategoryIcon category={topic.category} />
@@ -276,6 +289,14 @@ export default function Feed({ site }: { site: Site | null }) {
                 <strong>{current.topic.name}</strong>
               </span>
             </Link>
+            {current.topic.heat > 0 && (
+              <p className="rail-hot">
+                <Flame className={`flame heat-${current.topic.heat}`} />
+                <span>
+                  <strong>Trending now.</strong> {current.topic.heat_reason}
+                </span>
+              </p>
+            )}
             <div className="rail-progress">
               <div className="rail-progress-bar">
                 <span style={{ width: `${((current.position + 1) / Math.max(1, current.topic.stories)) * 100}%` }} />
