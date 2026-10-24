@@ -43,7 +43,7 @@ export default function Login({ onLogin }: { onLogin: (user: string) => void }) 
         {/* Real form with name/autocomplete attributes so password managers offer to save and fill it. */}
         <form className="login" method="post" action="/api/login" onSubmit={submit}>
           <Art name="login-badge" className="login-badge" />
-          <p className="eyebrow mono">~/bas-franke.com/status</p>
+          <p className="eyebrow mono">status.bas-franke.com</p>
           <h1>Welcome back</h1>
           <p className="muted">Sign in to see what's running and what still needs setting up.</p>
 

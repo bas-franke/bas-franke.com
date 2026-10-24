@@ -102,7 +102,7 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
         <div className="brand">
           <Art name="mascot" className="brand-mascot" />
           <span className="mono">
-            bas-franke<span className="accent">.com</span>/status
+            <span className="accent">status</span>.bas-franke.com
           </span>
         </div>
         <div className="actions">
