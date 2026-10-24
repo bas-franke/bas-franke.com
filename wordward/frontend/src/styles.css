@@ -570,8 +570,7 @@ input {
   background: rgba(30, 20, 10, 0.45);
   border: 1px solid rgba(255, 240, 210, 0.35);
   color: rgba(255, 244, 222, 0.85);
-  font-size: 9px;
-  letter-spacing: -1px;
+  font-size: 11px;
   transition: background 0.15s;
 }
 .pause:hover span,
@@ -656,11 +655,14 @@ input {
 .enter {
   margin-left: auto;
   flex: none;
+  display: grid;
   font-size: 22px;
-  font-weight: 700;
   line-height: 1;
   color: var(--ink-soft);
   opacity: 0.85;
+}
+.enter .icon {
+  stroke-width: 2.2;
 }
 .caret {
   display: inline-block;
@@ -695,9 +697,11 @@ input {
   color: rgba(255, 240, 214, 0.55);
   white-space: nowrap;
 }
-.dline .lang i {
-  font-style: normal;
-  font-size: 9px;
+.dline .lang .lang-icon {
+  font-size: 10px;
+  vertical-align: -1px;
+  color: var(--glow);
+  stroke-width: 2.2;
 }
 /* In the pill the language mark is a faint tag before the words, not a badge. */
 .dline.main .lang {
@@ -706,7 +710,7 @@ input {
   color: var(--dim);
   opacity: 0.8;
 }
-.dline.main .lang i {
+.dline.main .lang .lang-icon {
   display: none;
 }
 .dline.main.shield .lang {
@@ -1242,8 +1246,11 @@ input {
   padding: 2px 10px 2px 6px;
   font-style: italic;
 }
-.bestiary i {
-  font-style: normal;
+.bestiary .icon {
+  font-size: 17px;
+  vertical-align: -4px;
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.35);
 }
 .bestiary b {
   color: var(--ink);
@@ -1357,7 +1364,7 @@ input {
   .pause span {
     width: 30px;
     height: 30px;
-    font-size: 10px;
+    font-size: 12px;
   }
   .tag {
     font-size: 13px;
@@ -1553,8 +1560,24 @@ input {
   font-style: italic;
 }
 .mode-emoji {
-  font-size: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  font-size: 30px;
   line-height: 1;
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.4);
+  background: radial-gradient(circle at 35% 30%, #fffbef, #ead7ac);
+  box-shadow: inset 0 0 0 1px rgba(110, 72, 36, 0.6), inset 0 0 0 3px #fbf3df, inset 0 0 0 4px rgba(200, 150, 70, 0.7);
+}
+.mode-card.adventure .mode-emoji {
+  color: var(--gold-2);
+  --icon-fill: rgba(242, 207, 120, 0.22);
+  background: radial-gradient(circle at 35% 30%, #6e3d22, #4a2715);
+  box-shadow: inset 0 0 0 1px #2e170a, inset 0 0 0 3px rgba(60, 30, 12, 0.6), inset 0 0 0 4px rgba(226, 176, 80, 0.75);
 }
 .mode-sub {
   display: block;
@@ -1614,6 +1637,9 @@ input {
   padding: 0;
   font-size: 22px;
 }
+.btn.back .icon {
+  stroke-width: 2.2;
+}
 .small-seg {
   margin-left: auto;
 }
@@ -1622,17 +1648,22 @@ input {
   padding: 4px 10px;
 }
 .stars {
-  letter-spacing: 1px;
+  display: inline-flex;
+  gap: 1px;
   font-size: 16px;
   line-height: 1;
   margin-top: 3px;
+  vertical-align: -3px;
 }
-.star {
-  color: rgba(120, 90, 50, 0.25);
+.icon.star {
+  color: rgba(120, 90, 50, 0.38);
+  --icon-fill: rgba(120, 90, 50, 0.08);
 }
-.star.on {
-  color: #e7ac2c;
-  text-shadow: 0 0 4px rgba(255, 200, 80, 0.7), 0 1px 0 #8a5a12;
+.icon.star.on {
+  color: #8a5a12;
+  --icon-fill: #f0b638;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 2px rgba(255, 200, 80, 0.75));
 }
 
 /* ---- won ---------------------------------------------------------------------------------------------------- */
@@ -1641,16 +1672,27 @@ input {
   text-align: center;
 }
 .won-emoji {
-  font-size: 56px;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto;
+  border-radius: 50%;
+  font-size: 44px;
   line-height: 1;
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.45);
+  background: radial-gradient(circle at 35% 30%, #fff6d4, #efcf86);
+  box-shadow: inset 0 0 0 3px #fbf3df, inset 0 0 0 4.5px rgba(200, 150, 70, 0.8), 0 0 0 1.5px #6a4524, 0 4px 12px rgba(30, 15, 4, 0.35),
+    0 0 24px rgba(255, 200, 90, 0.6);
   animation: bounce-in 0.6s ease-out;
 }
 .won-stars .stars {
   font-size: 54px;
-  letter-spacing: 6px;
+  gap: 8px;
 }
 .won-stars .star.on {
-  display: inline-block;
+  stroke-width: 1.2;
   animation: star-pop 0.5s ease-out backwards;
 }
 .won-stars .star.on:nth-child(2) {
@@ -1730,8 +1772,13 @@ input {
   color: #e2c79a;
 }
 .chapter-emoji {
+  flex: none;
+  display: grid;
   font-size: 32px;
   line-height: 1;
+  color: var(--gold-2);
+  --icon-fill: rgba(242, 207, 120, 0.2);
+  filter: drop-shadow(0 1px 0 rgba(30, 12, 2, 0.7));
 }
 .chapter-n {
   font-family: var(--display);
@@ -1805,8 +1852,12 @@ input {
   transform: translateY(2px);
 }
 .node-emoji {
-  font-size: 32px;
+  display: grid;
+  place-items: center;
+  font-size: 36px;
   line-height: 1;
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.38);
 }
 .node-n {
   position: absolute;
@@ -1827,23 +1878,26 @@ input {
 .node-variants {
   position: absolute;
   bottom: -10px;
-  right: -14px;
+  right: -16px;
   display: flex;
-  gap: 1px;
-  background: var(--paper);
+  gap: 2px;
+  background: linear-gradient(180deg, #fffaec, #ecdcb8);
   border: 1px solid #6a4524;
   border-radius: 999px;
-  padding: 0 4px;
-  font-size: 12px;
+  box-shadow: 0 1px 0 rgba(90, 58, 28, 0.6), 0 2px 4px rgba(30, 15, 4, 0.25);
+  padding: 2px 5px;
+  font-size: 14px;
+  line-height: 1;
 }
-.node-variants i {
-  font-style: normal;
-  filter: grayscale(1);
-  opacity: 0.4;
+.node-variants .icon {
+  color: rgba(106, 79, 52, 0.5);
+  --icon-fill: none;
+  stroke-width: 2;
 }
-.node-variants i.won {
-  filter: none;
-  opacity: 1;
+.node-variants .icon.won {
+  color: #8a5a12;
+  --icon-fill: #f0b638;
+  stroke-width: 1.8;
 }
 /* Won missions and bosses are wax seals: a glossy blob with a pressed inner ring (green = cleared, teal = review,
    red = boss). */
@@ -1878,12 +1932,14 @@ input {
 }
 .node.cleared .node-emoji,
 .node.boss .node-emoji {
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+  color: #f6dc98;
+  --icon-fill: rgba(255, 228, 160, 0.16);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.45)) drop-shadow(0 -0.5px 0 rgba(255, 255, 255, 0.2));
 }
 .node.boss .node-emoji {
-  font-size: 42px;
+  font-size: 46px;
 }
-.node.current {
+.node.current:not(.boss) {
   background: radial-gradient(circle at 35% 30%, #fff6d4, #f0c868);
   animation: pulse 1.8s ease-in-out infinite;
 }
@@ -1892,8 +1948,21 @@ input {
   border-color: #a39276;
   box-shadow: inset 0 0 0 3px #f1ebde, 0 3px 0 #a39276;
 }
-.node.locked .node-emoji {
-  opacity: 0.7;
+/* Locked: a brass padlock on the faded medallion. */
+.node-emoji .icon.brass {
+  font-size: 30px;
+}
+.node.boss.locked .node-emoji .icon.brass {
+  font-size: 38px;
+}
+.icon.brass {
+  color: #7a5520;
+  --icon-fill: #e2b24f;
+  stroke-width: 1.6;
+  filter: drop-shadow(0 1px 0 rgba(255, 246, 220, 0.7));
+}
+.node.boss.locked .icon.brass {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
 }
 .node.locked .node-n {
   background: #a39276;
@@ -1964,8 +2033,14 @@ input {
   background: linear-gradient(180deg, #fffaec, #ecdcb8);
   box-shadow: 0 2px 4px rgba(30, 15, 4, 0.25);
   color: var(--ink-soft);
-  font-weight: 700;
+  font-size: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   cursor: pointer;
+}
+.sheet-close .icon {
+  stroke-width: 2.2;
 }
 .sheet-head {
   display: flex;
@@ -1985,8 +2060,24 @@ input {
   font-style: italic;
 }
 .sheet-emoji {
-  font-size: 46px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  font-size: 36px;
   line-height: 1;
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.4);
+  background: radial-gradient(circle at 35% 30%, #fffbef, #ecdcb6);
+  box-shadow: inset 0 0 0 3px #fbf3df, inset 0 0 0 4.5px rgba(200, 150, 70, 0.75), 0 0 0 1.5px #6a4524, 0 3px 8px rgba(30, 15, 4, 0.3);
+}
+.sheet-emoji.boss {
+  color: #f6dc98;
+  --icon-fill: rgba(255, 228, 160, 0.16);
+  background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0) 30%), radial-gradient(circle, #c55a4a, #8e2c22 62%, #5e1a13);
+  box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.07), inset 0 0 0 7px rgba(0, 0, 0, 0.22), 0 0 0 2px #8e2c22, 0 3px 8px rgba(30, 15, 4, 0.3);
 }
 .sheet-topics {
   font-size: 13px;
@@ -2012,8 +2103,8 @@ input {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
+  stroke-width: 2.6;
   color: #fff6e6;
   background: var(--red);
   flex: none;
@@ -2053,7 +2144,21 @@ input {
   color: var(--dim);
 }
 .variant-emoji {
-  font-size: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 24px;
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.4);
+  background: radial-gradient(circle at 35% 30%, #fffbef, #ecdcb6);
+  box-shadow: inset 0 0 0 1px rgba(110, 72, 36, 0.55), inset 0 0 0 3px #fbf3df, inset 0 0 0 4px rgba(200, 150, 70, 0.6);
+}
+.variant.locked .variant-emoji {
+  color: var(--dim);
+  --icon-fill: none;
 }
 .variant-text {
   flex: 1;
@@ -2115,7 +2220,17 @@ input {
   background: linear-gradient(180deg, #eef3dc, #d6e2b2);
   border-color: #6f8746;
   flex-direction: row;
-  gap: 4px;
+  align-items: center;
+  gap: 5px;
+}
+.account-chip .icon {
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.35);
+  vertical-align: -2px;
+}
+.account-chip .sync {
+  display: grid;
+  font-size: 15px;
 }
 .map-head .account-chip {
   margin-left: 4px;
@@ -2163,4 +2278,177 @@ input {
 .btn.danger {
   background: linear-gradient(180deg, #fbe6df, #efc6b8);
   color: #8a2117;
+}
+
+/* ---- icons (icons.tsx / iconData.ts) ---------------------------------------------------------------------------
+   Line icons on a 24px grid, stroked in currentColor; .f parts take a soft wash (--icon-fill), .s parts are solid.
+   They sit in text at 1em like a glyph, so font-size sizes them. */
+
+.icon {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.14em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: visible;
+}
+.icon .f {
+  fill: var(--icon-fill, none);
+}
+.icon .s {
+  fill: currentColor;
+  stroke: none;
+}
+/* Gold accents inside running text (stars, shields). */
+.icon.gold {
+  color: var(--gold-ink);
+  --icon-fill: var(--gold-2);
+  stroke-width: 1.7;
+}
+.mode-card.adventure .icon.gold,
+.chapter-head .icon.gold {
+  color: #f2cf78;
+  --icon-fill: rgba(242, 207, 120, 0.35);
+}
+.how .icon,
+.sheet-topics .icon,
+.save-note .icon,
+.reqs .field-label .icon,
+.req-text .icon,
+.chapter-n .icon,
+.dim .icon,
+.hint-line .icon,
+.btn .icon,
+.tap-to-type .icon,
+.check .icon {
+  font-size: 1.15em;
+  vertical-align: -0.2em;
+}
+.sheet-topics .icon,
+.save-note .icon,
+.req-text .icon,
+.chapter-n .icon,
+.btn:not(.primary) .icon,
+.tap-to-type .icon {
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.35);
+}
+.req-text .icon.inline {
+  color: var(--gold-ink);
+  --icon-fill: var(--gold-2);
+}
+.btn.primary .icon {
+  --icon-fill: rgba(255, 220, 150, 0.25);
+}
+.hint-line .stars {
+  font-size: 13px;
+  vertical-align: -2px;
+}
+.hud-meta .icon {
+  font-size: 13px;
+  vertical-align: -2px;
+  color: var(--glow);
+  stroke-width: 2;
+}
+.banner-text .icon {
+  font-size: 0.78em;
+  vertical-align: -0.08em;
+  margin-right: 0.12em;
+  stroke-width: 2.2;
+  --icon-fill: rgba(255, 200, 90, 0.35);
+  filter: drop-shadow(0 0 1.5px #3a1e06) drop-shadow(0 2px 0 #4a2709) drop-shadow(0 0 10px rgba(255, 190, 70, 0.8));
+}
+.banner-sub .icon {
+  font-size: 1.1em;
+  vertical-align: -0.18em;
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.4);
+}
+.banner-sub .icon-heart {
+  color: #a3271f;
+  --icon-fill: var(--heart);
+}
+/* A mission with no drawing of its own: its number on a little medallion. */
+.medallion {
+  display: inline-grid;
+  place-items: center;
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  border: 0.06em solid currentColor;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1em;
+  line-height: 1;
+}
+.medallion b {
+  font-size: 0.48em;
+}
+/* The open boss keeps its red wax and glows instead of turning into a gold medallion. */
+.node.boss.current {
+  animation: boss-glow 1.8s ease-in-out infinite;
+}
+@keyframes boss-glow {
+  50% {
+    filter: drop-shadow(0 0 10px rgba(255, 196, 90, 0.95));
+  }
+}
+
+/* ---- sound toggles ------------------------------------------------------------------------------------------ */
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.sound-toggles {
+  display: flex;
+  gap: 4px;
+}
+/* Round brass-rimmed parchment buttons; off = faded ink with a strike. */
+.round-toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(100, 66, 34, 0.75);
+  background: linear-gradient(180deg, #fffaec, #ecdcb8);
+  box-shadow: inset 0 0 0 2px #fdf7e6, inset 0 0 0 3px rgba(200, 150, 70, 0.45), 0 2px 0 rgba(90, 58, 28, 0.55), 0 3px 8px rgba(30, 15, 4, 0.2);
+  font-size: 21px;
+  color: var(--dim);
+  --icon-fill: none;
+  cursor: pointer;
+  transition: transform 0.06s, filter 0.12s;
+}
+.round-toggle.on {
+  color: var(--leather);
+  --icon-fill: rgba(217, 164, 65, 0.45);
+  box-shadow: inset 0 0 0 2px #fdf7e6, inset 0 0 0 3px rgba(214, 164, 64, 0.9), 0 2px 0 rgba(90, 58, 28, 0.55), 0 0 10px rgba(255, 200, 90, 0.35);
+}
+.round-toggle:hover {
+  filter: brightness(1.04);
+}
+.round-toggle:active {
+  transform: translateY(2px);
+}
+.round-toggle:focus-visible {
+  outline: 2px solid var(--gold-ink);
+  outline-offset: 2px;
+}
+.pause.sound {
+  margin-right: -2px;
+}
+.pause span .icon {
+  font-size: 1.25em;
+}
+.pause.sound span {
+  font-size: 11px;
 }

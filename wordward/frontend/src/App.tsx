@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Game, type Difficulty, type GameState, type LineView, type Mix, type RunConfig, type Settings, type WordView } from './game/Game';
+import { Game, type Difficulty, type GameState, type LineView, type Mix, type RunConfig, type Settings as GameSettings, type WordView } from './game/Game';
 import { sfx } from './game/audio';
 import { masteredCount } from './game/progress';
 import {
@@ -25,6 +25,10 @@ import {
 import { save, update } from './game/save';
 import { AccountError, accountState, authenticate, deleteAccount, initAccount, logout, onAccount, type AccountState } from './game/account';
 import { CATEGORIES, countIn, ENTRIES, stripHints, type Direction } from './vocab';
+import { chapterIcon, Icon, IconText, MissionEmblem, VARIANT_ICON, type IconName } from './icons';
+
+/** The game's settings plus the app's own: sound effects and the ambient library bed (both saved with the rest). */
+type Settings = GameSettings & { sound: boolean; ambient: boolean };
 
 const DEFAULTS: Settings = {
   direction: 'en-ro',
@@ -33,6 +37,8 @@ const DEFAULTS: Settings = {
   difficulty: 'normal',
   lenient: true,
   shields: true,
+  sound: true,
+  ambient: true,
 };
 
 /** Settings from the save; topics added since they were saved start switched on. */
@@ -90,6 +96,8 @@ export default function App() {
   /** The mission whose details sheet is open on the map. */
   const [sheet, setSheet] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [, refresh] = useState(0);
   const [accountOpen, setAccountOpen] = useState(false);
   useVisualViewport(app);
@@ -135,6 +143,29 @@ export default function App() {
     if (phase === 'won' && state.run) recordStars(settings.direction, state.run.missionId, state.run.variant as Variant, state.stars);
     refresh((n) => n + 1);
   }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sound: mute and ambience follow the settings; browsers only start audio after a user gesture, so the ambience
+  // is (re)applied on the first pointer or key press too (play() unlocks the context as well).
+  useEffect(() => {
+    sfx.muted = !settings.sound;
+    sfx.ambient(settings.sound && settings.ambient);
+  }, [settings.sound, settings.ambient]);
+  useEffect(() => {
+    const first = () => {
+      window.removeEventListener('pointerdown', first, true);
+      window.removeEventListener('keydown', first, true);
+      if (!settingsRef.current.sound) return;
+      sfx.unlock();
+      sfx.ambient(settingsRef.current.ambient);
+    };
+    window.addEventListener('pointerdown', first, true);
+    window.addEventListener('keydown', first, true);
+    return () => {
+      window.removeEventListener('pointerdown', first, true);
+      window.removeEventListener('keydown', first, true);
+    };
+  }, []);
+  const toggleSound = () => setSettings({ ...settings, sound: !settings.sound });
 
   const focusInput = () => input.current?.focus({ preventScroll: true });
 
@@ -232,10 +263,10 @@ export default function App() {
         inputMode="text"
         aria-label="Type here"
       />
-      {state && game && playing && <Hud state={state} game={game} />}
+      {state && game && playing && <Hud state={state} game={game} sound={settings.sound} onSound={toggleSound} />}
       {phase === 'playing' && !focused && touchDevice() && (
         <button className="tap-to-type" onClick={focusInput}>
-          ⌨️ Tap to type
+          <Icon name="keyboard" /> Tap to type
         </button>
       )}
       {phase === 'idle' && accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} onChanged={accountChanged} />}
@@ -313,7 +344,7 @@ function Sprig({ right }: { right?: boolean }) {
   );
 }
 
-function Hud({ state, game }: { state: GameState; game: Game }) {
+function Hud({ state, game, sound, onSound }: { state: GameState; game: Game; sound: boolean; onSound: () => void }) {
   const top = useRef<HTMLDivElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   // Tell the game how much of the screen the panels cover, so it keeps the castle in view above the word panel.
@@ -340,7 +371,11 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
         <div className="hud-left">
           <Hearts hp={state.hp} max={state.maxHp} />
           <div className="hud-meta">
-            {lvl ? `${lvl.emoji} M${lvl.n} · ` : ''}
+            {lvl ? (
+              <>
+                <MissionEmblem mission={{ id: lvl.missionId, kind: 'mission', n: lvl.n }} /> M{lvl.n} ·{' '}
+              </>
+            ) : null}
             <span className="hp-num">
               {state.hp}/{state.maxHp}
             </span>
@@ -364,8 +399,15 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
               {accuracy}% · combo {state.combo}
             </div>
           </div>
+          <button className="pause sound" onClick={onSound} aria-label={sound ? 'Sound on: mute' : 'Sound off: unmute'} aria-pressed={sound} title={sound ? 'Mute' : 'Unmute'}>
+            <span>
+              <Icon name={sound ? 'speaker' : 'speakerOff'} />
+            </span>
+          </button>
           <button className="pause" onClick={() => game.pause(true)} aria-label="Pause">
-            <span>❚❚</span>
+            <span>
+              <Icon name="pause" />
+            </span>
           </button>
         </div>
       </div>
@@ -376,8 +418,12 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
       )}
       {state.banner && (
         <div className="banner" key={state.banner.n}>
-          <div className="banner-text">{state.banner.text}</div>
-          <div className="banner-sub">{state.banner.sub}</div>
+          <div className="banner-text">
+            <IconText text={state.banner.text} />
+          </div>
+          <div className="banner-sub">
+            <IconText text={state.banner.sub} />
+          </div>
         </div>
       )}
       <div className="hud bottom" ref={bottom}>
@@ -395,7 +441,7 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
               <div className="dialog-input">
                 <Line line={main} main />
                 <span className="enter" aria-hidden="true">
-                  ↵
+                  <Icon name="enter" />
                 </span>
               </div>
             </>
@@ -414,11 +460,11 @@ function Hud({ state, game }: { state: GameState; game: Game }) {
 }
 
 function Line({ line, main }: { line: LineView; main?: boolean }) {
-  const icon = line.shield ? '🫧' : line.state === 'info' ? '👀' : line.state === 'done' ? '✓' : '⭐';
+  const icon: IconName = line.shield ? 'shield' : line.state === 'info' ? 'eye' : line.state === 'done' ? 'check' : 'star';
   return (
     <div className={`dline ${line.state}${line.shield ? ' shield' : ''}${main ? ' main' : ''}`}>
       <span className="lang">
-        <i>{icon}</i> {line.lang.toUpperCase()}
+        <Icon name={icon} className="lang-icon" /> {line.lang.toUpperCase()}
       </span>
       <span className="dwords">
         {line.words.map((w, i) => (
@@ -464,13 +510,13 @@ const DIFFICULTIES: { id: Difficulty; label: string; sub: string }[] = [
   { id: 'hard', label: 'Hard', sub: 'quick fingers' },
 ];
 
-const BESTIARY: [emoji: string, name: string, what: string][] = [
-  ['🦋', 'Glimmerwing', 'short words'],
-  ['📚', 'Sootling', 'words'],
-  ['🐌', 'Scrollshell', 'long words'],
-  ['📖', 'Tome Toter', 'longest words'],
-  ['💧', 'Inklings', 'sentences'],
-  ['🐉', 'Bookwyrm', 'boss'],
+const BESTIARY: [icon: IconName, name: string, what: string][] = [
+  ['moth', 'Glimmerwing', 'short words'],
+  ['soot', 'Sootling', 'words'],
+  ['snail', 'Scrollshell', 'long words'],
+  ['tome', 'Tome Toter', 'longest words'],
+  ['ink', 'Inklings', 'sentences'],
+  ['dragon', 'Bookwyrm', 'boss'],
 ];
 
 type SetSettings = (s: Settings) => void;
@@ -508,7 +554,7 @@ function CommonOptions({ settings, setSettings }: { settings: Settings; setSetti
         <label className="check">
           <input type="checkbox" checked={settings.shields} onChange={(e) => set('shields', e.target.checked)} />
           <span>
-            Shields 🫧 <span className="dim">type the word you read first</span>
+            Shields <Icon name="shield" className="gold" /> <span className="dim">type the word you read first</span>
           </span>
         </label>
         <label className="check">
@@ -522,13 +568,46 @@ function CommonOptions({ settings, setSettings }: { settings: Settings; setSetti
   );
 }
 
+/** Two round brass toggles: sound effects and the quiet library ambience. */
+function SoundToggles({ settings, setSettings }: { settings: Settings; setSettings: SetSettings }) {
+  const { sound, ambient } = settings;
+  return (
+    <div className="sound-toggles">
+      <button
+        className={`round-toggle${sound ? ' on' : ''}`}
+        onClick={() => setSettings({ ...settings, sound: !sound })}
+        aria-pressed={sound}
+        aria-label="Sound"
+        title={sound ? 'Sound on' : 'Sound off'}
+      >
+        <Icon name={sound ? 'speaker' : 'speakerOff'} />
+      </button>
+      <button
+        className={`round-toggle${sound && ambient ? ' on' : ''}`}
+        onClick={() => setSettings({ ...settings, ambient: !ambient, sound: !ambient ? true : sound })}
+        aria-pressed={sound && ambient}
+        aria-label="Library ambience"
+        title={sound && ambient ? 'Ambience on' : 'Ambience off'}
+      >
+        <Icon name={sound && ambient ? 'music' : 'musicOff'} />
+      </button>
+    </div>
+  );
+}
+
 function SaveNote() {
   const acc = useAccount();
   return (
     <p className="save-note">
-      {acc.user
-        ? `☁️ ${acc.user.displayName}'s progress is saved to the account and in cookies.`
-        : '🍪 Progress is saved in cookies on this device.'}
+      {acc.user ? (
+        <>
+          <Icon name="cloud" /> {acc.user.displayName}'s progress is saved to the account and in cookies.
+        </>
+      ) : (
+        <>
+          <Icon name="cookie" /> Progress is saved in cookies on this device.
+        </>
+      )}
       {!acc.user && acc.enabled && ' Make an account to take it anywhere.'}
     </p>
   );
@@ -548,12 +627,23 @@ function AccountChip({ onOpen }: { onOpen: () => void }) {
     <button className={`account-chip${acc.user ? ' in' : ''}`} onClick={onOpen}>
       {acc.user ? (
         <>
-          👤 {acc.user.displayName}
-          <small>{acc.sync === 'error' ? ' ⚠️' : acc.sync === 'pending' ? ' ⏳' : ' ☁️'}</small>
+          <Icon name="user" /> {acc.user.displayName}
+          <small className="sync">
+            {acc.sync === 'error' ? (
+              <Icon name="alert" label="Not synced" />
+            ) : acc.sync === 'pending' ? (
+              <Icon name="hourglass" label="Saving" />
+            ) : (
+              <Icon name="cloud" label="Saved" />
+            )}
+          </small>
         </>
       ) : (
         <>
-          👤 Account <small>Log in / sign up</small>
+          <span>
+            <Icon name="user" /> Account
+          </span>
+          <small>Log in / sign up</small>
         </>
       )}
     </button>
@@ -597,21 +687,29 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet account-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Account">
         <button className="sheet-close" onClick={onClose} aria-label="Close">
-          ✕
+          <Icon name="close" />
         </button>
         {acc.user && !deleting ? (
           <>
             <div className="sheet-head">
-              <span className="sheet-emoji">🦉</span>
+              <span className="sheet-emoji">
+                <Icon name="owl" />
+              </span>
               <div>
                 <div className="chapter-n">Your account</div>
                 <h3>{acc.user.displayName}</h3>
               </div>
             </div>
             <p className="sheet-topics">
-              {acc.sync === 'error'
-                ? '⚠️ Could not reach the server; we retry on the next change.'
-                : '☁️ Your progress is saved on the server: log in on any device.'}
+              {acc.sync === 'error' ? (
+                <>
+                  <Icon name="alert" /> Could not reach the server; we retry on the next change.
+                </>
+              ) : (
+                <>
+                  <Icon name="cloud" /> Your progress is saved on the server: log in on any device.
+                </>
+              )}
             </p>
             <div className="row">
               <button className="btn" onClick={out} disabled={busy}>
@@ -625,7 +723,9 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
         ) : (
           <form onSubmit={submit} className="account-form">
             <div className="sheet-head">
-              <span className="sheet-emoji">{deleting ? '🗑️' : '🦉'}</span>
+              <span className="sheet-emoji">
+                <Icon name={deleting ? 'trash' : 'owl'} />
+              </span>
               <div>
                 <div className="chapter-n">{deleting ? 'Delete account' : 'Account'}</div>
                 <h3>{deleting ? 'Are you sure?' : mode === 'register' ? 'New account' : 'Log in'}</h3>
@@ -643,9 +743,15 @@ function AccountSheet({ onClose, onChanged }: { onClose: () => void; onChanged: 
                   </button>
                 </div>
                 <p className="sheet-topics">
-                  {mode === 'register'
-                    ? '🎈 No email needed. Pick a name and a password; your progress on this device comes along.'
-                    : '🔑 Progress on this device is added to your account.'}
+                  {mode === 'register' ? (
+                    <>
+                      <Icon name="sparkle" /> No email needed. Pick a name and a password; your progress on this device comes along.
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="key" /> Progress on this device is added to your account.
+                    </>
+                  )}
                 </p>
                 <label className={`input${error?.field === 'username' ? ' bad' : ''}`}>
                   <span>Username</span>
@@ -726,17 +832,24 @@ function Home({
             <h1 className="logo">Wordward</h1>
             <Sprig right />
           </div>
-          <AccountChip onOpen={onAccount} />
+          <div className="top-actions">
+            <SoundToggles settings={settings} setSettings={setSettings} />
+            <AccountChip onOpen={onAccount} />
+          </div>
         </div>
         <p className="tagline">
           Defend the library with words! <span className="dim">Learn Romanian and English as you type.</span>
         </p>
         <ol className="how">
           <li>
-            <b>🫧 Pop the bubble:</b> type the {readLang} word on the creature.
+            <b>
+              <Icon name="shield" className="gold" /> Pop the bubble:
+            </b> type the {readLang} word on the creature.
           </li>
           <li>
-            <b>⭐ Send it home:</b> type the translation. The closest one is always your target.
+            <b>
+              <Icon name="star" className="gold" /> Send it home:
+            </b> type the translation. The closest one is always your target.
           </li>
         </ol>
 
@@ -744,16 +857,20 @@ function Home({
 
         <div className="modes">
           <button className="mode-card adventure" onClick={onAdventure}>
-            <span className="mode-emoji">🗺️</span>
+            <span className="mode-emoji">
+              <Icon name="map" />
+            </span>
             <span>
               <b>Adventure</b> <small>Campaign</small>
               <span className="mode-sub">
-                {MISSIONS.length} missions · ⭐ {stars}/{maxStars}
+                {MISSIONS.length} missions · <Icon name="star" className="gold" /> {stars}/{maxStars}
               </span>
             </span>
           </button>
           <button className={`mode-card free${showFree ? ' open' : ''}`} onClick={() => setShowFree(!showFree)}>
-            <span className="mode-emoji">♾️</span>
+            <span className="mode-emoji">
+              <Icon name="infinity" />
+            </span>
             <span>
               <b>Free play</b> <small>Your rules</small>
               <span className="mode-sub">{best > 0 ? `Best ${best.toLocaleString()}` : 'Endless waves, your topics'}</span>
@@ -815,9 +932,9 @@ function Home({
         </div>
 
         <div className="bestiary">
-          {BESTIARY.map(([emoji, name, what]) => (
+          {BESTIARY.map(([icon, name, what]) => (
             <span key={name}>
-              <i>{emoji}</i> <b>{name}</b> {what}
+              <Icon name={icon} /> <b>{name}</b> {what}
             </span>
           ))}
         </div>
@@ -831,9 +948,7 @@ function Stars({ n, of = 3 }: { n: number; of?: number }) {
   return (
     <span className="stars" aria-label={`${n} of ${of} stars`}>
       {Array.from({ length: of }, (_, i) => (
-        <span key={i} className={i < n ? 'star on' : 'star'}>
-          ★
-        </span>
+        <Icon key={i} name="star" className={i < n ? 'star on' : 'star'} />
       ))}
     </span>
   );
@@ -872,12 +987,12 @@ function CampaignMap({
       <div className="card map-card">
         <div className="map-head">
           <button className="btn back" onClick={onBack} aria-label="Back">
-            ←
+            <Icon name="back" />
           </button>
           <div>
             <h2>Adventure</h2>
             <p className="dim">
-              ⭐ {totalStars(dir)}/{maxStars} stars
+              <Icon name="star" className="gold" /> {totalStars(dir)}/{maxStars} stars
             </p>
           </div>
           <div className="seg small-seg">
@@ -897,13 +1012,15 @@ function CampaignMap({
           return (
             <section key={ch.n} className={`chapter${reachable ? '' : ' far'}`}>
               <div className="chapter-head">
-                <span className="chapter-emoji">{ch.emoji}</span>
+                <span className="chapter-emoji">
+                  <Icon name={chapterIcon(ch.n)} />
+                </span>
                 <div>
                   <div className="chapter-n">Chapter {ch.n}</div>
                   <b>{ch.en}</b>
                 </div>
                 <span className="chapter-stars">
-                  ⭐ {score.stars}/{maxChapterStars(ch)}
+                  <Icon name="star" className="gold" /> {score.stars}/{maxChapterStars(ch)}
                 </span>
               </div>
               <div className="path" style={{ height: rows * ROW }}>
@@ -922,16 +1039,19 @@ function CampaignMap({
                         onClick={() => setSheet(m.id)}
                         aria-label={`${m.en}: ${unlocked ? `${stars} stars` : 'locked'}`}
                       >
-                        <span className="node-emoji">{unlocked ? m.emoji : '🔒'}</span>
+                        <span className="node-emoji">{unlocked ? <MissionEmblem mission={m} /> : <Icon name="lock" className="brass" />}</span>
                         <span className="node-n">{m.n}</span>
                         {m.variants.length > 1 && (
                           <span className="node-variants">
                             {m.variants
                               .filter((v) => v !== 'std')
                               .map((v) => (
-                                <i key={v} className={starsFor(dir, m.id, v) ? 'won' : ''}>
-                                  {VARIANTS[v].emoji}
-                                </i>
+                                <Icon
+                                  key={v}
+                                  name={VARIANT_ICON[v]}
+                                  className={starsFor(dir, m.id, v) ? 'won' : ''}
+                                  label={`${VARIANTS[v].en}${starsFor(dir, m.id, v) ? ' (won)' : ''}`}
+                                />
                               ))}
                           </span>
                         )}
@@ -982,26 +1102,36 @@ function MissionSheet({
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={mission.en}>
         <button className="sheet-close" onClick={onClose} aria-label="Close">
-          ✕
+          <Icon name="close" />
         </button>
         <div className="sheet-head">
-          <span className="sheet-emoji">{mission.emoji}</span>
+          <span className={`sheet-emoji ${mission.kind}`}>
+            <MissionEmblem mission={mission} />
+          </span>
           <div>
             <div className="chapter-n">
-              Mission {mission.n} · {chapter.emoji} {chapter.en}
+              Mission {mission.n} · <Icon name={chapterIcon(chapter.n)} /> {chapter.en}
               {mission.kind === 'review' ? ' · review' : mission.kind === 'boss' ? ' · boss' : ''}
             </div>
             <h3>{mission.en}</h3>
           </div>
         </div>
         <p className="sheet-topics">
-          {mission.kind === 'review'
-            ? '🔁 The words of this chapter you have not mastered yet'
-            : `📚 ${topics} · ${mission.waves} waves${mission.kind === 'boss' ? ', the Bookwyrm in every wave' : ''}`}
+          {mission.kind === 'review' ? (
+            <>
+              <Icon name="review" /> The words of this chapter you have not mastered yet
+            </>
+          ) : (
+            <>
+              <Icon name="book" /> {`${topics} · ${mission.waves} waves${mission.kind === 'boss' ? ', the Bookwyrm in every wave' : ''}`}
+            </>
+          )}
         </p>
         {!unlocked && (
           <div className="reqs">
-            <div className="field-label">🔒 Locked: you need</div>
+            <div className="field-label">
+              <Icon name="lock" className="brass" /> Locked: you need
+            </div>
             {prev && (
               <Req ok={starsFor(dir, prev.id) > 0} text={`⭐ ${prev.en} · ${VARIANTS.std.en}`} onGo={() => onGo(prev.id)} />
             )}
@@ -1018,7 +1148,9 @@ function MissionSheet({
             const stars = starsFor(dir, mission.id, v);
             return (
               <div key={v} className={`variant${can ? '' : ' locked'}`}>
-                <span className="variant-emoji">{info.emoji}</span>
+                <span className="variant-emoji">
+                  <Icon name={VARIANT_ICON[v]} />
+                </span>
                 <div className="variant-text">
                   <b>{info.en}</b>
                   <div className="variant-desc">{can || v === 'std' ? info.desc : 'Win the standard run first.'}</div>
@@ -1039,12 +1171,16 @@ function MissionSheet({
 function Req({ ok, text, progress, onGo }: { ok: boolean; text: string; progress?: string; onGo?: () => void }) {
   return (
     <div className={`req${ok ? ' ok' : ''}`}>
-      <span className="req-mark">{ok ? '✓' : '✗'}</span>
-      <span className="req-text">{text}</span>
+      <span className="req-mark">
+        <Icon name={ok ? 'check' : 'close'} label={ok ? 'done' : 'not yet'} />
+      </span>
+      <span className="req-text">
+        <IconText text={text} />
+      </span>
       {progress && <span className="req-progress">{progress}</span>}
       {!ok && onGo && (
         <button className="link" onClick={onGo}>
-          go →
+          go <Icon name="next" />
         </button>
       )}
     </div>
@@ -1073,10 +1209,12 @@ function Won({
   return (
     <div className="overlay">
       <div className="card won">
-        <div className="won-emoji">{run.emoji}</div>
+        <div className="won-emoji">
+          <MissionEmblem mission={{ id: run.missionId, kind: 'mission', n: run.n }} />
+        </div>
         <h2>Mission complete!</h2>
         <p className="dim">
-          {run.en} · {variant.emoji} {variant.en}
+          {run.en} · <Icon name={VARIANT_ICON[run.variant as Variant]} /> {variant.en}
         </p>
         <div className="won-stars">
           <Stars n={state.stars} />
@@ -1101,11 +1239,13 @@ function Won({
             <span>Accuracy</span>
           </div>
         </div>
-        {state.stars < 3 && <p className="hint-line">⭐⭐⭐ = 80%+ HP left and 90%+ accuracy</p>}
+        {state.stars < 3 && <p className="hint-line">
+            <Stars n={3} /> = 80%+ HP left and 90%+ accuracy
+          </p>}
         <div className="row">
           {next && (
             <button className="btn primary" onClick={onNext}>
-              {next.emoji} {next.en} <small>Next · Enter</small>
+              <MissionEmblem mission={next} /> {next.en} <small>Next · Enter</small>
             </button>
           )}
           <button className="btn" onClick={onAgain}>
@@ -1141,8 +1281,15 @@ function GameOver({
       <div className="card">
         <h2 className="over-title">The library needs a nap!</h2>
         <p className="dim">
-          {state.failReason ? `${state.failReason}. ` : ''}
-          {state.run ? `${state.run.emoji} ${state.run.en}. ` : ''}Great effort, try again!
+          {state.failReason ? <IconText text={`${state.failReason}. `} /> : ''}
+          {state.run ? (
+            <>
+              <MissionEmblem mission={{ id: state.run.missionId, kind: 'mission', n: state.run.n }} /> {state.run.en}.{' '}
+            </>
+          ) : (
+            ''
+          )}
+          Great effort, try again!
         </p>
         <div className="stats">
           <div>
