@@ -226,8 +226,10 @@ const PITCH_LANDSCAPE = THREE.MathUtils.degToRad(55);
 const PITCH_PORTRAIT = THREE.MathUtils.degToRad(63);
 /** Creatures are modelled at about 1 m radius and drawn bigger, so faces read on a phone. */
 const CREATURE_SCALE = 1.45;
-/** Narrow screens show at least this much of the field's width at the defence line. */
-const MIN_HALF_WIDTH = 8.5;
+/** Narrow screens show at least this much width at the defence line: the field plus a sliver of the shelves' props. */
+const MIN_HALF_WIDTH = FIELD_HALF + 1.1;
+/** Screen pixels kept free above a creature for its word tag, so tags of new arrivals never slide under the HUD. */
+const TAG_ROOM = 100;
 
 export class Game {
   readonly engine: Engine;
@@ -287,6 +289,8 @@ export class Game {
     this.tags = tags;
     this.world = buildWorld(this.engine.scene);
     this.effects = new Effects(this.engine.scene);
+    // Compile the beam and splat shaders now, so the first hit does not stutter.
+    this.effects.prewarm(this.engine.renderer, this.engine.camera);
     this.engine.start((dt, t) => this.frame(dt, t));
   }
 
@@ -577,7 +581,11 @@ export class Game {
         root.add(model.root);
         const slot: Slot = { anchor: model.root, model, radius: model.radius, tag: this.makeTag(kind), parts: [], sx: 0, sy: 0, done: false };
         if (shields) {
-          slot.bubble = makeBubble(model.radius * 1.45);
+          // Hug the creature: the dome (see shield.ts) reaches 1.54 r up and 0.88 r out, so size it to the taller of
+          // its height and its girth. Hovering creatures (the moth) get their bubble lifted around the body.
+          const h = (model as { height?: number }).height ?? model.radius * 2;
+          slot.bubble = makeBubble(Math.max(model.radius * 1.05, h * 0.6));
+          if (kind === 'bat') slot.bubble.root.position.y = h * 0.28;
           model.root.add(slot.bubble.root);
           parts.push(word('shield', e, e[src], slot));
         } else slot.info = { lang: src, text: e[src] };
@@ -592,16 +600,35 @@ export class Game {
     for (const s of slots) s.radius *= scale;
     total *= scale;
     const letters = parts.reduce((n, p) => n + p.glyphs.filter((g) => g.typed).length, 0);
-    const margin = Math.min(this.halfWidth - 1, total / 2 + 2);
-    const x = kind === 'balaur' ? 0 : (Math.random() * 2 - 1) * Math.max(0, this.halfWidth - margin);
-    const aimX = kind === 'convoy' || kind === 'balaur' ? x * 0.6 : (Math.random() * 2 - 1) * Math.min(this.halfWidth * 0.75, 13);
+    // Keep the creature and its word tag inside the field: groups by their width, single creatures by their word.
+    const chars = Math.max(...entries.map((e) => Math.max(stripHints(e[dst]).length, stripHints(e[src]).length)));
+    const group = kind === 'convoy' || kind === 'balaur';
+    const margin = Math.min(this.halfWidth - 0.5, group ? total / 2 + 0.6 : 1.2 + chars * 0.06);
+    const lim = Math.max(0, this.halfWidth - margin);
+    const startY = this.top + (kind === 'balaur' ? 5 : 2);
+    // Spread out: of a few candidate lanes, take the one farthest from creatures already near the same depth.
+    let x = 0;
+    if (kind !== 'balaur') {
+      let best = -1;
+      const LANES = 9;
+      for (let i = 0; i < LANES; i++) {
+        const cx = -lim + ((i + 0.2 + Math.random() * 0.6) / LANES) * 2 * lim;
+        let d = 99;
+        for (const o of this.enemies) d = Math.min(d, Math.abs(cx - this.laneX(o)) + Math.abs(startY - o.y) * 0.45);
+        if (d > best) {
+          best = d;
+          x = cx;
+        }
+      }
+    }
+    // Drift a little towards the middle on the way down, never all into one column.
+    const aimX = group ? x * 0.6 : THREE.MathUtils.clamp(x * 0.7 + (Math.random() * 2 - 1) * 1.5, -lim, lim);
     const diff = DIFF[this.settings.difficulty];
     const waveFactor = Math.min(2.3, 1 + (this.state.wave - 1) * 0.08);
     // Never faster than a learner at this difficulty can type it, plus a few seconds to read.
     const typeTime = letters / diff.cps + (parts.length > 2 ? 6 : 3);
     const levelSpeed = this.settings.run?.speed ?? 1;
     const time = Math.max((FALL_TIME[kind] * diff.time) / (kind === 'balaur' ? levelSpeed : waveFactor * levelSpeed), typeTime);
-    const startY = this.top + (kind === 'balaur' ? 5 : 2);
     const enemy: Enemy = {
       id: this.nextId++,
       kind,
@@ -713,7 +740,8 @@ export class Game {
     const at = this.slotPosition(slot, this.tmp);
     this.world.cast();
     this.effects.beam(this.world.muzzle(this.tmp2), at, part.layer === 'shield' ? 0x5fd0ff : 0xff6fb5);
-    this.effects.sparkles(at, 3, 4, 0.18);
+    // The letter just typed flies off as a golden glyph.
+    this.effects.sparkles(at, 3, 4, 0.18, want.ch);
     this.letterPop(slot, want.ch, part.layer);
     if (part.layer === 'shield') {
       sfx.play('tink', this.zapPitch);
@@ -915,7 +943,11 @@ export class Game {
     cam.updateMatrixWorld();
     // Creatures enter just under the HUD (never past the far end of the hall); spawns happen at `top + 2`.
     const visible = h * kL - DEFENDER_FRONT;
-    this.top = IMPACT_Y + Math.min(FIELD_LENGTH - 4, visible - 1.5) - 2;
+    // ...and low enough that their word tags clear the HUD.
+    const spawnPx = Math.min(H * 0.4, Math.max(topPx, this.insets.top + TAG_ROOM));
+    const dipS = Math.max(0.2, pitch - Math.atan((1 - (2 * spawnPx) / H) * tanF));
+    const spawnVisible = h * (1 / Math.tan(dipS) - 1 / Math.tan(dipB)) - DEFENDER_FRONT;
+    this.top = IMPACT_Y + Math.min(FIELD_LENGTH - 4, visible - 1.5, spawnVisible) - 2;
     const lineHalf = (DEFENDER_FRONT * Math.cos(pitch) + h * kD) * tanF * aspect;
     this.halfWidth = Math.min(FIELD_HALF - 0.6, lineHalf - 0.4);
   }
@@ -951,10 +983,9 @@ export class Game {
 
     for (const e of [...this.enemies]) {
       e.y -= e.speed * step;
-      const progress = 1 - (e.y - IMPACT_Y) / (this.top + 2 - IMPACT_Y);
-      let x = e.x + (e.aimX - e.x) * Math.max(0, progress);
-      if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 1.0;
-      if (e.kind === 'ghost') x += Math.sin(t * 1.2 + e.phase) * 1.4;
+      let x = this.laneX(e);
+      if (e.kind === 'bat') x += Math.sin(t * 2.3 + e.phase) * 0.7;
+      if (e.kind === 'ghost') x += Math.sin(t * 1.2 + e.phase) * 0.9;
       if (e.kind === 'balaur') x = Math.sin(t * 0.5 + e.phase) * Math.max(0, this.halfWidth - 11) * 0.5;
       e.root.position.set(x, 0, fieldZ(e.y));
       for (const s of e.slots) {
@@ -991,6 +1022,12 @@ export class Game {
     this.positionTags();
   }
 
+  /** Where a creature walks across the field at its current distance (before any per-kind sway). */
+  private laneX(e: Enemy) {
+    const progress = 1 - (e.y - IMPACT_Y) / (this.top + 2 - IMPACT_Y);
+    return e.x + (e.aimX - e.x) * Math.max(0, progress);
+  }
+
   private impact(e: Enemy) {
     const remaining = e.slots.filter((s) => s.model && !s.done).length;
     const damage = e.kind === 'convoy' ? remaining : e.kind === 'balaur' ? remaining + 1 : e.kind === 'zmeu' ? 2 : 1;
@@ -1022,6 +1059,10 @@ export class Game {
         if (s.model) v.y += Math.max(this.slotHeight(s), s.bubble ? s.radius * 2.6 : 0) + 0.25;
         else v.y += s.radius * 1.6;
         const p = this.project(v);
+        // Keep the tag on screen and below the HUD (its bottom edge is at p.y).
+        const el = this.engine.renderer.domElement;
+        p.x = Math.min(el.clientWidth - 64, Math.max(64, p.x));
+        p.y = Math.max(this.insets.top + 40, p.y);
         s.sx = p.x;
         s.sy = p.y - 18;
         const shift = s.model ? '-100%' : 'calc(-100% - 2.6em)';

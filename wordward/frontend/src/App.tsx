@@ -272,12 +272,12 @@ export default function App() {
 
 const HEART = 'M12 21.3l-1.5-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1C13.1 3.8 14.8 3 16.5 3 19.6 3 22 5.4 22 8.5c0 3.8-3.4 6.9-8.5 11.5L12 21.3z';
 
-/** One heart per hit point (at most ten; with more HP each heart holds a share and can be part full). */
+/** A short row of hearts: one per HP up to five, otherwise each heart holds a share (10 HP = 5 hearts of 2, so halves). */
 function Hearts({ hp, max }: { hp: number; max: number }) {
-  const n = Math.max(1, Math.min(max, 10));
-  const per = max / n;
+  const per = max <= 5 ? 1 : Math.ceil(max / 5);
+  const n = Math.max(1, Math.ceil(max / per));
   return (
-    <div className={`hearts${n > 5 ? ' many' : ''}${hp / max <= 0.2 ? ' low' : ''}`} role="img" aria-label={`HP ${hp}/${max}`} title={`HP ${hp}/${max}`}>
+    <div className={`hearts${hp / max <= 0.2 ? ' low' : ''}`} role="img" aria-label={`HP ${hp}/${max}`} title={`HP ${hp}/${max}`}>
       {Array.from({ length: n }, (_, i) => {
         const fill = Math.max(0, Math.min(1, (hp - i * per) / per));
         return (
@@ -721,7 +721,11 @@ function Home({
     <div className="overlay menu">
       <div className="card">
         <div className="card-top">
-          <h1 className="logo">Wordward</h1>
+          <div className="plaque">
+            <Sprig />
+            <h1 className="logo">Wordward</h1>
+            <Sprig right />
+          </div>
           <AccountChip onOpen={onAccount} />
         </div>
         <p className="tagline">

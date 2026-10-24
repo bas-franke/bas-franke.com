@@ -2,7 +2,8 @@
 // A small governor watches frame times and lowers the render resolution when a machine cannot keep up (and raises
 // it again when there is headroom), so the game stays playable everywhere.
 //
-// Colour: sRGB output with ACES filmic tone mapping for the warm dusk library. Glow comes from additive sprites
+// Colour: sRGB output, a warm grade (white balance, saturation, warm shadow lift) folded into ACES filmic tone
+// mapping for the dusk library. Glow comes from additive sprites
 // (toon.ts `glowSprite`/`glowBatch`), not a bloom pass. `stats` exposes frame cost and draw calls for the
 // compare/perf tools (dev builds also publish `window.__engine`).
 
@@ -10,6 +11,34 @@ import * as THREE from 'three';
 
 /** Pixel ratios the governor steps through, best first. */
 const QUALITY_STEPS = [1.5, 1.25, 1, 0.85, 0.7];
+
+// ---- colour grade -------------------------------------------------------------------------------------------------
+// A warm "golden lamp light at dusk" grade folded into tone mapping (three's CustomToneMapping slot), so it costs a
+// few ALU ops in every shader that already tone maps and no extra pass. Linear values in, then ACES filmic.
+
+/** White balance: warm the whole frame like tungsten/candle light. */
+const GRADE_WB = [1.05, 1.0, 0.93];
+/** Saturation before the curve (1 = unchanged): ACES desaturates brights, this gives wood and books back a bit. */
+const GRADE_SAT = 1.06;
+/** Added to the darkest tones only: shadows lift to a warm umber instead of crushing to black. */
+const GRADE_LIFT = [0.014, 0.008, 0.002];
+const GRADE_EXPOSURE = 1.1;
+
+const g4 = (n: number) => n.toFixed(4);
+const v3 = (v: number[]) => `vec3( ${v.map(g4).join(', ')} )`;
+const CUSTOM_STUB = 'vec3 CustomToneMapping( vec3 color ) { return color; }';
+if (THREE.ShaderChunk.tonemapping_pars_fragment.includes(CUSTOM_STUB)) {
+  THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
+    CUSTOM_STUB,
+    /* glsl */ `vec3 CustomToneMapping( vec3 color ) {
+	color *= ${v3(GRADE_WB)};
+	float gradeL = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
+	color = max( mix( vec3( gradeL ), color, ${g4(GRADE_SAT)} ), 0.0 );
+	color += ${v3(GRADE_LIFT)} * ( 1.0 - smoothstep( 0.0, 0.2, gradeL ) );
+	return ACESFilmicToneMapping( color );
+}`,
+  );
+} else console.warn('engine: three tone mapping chunk changed; warm grade skipped');
 
 export interface EngineStats {
   /** Frames rendered so far. */
@@ -53,8 +82,8 @@ export class Engine {
     if (this.quality < 0) this.quality = QUALITY_STEPS.length - 1;
     this.renderer.setPixelRatio(QUALITY_STEPS[this.quality]);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMapping = THREE.CustomToneMapping;
+    this.renderer.toneMappingExposure = GRADE_EXPOSURE;
     this.stats.ratio = QUALITY_STEPS[this.quality];
     if (opts.shadows ?? true) {
       this.renderer.shadowMap.enabled = true;

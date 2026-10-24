@@ -371,14 +371,10 @@ input {
   gap: 2px;
   justify-content: start;
 }
-.hearts.many {
-  grid-auto-flow: row;
-  grid-template-columns: repeat(5, auto);
-}
 .heart {
   position: relative;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   display: block;
 }
 .heart svg {
@@ -854,6 +850,7 @@ input {
   flex-direction: column;
   align-items: center;
   line-height: 1.15;
+  white-space: nowrap;
   animation: bob 1.4s ease-in-out infinite;
 }
 .tap-to-type small {
@@ -910,10 +907,33 @@ input {
   margin: 4px 0;
 }
 
+/* The title sits on a dark walnut plaque with a gold inlay and brass pins. */
+.plaque {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px 10px;
+  border-radius: 12px;
+  background: radial-gradient(4px 4px at 12px 12px, #f3d27a, #8a5a12 70%, transparent 75%),
+    radial-gradient(4px 4px at calc(100% - 12px) 12px, #f3d27a, #8a5a12 70%, transparent 75%),
+    radial-gradient(4px 4px at 12px calc(100% - 12px), #f3d27a, #8a5a12 70%, transparent 75%),
+    radial-gradient(4px 4px at calc(100% - 12px) calc(100% - 12px), #f3d27a, #8a5a12 70%, transparent 75%),
+    radial-gradient(ellipse at 40% 0%, rgba(255, 200, 130, 0.25), transparent 60%),
+    repeating-linear-gradient(176deg, rgba(0, 0, 0, 0.08) 0 2px, transparent 2px 7px, rgba(255, 220, 170, 0.05) 7px 9px, transparent 9px 13px),
+    linear-gradient(180deg, #6b3f22, #4a2914 60%, #3a1f0f);
+  box-shadow: inset 0 0 0 3px rgba(40, 20, 8, 0.6), inset 0 0 0 4px rgba(226, 176, 80, 0.75), inset 0 2px 10px rgba(0, 0, 0, 0.4),
+    0 3px 0 #2a160a, 0 8px 18px rgba(20, 10, 2, 0.45);
+  max-width: 100%;
+}
+.plaque .sprig {
+  width: 40px;
+  height: 24px;
+}
 .logo {
   font-family: var(--display);
   font-weight: 800;
-  font-size: clamp(42px, 12vw, 70px);
+  font-size: clamp(34px, 10vw, 64px);
   letter-spacing: 0.04em;
   margin: 0 0 2px;
   line-height: 1;
@@ -922,8 +942,8 @@ input {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  -webkit-text-stroke: 1.5px #5a3514;
-  filter: drop-shadow(0 2px 0 #4a2a12) drop-shadow(0 0 8px rgba(255, 200, 100, 0.45));
+  -webkit-text-stroke: 1px #3a1f0a;
+  filter: drop-shadow(0 2px 0 #1e0f05) drop-shadow(0 0 10px rgba(255, 200, 100, 0.5));
   display: inline-block;
 }
 .tagline {
@@ -1057,16 +1077,19 @@ input {
   font-size: 13px;
 }
 
+/* Topic chips are bookmarks: a ribbon with a swallowtail end; switched on they turn deep green. */
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 6px 8px;
+  filter: drop-shadow(0 1.5px 1px rgba(60, 35, 10, 0.35));
 }
 .chip {
-  border: 1px solid rgba(110, 76, 40, 0.6);
-  border-radius: 999px;
-  background: rgba(255, 251, 240, 0.75);
-  padding: 6px 12px;
+  border: 0;
+  border-radius: 3px 0 0 3px;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 50%, 100% 100%, 0 100%);
+  background: linear-gradient(90deg, #c9a45a 0 4px, transparent 4px), linear-gradient(180deg, #fbf3df, #ead8b2);
+  padding: 6px 22px 6px 12px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -1078,9 +1101,11 @@ input {
   font-style: italic;
 }
 .chip.on {
-  background: linear-gradient(180deg, #e4edc9, #c8d79f);
-  border-color: #6f8746;
-  box-shadow: inset 0 -2px 0 rgba(80, 110, 40, 0.25);
+  background: linear-gradient(90deg, #e2b04e 0 4px, transparent 4px), linear-gradient(180deg, #4a7a40, #2f5a2a);
+  color: #fdf3d8;
+}
+.chip.on small {
+  color: #d6e6bf;
 }
 
 .start-row {
@@ -1264,19 +1289,11 @@ input {
     padding-bottom: 16px;
   }
   .heart {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
   }
   .hearts {
     gap: 4px;
-  }
-  .hearts.many .heart {
-    width: 22px;
-    height: 22px;
-  }
-  .hearts.many {
-    grid-auto-flow: column;
-    grid-template-columns: none;
   }
   .hud-meta {
     font-size: 12px;
@@ -1346,8 +1363,8 @@ input {
     font-size: 15px;
   }
   .heart {
-    width: 15px;
-    height: 15px;
+    width: 19px;
+    height: 19px;
   }
   .score-num {
     font-size: 19px;
@@ -1363,12 +1380,8 @@ input {
     padding-bottom: max(4px, env(safe-area-inset-bottom));
   }
   .heart {
-    width: 15px;
-    height: 15px;
-  }
-  .hearts.many .heart {
-    width: 12px;
-    height: 12px;
+    width: 17px;
+    height: 17px;
   }
   .hud-meta,
   .score-sub {
@@ -1623,6 +1636,9 @@ input {
 }
 
 @media (min-width: 640px) {
+  .path::before {
+    inset: -20px -18px -16px;
+  }
   .modes {
     grid-template-columns: 1fr 1fr;
   }
@@ -1680,8 +1696,21 @@ input {
 }
 .path {
   position: relative;
-  margin: 18px auto 0;
+  z-index: 0;
+  margin: 30px auto 14px;
   max-width: 520px;
+}
+/* The path is drawn on an old map sheet: darker parchment with burnt edges and faint grid lines. */
+.path::before {
+  content: '';
+  position: absolute;
+  inset: -20px -8px -16px;
+  z-index: -1;
+  border-radius: 10px;
+  background: repeating-linear-gradient(0deg, rgba(120, 80, 40, 0.06) 0 1px, transparent 1px 28px),
+    repeating-linear-gradient(90deg, rgba(120, 80, 40, 0.06) 0 1px, transparent 1px 28px),
+    radial-gradient(ellipse at 50% 50%, #f1e2bf 40%, #e2c993 100%);
+  box-shadow: inset 0 0 30px rgba(120, 75, 25, 0.4), inset 0 0 4px rgba(90, 55, 20, 0.5), 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .trail {
   position: absolute;
@@ -1764,21 +1793,40 @@ input {
   filter: none;
   opacity: 1;
 }
-.node.cleared {
-  background: radial-gradient(circle at 35% 30%, #f6faea, #d4e0b0);
-}
-.node.review {
-  background: radial-gradient(circle at 35% 30%, #f2f8f4, #cfe2d8);
+/* Won missions and bosses are wax seals: a glossy blob with a pressed inner ring (green = cleared, teal = review,
+   red = boss). */
+.node.cleared,
+.node.boss {
+  --wax-hi: #6f9a58;
+  --wax: #3f6a34;
+  --wax-lo: #284a22;
+  background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 30%),
+    radial-gradient(circle at 50% 50%, var(--wax-hi), var(--wax) 62%, var(--wax-lo));
+  border: 0;
+  border-radius: 48% 52% 50% 50% / 52% 48% 52% 48%;
+  box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.07), inset 0 0 0 7px rgba(0, 0, 0, 0.22), inset 0 0 0 8px rgba(255, 255, 255, 0.12),
+    0 0 0 3px var(--wax), 0 2px 0 3px var(--wax-lo), 0 6px 12px 2px rgba(30, 15, 4, 0.35);
 }
 .node.review.cleared {
-  background: radial-gradient(circle at 35% 30%, #eef8f0, #b9d8c6);
+  --wax-hi: #4f9c95;
+  --wax: #2a6c66;
+  --wax-lo: #1b4a45;
 }
 .node.boss {
+  --wax-hi: #c55a4a;
+  --wax: #8e2c22;
+  --wax-lo: #5e1a13;
   width: 88px;
   height: 88px;
-  background: radial-gradient(circle at 35% 30%, #fbe9e1, #e6bfae);
-  border-color: #5a1e14;
-  box-shadow: inset 0 0 0 3px #fbeee6, inset 0 0 0 4.5px rgba(154, 58, 44, 0.7), 0 3px 0 #5a1e14, 0 6px 14px rgba(30, 10, 4, 0.4);
+}
+.node.boss.locked {
+  --wax-hi: #b39a8e;
+  --wax: #8a756a;
+  --wax-lo: #66554c;
+}
+.node.cleared .node-emoji,
+.node.boss .node-emoji {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
 }
 .node.boss .node-emoji {
   font-size: 42px;
@@ -1787,7 +1835,7 @@ input {
   background: radial-gradient(circle at 35% 30%, #fff6d4, #f0c868);
   animation: pulse 1.8s ease-in-out infinite;
 }
-.node.locked {
+.node.locked:not(.boss) {
   background: radial-gradient(circle at 35% 30%, #eee8da, #d6ccb6);
   border-color: #a39276;
   box-shadow: inset 0 0 0 3px #f1ebde, 0 3px 0 #a39276;
@@ -1814,7 +1862,7 @@ input {
   display: flex;
   flex-direction: column;
   align-items: center;
-  text-shadow: 0 0 4px #f6ecd6, 0 0 4px #f6ecd6, 0 0 6px #f6ecd6;
+  text-shadow: 0 0 4px #f1e2bf, 0 0 4px #f1e2bf, 0 0 6px #f1e2bf;
 }
 .node-label .stars {
   font-size: 13px;
@@ -1975,8 +2023,15 @@ input {
 
 /* ---- account --------------------------------------------------------------------------------------------- */
 
+.chip:focus-visible {
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 2px;
+}
 .card-top {
+  margin-bottom: 8px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;

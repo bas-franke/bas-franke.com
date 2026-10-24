@@ -16,7 +16,7 @@ export const IMPACT_Y = 3.4;
 /** World z of the defence line. */
 export const LINE_Z = 0;
 /** Half the width of the tiled field (the library walls stand just outside it). */
-export const FIELD_HALF = 11;
+export const FIELD_HALF = 8;
 /** Length of the field from the defence line to the far end. */
 export const FIELD_LENGTH = 40;
 /** How far in front of the line (towards the camera) the defenders reach; the camera keeps this above the word panel. */
@@ -35,8 +35,8 @@ export const PAL = {
   blue: 0x4fa3ff,
   yellow: 0xffd23f,
   mint: 0x5fd6b0,
-  teal: 0x2f8a87,
-  tealDark: 0x1f5f60,
+  teal: 0x2a8a9c,
+  tealDark: 0x1c5a68,
   robe: 0x2c4a37,
   hat: 0x3e6b48,
   skin: 0xf0c49c,
@@ -191,15 +191,17 @@ function floorTexture(): THREE.CanvasTexture {
   const Z = (z: number) => (z - FLOOR_FAR) * PX;
 
   // Mortar.
-  g.fillStyle = '#45473b';
+  g.fillStyle = '#34372e';
   g.fillRect(0, 0, W, H);
 
   // Flagstones: a regular grid with jittered gaps, some tiles split in two, each a slightly different grey-green.
   const stone = (x: number, y: number, w: number, h: number) => {
     const inset = 1.1 + rnd() * 1.1;
-    const hue = 70 + rnd() * 120;
-    const sat = 3 + rnd() * 5;
-    const lit = 50 + rnd() * 12;
+    // Weathered grey-green stone, warmed by the lamplight.
+    // Grey-green to blue-grey slate; the lamps and the colour grade bring the warmth.
+    const hue = 90 + rnd() * 110;
+    const sat = 5 + rnd() * 7;
+    const lit = 41 + rnd() * 10;
     const r = 4 + rnd() * 6;
     g.save();
     // A slightly wonky rounded quad, so the stones look hand-cut.
@@ -338,8 +340,8 @@ function floorTexture(): THREE.CanvasTexture {
       g.lineTo(X(s * (FIELD_HALF - 0.6)), Z(FLOOR_NEAR));
       g.stroke();
     }, 2.5);
-    carve(circle(s * 7, LINE_Z - 22, 1.6), 2);
-    carve(star(s * 7, LINE_Z - 22, 1.4, 4, 0.5), 2);
+    carve(circle(s * 5, LINE_Z - 22, 1.6), 2);
+    carve(star(s * 5, LINE_Z - 22, 1.4, 4, 0.5), 2);
   }
 
   // The defence line: a row of faintly glowing golden glyphs across the field.
@@ -385,10 +387,22 @@ function floorTexture(): THREE.CanvasTexture {
   g.putImageData(img, 0, 0);
 
   // A soft pool of warm lamplight down the middle of the hall.
-  const pool = g.createRadialGradient(X(0), Z(LINE_Z - 10), 0, X(0), Z(LINE_Z - 10), FIELD_HALF * 1.3 * PX);
-  pool.addColorStop(0, 'rgba(255,214,150,0.16)');
-  pool.addColorStop(1, 'rgba(255,214,150,0)');
-  g.fillStyle = pool;
+  for (const [cz, r, a] of [
+    [LINE_Z - 9, FIELD_HALF * 1.9, 0.2],
+    [LINE_Z - 24, FIELD_HALF * 1.5, 0.1],
+  ] as const) {
+    const pool = g.createRadialGradient(X(0), Z(cz), 0, X(0), Z(cz), r * PX);
+    pool.addColorStop(0, `rgba(255,196,112,${a})`);
+    pool.addColorStop(0.55, `rgba(255,180,96,${a * 0.45})`);
+    pool.addColorStop(1, 'rgba(255,170,90,0)');
+    g.fillStyle = pool;
+    g.fillRect(0, 0, W, H);
+  }
+  // Dusk blue settles into the corners, away from the lamps.
+  const dusk = g.createRadialGradient(X(0), Z(LINE_Z - 12), FIELD_HALF * 1.2 * PX, X(0), Z(LINE_Z - 12), FIELD_HALF * 2.6 * PX);
+  dusk.addColorStop(0, 'rgba(40,48,90,0)');
+  dusk.addColorStop(1, 'rgba(40,48,90,0.22)');
+  g.fillStyle = dusk;
   g.fillRect(0, 0, W, H);
 
   // Darken under the shelves and towards the far end (a baked vignette).
@@ -396,8 +410,8 @@ function floorTexture(): THREE.CanvasTexture {
     const x0 = X(s * (FIELD_HALF - 2));
     const x1 = X(s * FLOOR_HALF);
     const grad = g.createLinearGradient(x0, 0, x1, 0);
-    grad.addColorStop(0, 'rgba(12,8,4,0)');
-    grad.addColorStop(1, 'rgba(12,8,4,0.7)');
+    grad.addColorStop(0, 'rgba(18,10,4,0)');
+    grad.addColorStop(1, 'rgba(18,10,4,0.6)');
     g.fillStyle = grad;
     g.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
   }
@@ -485,12 +499,21 @@ function makeWizard() {
   // Robe hem trim and a belt.
   b.add(new THREE.TorusGeometry(0.88, 0.06, 6, 24).rotateX(Math.PI / 2).translate(0, 0.08, 0), 0x6b5536);
   b.add(new THREE.TorusGeometry(0.73, 0.06, 6, 24).rotateX(Math.PI / 2).translate(0, 0.82, 0), 0x6b5536);
-  // Scarf: a thick knitted ring and a tail hanging down the back (towards the camera).
-  b.add(new THREE.TorusGeometry(0.46, 0.2, 10, 20).rotateX(Math.PI / 2).translate(0, 1.42, 0), PAL.cream);
-  b.add(new THREE.TorusGeometry(0.46, 0.06, 6, 20).rotateX(Math.PI / 2).translate(0, 1.42, 0.0).scale(1.08, 1, 1.08), PAL.creamDark);
-  b.add(new THREE.BoxGeometry(0.32, 0.85, 0.1).translate(0, -0.42, 0).rotateX(-0.2).translate(0.22, 1.42, 0.55), PAL.cream);
-  b.add(new THREE.BoxGeometry(0.33, 0.06, 0.11).rotateX(-0.2).translate(0.22, 0.85, 0.69), PAL.creamDark);
-  b.add(new THREE.BoxGeometry(0.33, 0.06, 0.11).rotateX(-0.2).translate(0.22, 1.05, 0.65), PAL.creamDark);
+  // Scarf: a thick knitted cream ring with knit ridges, and two long tails down his back (towards the camera),
+  // each ending in a fringe, so it reads from above past the hat brim.
+  b.add(new THREE.TorusGeometry(0.5, 0.25, 10, 22).rotateX(Math.PI / 2).scale(1, 0.8, 1).translate(0, 1.4, 0), PAL.cream);
+  for (const y of [1.3, 1.5]) b.add(new THREE.TorusGeometry(0.55, 0.06, 5, 22).rotateX(Math.PI / 2).translate(0, y, 0), PAL.creamDark);
+  const tail = (x: number, len: number, tilt: number, twist: number) => {
+    const at = (geo: THREE.BufferGeometry) => geo.rotateX(-tilt).rotateZ(twist).translate(x, 1.36, 0.55);
+    b.add(at(new THREE.BoxGeometry(0.36, len, 0.12).translate(0, -len / 2, 0)), PAL.cream);
+    for (let k = 1; k < 4; k++) b.add(at(new THREE.BoxGeometry(0.37, 0.05, 0.13).translate(0, (-len * k) / 4, 0)), PAL.creamDark);
+    // Fringe: little tassels hanging off the end.
+    for (let f = 0; f < 5; f++) {
+      b.add(at(new THREE.CylinderGeometry(0.025, 0.018, 0.2, 4).translate(-0.14 + f * 0.07, -len - 0.09, 0)), PAL.cream);
+    }
+  };
+  tail(0.18, 1.0, 0.32, 0.12);
+  tail(-0.12, 0.72, 0.42, -0.08);
   // Sleeves: the left arm hangs, the right one holds the candle forward.
   b.add(new THREE.CapsuleGeometry(0.2, 0.45, 4, 10).rotateZ(0.35).translate(-0.72, 0.95, 0.05), PAL.robe);
   b.bake(body);
@@ -501,33 +524,38 @@ function makeWizard() {
   const hb = new Baker();
   hb.add(new THREE.SphereGeometry(0.42, 16, 12).translate(0, 0.22, 0), PAL.skin);
   // White beard peeking out at the sides of the face (front is -z).
-  hb.add(new THREE.SphereGeometry(0.36, 12, 10).scale(1.1, 1.0, 0.8).translate(0, 0.0, -0.2), 0xf4efe6);
+  hb.add(new THREE.SphereGeometry(0.36, 12, 10).scale(1.25, 1.1, 0.8).translate(0, -0.08, -0.22), 0xf4efe6);
+  // Beard tufts and a nose poking out at the sides, so a bit of face shows past the brim.
+  for (const sx of [-1, 1]) hb.add(new THREE.SphereGeometry(0.17, 8, 6).translate(sx * 0.4, 0.04, -0.12), 0xf4efe6);
+  hb.add(new THREE.SphereGeometry(0.1, 8, 6).translate(0, 0.2, -0.43), 0xe9a982);
   // Hat: a wide floppy brim, a band, a tall cone with a bent tip leaning back.
-  hb.add(new THREE.CylinderGeometry(0.74, 0.78, 0.08, 24).translate(0, 0.42, 0), PAL.hat);
-  hb.add(new THREE.CylinderGeometry(0.56, 0.6, 0.16, 20).translate(0, 0.52, 0), 0x2a4630);
-  hb.add(new THREE.ConeGeometry(0.58, 1.05, 18, 1, true).translate(0, 1.0, 0), PAL.hat);
-  hb.add(new THREE.ConeGeometry(0.3, 0.75, 12).translate(0, 0.32, 0).rotateX(0.75).translate(0, 1.38, 0.08), PAL.hat);
+  // Hat: a soft knitted cone with a rolled brim, its floppy tip bent over to one side.
+  hb.add(new THREE.TorusGeometry(0.54, 0.12, 8, 22).rotateX(Math.PI / 2).translate(0, 0.4, 0), 0x355c3e);
+  hb.add(new THREE.ConeGeometry(0.6, 1.0, 18, 1, true).translate(0, 0.9, 0), PAL.hat);
+  hb.add(new THREE.ConeGeometry(0.27, 0.6, 12).translate(0, 0.28, 0).rotateZ(1.0).rotateX(0.25).translate(0, 1.28, 0.04), PAL.hat);
+  hb.add(new THREE.SphereGeometry(0.08, 8, 6).translate(-0.55, 1.5, 0.15), PAL.hat);
   hb.bake(head);
 
   // Right arm with the candle (the side next to the robot).
   const arm = new THREE.Group();
-  arm.position.set(0.62, 1.0, -0.15);
+  arm.position.set(0.66, 1.0, -0.05);
   body.add(arm);
   const ab = new Baker();
   ab.add(new THREE.CapsuleGeometry(0.19, 0.5, 4, 10).rotateZ(-1.1).translate(0.3, 0.1, 0), PAL.robe);
   ab.add(new THREE.SphereGeometry(0.15, 10, 8).translate(0.62, 0.26, 0), PAL.skin);
-  ab.add(new THREE.CylinderGeometry(0.035, 0.035, 0.7, 6).translate(0.64, 0.5, 0), 0x6b4a2e);
-  ab.add(new THREE.CylinderGeometry(0.1, 0.12, 0.3, 10).translate(0.64, 0.98, 0), PAL.candle);
-  ab.add(new THREE.CylinderGeometry(0.16, 0.16, 0.04, 12).translate(0.64, 0.84, 0), 0xc99a4a);
+  // A tall wooden candle stick: the flame burns above the hat brim, out to the side.
+  ab.add(new THREE.CylinderGeometry(0.045, 0.05, 1.4, 6).translate(0.66, 0.85, 0), 0x6b4a2e);
+  ab.add(new THREE.CylinderGeometry(0.2, 0.15, 0.07, 12).translate(0.66, 1.58, 0), 0xc99a4a);
+  ab.add(new THREE.CylinderGeometry(0.1, 0.12, 0.3, 10).translate(0.66, 1.76, 0), PAL.candle);
   ab.bake(arm);
   const flame = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8).scale(1, 1.8, 1), flat(0xfff2b0));
-  flame.position.set(0.64, 1.21, 0);
+  flame.position.set(0.66, 2.0, 0);
   arm.add(flame);
-  const halo = glow(0xffb347, 1.1);
+  const halo = glow(0xffb347, 1.6);
   halo.position.copy(flame.position);
   arm.add(halo);
-  const light = new THREE.PointLight(0xffa850, 9, 10, 1.6);
-  light.position.set(0.64, 1.5, 0);
+  const light = new THREE.PointLight(0xffa850, 5, 8, 1.6);
+  light.position.set(1.0, 2.6, 0.2);
   arm.add(light);
 
   let castT = 0;
@@ -558,8 +586,8 @@ function makeWizard() {
       body.scale.set(1 / Math.sqrt(breathe), breathe, 1 / Math.sqrt(breathe));
       const flick = base * (1 + Math.sin(t * 17) * 0.06 + Math.sin(t * 7.3) * 0.08) + castT * 2.5;
       flame.scale.set(0.8 + flick * 0.2, flick, 0.8 + flick * 0.2);
-      halo.scale.setScalar(0.7 + flick * 0.5);
-      light.intensity = 7 * flick;
+      halo.scale.setScalar(1.1 + flick * 0.6);
+      light.intensity = 4 * flick;
     },
   };
 }
@@ -575,16 +603,19 @@ function makeRobot() {
   b.add(new THREE.SphereGeometry(0.83, 22, 8, 0, Math.PI * 2, Math.PI * 0.62, Math.PI * 0.38).scale(1, 0.92, 1).translate(0, 1.0, 0), PAL.teal);
   b.add(new THREE.TorusGeometry(0.8, 0.05, 6, 28).rotateX(Math.PI / 2).translate(0, 0.72, 0), PAL.tealDark);
   // Side dials (like little ears).
-  for (const s of [-1, 1]) {
-    b.add(new THREE.CylinderGeometry(0.26, 0.26, 0.16, 16).rotateZ(Math.PI / 2).translate(s * 0.8, 1.05, 0), PAL.teal);
-    b.add(new THREE.CylinderGeometry(0.15, 0.15, 0.2, 12).rotateZ(Math.PI / 2).translate(s * 0.84, 1.05, 0), 0xe7b04a);
-  }
+  // A little ear on the left, a big teal drum with a brass coil on the right (like a scroll of laser wire).
+  b.add(new THREE.CylinderGeometry(0.2, 0.2, 0.14, 14).rotateZ(Math.PI / 2).translate(-0.8, 1.05, 0), PAL.teal);
+  b.add(new THREE.CylinderGeometry(0.11, 0.11, 0.18, 10).rotateZ(Math.PI / 2).translate(-0.84, 1.05, 0), 0xe7b04a);
+  b.add(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 18).rotateZ(Math.PI / 2).translate(0.86, 0.98, 0.05), PAL.teal);
+  for (const r of [0.3, 0.2, 0.1]) b.add(new THREE.TorusGeometry(r, 0.045, 5, 18).rotateY(Math.PI / 2).translate(1.02, 0.98, 0.05), 0xe2a948);
+  // Little round feet instead of plain wheels peeking out front and back.
+  for (const sx of [-1, 1]) b.add(new THREE.SphereGeometry(0.2, 10, 8).scale(1, 0.8, 1).translate(sx * 0.42, 0.22, 0.55), PAL.cream);
   // Wheels.
   for (const sx of [-1, 1]) {
-    for (const sz of [-1, 1]) b.add(new THREE.CylinderGeometry(0.2, 0.2, 0.16, 14).rotateZ(Math.PI / 2).translate(sx * 0.5, 0.2, sz * 0.42), 0x3b3a40);
+    for (const sz of [-1]) b.add(new THREE.CylinderGeometry(0.2, 0.2, 0.16, 14).rotateZ(Math.PI / 2).translate(sx * 0.5, 0.2, sz * 0.42), 0x3b3a40);
   }
   // Turret base.
-  b.add(new THREE.CylinderGeometry(0.34, 0.42, 0.22, 16).translate(0, 1.78, 0), PAL.teal);
+  b.add(new THREE.CylinderGeometry(0.26, 0.34, 0.18, 16).translate(0, 1.76, 0), PAL.teal);
   b.bake(body);
   // Face (towards the camera, +z).
   const face = new THREE.Group();
@@ -613,10 +644,11 @@ function makeRobot() {
   const barrel = new THREE.Group();
   pitch.add(barrel);
   const tb = new Baker();
-  tb.add(new THREE.SphereGeometry(0.3, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), PAL.teal);
-  tb.add(new THREE.CylinderGeometry(0.13, 0.15, 1.0, 14).rotateX(Math.PI / 2).translate(0, 0.08, -0.55), PAL.cream);
-  tb.add(new THREE.CylinderGeometry(0.19, 0.19, 0.12, 14).rotateX(Math.PI / 2).translate(0, 0.08, -0.32), PAL.teal);
-  tb.add(new THREE.CylinderGeometry(0.2, 0.17, 0.22, 14).rotateX(Math.PI / 2).translate(0, 0.08, -1.08), PAL.teal);
+  tb.add(new THREE.SphereGeometry(0.22, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), PAL.teal);
+  tb.add(new THREE.CylinderGeometry(0.12, 0.14, 1.0, 14).rotateX(Math.PI / 2).translate(0, 0.08, -0.55), PAL.cream);
+  tb.add(new THREE.CylinderGeometry(0.18, 0.18, 0.12, 14).rotateX(Math.PI / 2).translate(0, 0.08, -0.3), PAL.teal);
+  tb.add(new THREE.CylinderGeometry(0.17, 0.17, 0.1, 14).rotateX(Math.PI / 2).translate(0, 0.08, -0.82), 0xe2a948);
+  tb.add(new THREE.CylinderGeometry(0.2, 0.16, 0.24, 14).rotateX(Math.PI / 2).translate(0, 0.08, -1.06), PAL.teal);
   tb.bake(barrel);
   const lens = new THREE.Mesh(new THREE.CircleGeometry(0.12, 14), flat(0xc8ff9a));
   lens.position.set(0, 0.08, -1.2);
@@ -679,11 +711,15 @@ export function buildWorld(scene: THREE.Scene): World {
   scene.fog = new THREE.Fog(0x1c140d, 75, 190);
 
   // Dusk lamplight: a warm hemisphere, one warm key light from the upper left, the wizard's candle (a point light).
-  scene.add(new THREE.HemisphereLight(0xf2dcc0, 0x2e2418, 1.0));
-  const key = new THREE.DirectionalLight(0xffcf96, 1.7);
+  scene.add(new THREE.HemisphereLight(0xd2d8e4, 0x2a2c44, 0.9));
+  const key = new THREE.DirectionalLight(0xffcc8c, 1.6);
   key.position.set(-14, 26, 12);
   key.target.position.set(0, 0, LINE_Z - 12);
   scene.add(key, key.target);
+  // A big warm lamp pool over the middle of the hall (the one extra light; the shelves fake theirs).
+  const pool = new THREE.PointLight(0xffc47a, 13, 34, 1.4);
+  pool.position.set(0, 9, LINE_Z - 9);
+  scene.add(pool);
 
   buildFloor(scene);
   const cracks = buildCracks(scene);
@@ -693,6 +729,8 @@ export function buildWorld(scene: THREE.Scene): World {
   // Faces -z, towards the creatures: we see his back, like the player standing behind him.
   wizard.root.position.set(-1.9, 0, LINE_Z + 2.1);
   wizard.root.scale.setScalar(DEFENDER_SCALE);
+  // Leaning back a touch and turned a little towards the robot, so the camera sees his scarf, beard and candle.
+  wizard.root.rotation.set(-0.22, -0.3, 0, 'YXZ');
   scene.add(wizard.root);
   const robot = makeRobot();
   robot.root.position.set(1.7, 0, LINE_Z + 1.9);

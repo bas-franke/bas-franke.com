@@ -26,7 +26,7 @@ export interface Library {
 // ---- layout -------------------------------------------------------------------------------------------------------
 
 /** Floor between the field edge and the shelf fronts, where props pile up. */
-const STRIP = 3.0;
+const STRIP = 2.4;
 /** Floor between the far end of the field and the far wall. */
 const FAR_GAP = 2.6;
 /** Shelf depth (front face to back panel). */
@@ -38,14 +38,14 @@ const ROWS = [0.5, 1.64, 2.78, 3.92, 5.06, 6.2];
 /** Target bay width between two posts. */
 const BAY = 2.3;
 /** How far the side walls continue behind the defence line. */
-const NEAR_EXTRA = 6;
+const NEAR_EXTRA = 5;
 
 const BOOK_COLORS = [
   0x6a2e26, 0x58262e, 0x2f4a38, 0x2a4646, 0x2c3a58, 0x7e6238, 0x4a3424, 0x463246, 0xa8916c, 0x664630, 0x38584a,
   0x723c2c, 0x26403a, 0x54303c, 0x334664,
 ];
 const CUSHION_COLORS = [0x84332e, 0x72302c, 0x4a6840, 0x3c5a3a, 0x34507a, 0x33605c];
-const LEAF_COLORS = [0x2a4a20, 0x325626, 0x3a622a, 0x24421c, 0x426c30, 0x2c5024];
+const LEAF_COLORS = [0x2e5424, 0x386028, 0x44702e, 0x2a4c20, 0x4e7a34, 0x325a26];
 const WOOD = 0x452b1a;
 const WOOD_DARK = 0x24160d;
 const BRASS = 0x9a6c34;
@@ -146,6 +146,8 @@ interface MatOpts {
   /** Leaves and flowers sway a little. */
   sway?: boolean;
   side?: THREE.Side;
+  /** Fraction of albedo added as light everywhere (thin leaves seen from behind would go black otherwise). */
+  selfLit?: number;
 }
 
 /** Soft lit material with the baked lantern light added as warm emissive. Expects a `bake` attribute. */
@@ -182,7 +184,7 @@ function libMaterial(key: string, o: MatOpts = {}) {
       );
     fs = fs.replace(
       '#include <emissivemap_fragment>',
-      '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * vBake * uWarm;',
+      `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * ( vBake * uWarm + ${(o.selfLit ?? 0).toFixed(3)} );`,
     );
     sh.fragmentShader = fs;
   };
@@ -498,15 +500,11 @@ function flowerGeometry() {
     const sa = Math.sin(a);
     const pt = (r: number, w: number): [number, number] => [ca * r - sa * w, sa * r + ca * w];
     const c0 = pt(0.15, 0);
-    const l = pt(0.55, 0.32);
-    const tip = pt(1, 0);
-    const r = pt(0.55, -0.32);
-    void tip;
+    const r = pt(1.05, -0.38);
+    const l = pt(1.05, 0.38);
     push(c0[0], 0.02, c0[1], white);
-    push(pt(1.05, -0.38)[0], 0.08, pt(1.05, -0.38)[1], white);
-    push(pt(1.05, 0.38)[0], 0.08, pt(1.05, 0.38)[1], white);
-    void l;
-    void r;
+    push(r[0], 0.08, r[1], white);
+    push(l[0], 0.08, l[1], white);
   }
   for (let k = 0; k < 3; k++) {
     const a0 = (k / 3) * Math.PI * 2;
@@ -606,11 +604,10 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   const cyl = new THREE.CylinderGeometry(1, 1, 1, 7);
   const cyl12 = new THREE.CylinderGeometry(1, 1, 1, 12);
   const cone = new THREE.ConeGeometry(1, 1, 8);
-  const hemi = new THREE.SphereGeometry(1, 10, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+  const hemi = new THREE.SphereGeometry(1, 8, 3, 0, Math.PI * 2, 0, Math.PI / 2);
   const ball = new THREE.SphereGeometry(1, 10, 7);
-  const dot = new THREE.SphereGeometry(1, 5, 3);
+  const dot = new THREE.SphereGeometry(1, 4, 2);
   const ring = new THREE.TorusGeometry(1, 0.06, 4, 24);
-  const ringLow = new THREE.TorusGeometry(1, 0.18, 3, 8);
 
   const props = new Bag();
   const glowBag = new Bag();
@@ -647,17 +644,16 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
     const brass = jitter(BRASS, 0.05);
     const dark = jitter(BRASS_DARK, 0.05);
     piece(props, cyl, local(x, y + 0.03 * s, z, 0, 0, 0, 0.17 * s, 0.06 * s, 0.17 * s), dark);
-    piece(glowBag, cyl, local(x, y + 0.2 * s, z, 0, 0.4, 0, 0.1 * s, 0.26 * s, 0.1 * s), 0xf0a848);
+    piece(glowBag, cyl, local(x, y + 0.2 * s, z, 0, 0.4, 0, 0.09 * s, 0.26 * s, 0.09 * s), 0xffb85a);
     for (let k = 0; k < 4; k++) {
       const a = (k / 4) * Math.PI * 2 + 0.4;
       piece(props, box, local(x + Math.cos(a) * 0.12 * s, y + 0.2 * s, z + Math.sin(a) * 0.12 * s, 0, -a, 0, 0.05 * s, 0.3 * s, 0.05 * s), dark);
     }
-    piece(props, cyl, local(x, y + 0.36 * s, z, 0, 0, 0, 0.16 * s, 0.04 * s, 0.16 * s), brass);
-    piece(props, cone, local(x, y + 0.44 * s, z, 0, 0.4, 0, 0.15 * s, 0.14 * s, 0.15 * s), brass);
-    piece(props, ringLow, local(x, y + 0.56 * s, z, 0, 0, 0, 0.06 * s, 0.06 * s, 0.06 * s), dark);
+    piece(props, cone, local(x, y + 0.42 * s, z, 0, 0.4, 0, 0.18 * s, 0.16 * s, 0.18 * s), brass);
+    piece(props, box, local(x, y + 0.54 * s, z, 0, 0.4, 0, 0.1 * s, 0.07 * s, 0.03 * s), dark);
     if (hanging) piece(props, box, local(x, y + 0.6 * s + 0.25, z, 0, 0, 0, 0.02, 0.5, 0.02), dark);
-    glow(x, y + 0.2 * s, z, 1.25 * s, 0.38, 0);
-    glow(x, y + 0.2 * s, z, 0.3 * s, 0.6, 1);
+    glow(x, y + 0.22 * s, z, 1.7 * s, 0.4, 0);
+    glow(x, y + 0.22 * s, z, 0.38 * s, 0.5, 1);
     light(x, y + 0.25 * s, z, 0.5, 2.6 * Math.min(1.6, s));
   };
 
@@ -669,7 +665,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   };
 
   const candles = (x: number, z: number, y = 0) => {
-    piece(props, cyl12, local(x, y + 0.02, z, 0, 0, 0, 0.24, 0.04, 0.24), jitter(BRASS_DARK));
+    piece(props, cyl12, local(x, y + 0.02, z, 0, 0, 0, 0.24, 0.04, 0.24), jitter(BRASS));
     const n = 2 + Math.floor(R(0, 2));
     for (let k = 0; k < n; k++) candle(x + R(-0.12, 0.12), y + 0.04, z + R(-0.12, 0.12), R(0.12, 0.38));
   };
@@ -683,7 +679,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const h = 0.2 * s;
       piece(props, cyl, local(mx, h / 2, mz, R(-0.1, 0.1), 0, R(-0.1, 0.1), 0.045 * s, h, 0.045 * s), jitter(0xeadcc0, 0.04));
       piece(props, hemi, local(mx, h - 0.02, mz, 0, 0, 0, 0.15 * s, 0.075 * s, 0.15 * s), jitter(0xc8402e, 0.06));
-      for (let d = 0; d < 5; d++) {
+      for (let d = 0; d < 4; d++) {
         const a = R(0, Math.PI * 2);
         const rr = R(0.02, 0.1) * s;
         piece(props, dot, local(mx + Math.cos(a) * rr, h - 0.02 + 0.07 * s * Math.sqrt(Math.max(0, 1 - (rr / (0.15 * s)) ** 2)), mz + Math.sin(a) * rr, 0, 0, 0, 0.022 * s, 0.01 * s, 0.022 * s), 0xfff4e0);
@@ -756,13 +752,6 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const yaw = R(0, Math.PI * 2);
       leaf(x, y + 0.32 * s, z, R(0.2, 1.4), yaw, R(-0.3, 0.3), R(0.28, 0.42) * s);
     }
-  };
-
-  const crate = (x: number, z: number, s = R(0.55, 0.75)) => {
-    const yaw = R(-0.3, 0.3);
-    piece(props, box, local(x, s / 2, z, 0, yaw, 0, s * 1.1, s, s), jitter(0x5a3a22, 0.05));
-    piece(props, box, local(x, s - 0.02, z, 0, yaw, 0, s * 1.14, 0.06, s * 1.04), jitter(0x42291a, 0.04));
-    return s;
   };
 
   const globe = (x: number, z: number, s = 1) => {
@@ -871,7 +860,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       const z = R(0.08, 0.28);
       leaf(vx + R(-0.1, 0.1), y, z, R(-0.9, -0.2), R(-0.5, 0.5), Math.PI + R(-0.9, 0.9), R(0.2, 0.3));
       if (rng() < 0.08) flower(vx + R(-0.1, 0.1), y, z + 0.08, R(0.07, 0.1), Math.PI / 2 - 0.4, 0);
-      y -= R(0.08, 0.15);
+      y -= R(0.12, 0.2);
     }
   };
 
@@ -896,6 +885,14 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       if (!ends && (i === 0 || i === nb)) continue;
       piece(props, box, local(x, HEIGHT / 2, -DEPTH / 2 + 0.02, 0, 0, 0, 0.2, HEIGHT, DEPTH + 0.04), wood());
       piece(props, box, local(x, HEIGHT / 2, 0.04, 0, 0, 0, 0.26, HEIGHT, 0.06), jitter(0x553722, 0.04));
+      // Ivy climbing the post from the floor.
+      if (rng() < 0.7) {
+        const top = R(0.8, 2.6);
+        for (let y = 0.1; y < top; y += R(0.12, 0.2)) {
+          leaf(x + R(-0.22, 0.22), y, R(0.08, 0.3), R(-0.6, 0.2), R(-0.5, 0.5), R(-1.2, 1.2), R(0.26, 0.38));
+          if (rng() < 0.15) flower(x + R(-0.2, 0.2), y, R(0.25, 0.35), R(0.1, 0.14), Math.PI / 2 - 0.5, 0);
+        }
+      }
       // Hanging lanterns on brackets in front of the posts.
       if (i > 0 && i < nb && rng() < 0.55) {
         const y = R(ROWS[1] + 0.2, ROWS[4]);
@@ -923,7 +920,7 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       for (let k = 0; k < vines; k++) vine(R(x0, x1), R(1.2, win ? 2.2 : 4.8));
     }
     // Garland of leaves along the cornice top.
-    for (let x = 0; x < len; x += R(0.14, 0.3))
+    for (let x = 0; x < len; x += R(0.25, 0.45))
       leaf(x, HEIGHT + 0.46, R(-0.2, 0.35), R(-1.6, -0.6), R(-0.4, 0.4), R(-2, 2), R(0.22, 0.34));
 
     // Floor strip props, kept sparse: a row against the shelves (book stacks, a lantern, deep-green plants, the odd
@@ -933,8 +930,8 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
       for (let k = 0; k < n; k++) {
         const lx = cx + R(-spread, spread);
         const lz = cz + R(-spread, spread) * 0.6;
-        leaf(lx, R(0.01, 0.12), lz, -Math.PI / 2 + R(0.15, 0.7), R(0, 6.3), 0, R(0.24, 0.36));
-        if (rng() < 0.18) flower(lx, R(0.1, 0.2), lz, R(0.1, 0.13));
+        leaf(lx, R(0.01, 0.16), lz, -Math.PI / 2 + R(0.2, 0.9), R(0, 6.3), 0, R(0.3, 0.46));
+        if (rng() < 0.3) flower(lx, R(0.12, 0.24), lz, R(0.12, 0.17));
       }
     };
     let x = R(0.2, 0.6);
@@ -946,12 +943,12 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
         if (rng() < 0.4) lantern(x + R(-0.1, 0.1), top, zb, R(1.3, 1.5));
         else if (rng() < 0.3) candles(x, zb, top);
       } else if (back < 0.5) {
-        const h = crate(x, zb, R(0.7, 0.9));
-        if (rng() < 0.65) lantern(x, h, zb, R(1.3, 1.5));
+        const top = bookStack(x, zb, 0, 9, P);
+        lantern(x, top, zb, R(1.3, 1.5));
       } else if (back < 0.72) bush(x, zb + 0.15, R(1.2, 1.6), 6);
       else if (back < 0.82) cushion(x, zb + 0.2, 0, R(1.1, 1.3));
       else if (back < 0.92) lantern(x, 0, zb, R(1.7, 2.0));
-      ivyPatch(x, R(0.1, 0.5), 2 + Math.floor(R(0, 4)), 0.5);
+      ivyPatch(x, R(0.1, 0.5), 4 + Math.floor(R(0, 5)), 0.55);
 
       if (strip > 1.8 && rng() < 0.3) {
         const xm = x + R(-0.35, 0.35);
@@ -962,11 +959,11 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
         else if (mid < 0.7) bookStack(xm, zm, 0, 3, P);
         else candles(xm, zm);
       }
-      if (rng() < 0.3) {
+      if (rng() < 0.6) {
         const xf = x + R(-0.4, 0.4);
-        const zf = R(Math.min(strip - 0.6, 2.2), strip + 0.2);
-        if (rng() < 0.5) mushrooms(xf, zf);
-        else ivyPatch(xf, zf, 6, 0.45);
+        const zf = R(Math.min(strip - 0.8, 1.6), strip + 0.1);
+        if (rng() < 0.3) mushrooms(xf, zf);
+        else ivyPatch(xf, zf, 5, 0.45);
       }
       x += R(0.95, 1.5);
     }
@@ -1094,12 +1091,12 @@ export function buildLibrary(scene: THREE.Scene, opts: LibraryOptions): Library 
   instanced(books, bookGeometry(), libMaterial('books', { map: atlas, trim: true, atlas: true }), true);
   instanced(openBooks, openBookGeometry(), libMaterial('openbooks', { map: atlas, trim: true, atlas: true }), true);
   instanced(cushions, cushionGeometry(), libMaterial('cushions', { map: cushionTexture(), trim: true }));
-  instanced(leaves, leafGeometry(), libMaterial('leaves', { sway: true, side: THREE.DoubleSide }));
-  instanced(flowers, flowerGeometry(), libMaterial('flowers', { sway: true, side: THREE.DoubleSide }));
+  instanced(leaves, leafGeometry(), libMaterial('leaves', { sway: true, side: THREE.DoubleSide, selfLit: 0.22 }));
+  instanced(flowers, flowerGeometry(), libMaterial('flowers', { sway: true, side: THREE.DoubleSide, selfLit: 0.3 }));
 
   group.add(glowMesh(glowC, glowD));
 
-  for (const g of [box, cyl, cyl12, cone, hemi, ball, dot, ring, ringLow]) g.dispose();
+  for (const g of [box, cyl, cyl12, cone, hemi, ball, dot, ring]) g.dispose();
   scene.add(group);
 
   return {

@@ -492,8 +492,8 @@ export class Effects {
     m.obj.scale.set(1, len, 1);
     m.life = 0.17;
     this.flash(from, 1.3, color, 0.16);
-    this.flash(to, 1.8, 0xd8ff8a, 0.22);
-    this.star(to, 2.2, 0xfff4c8, 0.2);
+    this.flash(to, 1.5, 0x9ac860, 0.2);
+    this.star(to, 1.8, 0xd8c890, 0.2);
   }
 
   /** A soft additive glow that swells and fades in place. */
