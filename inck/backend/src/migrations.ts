@@ -113,4 +113,12 @@ export const migrations: { name: string; sql: string }[] = [
       UPDATE settings SET text_model = 'gpt-5.4-mini' WHERE text_model = 'gpt-5-mini';
     `,
   },
+  {
+    // gpt-5.4-nano writes 1,200-word, well-structured articles at the lowest price, so it is the default.
+    name: '004_text_model_nano',
+    sql: `
+      ALTER TABLE settings ALTER COLUMN text_model SET DEFAULT 'gpt-5.4-nano';
+      UPDATE settings SET text_model = 'gpt-5.4-nano' WHERE text_model IN ('gpt-5-mini', 'gpt-5.4-mini');
+    `,
+  },
 ];

@@ -129,6 +129,8 @@ export async function writeArticle(opts: {
       'split the article into 3 to 6 sections, each introduced by a Markdown heading line starting with "## "; ' +
       'short paragraphs; **bold** only for a handful of key facts; no bullet lists longer than five items.',
     imagesWanted,
+    'Every [[chart:N]] or [[image:N]] marker goes on a line of its own, never inside a heading or sentence. ' +
+      'Do not add a "Sources" or "References" section to the body: sources go only in the sources field.',
     'Be accurate. Prefer well-established facts; when numbers are estimates, say so. Never invent studies, quotes or URLs.',
     settings.charts_enabled
       ? 'Include 1 to 3 charts only when there is real quantitative data worth showing, and place [[chart:N]] markers in the body.'

@@ -110,6 +110,21 @@ function remapMarkers(body: string, results: (ArticleImage | undefined)[]) {
   });
 }
 
+/**
+ * Cleans up habits the writer has despite instructions: markers glued into headings or sentences are moved to
+ * their own line, and a trailing "## Sources" / "## References" section is removed (sources are structured data).
+ */
+export function tidyBody(body: string) {
+  return body
+    .replace(/^(#{1,6}\s*)?(.*?)\s*(\[\[(?:chart|image):\d+\]\])\s*(.*)$/gm, (line, hashes, before, marker, after) => {
+      if (!before && !after) return line;
+      const rest = `${before}${after}`.trim();
+      return `${marker}\n\n${rest ? `${hashes ?? ''}${rest}` : ''}`;
+    })
+    .replace(/\n#{1,6}\s*(sources|references|further reading)\s*:?\s*\n[\s\S]*$/i, '\n')
+    .trim();
+}
+
 /** Images the writer forgot to place get a slot before successive "## " headings. */
 function placeUnusedImages(body: string, imageCount: number) {
   const used = new Set([...body.matchAll(/\[\[image:(\d+)\]\]/g)].map((m) => Number(m[1])));
@@ -154,7 +169,7 @@ async function runGeneration(trigger: Run['trigger'], topicId?: number): Promise
     if (!settings.charts_enabled) draft.charts = [];
 
     let images: ArticleImage[] = [];
-    let body = draft.body_markdown;
+    let body = tidyBody(draft.body_markdown);
     if (settings.images_enabled) {
       const specs = draft.images.slice(0, Math.max(1, settings.images_max));
       await setStep(run.id, `illustrating 0/${specs.length}`);
