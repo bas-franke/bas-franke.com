@@ -124,6 +124,9 @@ This creates `gh-deploy` (private) and `gh-deploy.pub` (public); both are git-ig
 
 <https://github.com/bas-franke/bas-franke.com> → **Settings → Secrets and variables → Actions → New repository secret**:
 
+The deploy jobs use the GitHub environment `main`, so these can be repository secrets **or** secrets of an
+environment named `main` (Settings → Environments → main).
+
 | Name          | Value                                                                  |
 |---------------|------------------------------------------------------------------------|
 | `EC2_HOST`    | `<elastic-ip>`                                                         |

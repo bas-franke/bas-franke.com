@@ -40,7 +40,7 @@ Then put `DATABASE_URL=postgres://notes:<password>@<rds-endpoint>:5432/notes?ssl
 
 - **name.com**: A record `notes` → Elastic IP (skip if a wildcard `*` record already exists).
 - **AWS**: nothing new; the EC2 security group already allows 80/443 and RDS already allows the EC2 group.
-- **GitHub**: nothing new; the repository secrets are shared by all workflows.
+- **GitHub**: nothing new; the secrets (repository or `main` environment) are shared by all workflows. Keep `environment: main` in the new workflow.
 - **Server**: create folders, install the Nginx site, issue the certificate. The exact commands are in the
   "First-time server setup" section of the project README (same as portfolio, different names).
 

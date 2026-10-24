@@ -20,6 +20,8 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
+    # Secrets may live in the "main" environment; repository secrets work too.
+    environment: main
     steps:
       - uses: actions/checkout@v5
 

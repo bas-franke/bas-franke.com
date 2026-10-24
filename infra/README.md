@@ -61,6 +61,9 @@ ssh -i bas-franke-ec2.pem ubuntu@<elastic-ip> "cat >> ~/.ssh/authorized_keys" < 
 
 Repository `bas-franke/bas-franke.com` → **Settings → Secrets and variables → Actions → New repository secret**:
 
+The deploy jobs use the GitHub environment `main`, so these can be repository secrets **or** secrets of an
+environment named `main` (Settings → Environments → main). Any new `deploy-*.yml` must keep `environment: main`.
+
 | Secret        | Value                                         |
 |---------------|-----------------------------------------------|
 | `EC2_HOST`    | The Elastic IP                                |
