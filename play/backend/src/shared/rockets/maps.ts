@@ -4,61 +4,103 @@
 import { v3 } from '../math.js';
 import { MapBuilder as B, type MapData } from './map.js';
 
-/** The original arena, scaled up: central platform, four corner towers on jump pads, ledges east and west. */
+/**
+ * The original arena, scaled up: a dais with a furnace in the middle, and a raised ring all the way round the walls,
+ * ledges in the middle of each side climbing to gantries in the corners, each side marked by its own coloured chimney.
+ */
 function foundry(): MapData {
   const half = 32;
   const b = new B().shell(half, 10);
+  // The same shapes in every quarter, each quarter in its own colour, so players can tell where they are.
+  const marks = (kinds: MapData['boxes'][number]['kind'][], piece: (p: B) => void) => {
+    const all = (kinds.length === 2 ? new B().pair(piece) : new B().quad(piece)).boxes;
+    all.forEach((m, i) => b.box(kinds[Math.floor((i * kinds.length) / all.length)], m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z));
+  };
   const platH = 3;
-  b.block('platform', 0, 0, 9, 9, platH);
-  b.pair((p) => p.stairs('z', -1, 0, 9 + B.run(0, platH), 5, 0, platH).spawn(0, platH, 5).pack(5, platH, 5));
-  b.padUp(v3(0, platH, 0), 15);
+  const ring = 4;
+  const gantry = 6;
+  // The furnace blocks the views across the dais; its top and health pack are a rocket jump away.
+  b.block('platform', 0, 0, 8, 8, platH).block('stair', 0, 0, 2.5, 2.5, 8).pack(0, 8, 0);
+  b.pair((p) => p.stairs('z', -1, 0, 8 + B.run(0, platH), 5, 0, platH).pack(5, platH, 5));
+  // Chimneys straddle the wall ledges: walk under the arch, but nobody sees along the whole ring.
+  marks(['tower', 'pillar', 'crate', 'ledge'], (p) => p.box('tower', 25, 0, -1.5, 27, 15, 1.5).box('tower', 27, ring + 2.4, -1.5, half, 15, 1.5));
   b.quad((p) => {
-    p.block('tower', 23, 23, 4, 4, 6).padTo(v3(15, 0, 15), v3(23, 6, 23)).pack(23, 6, 23);
-    p.block('pillar', 11.5, 11.5, 1.2, 1.2, 7);
-    p.block('crate', 19, -7, 1, 1, 2).block('crate', 6, 22, 0.8, 0.8, 1.6);
-    p.spawn(0, 0, 27).spawn(14, 0, 24);
+    const steps = B.run(ring, gantry);
+    p.box('platform', half - 5, 0, -10 - steps, half, ring, 10 + steps).stairs('x', 1, half - 5 - B.run(0, ring), 6, 3, 0, ring);
+    p.stairs('z', 1, half - 2.5, 10, 5, ring, gantry).box('platform', half - 5, 0, 10 + steps, half, gantry, 22);
+    p.stairs('z', -1, half - 2.5, -10, 5, ring, gantry).box('platform', half - 5, 0, -22, half, gantry, -10 - steps);
+    p.box('platform', 22, 0, 22, half, gantry, half).padTo(v3(18, 0, 11), v3(26, gantry, 26));
+    // Floor cover: pillars and a block on the gantry-to-gantry diagonal, a low wall in front of each dais staircase.
+    p.block('stair', 11.5, 11.5, 1.2, 1.2, 9).block('stair', 16.2, 16.2, 1.4, 1.4, 2.2);
+    p.block('stair', 0, 21, 3, 0.6, 2.2).pack(0, 0, 23.5);
+    p.block('stair', 19, -6, 1, 1, 1.4);
+    p.spawn(13.5, 0, 17.5).spawn(28, gantry, 28).spawn(29.5, ring, -6);
   });
-  b.pair((p) => {
-    p.box('ledge', half - 3.5, 0, -12, half, 4, 12).stairs('z', -1, half - 1.75, 12 + B.run(0, 4), 3.5, 0, 4);
-    p.pack(half - 1.7, 4, 0);
-  });
-  return b.build({ id: 'foundry', accent: 0x2ed8a0, name: 'Foundry', half, skyColor: 0x3f9be8, fogColor: 0xbfe4ff });
+  return b.build({ id: 'foundry', accent: 0x2ed8a0, name: 'Foundry', half, skyColor: 0x3f9be8, fogColor: 0x5aa0e0, tint: { stair: 0x56607a, wall: 0xa04a32 } });
 }
 
-/** Floating islands over the void, joined by narrow bridges; fall off and you are gone. */
+/** Floating islands over the void, joined by narrow bridges and pads; fall off and you are gone. */
 function skyway(): MapData {
   const half = 40;
   const b = new B().shell(half, 0, false);
+  // The same shapes in every quarter, each quarter in its own colour, so players can tell where they are.
+  const marks = (kinds: MapData['boxes'][number]['kind'][], piece: (p: B) => void) => {
+    const all = (kinds.length === 2 ? new B().pair(piece) : new B().quad(piece)).boxes;
+    all.forEach((m, i) => b.box(kinds[Math.floor((i * kinds.length) / all.length)], m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z));
+  };
   b.box('floor', -10, -1, -10, 10, 0, 10);
-  b.block('platform', 0, 0, 3.5, 3.5, 2);
-  b.pack(0, 2, 0);
-  b.pair((p) => p.stairs('z', -1, 0, 3.5 + B.run(0, 2), 3, 0, 2).spawn(6, 0, 6));
+  // The hub's beacon breaks the corner-to-corner sightlines and is visible from every island.
+  b.block('platform', 0, 0, 3.5, 3.5, 2).block('pillar', 0, 0, 1.2, 1.2, 9, 2);
+  b.pair((p) => p.stairs('z', -1, 0, 3.5 + B.run(0, 2), 3, 0, 2).pack(2.6, 2, 2.6).spawn(-8, 0, 8));
+  marks(['platform', 'ledge', 'tower', 'crate'], (p) => p.box('platform', 21, 4, 21, 31, 5, 31));
   b.quad((p) => {
+    p.block('pillar', 6.5, 6.5, 0.7, 0.7, 3.5);
     p.box('platform', 10, -1, -1.2, 19, 0, 1.2).pack(14.5, 0, 0);
-    p.box('floor', 19, -1, -7, 33, 0, 7).spawn(24, 0, 0).padUp(v3(30, 0, 0), 16);
-    // Corner island, five metres up, climbed from the next island round and left by a pad back to the middle.
-    p.box('platform', 21, 4, 21, 31, 5, 31).spawn(27, 5, 27).pack(28.5, 5, 28.5);
+    // Side island: a wall to duck behind when you come off the bridge, and a pad up to the next corner island.
+    p.box('floor', 19, -1, -7, 33, 0, 7).block('pillar', 23, 0, 0.6, 2.6, 3.5).spawn(29, 0, -4);
+    p.padTo(v3(30, 0, 4), v3(26, 5, 24), 1.6);
+    // Corner island, five metres up: stairs down to the next island round, a pad back to the hub.
+    p.block('pillar', 22.5, 28, 1.2, 1, 6.8, 5).spawn(27, 5, 28).pack(29, 5, 24.5);
     p.stairs('x', 1, 7, 25, 4, 0, 5).box('platform', 7 + B.run(0, 5), 4, 23, 21, 5, 27);
-    p.padTo(v3(23.5, 5, 23.5), v3(5, 0, 5), 2);
+    p.padTo(v3(23.5, 5, 23.5), v3(4, 0, 7.5), 2);
   });
-  return b.build({ id: 'skyway', accent: 0xff5ea8, name: 'Skyway', half, skyColor: 0x2f8cf0, fogColor: 0xd8f0ff, tint: { floor: 0x9ad06a, platform: 0xf2c14e, stair: 0xe8a840 } });
+  return b.build({
+    id: 'skyway',
+    accent: 0xff5ea8,
+    name: 'Skyway',
+    half,
+    skyColor: 0x2f8cf0,
+    fogColor: 0x2a7ad8,
+    tint: { floor: 0x9ad06a, platform: 0xf2c14e, stair: 0xe8a840, pillar: 0xf4f0e8, crate: 0x4ad0e0 },
+  });
 }
 
-/** Two sandstone plateaus either side of a canyon, linked by high bridges. */
+/** Two sandstone plateaus either side of a canyon, linked by high bridges, rock columns and pads. */
 function canyon(): MapData {
   const half = 34;
   const b = new B().shell(half, 12);
+  // The same shapes on both sides, each side in its own colour, so players can tell where they are.
+  const marks = (kinds: MapData['boxes'][number]['kind'][], piece: (p: B) => void) => {
+    const all = (kinds.length === 2 ? new B().pair(piece) : new B().quad(piece)).boxes;
+    all.forEach((m, i) => b.box(kinds[Math.floor((i * kinds.length) / all.length)], m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z));
+  };
   const top = 6;
-  b.block('crate', 0, 0, 1.5, 1.5, 2.5);
+  b.block('crate', 0, 0, 1.5, 1.5, 2.2);
+  marks(['tower', 'platform'], (p) => p.block('tower', 26, 26, 4, 4, 11));
   b.pair((p) => {
     p.box('ledge', 14, 0, -half, half, top, half);
-    p.stairs('x', 1, 14 - B.run(0, top), 0, 4, 0, top).stairs('x', 1, 14 - B.run(0, top), 30, 3, 0, top);
+    p.stairs('x', 1, 14 - B.run(0, top), 0, 4, 0, top).stairs('x', 1, 14 - B.run(0, top), half - 1.75, 3.5, 0, top);
     p.box('platform', -14, top - 0.5, 18, 14, top, 22).pack(0, top, 20);
     p.padTo(v3(8, 0, 10), v3(22, top, 10));
-    p.block('tower', 26, 26, 4, 4, 11).padTo(v3(26, top, 16), v3(26, 11, 26)).spawn(26, 11, 26);
-    p.block('crate', 20, -6, 1, 1, top + 2, top).block('crate', 28, -14, 1.2, 1.2, top + 2.4, top);
-    p.block('pillar', 6, 26, 1, 1, 4.5);
-    p.spawn(24, top, 0).spawn(26, top, -24).spawn(10, 0, 27).spawn(-6, 0, 10);
+    // Up the tower, and from its top a cannon across the canyon to the far plateau.
+    p.padTo(v3(26, top, 16), v3(26, 11, 26)).padTo(v3(23, 11, 23), v3(-24, top, 12), 5, 1);
+    // The far end of the trench throws you up onto the plateau instead of leaving you in a corner.
+    p.padTo(v3(-8, 0, 30), v3(-24, top, 28), 3);
+    // Rock columns too tall to stand on break the long views along the plateau and down the trench.
+    p.block('pillar', 24, 8, 1.8, 1.8, 14.5).block('pillar', 21, -20, 2, 2, 14.5).block('pillar', 6, 26, 1, 1, 14.5);
+    p.block('crate', 20, -6, 1, 1, top + 1.8, top).block('crate', 29, -12, 1.2, 1.2, top + 2, top);
+    p.block('crate', 3, 13, 1.8, 1.8, 2.2);
+    p.spawn(24, top, 0).spawn(26, top, -24).spawn(10, 0, 27).spawn(-6, 0, 10).spawn(27, 11, 27);
     p.pack(30, top, 0).pack(0, 0, -28);
   });
   return b.build({
@@ -67,45 +109,68 @@ function canyon(): MapData {
     name: 'Canyon',
     half,
     skyColor: 0xff8a4a,
-    fogColor: 0xffd8a0,
-    tint: { floor: 0xe8b27a, ledge: 0xd0703e, wall: 0xb8603a, platform: 0x8a5a3a, stair: 0xd88a52, tower: 0xc8643c, crate: 0x6a9a4a },
+    fogColor: 0xe07838,
+    tint: { floor: 0xe8b27a, ledge: 0xe8a050, wall: 0x9a3a2a, platform: 0xe0b040, stair: 0xf0c070, tower: 0xc8643c, crate: 0x6a9a4a, pillar: 0xa04a34 },
   });
 }
 
-/** A stepped pyramid in the middle, staircases on all four faces, raised bunkers in the corners. */
+/** A stepped pyramid in the middle, staircases on all four faces, raised terraces in the corners. */
 function ziggurat(): MapData {
   const half = 34;
   const b = new B().shell(half, 10);
+  // The same shapes in every quarter, each quarter in its own colour, so players can tell where they are.
+  const marks = (kinds: MapData['boxes'][number]['kind'][], piece: (p: B) => void) => {
+    const all = (kinds.length === 2 ? new B().pair(piece) : new B().quad(piece)).boxes;
+    all.forEach((m, i) => b.box(kinds[Math.floor((i * kinds.length) / all.length)], m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z));
+  };
   b.block('platform', 0, 0, 12, 12, 2).block('platform', 0, 0, 8, 8, 4).block('platform', 0, 0, 4.5, 4.5, 6);
-  b.pack(0, 6, 0);
+  // A capstone on the summit: holding the top means picking a side instead of seeing the whole arena.
+  b.block('stair', 0, 0, 1.4, 1.4, 8.5, 6);
+  // Each quarter's terrace, obelisk and low wall share a colour.
+  marks(['ledge', 'tower', 'crate', 'pillar'], (p) => {
+    p.box('ledge', 24, 0, 24, half, 3.5, half);
+    p.block('ledge', 13.5, 19.5, 1.3, 1.3, 3.2).block('ledge', 0, 20, 3, 0.7, 2.2);
+  });
   b.quad((p) => {
     p.stairs('z', -1, 0, 12 + B.run(0, 2), 4, 0, 2);
     p.stairs('z', -1, 0, 8 + B.run(2, 4), 4, 2, 4);
     p.stairs('z', -1, 0, 4.5 + B.run(4, 6), 3, 4, 6);
-    p.pack(10, 2, 10);
+    p.pack(6.3, 4, 6.3);
     p.block('pillar', 22, 10, 1, 1, 6);
-    p.box('ledge', 24, 0, 24, half, 3.5, half).stairs('x', 1, 24 - B.run(0, 3.5), 29, 4, 0, 3.5).pack(31, 3.5, 31);
+    // Terrace steps run along both walls, so the corner is a loop rather than a dead end.
+    p.stairs('x', 1, 24 - B.run(0, 3.5), half - 1.75, 3.5, 0, 3.5).stairs('z', 1, half - 1.75, 24 - B.run(0, 3.5), 3.5, 0, 3.5);
+    p.pack(31, 3.5, 27);
     p.padTo(v3(19, 0, 19), v3(3, 6, 3), 1.8);
-    p.spawn(29, 3.5, 29).spawn(0, 0, 26).spawn(28, 0, 10);
+    p.spawn(27, 3.5, 31).spawn(0, 0, 26).spawn(26, 0, 12);
   });
-  return b.build({ id: 'ziggurat', accent: 0x3ec8ff, name: 'Ziggurat', half, skyColor: 0x4ab8e8, fogColor: 0xf6e8c0, tint: { platform: 0xf0c060, stair: 0xe0aa50, floor: 0xd8c08a, ledge: 0x5ab070, pillar: 0xe85d5d } });
+  return b.build({ id: 'ziggurat', accent: 0x3ec8ff, name: 'Ziggurat', half, skyColor: 0x4ab8e8, fogColor: 0x3ea0d0, tint: { platform: 0xe8884a, stair: 0xf0c060, floor: 0xd8c08a, wall: 0x3a7a8a, ledge: 0x5ab070, pillar: 0xe85d5d, tower: 0x6a7ae0, crate: 0xf0d040 } });
 }
 
-/** A forest of spires of different heights, chained together by jump pads. */
+/** A forest of spires of different heights, chained together by jump pads around a central needle. */
 function spires(): MapData {
   const half = 36;
   const b = new B().shell(half, 12);
-  b.block('tower', 0, 0, 4, 4, 5).padUp(v3(0, 5, 0), 14);
+  // The same shapes in every quarter, each quarter in its own colour, so players can tell where they are.
+  const marks = (kinds: MapData['boxes'][number]['kind'][], piece: (p: B) => void) => {
+    const all = (kinds.length === 2 ? new B().pair(piece) : new B().quad(piece)).boxes;
+    all.forEach((m, i) => b.box(kinds[Math.floor((i * kinds.length) / all.length)], m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z));
+  };
+  // The needle blocks the diagonals between the tall spires; the plinth corners are cannons out to them.
+  b.block('tower', 0, 0, 4, 4, 5).block('stair', 0, 0, 1.5, 1.5, 14.5, 5);
+  marks(['ledge', 'crate', 'platform', 'pillar'], (p) => p.block('tower', 24, 24, 3, 3, 10).block('tower', 24, 8, 2.5, 2.5, 7));
   b.quad((p) => {
     p.stairs('z', -1, 0, 4 + B.run(0, 5), 3, 0, 5);
+    p.padTo(v3(2.9, 5, 2.9), v3(23, 10, 23), 2, 0.8);
     p.block('tower', 10, 10, 2.5, 2.5, 3).stairs('z', -1, 10, 12.5 + B.run(0, 3), 2.5, 0, 3);
-    p.block('tower', 24, 8, 2.5, 2.5, 7).padTo(v3(17, 0, 4), v3(24, 7, 8));
-    p.block('tower', 24, 24, 3, 3, 10).padTo(v3(24, 7, 9.5), v3(24, 10, 24), 1.4, 1);
+    p.padTo(v3(17, 0, 4), v3(24, 7, 8));
+    p.padTo(v3(24, 7, 9.5), v3(24, 10, 24), 1.4, 1);
     p.block('tower', 8, 28, 2, 2, 5).padTo(v3(5, 0, 21), v3(8, 5, 28));
-    p.spawn(16, 0, 16).spawn(30, 0, 0).spawn(24, 10, 24);
+    // A half wall to spawn behind at the edge.
+    p.block('stair', 28, 1, 0.5, 2, 1.9);
+    p.spawn(16, 0, 16).spawn(31, 0, 0).spawn(24, 10, 24);
     p.pack(24, 10, 24).pack(0, 0, 22);
   });
-  return b.build({ id: 'spires', accent: 0xffb020, name: 'Spires', half, skyColor: 0x7ac8ff, fogColor: 0xeef8ff, tint: { tower: 0x6a9ae8, floor: 0xdde6f2, stair: 0x9ab8f0 } });
+  return b.build({ id: 'spires', accent: 0xffb020, name: 'Spires', half, skyColor: 0x7ac8ff, fogColor: 0x60b0e8, tint: { tower: 0x6a9ae8, floor: 0xd8d0c4, stair: 0xf2a040, wall: 0x5a4ab0, ledge: 0xe86a8a, crate: 0x5ac88a, platform: 0xf2c14e, pillar: 0xf4f0e8 } });
 }
 
 /** A walled keep with battlements, corner turrets and bunkers in the yard. */
