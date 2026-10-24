@@ -27,7 +27,7 @@ import { RK } from '../../shared/rockets/constants.js';
 import type { MapData } from '../../shared/rockets/map.js';
 import { chestPosition, eyePosition, playerAABB, stepBody, type Body } from '../../shared/rockets/physics.js';
 import type { RocketsInput } from '../../shared/rockets/protocol.js';
-import { findPath, nearestNode, type NavGraph, type NavNode } from './nav.js';
+import { airSteer, findPath, linkBetween, nearestNode, shouldJump, StuckWatch, type NavGraph, type NavNode } from './nav.js';
 
 export interface BotParams {
   /** Radians of aim noise. */
@@ -134,11 +134,14 @@ export interface BotView {
   now: number;
   self: BotSelf;
   enemies: BotEnemy[];
-  packs: { pos: Vec3; available: boolean }[];
+  /** Health packs and items (armor, mega...); `item` marks the ones worth taking at full health. */
+  packs: { pos: Vec3; available: boolean; item?: boolean }[];
   /** Rockets in flight; without them bots cannot dodge. */
   rockets?: readonly BotRocket[];
   map: MapData;
   canSee(from: Vec3, to: Vec3): boolean;
+  /** The match countdown: nobody can move or fire yet. */
+  frozen?: boolean;
 }
 
 type Mode = 'roam' | 'fight' | 'heal';
@@ -159,6 +162,24 @@ function floorBelow(map: MapData, x: number, z: number, maxY: number): number | 
     if (x >= b.min.x && x <= b.max.x && z >= b.min.z && z <= b.max.z && b.max.y <= maxY && (best === null || b.max.y > best)) best = b.max.y;
   }
   return best !== null && best > map.killY ? best : null;
+}
+
+/**
+ * Per-tick work budget shared by all bots in the process: path searches and rocket-jump simulations are the expensive
+ * calls, and a room full of bots deciding in the same tick must not stall the loop. Over budget, a bot waits a tick.
+ */
+const budget = { at: -1, paths: 0, rj: 0 };
+const PATHS_PER_TICK = 4;
+const RJ_PLANS_PER_TICK = 1;
+function spend(now: number, kind: 'paths' | 'rj', max: number): boolean {
+  if (budget.at !== now) {
+    budget.at = now;
+    budget.paths = 0;
+    budget.rj = 0;
+  }
+  if (budget[kind] >= max) return false;
+  budget[kind]++;
+  return true;
 }
 
 /**
@@ -199,6 +220,25 @@ export class RocketsBot {
   private rj: RocketJump | null = null;
   private rjTryAt = 0;
   private roamRetryAt = 0;
+  /** The path node we last passed, so the link to the next one (jump, pad) is known. */
+  private prev = -1;
+  /** What the current nav link wants from the jump key: true/false on a jump link, null otherwise. */
+  private navJump: boolean | null = null;
+  private readonly stuck = new StuckWatch();
+  /** Waypoints we got stuck on recently; paths route around them for a while. */
+  private readonly avoid = new Set<number>();
+  private avoidUntil = 0;
+  /** Goals that trapped us (stuck watchdog), skipped until the time stored. */
+  private readonly banned = new Map<number, number>();
+  /** The pack or item we are heading for, its nav node, and when to reconsider. */
+  private pickup: Vec3 | null = null;
+  private pickupNode: NavNode | null = null;
+  private pickupAt = 0;
+  private calmAt = 0;
+  /** Spawn time and place: no shooting (it ends spawn protection) until we moved off the spawn or it ran out. */
+  private spawnAt = -1;
+  private spawnPos: Vec3 = v3();
+  private wasDead = true;
   private progressPos: Vec3 = v3();
   private progressAt = 0;
   /** A rocket jump the bot would like to make; tried on the next step it stands on the ground. */
@@ -242,10 +282,25 @@ export class RocketsBot {
       this.rjWant = null;
       this.dodgeDir = null;
       this.padFlight = false;
+      this.pickup = null;
+      this.wasDead = true;
       return input;
+    }
+    if (this.wasDead) {
+      this.wasDead = false;
+      this.spawnAt = now;
+      this.spawnPos = { ...self.body.pos };
     }
 
     const body = self.body;
+    if (view.frozen) {
+      // Countdown: nothing to plan yet (a rocket jump or a stuck check now would only misfire).
+      this.rj = null;
+      this.rjWant = null;
+      this.stuck.reset();
+      this.progressAt = now;
+      return input;
+    }
     // A blast knocks us off the pad's arc: then steer for safety like any other fall.
     if (body.onGround || self.hp < this.lastHp) this.padFlight = false;
     else if (this.wasOnGround && view.map.pads.some((p) => hdist(body.pos, p.pos) <= p.radius + 0.6 && Math.abs(body.pos.y - p.pos.y) < 1)) this.padFlight = true;
@@ -253,8 +308,7 @@ export class RocketsBot {
     this.lastHp = self.hp;
 
     if (this.rjWant && now < this.rjWant.until && body.onGround && now >= self.nextFire && self.hp >= 60) {
-      this.planRocketJump(view, this.rjWant.dest);
-      this.rjWant = null;
+      if (this.planRocketJump(view, this.rjWant.dest)) this.rjWant = null;
     }
     if (this.rj) return this.flyRocketJump(view, input);
 
@@ -309,6 +363,12 @@ export class RocketsBot {
       moveDir = this.followPath(view);
       onPath = moveDir !== null;
       if (engaged) faceMove = false;
+      // The nav node next to a pack can be further away than the pickup radius: walk the last metres straight.
+      const pk = this.pickup;
+      if (!moveDir && pk && this.mode === 'heal' && hdist(pk, body.pos) < 3.5 && Math.abs(pk.y - body.pos.y) < 1.5) {
+        moveDir = v3(pk.x - body.pos.x, 0, pk.z - body.pos.z);
+        if (Math.hypot(moveDir.x, moveDir.z) < 0.3) moveDir = null;
+      }
     }
 
     // Incoming rocket: sidestep it (overrides the plan above for a moment).
@@ -339,7 +399,11 @@ export class RocketsBot {
       // Airborne and about to come down in the void: forget the fight and air-steer toward the nearest floor.
       // Otherwise only keep air-strafing if that does not carry us off the edge.
       const v = body.vel;
-      if (!this.landsSafely(view, v.x, v.z)) {
+      const steerLen = moveDir ? Math.hypot(moveDir.x, moveDir.z) : 0;
+      const steered = onPath && steerLen > 1e-4 ? this.landsSafely(view, v.x + (moveDir!.x / steerLen) * 4, v.z + (moveDir!.z / steerLen) * 4) : false;
+      if (onPath && (steered || (steerLen <= 1e-4 && this.landsSafely(view, v.x, v.z)))) {
+        // Nav air steering (or coasting) brings us down on the next waypoint: leave it be.
+      } else if (!this.landsSafely(view, v.x, v.z)) {
         const rescue = this.nearestFloor(view);
         if (rescue) {
           moveDir = vsub(rescue, body.pos);
@@ -370,10 +434,10 @@ export class RocketsBot {
         }
         wantYaw = angles.yaw + this.errYaw;
         wantPitch = angles.pitch + this.errPitch;
-      } else if (moveDir) {
+      } else if (moveDir && (moveDir.x || moveDir.z)) {
         wantYaw = Math.atan2(-moveDir.x, -moveDir.z);
       }
-    } else {
+    } else if (moveDir.x || moveDir.z) {
       wantYaw = Math.atan2(-moveDir.x, -moveDir.z);
     }
 
@@ -410,9 +474,12 @@ export class RocketsBot {
     if (now < this.jumpUntil) input.jump = true;
     // Do not hop off a ledge into nothing.
     if (input.jump && !this.safeJump(view, moveDir)) input.jump = false;
+    // Jump links of the nav graph decide the jump key themselves, as long as there is floor where the jump comes down.
+    if (onPath && this.navJump !== null) input.jump = this.navJump && this.navJumpLands(view);
 
     // --- fire ------------------------------------------------------------------------------------------------
-    if (engaged && target && visible && now >= self.nextFire && now - this.firstSightAt >= this.params.reaction) {
+    const spawnSafe = now - this.spawnAt < RK.spawnProtection && hdist(self.body.pos, this.spawnPos) < 3;
+    if (engaged && target && visible && !spawnSafe && now >= self.nextFire && now - this.firstSightAt >= this.params.reaction) {
       const eye = eyePosition(self.body.pos);
       const aimAt = this.aimPoint(view, target);
       const want = dirToAngles(vsub(aimAt, eye));
@@ -427,6 +494,10 @@ export class RocketsBot {
 
   private decide(view: BotView) {
     const { self, now } = view;
+    if (budget.at === now && budget.paths >= PATHS_PER_TICK) {
+      this.decideAt = now + RK.dt;
+      return;
+    }
     const eye = eyePosition(self.body.pos);
 
     let best: BotEnemy | null = null;
@@ -463,14 +534,16 @@ export class RocketsBot {
       return;
     }
 
-    // Badly hurt: any pack within reach. A bit hurt: only one that is a short walk away.
-    if (self.hp < this.params.healAt || self.hp <= 70) {
-      const pack = this.nearestPack(view, self.hp < this.params.healAt ? 30 : 12);
-      const goal = pack ? nearestNode(this.graph, pack) : null;
-      if (goal) {
-        const reachable = goal !== this.goal || now > this.repathAt ? this.setGoal(here, goal, now) : this.path.length > 0 || hdist(self.body.pos, goal.pos) < 1.5;
-        if (reachable && (self.hp < this.params.healAt || this.path.length <= 10)) mode = 'heal';
-      }
+    // Health and items: badly hurt, any pack a walk away; a bit hurt, a nearby one; calm, now and then an item.
+    if (this.pickup && !view.packs.some((p) => p.available && p.pos === this.pickup)) this.pickup = null;
+    if (now >= this.pickupAt || (!this.pickup && self.hp < this.params.healAt)) {
+      this.pickupAt = now + 1;
+      this.choosePickup(view, here, mode === 'roam');
+    }
+    if (this.pickup && this.pickupNode) {
+      const goal = this.pickupNode;
+      if (goal !== this.goal || (now > this.repathAt && this.path.length === 0 && hdist(self.body.pos, goal.pos) > 1)) this.setGoal(here, goal, now);
+      mode = 'heal';
     }
 
     // Stuck watchdog: no real progress for 3 s while not busy shooting at someone (a dead-end alley, a lip the
@@ -483,6 +556,11 @@ export class RocketsBot {
       this.progressPos = { ...self.body.pos };
       this.progressAt = now;
       this.stats.unstuck++;
+      // Whatever we were heading for trapped us: leave it alone for a while.
+      if (this.goal) this.banned.set(this.goal.id, now + 10);
+      if (this.pickupNode) this.banned.set(this.pickupNode.id, now + 10);
+      this.pickup = null;
+      this.pickupNode = null;
       this.path = [];
       this.goal = null;
       if (!best) {
@@ -507,7 +585,7 @@ export class RocketsBot {
         const goal = nearestNode(this.graph, this.lastSeenPos, 3);
         if (goal && (goal !== this.goal || now > this.repathAt)) this.setGoal(here, goal, now);
         // Chase: they went somewhere the walk is long; rocket-jump after them.
-        if (goal && this.pathLonger(self.body.pos, goal, 1.8)) this.tryRocketJump(view, goal.pos, this.style.rjChance * 0.5);
+        if (goal && goal.pos.y > self.body.pos.y + 1.5 && this.pathLonger(self.body.pos, goal, 1.8)) this.tryRocketJump(view, goal.pos, this.style.rjChance * 0.5);
       } else if (best && hdist(self.body.pos, best.pos) > this.style.range + 7) {
         const goal = nearestNode(this.graph, best.pos, 3);
         if (goal && (goal !== this.goal || now > this.repathAt)) this.setGoal(here, goal, now);
@@ -529,6 +607,7 @@ export class RocketsBot {
             const candidate = nodes[Math.floor(this.rng() * nodes.length)];
             if (candidate.pos.y > goal.pos.y && hdist(candidate.pos, self.body.pos) > 6) goal = candidate;
           }
+          if ((this.banned.get(goal.id) ?? 0) > now) continue;
           const reachable = this.setGoal(here, goal, now);
           // Unreachable on foot or a long way round: try to rocket-jump up there instead.
           if ((!reachable || this.pathLonger(self.body.pos, goal, 2.5)) && goal.pos.y > self.body.pos.y + 1.5 && hdist(goal.pos, self.body.pos) < 24) {
@@ -545,7 +624,10 @@ export class RocketsBot {
   private setGoal(here: NavNode, goal: NavNode, now: number): boolean {
     this.goal = goal;
     this.repathAt = now + 1.5;
-    const path = findPath(this.graph, here.id, goal.id);
+    this.prev = here.id;
+    if (now > this.avoidUntil) this.avoid.clear();
+    spend(now, 'paths', Infinity);
+    const path = findPath(this.graph, here.id, goal.id, { avoid: this.avoid });
     this.path = path ?? [];
     return path !== null;
   }
@@ -580,30 +662,99 @@ export class RocketsBot {
     return len > hdist(from, goal.pos) * factor + 4;
   }
 
-  private nearestPack(view: BotView, maxD: number): Vec3 | null {
-    let best: Vec3 | null = null;
-    let bestD = Infinity;
-    for (const p of view.packs) {
-      if (!p.available) continue;
-      const d = hdist(view.self.body.pos, p.pos) + Math.abs(p.pos.y - view.self.body.pos.y) * 3;
-      if (d < bestD && d < maxD) {
-        bestD = d;
-        best = p.pos;
+  /**
+   * Picks the pack or item to head for (or none), by walking distance: up to 40 m when badly hurt, 16 m when a bit
+   * hurt, and when calm, sometimes an item within 25 m. Ones out of reach on foot but above us get a rocket jump.
+   */
+  private choosePickup(view: BotView, here: NavNode, calm: boolean) {
+    const { self, now } = view;
+    const hp = self.hp;
+    let maxWalk = hp < this.params.healAt ? 40 : hp <= 70 ? 16 : 0;
+    let itemsOnly = false;
+    if (maxWalk === 0) {
+      // Keep a calm-time item target until it is taken; roll for a new one every few seconds.
+      if (this.pickup && calm) return;
+      if (!calm || now < this.calmAt) {
+        this.pickup = null;
+        return;
       }
+      this.calmAt = now + 3 + this.rng() * 3;
+      if (this.rng() > 0.5) return;
+      maxWalk = 25;
+      itemsOnly = true;
     }
-    return best;
-  }
-
-  /** World-space direction toward the next node, dropping nodes as we reach them. */
-  private followPath(view: BotView): Vec3 | null {
-    const pos = view.self.body.pos;
-    while (this.path.length) {
-      const node = this.graph.nodes[this.path[0]];
-      const reach = node.links.some((l) => l.pad !== undefined) ? 0.35 : 0.7;
-      if (hdist(pos, node.pos) < reach && Math.abs(pos.y - node.pos.y) < 1.2) {
-        this.path.shift();
+    const pos = self.body.pos;
+    const candidates = view.packs
+      .filter((p) => p.available && (!itemsOnly || p.item !== false) && hdist(p.pos, pos) < maxWalk)
+      .map((p) => ({ p, d: hdist(p.pos, pos) + Math.abs(p.pos.y - pos.y) * 2 }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 3);
+    let best: { pos: Vec3; node: NavNode } | null = null;
+    let bestLen = maxWalk;
+    let jumpTo: Vec3 | null = null;
+    for (const { p } of candidates) {
+      // Only pickups standing on a floor can be collected (the pickup needs feet within a metre of it).
+      const floor = floorBelow(view.map, p.pos.x, p.pos.z, p.pos.y + 1.05);
+      if (floor === null || Math.abs(floor - p.pos.y) >= 0.95) continue;
+      const node = nearestNode(this.graph, p.pos, 2.5);
+      if (!node || hdist(node.pos, p.pos) > 3 || (this.banned.get(node.id) ?? 0) > now) {
+        if (!jumpTo && p.pos.y > pos.y + 1.5) jumpTo = p.pos;
         continue;
       }
+      if (!spend(now, 'paths', PATHS_PER_TICK)) break;
+      const path = node === here ? [] : findPath(this.graph, here.id, node.id, { avoid: this.avoid });
+      if (!path) {
+        // A failed search walks the whole graph: do not repeat it every second.
+        this.banned.set(node.id, now + 8);
+        if (!jumpTo && p.pos.y > pos.y + 1.5) jumpTo = p.pos;
+        continue;
+      }
+      let len = hdist(p.pos, node.pos);
+      let prev = pos;
+      for (const id of path) {
+        const q = this.graph.nodes[id].pos;
+        len += hdist(prev, q);
+        prev = q;
+      }
+      if (len < bestLen) {
+        bestLen = len;
+        best = { pos: p.pos, node };
+      }
+    }
+    this.pickup = best?.pos ?? null;
+    this.pickupNode = best?.node ?? null;
+    // A mega on a pillar top, say: rocket-jump for it.
+    if (!best && jumpTo) this.tryRocketJump(view, jumpTo, Math.max(this.style.rjChance, 0.6));
+  }
+
+  /**
+   * World-space direction toward the next node, dropping nodes as we reach them. In the air it steers for the landing
+   * on that node (a zero vector means: coast, the arc already lands there). Also sets navJump for jump links.
+   */
+  private followPath(view: BotView): Vec3 | null {
+    const { now } = view;
+    const body = view.self.body;
+    const pos = body.pos;
+    this.navJump = null;
+    while (this.path.length) {
+      const node = this.graph.nodes[this.path[0]];
+      if (hdist(pos, node.pos) < (node.reach ?? 0.7) && Math.abs(pos.y - node.pos.y) < 1.2) {
+        this.prev = this.path.shift()!;
+        continue;
+      }
+      if (this.stuck.update(now, pos, node, body.onGround)) {
+        // No closer to this waypoint for a while: route around it, hop in case it is a lip, and plan again.
+        this.avoid.add(node.id);
+        this.avoidUntil = now + 5;
+        this.path = [];
+        this.repathAt = 0;
+        this.decideAt = 0;
+        this.jumpUntil = now + 0.05;
+        return null;
+      }
+      const link = this.prev >= 0 ? linkBetween(this.graph, this.prev, node.id) : undefined;
+      if (link?.jump) this.navJump = shouldJump(link, node.pos, pos, body.onGround);
+      if (!body.onGround) return airSteer(pos, body.vel, node.pos) ?? v3();
       const d = vsub(node.pos, pos);
       d.y = 0;
       return d;
@@ -626,9 +777,11 @@ export class RocketsBot {
       return g !== null && p.y - g <= 4;
     };
     for (const d of [ahead * 0.6, ahead]) if (!ok(p.x + nx * d, p.z + nz * d)) return false;
+    // Keep a margin from the edge: a splash knockback on top of the strafe must not be enough to tip us over.
+    const margin = 0.8;
     const vx = b.vel.x * 0.5 + nx * RK.groundSpeed * 0.5;
     const vz = b.vel.z * 0.5 + nz * RK.groundSpeed * 0.5;
-    for (const t of [0.25, 0.5, 0.8]) if (!ok(p.x + vx * t, p.z + vz * t)) return false;
+    for (const t of [0.25, 0.5, 0.8]) if (!ok(p.x + vx * t + nx * margin, p.z + vz * t + nz * margin)) return false;
     return true;
   }
 
@@ -653,6 +806,20 @@ export class RocketsBot {
       }
     }
     return true;
+  }
+
+  /** Is there floor (not void) where a nav jump toward the next waypoint comes down? */
+  private navJumpLands(view: BotView): boolean {
+    const b = view.self.body;
+    const node = this.path.length ? this.graph.nodes[this.path[0]] : null;
+    if (!node) return false;
+    if (floorBelow(view.map, node.pos.x, node.pos.z, node.pos.y + 0.05) === null) return false;
+    const air = (2 * RK.jumpSpeed) / RK.gravity;
+    const d = hdist(b.pos, node.pos) || 1;
+    const speed = Math.max(Math.hypot(b.vel.x, b.vel.z), RK.groundSpeed * 0.6);
+    const reachX = b.pos.x + ((node.pos.x - b.pos.x) / d) * Math.min(d, speed * air);
+    const reachZ = b.pos.z + ((node.pos.z - b.pos.z) / d) * Math.min(d, speed * air);
+    return floorBelow(view.map, reachX, reachZ, Math.max(b.pos.y, node.pos.y) + 1) !== null;
   }
 
   /** Coasting with this horizontal velocity from where we are, do we come down on a floor? */
@@ -838,7 +1005,9 @@ export class RocketsBot {
   }
 
   /** Commits to a rocket jump to `dest` if a simulated attempt lands there. */
-  private planRocketJump(view: BotView, dest: Vec3) {
+  private planRocketJump(view: BotView, dest: Vec3): boolean {
+    if (hdist(view.self.body.pos, dest) < 3) return true;
+    if (!spend(view.now, 'rj', RJ_PLANS_PER_TICK)) return false;
     let bestPlan: RocketJump | null = null;
     let bestCost = Infinity;
     for (const fireAt of [1, 4, 8, 12]) {
@@ -855,6 +1024,7 @@ export class RocketsBot {
       this.rj = bestPlan;
       this.stats.rocketJumps++;
     }
+    return true;
   }
 
   /**
@@ -930,7 +1100,8 @@ export class RocketsBot {
     input.yaw = this.yaw = steer.yaw;
     input.f = i <= plan.fireAt ? 1 : steer.f;
     input.jump = i === 0;
-    if (i === 0 && !body.onGround) {
+    // Not standing at the start, or the jump did not happen (the server held us still): give up quietly.
+    if ((i === 0 && !body.onGround) || (i === 1 && body.onGround)) {
       this.rj = null;
       return input;
     }
