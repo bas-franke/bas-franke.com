@@ -1535,12 +1535,16 @@ export class ZombiesClient implements GameClient {
         r.gun = g.root;
         r.gunId = pb.w;
       }
-      const clip = pb.st === 1 ? 'downed' : speed > 4.8 ? 'run' : speed > 0.4 ? 'walk' : 'idle';
+      const base = pb.st === 1 ? 'downed' : speed > 4.8 ? 'run' : speed > 0.4 ? 'walk' : 'idle';
+      // Pistols have their own stance, walk and reload when the model carries them (`<clip>_pistol`).
+      const pistol = WEAPONS[pb.w]?.kind === 'pistol';
+      const pick = (name: string) => (pistol && r.inst.actions[`${name}_pistol`] ? `${name}_pistol` : name);
+      const clip = base === 'downed' ? base : pick(base);
       r.clip = this.play(r.inst, clip, r.clip, { fade: 0.25 });
       const act = r.inst.actions[clip];
-      if (act && clip !== 'idle' && clip !== 'downed') act.timeScale = clamp(speed / (clip === 'run' ? 6 : 3.6), 0.5, 1.5);
+      if (act && base !== 'idle' && base !== 'downed') act.timeScale = clamp(speed / (base === 'run' ? 6 : 3.6), 0.5, 1.5);
       if (pb.r && !r.reloading) {
-        const rel = r.inst.actions.reload;
+        const rel = r.inst.actions[pick('reload')];
         if (rel) {
           rel.reset().setLoop(THREE.LoopOnce, 1).play();
           rel.weight = 0.8;
