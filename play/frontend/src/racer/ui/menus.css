@@ -2092,3 +2092,20 @@
     animation: none;
   }
 }
+
+/* ---- volume (shared ui/VolumeControl) ---------------------------------------------------------------------------- */
+
+.dr-volume {
+  justify-self: start;
+  width: min(280px, 100%);
+  margin-top: 4px;
+  padding: 0 16px;
+}
+.dr-volume input[type='range'] {
+  accent-color: var(--y);
+}
+@media (max-width: 700px) {
+  .dr-volume {
+    justify-self: center;
+  }
+}

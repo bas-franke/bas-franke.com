@@ -232,3 +232,7 @@
   .hud-finish-title { font-size: 3em; }
   .hud-flash-title { font-size: 2.6em; }
 }
+
+/* ---------- volume (shared ui/VolumeControl) ---------- */
+.hud-volume { margin-top: 0.6em; padding: 0.4em 1.2em; font-size: 1em; }
+.hud-volume input[type='range'] { accent-color: var(--hud-yellow); }

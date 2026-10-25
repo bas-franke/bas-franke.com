@@ -25,6 +25,10 @@ class MenuAudio {
   private lastHover = 0;
   private armed = false;
 
+  constructor() {
+    sfx.subscribe(() => this.applyLevel());
+  }
+
   /** The output bus on the shared context, or null before the first gesture. */
   private bus(): GainNode | null {
     if (this.out) return this.out;
@@ -47,7 +51,7 @@ class MenuAudio {
   }
 
   private level() {
-    return this.muted ? 0 : Math.min(1, sfx.volume * 2) * 0.8;
+    return this.muted ? 0 : Math.min(1, sfx.level * 2) * 0.8;
   }
 
   private ready(): [AudioContext, GainNode] | null {
@@ -142,6 +146,10 @@ class MenuAudio {
 
   setMuted(m: boolean) {
     this.muted = m;
+    this.applyLevel();
+  }
+
+  private applyLevel() {
     const ctx = currentAudioContext();
     if (this.out && ctx) glide(this.out.gain, this.level(), ctx.currentTime, 0.05);
   }

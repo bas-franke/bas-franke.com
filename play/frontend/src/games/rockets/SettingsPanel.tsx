@@ -2,6 +2,7 @@
 // so changes apply live (and are saved) while the panel is open.
 
 import { useEffect, useState } from 'react';
+import { VolumeControl } from '../../ui/VolumeControl';
 import { useStore } from '../types';
 import {
   ACTIONS,
@@ -185,17 +186,8 @@ export function SettingsPanel({ onClose, rawSupported }: { onClose: () => void; 
           <section>
             <h3>Sound</h3>
             <div className="rk-row">
-              <label htmlFor="rk-vol">Master volume</label>
-              <input
-                id="rk-vol"
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={s.volume}
-                onChange={(e) => settings.set({ volume: +e.target.value })}
-              />
-              <span className="rk-val">{Math.round(s.volume * 100)}%</span>
+              <label>Master volume</label>
+              <VolumeControl className="rk-volume" label="Master volume" />
             </div>
           </section>
 

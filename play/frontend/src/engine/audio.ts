@@ -9,6 +9,9 @@
 // - `playAt(name, x, y, z)` is positional: distance attenuation, stereo pan and a muffling low-pass, all relative to
 //   the listener set each frame with `listen()`. Rockets in flight get a looping hiss with doppler via `rocket()`.
 // Positional sounds share a voice budget; when it is full, new far-away sounds are simply dropped.
+//
+// The volume setting (level and mute) is shared by every game on the site, including the racer's own graph, and is
+// remembered in localStorage. `subscribe()` tells graphs outside this file when it changes.
 
 type Sfx =
   | 'fire'
@@ -61,7 +64,12 @@ class Audio {
   private bus?: GainNode;
   private white?: AudioBuffer;
   private crackle?: AudioBuffer;
+  /** Slider level, 0..1, kept while muted. Use `level` for what is actually heard. */
   volume = 0.5;
+  muted = false;
+  private subs = new Set<() => void>();
+  /** Immutable snapshot for React (`useSyncExternalStore`). */
+  private state: VolumeState = { volume: 0.5, muted: false };
 
   // Listener, from the camera. Velocity is derived from position changes, for doppler.
   private lx = 0;
@@ -88,6 +96,13 @@ class Audio {
   private loops = new Map<number | string, Loop>();
   private nextBeat = 0;
 
+  constructor() {
+    const v = loadVolume();
+    this.volume = v.volume;
+    this.muted = v.muted;
+    this.state = v;
+  }
+
   private ensure() {
     if (this.ctx) {
       if (this.ctx.state === 'suspended') void this.ctx.resume();
@@ -96,7 +111,7 @@ class Audio {
     try {
       const ctx = new AudioContext();
       this.master = ctx.createGain();
-      this.master.gain.value = this.volume;
+      this.master.gain.value = this.level;
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -12;
       comp.knee.value = 10;
@@ -118,17 +133,51 @@ class Audio {
   /** The context, only when it is running and audible (sounds scheduled while suspended would burst out later). */
   private live() {
     const ctx = this.ensure();
-    return ctx && ctx.state === 'running' && this.volume > 0 ? ctx : undefined;
+    return ctx && ctx.state === 'running' && this.level > 0 ? ctx : undefined;
   }
 
   unlock() {
     this.ensure();
   }
 
-  /** Master volume, 0..1. Safe to call before the first gesture. */
+  /** What is heard, 0..1: the slider level, or 0 while muted. */
+  get level() {
+    return this.muted ? 0 : this.volume;
+  }
+
+  /** Master volume, 0..1. Raising it unmutes. Safe to call before the first gesture. */
   setVolume(v: number) {
-    this.volume = Math.min(1, Math.max(0, v));
-    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.02);
+    this.volume = Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0.5));
+    if (this.volume > 0) this.muted = false;
+    this.changed();
+  }
+
+  setMuted(m: boolean) {
+    this.muted = m;
+    // Unmuting a slider left at zero would still be silent.
+    if (!m && this.volume === 0) this.volume = 0.5;
+    this.changed();
+  }
+
+  /** Called on every volume or mute change. Returns an unsubscribe function. */
+  subscribe = (fn: () => void) => {
+    this.subs.add(fn);
+    return () => {
+      this.subs.delete(fn);
+    };
+  };
+
+  snapshot = () => this.state;
+
+  private changed() {
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.level, this.ctx.currentTime, 0.02);
+    this.state = { volume: this.volume, muted: this.muted };
+    try {
+      localStorage.setItem(VOLUME_KEY, JSON.stringify(this.state));
+    } catch {
+      // Private mode or blocked storage: the setting lasts for this page only.
+    }
+    for (const fn of this.subs) fn();
   }
 
   // ---- listener -------------------------------------------------------------------------------------------------
@@ -484,6 +533,30 @@ class Audio {
     this.tone(this.bus!, t, 95, 0.13, 'triangle', g, 0.55, 0.01);
     this.tone(this.bus!, t + 0.17, 80, 0.15, 'triangle', g * 0.7, 0.55, 0.01);
   }
+}
+
+export interface VolumeState {
+  volume: number;
+  muted: boolean;
+}
+
+const VOLUME_KEY = 'play.volume.v1';
+
+/** The saved setting; before it existed, Rockets kept the volume in its own settings, so that is the fallback. */
+function loadVolume(): VolumeState {
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : undefined);
+  try {
+    const raw = localStorage.getItem(VOLUME_KEY);
+    if (raw) {
+      const r = JSON.parse(raw) as Partial<VolumeState>;
+      return { volume: num(r.volume) ?? 0.5, muted: r.muted === true };
+    }
+    const old = localStorage.getItem('rockets.settings.v1');
+    if (old) return { volume: num((JSON.parse(old) as { volume?: unknown }).volume) ?? 0.5, muted: false };
+  } catch {
+    // Blocked storage or a malformed value: fall through to the default.
+  }
+  return { volume: 0.5, muted: false };
 }
 
 const cap = (v: number) => Math.max(-40, Math.min(40, v));

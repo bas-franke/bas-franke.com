@@ -1,4 +1,5 @@
-// Player settings for Rockets: mouse, field of view, key bindings, volume, graphics quality and the FPS readout.
+// Player settings for Rockets: mouse, field of view, key bindings, graphics quality and the FPS readout. Volume is
+// site-wide and lives in engine/audio.ts.
 // Kept in localStorage (when the browser allows it) and shared through a tiny store, so the panel, the HUD and the
 // client all see changes the moment they happen.
 //
@@ -6,7 +7,6 @@
 // divided by 0.022 (m_yaw), and FOV is the horizontal angle on a 4:3 screen, widened for wider screens (Hor+).
 
 import * as THREE from 'three';
-import { sfx } from '../../engine/audio';
 import type { Input } from '../../engine/input';
 import { setInkVisible } from '../../engine/toon';
 import { createStore } from '../types';
@@ -24,8 +24,6 @@ export interface RocketsSettings {
   rawInput: boolean;
   /** Two slots per action; '' is an empty slot. */
   keys: Record<Action, [string, string]>;
-  /** 0..1 */
-  volume: number;
   quality: Quality;
   showFps: boolean;
   /** View and weapon bob while running. */
@@ -69,7 +67,6 @@ export const DEFAULTS: RocketsSettings = {
     jump: ['Space', 'WheelDown'],
     fire: ['Mouse0', ''],
   },
-  volume: 0.5,
   quality: 'high',
   showFps: true,
   bob: true,
@@ -101,7 +98,6 @@ function sanitize(raw: unknown): RocketsSettings {
     fov: Math.round(clampNum(r.fov, FOV_MIN, FOV_MAX, DEFAULTS.fov)),
     rawInput: typeof r.rawInput === 'boolean' ? r.rawInput : DEFAULTS.rawInput,
     keys,
-    volume: clampNum(r.volume, 0, 1, DEFAULTS.volume),
     quality: r.quality === 'low' || r.quality === 'medium' || r.quality === 'high' ? r.quality : DEFAULTS.quality,
     showFps: typeof r.showFps === 'boolean' ? r.showFps : DEFAULTS.showFps,
     bob: typeof r.bob === 'boolean' ? r.bob : DEFAULTS.bob,
@@ -123,14 +119,12 @@ export const settings = createStore<RocketsSettings>(load());
 
 settings.subscribe(() => {
   const s = settings.get();
-  sfx.setVolume(s.volume);
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch {
     // Private mode or blocked storage: settings last for this page only.
   }
 });
-sfx.setVolume(settings.get().volume);
 
 export const resetSettings = () => settings.set(sanitize(null));
 

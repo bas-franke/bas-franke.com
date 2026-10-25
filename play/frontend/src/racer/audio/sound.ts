@@ -75,6 +75,7 @@ export class RaceAudio {
   private revAt = 0;
   private cheer = 0;
   private time = 0;
+  private offVolume: () => void;
 
   constructor(private readonly race: Race, private readonly opts: RaceAudioOptions = {}) {
     this.zones = zonesFor(race.track);
@@ -88,6 +89,7 @@ export class RaceAudio {
       return 0.86 + ((h >>> 0) % 1000) / 1000 * 0.3;
     });
     if (opts.context) this.build(opts.context);
+    this.offVolume = sfx.subscribe(() => this.applyMaster(0.05));
   }
 
   /** Call after a user gesture (also works before one: the sound then starts on the first gesture). */
@@ -201,7 +203,7 @@ export class RaceAudio {
   }
 
   private volume() {
-    return Math.min(1, sfx.volume * 2);
+    return Math.min(1, sfx.level * 2);
   }
 
   private applyMaster(tau = 0.05) {
@@ -439,6 +441,7 @@ export class RaceAudio {
   }
 
   dispose() {
+    this.offVolume();
     this.cancelWait?.();
     this.cancelWait = null;
     const ctx = this.ctx;

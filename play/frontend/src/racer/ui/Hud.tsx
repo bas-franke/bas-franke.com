@@ -6,6 +6,7 @@ import { memo, useEffect, useState } from 'react';
 import type { RaceView } from '../RaceView';
 import { Countdown, FinishBanner, IntroHint, Minimap, PosPanel, Speedo, Standings, TimePanel, ToGoPanel, WrongWay } from './hudParts';
 import { useHud, wantsTouch } from './hudStore';
+import { VolumeControl } from '../../ui/VolumeControl';
 import { TouchControls } from './TouchControls';
 import './hud.css';
 
@@ -89,6 +90,7 @@ const PauseMenu = memo(function PauseMenu({ view, onQuit, onRestart }: { view: R
           <span>Quit to menu</span>
           <kbd>Q</kbd>
         </button>
+        <VolumeControl className="hud-volume" />
       </div>
     </div>
   );

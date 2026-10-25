@@ -19,6 +19,7 @@ import { Btn, Credits } from './menuParts';
 import { PreRace, QuickSetup, TrialSetup } from './menuRace';
 import { useMenuNav } from './menuNav';
 import { applyFinished, DIFFICULTIES, loadQuick, type QuickSettings } from './menuStore';
+import { VolumeControl } from '../../ui/VolumeControl';
 import { Results } from './Results';
 import './menus.css';
 
@@ -285,6 +286,7 @@ function Title(props: { save: CareerSave | null; onCareer(): void; onQuick(): vo
         <button className="dr-exit" onClick={props.onExit}>
           <span>‹</span> play.bas-franke.com
         </button>
+        <VolumeControl className="dr-volume" />
       </nav>
       <div className="dr-controls">
         <span>

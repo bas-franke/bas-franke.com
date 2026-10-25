@@ -3,6 +3,7 @@ import { colorHex } from '@shared/protocol';
 import { RU } from '@shared/ruckus/constants';
 import type { RuckusScore } from '@shared/ruckus/protocol';
 import { MINIGAMES } from '@shared/ruckus/world';
+import { VolumeControl } from '../../ui/VolumeControl';
 import { TouchControls, useTouchMode } from '../rockets/TouchControls';
 import { type ClientContext, useStore } from '../types';
 import { type RuckusClient, minigameName, minigameRules } from './client';
@@ -180,6 +181,7 @@ export function RuckusHud({ client, ctx }: { client: RuckusClient; ctx: ClientCo
             <h2>Menu</h2>
             <p className="sub">The game keeps going. Room code {room.code}.</p>
             <Standings scores={s.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
+            <VolumeControl />
             <div className="actions">
               {isHost && (
                 <button className="btn danger" onClick={() => ctx.socket.send({ t: 'stop' })}>

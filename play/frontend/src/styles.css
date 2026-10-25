@@ -3342,3 +3342,47 @@ footer.site {
   }
 }
 
+
+/* ---- volume control (ui/VolumeControl.tsx), shared by every game's menu ---- */
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.volume-mute {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  cursor: pointer;
+}
+.volume-mute:hover,
+.volume-mute:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+}
+.volume-mute[aria-pressed='true'] {
+  color: var(--ink-faint);
+}
+.volume-control input[type='range'] {
+  flex: 1;
+  min-width: 80px;
+  accent-color: var(--brand);
+}
+.volume-val {
+  flex: none;
+  width: 3.2em;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.scoreboard .volume-control {
+  margin-top: 16px;
+}
