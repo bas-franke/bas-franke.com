@@ -7,14 +7,14 @@ Inputs  (in <garden-models-dir>, normally frontend/public/models/garden):
     towers.glb   roots Tower_<kind>_<lv>   kind = laser | shield | slow | missile | beacon, lv = 1 | 2 | 3
     enemies.glb  roots Enemy_<kind>        kind = runner | skitter | disruptor | brute | colossus
 
-Outputs (256x256, transparent background, 3/4 view, warm key + cool rim + soft contact shadow):
+Outputs (256x256, opaque: 3/4 top-down view on a warm dark radial backdrop (#3B3F2E centre -> #2B2A26 edge) with a
+soft halo in the kind's glow colour, warm key + cool rim + soft contact shadow):
     <garden-models-dir>/portraits/tower_<kind>_<lv>.webp   (15)  e.g. /models/garden/portraits/tower_laser_3.webp
     <garden-models-dir>/portraits/enemy_<kind>.webp        (5)   e.g. /models/garden/portraits/enemy_brute.webp
-    Files are WebP (lossy with alpha). If Pillow has no WebP support they are quantised PNGs (.png) instead.
+    Files are WebP (lossy). If Pillow has no WebP support they are quantised PNGs (.png) instead.
 
-Framing: all 15 towers share one camera scale and stand on the same baseline, so level 3 reads visibly grander than
-level 1. Enemies share a damped scale (own size^0.75 x largest size^0.25): the colossus is the biggest chip, but the
-runner still fills its chip.
+Framing: every model is fitted on its own so it fills ~85 % of the tile (the HUD cards are small; level differences
+read from the models' detail, bronze and gold). The renders are transparent and get the backdrop at compression.
 
 --stand-in renders primitive placeholders with the same root names (for testing without the GLBs).
 --contact <png> also writes a contact sheet of every portrait.
@@ -45,7 +45,8 @@ ENEMIES = [f"Enemy_{k}" for k in ("runner", "skitter", "disruptor", "brute", "co
 
 SIZE = 256
 YAW = math.radians(-38)      # camera azimuth from the model's front (+Y), toward its right
-PITCH = math.radians(24)     # camera elevation
+PITCH = math.radians(38)     # camera elevation (3/4 top-down, closer to the game camera)
+FILL = 0.85                  # model extent / tile size
 
 
 # ---- scene ---------------------------------------------------------------------------------------------------------
@@ -126,7 +127,7 @@ def setup_render():
         vs.look = "AgX - Medium High Contrast"
     except Exception:
         pass
-    vs.exposure = 0.2
+    vs.exposure = -0.1
 
     world = bpy.data.worlds.new("PortraitWorld")
     scene.world = world
@@ -252,7 +253,7 @@ def place_camera(cam, m, ortho, anchor_bottom):
     if anchor_bottom:
         cy = m["ymin"] + ortho * 0.5 - ortho * 0.08  # model's lowest point 8% above the bottom edge
     else:
-        cy = m["cy"] - ortho * 0.02
+        cy = m["cy"]
     back = rot @ Vector((0, 0, 1))
     target = rot @ Vector((cx, cy, 0))
     # Shift along the view axis so the model is well inside the clip range.
@@ -270,16 +271,37 @@ raw, out = sys.argv[1], sys.argv[2]
 contact = sys.argv[3] if len(sys.argv) > 3 else ""
 webp = features.check("webp")
 names = sorted(f[:-4] for f in os.listdir(raw) if f.endswith(".png"))
+HALO = {"laser": (255, 169, 64), "missile": (255, 122, 48), "shield": (255, 178, 74), "slow": (78, 230, 217),
+        "beacon": (47, 220, 180), "runner": (255, 150, 60), "skitter": (70, 220, 210), "disruptor": (170, 100, 255),
+        "brute": (70, 220, 230), "colossus": (160, 130, 255)}
+def backdrop(name, size):
+    """Warm dark radial backdrop plus a soft halo in the kind's glow colour behind the model."""
+    g = Image.radial_gradient("L").resize((size, size), Image.BILINEAR)   # 0 centre -> 255 edge
+    g = g.point(lambda v: min(255, int(v * 1.25)))
+    bg = Image.composite(Image.new("RGB", (size, size), (43, 42, 38)), Image.new("RGB", (size, size), (59, 63, 46)), g)
+    kind = next((k for k in HALO if k in name), None)
+    if kind:
+        hs = int(size * 0.9)
+        h = Image.radial_gradient("L").resize((hs, hs), Image.BILINEAR).point(lambda v: int(max(0, 255 - v * 1.6) * 0.42))
+        halo = Image.new("RGBA", (hs, hs), HALO[kind] + (0,))
+        halo.putalpha(h)
+        bg = bg.convert("RGBA")
+        bg.alpha_composite(halo, ((size - hs) // 2, int(size * 0.4) - hs // 2))
+    return bg.convert("RGBA")
 total = 0
 for n in names:
-    im = Image.open(os.path.join(raw, n + ".png")).convert("RGBA")
+    fg = Image.open(os.path.join(raw, n + ".png")).convert("RGBA")
+    im = backdrop(n, fg.width)
+    im.alpha_composite(fg)
+    im.save(os.path.join(raw, n + ".png"))
+    im = im.convert("RGB")
     for ext in (".webp", ".png"):
         p = os.path.join(out, n + ext)
         if os.path.exists(p):
             os.remove(p)
     if webp:
         p = os.path.join(out, n + ".webp")
-        im.save(p, "WEBP", quality=88, method=6, alpha_quality=90)
+        im.save(p, "WEBP", quality=88, method=6)
     else:
         p = os.path.join(out, n + ".png")
         im.quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.FLOYDSTEINBERG).save(p, optimize=True)
@@ -299,6 +321,7 @@ if contact:
         d.rounded_rectangle((x + 4, y + 4, x + cell - 4, y + cell - 4), 14, fill=(28, 33, 38, 255))
         im = Image.open(os.path.join(raw, n + ".png")).convert("RGBA").resize((cell - 16, cell - 16), Image.LANCZOS)
         sheet.alpha_composite(im, (x + 8, y + 4))
+        d.rectangle((x + 8, y + cell - 18, x + cell - 8, y + cell - 4), fill=(28, 33, 38, 255))
         d.text((x + 10, y + cell - 16), n, fill=(230, 230, 220, 255))
     sheet.save(contact)
     print(f"[portraits] contact sheet {contact}")
@@ -355,22 +378,15 @@ def main():
     measures = {n: measure(r, cam) for n, r in roots.items()}
     measures = {n: m for n, m in measures.items() if m}
 
-    tower_ext = max([max(m["w"], m["h"]) for n, m in measures.items() if n.startswith("Tower")] or [1])
-    enemy_ext = max([max(m["w"], m["h"]) for n, m in measures.items() if n.startswith("Enemy")] or [1])
 
     for name, m in measures.items():
         keep = set(m["objs"])
         for o in all_render_objs:
             o.hide_render = o not in keep
         # Models are laid out side by side in the GLB; each render only sees its own root.
-        if name.startswith("Tower"):
-            ortho = tower_ext * 1.1
-            place_camera(cam, m, ortho, anchor_bottom=True)
-        else:
-            own = max(m["w"], m["h"])
-            ortho = own ** 0.75 * enemy_ext ** 0.25 * 1.15
-            ortho = max(ortho, own * 1.14)
-            place_camera(cam, m, ortho, anchor_bottom=False)
+        own = max(m["w"], m["h"])
+        ortho = own / FILL
+        place_camera(cam, m, ortho, anchor_bottom=False)
         size = ortho * 0.9
         rig.location = m["foot"]
         floor.location = Vector((0, 0, 0))

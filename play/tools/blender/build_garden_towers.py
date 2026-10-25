@@ -4,7 +4,8 @@ Builds the Garden Sentinels towers (towers.glb) in Blender: five tower kinds, th
     blender --background --factory-startup --python build_garden_towers.py -- <output-dir> [preview-dir]
 
 Style: cozy "advanced ceramic tech". Every tower stands on a round stone-ringed planter overflowing with leaves,
-built from polished cream ceramic, brushed gunmetal, gold trim (level 3) and glowing amber / mint glass.
+built from polished cream ceramic, warm bronze (joints, barrels, housings), gold trim (level 3) and a strong glow in
+the kind's colour: amber laser lens, orange-red missile tips, amber shield dome, mint flower, teal beacon crystal.
 Everything is procedural geometry with plain materials (no textures), so the GLB stays small.
 
 Conventions the frontend relies on (frontend/src/games/garden/api.ts, models.ts section):
@@ -13,8 +14,10 @@ Conventions the frontend relies on (frontend/src/games/garden/api.ts, models.ts 
   * laser and missile: child empty `<root>_head` at the yaw axis; everything that turns hangs under it, aim = +Y.
     Muzzle empties `<root>_muzzle` or `<root>_muzzle0..N` under the head at the barrel tips.
   * shield, slow and beacon: one `<root>_muzzle` empty where the effect emits (core, flower centre, crystal tip).
-  * materials: `Team` (tinted per player, near white), `Glow*` (emissive), Ceramic, CeramicMatte, Metal, Gold,
-    Stone, StoneDark, Leaf, LeafDark, Soil, Glass. Planter meshes are shared between kinds of the same level.
+  * materials: `Team` (tinted per player, near white; only the small pennant on the planter rim), `Glow*` (emissive:
+    GlowAmber, GlowMissile, GlowShield (translucent dome), GlowMint, GlowPetal, GlowGreen, GlowYellow and the
+    kind-coloured plinth bands GlowBand_<kind>), Ceramic, Bronze, BronzeDark, Gold, Stone, StoneDark, Leaf, LeafDark,
+    Soil. Planter meshes are shared between kinds of the same level.
 """
 
 import math
@@ -76,21 +79,30 @@ def material(name, color, rough=0.5, metal=0.0, emission=None, strength=0.0, alp
 def palette():
     return {
         "Ceramic": material("Ceramic", "#F5E7D6", rough=0.28, coat=0.4),
-        "CeramicMatte": material("CeramicMatte", "#E2CDB3", rough=0.65),
-        "Metal": material("Metal", "#3C424B", rough=0.38, metal=0.85),
         "Gold": material("Gold", "#E5AE45", rough=0.26, metal=1.0),
         "Stone": material("Stone", "#B3A795", rough=0.92),
         "StoneDark": material("StoneDark", "#8E8475", rough=0.95),
         "Leaf": material("Leaf", "#6BAF4B", rough=0.6, double_sided=True),
         "LeafDark": material("LeafDark", "#3E7A33", rough=0.7, double_sided=True),
         "Soil": material("Soil", "#4A3426", rough=1.0),
+        "Bronze": material("Bronze", "#6B5444", rough=0.34, metal=0.7, coat=0.2),
+        "BronzeDark": material("BronzeDark", "#3A2E28", rough=0.42, metal=0.55),
         "Team": material("Team", "#F2F2F0", rough=0.4),
-        "Glass": material("Glass", "#FFB84D", rough=0.08, alpha=0.28, double_sided=True),
         "GlowAmber": material("GlowAmber", "#FF9A2E", rough=0.3, emission="#FFA940", strength=3.0),
+        "GlowMissile": material("GlowMissile", "#FF6A26", rough=0.3, emission="#FF7A30", strength=3.2),
+        "GlowShield": material("GlowShield", "#FFB24A", rough=0.06, emission="#FFB24A", strength=0.55, alpha=0.42,
+                               double_sided=True),
         "GlowMint": material("GlowMint", "#12A397", rough=0.2, emission="#2FDCCD", strength=2.0),
-        "GlowPetal": material("GlowPetal", "#34C9BD", rough=0.15, emission="#2FDCCD", strength=0.8),
+        "GlowPetal": material("GlowPetal", "#36D8CA", rough=0.25, emission="#4EE6D9", strength=0.6,
+                              double_sided=True),
         "GlowGreen": material("GlowGreen", "#8CFF5A", rough=0.3, emission="#7CFF4A", strength=3.0),
-        "GlowYellow": material("GlowYellow", "#FFE27A", rough=0.3, emission="#FFD54A", strength=3.0),
+        "GlowYellow": material("GlowYellow", "#FFD27A", rough=0.3, emission="#FFD27A", strength=2.6),
+        # plinth band in the tower kind's colour (baked: the owner colour lives on the small Team pennant)
+        "GlowBand_laser": material("GlowBand_laser", "#FFA940", rough=0.3, emission="#FFA940", strength=1.6),
+        "GlowBand_missile": material("GlowBand_missile", "#FF6A26", rough=0.3, emission="#FF7A30", strength=1.6),
+        "GlowBand_shield": material("GlowBand_shield", "#FFC060", rough=0.3, emission="#FFB24A", strength=1.4),
+        "GlowBand_slow": material("GlowBand_slow", "#4EE6D9", rough=0.3, emission="#4EE6D9", strength=1.3),
+        "GlowBand_beacon": material("GlowBand_beacon", "#1FC79A", rough=0.3, emission="#22D8A4", strength=1.4),
     }
 
 
@@ -315,9 +327,9 @@ def hex_shell(b, r, mat, M=None, sub=2, thickness=0.018, cut_below=-2.0):
 
 # ---- planter base (shared per level) -----------------------------------------------------------------------------------
 
-BASE_R = {1: 0.70, 2: 0.76, 3: 0.80}
+BASE_R = {1: 0.68, 2: 0.73, 3: 0.77}
 BASE_H = {1: 0.36, 2: 0.40, 3: 0.44}
-MAX_R = 0.83
+MAX_R = 0.82
 
 
 def build_base(mats, lv):
@@ -392,90 +404,117 @@ def build_base(mats, lv):
 
 # ---- shared tower parts ------------------------------------------------------------------------------------------------
 
-def team_band(b, r, z, lv):
-    torus(b, r, 0.028 + 0.004 * lv, "Team", mat4((0, 0, z)), seg=32, rseg=6)
+def kind_band(b, kind, r, z, lv):
+    """Glowing band round the foot of the plinth in the tower kind's colour (amber, orange, mint, teal...)."""
+    torus(b, r, 0.036 + 0.006 * lv, f"GlowBand_{kind}", mat4((0, 0, z)), seg=32, rseg=6)
 
 
-def plinth(b, z0, s, lv, top_r=0.2, height=0.42, metal_body=False):
-    """Tapered ceramic column with a team band; returns the top z."""
+def team_pennant(b, z0, lv):
+    """Small owner-coloured pennant on the planter rim (front-left): the only `Team` part of a tower."""
+    a = math.radians(135)
+    r = BASE_R[lv] - 0.1
+    x, y = r * math.cos(a), r * math.sin(a)
+    zb = z0 + 0.03
+    ph = 0.38
+    cyl(b, 0.016, 0.013, ph, "BronzeDark", mat4((x, y, zb + ph / 2)), seg=8)
+    cyl(b, 0.04, 0.04, 0.03, "BronzeDark", mat4((x, y, zb + 0.015)), seg=10)
+    sphere(b, 0.055, "Team", mat4((x, y, zb + ph + 0.02)), seg=10, rings=6)
+    # flag flies outward along the radius, gently waved (two panels)
+    ux, uy = math.cos(a), math.sin(a)
+    for i, (d0, d1, wv) in enumerate(((0.0, 0.11, 0.015), (0.11, 0.21, -0.01))):
+        cx = x + ux * (d0 + d1) / 2 - uy * wv
+        cy = y + uy * (d0 + d1) / 2 + ux * wv
+        hgt = 0.14 - 0.03 * i
+        box(b, (d1 - d0 + 0.006, 0.014, hgt), "Team", mat4((cx, cy, zb + ph - 0.08 - 0.012 * i), (0, 0, a)), bevel=0.004,
+            segs=1)
+
+
+def plinth(b, z0, s, lv, kind, top_r=0.2, height=0.36):
+    """Tapered ceramic column: kind-coloured glow band at the foot, bronze collar on top; returns the top z."""
     h = height * s
-    body = "Metal" if metal_body else "Ceramic"
-    lathe(b, [(0.33 * s, z0 - 0.04), (0.34 * s, z0 + 0.05 * s), (0.3 * s, z0 + 0.1 * s),
-              (top_r * s * 1.05, z0 + h * 0.75), (top_r * s * 1.25, z0 + h * 0.92), (top_r * s * 1.25, z0 + h)],
-          body, seg=28)
-    team_band(b, 0.315 * s, z0 + 0.075 * s, lv)
+    lathe(b, [(0.34 * s, z0 - 0.04), (0.35 * s, z0 + 0.05 * s), (0.31 * s, z0 + 0.1 * s),
+              (top_r * s * 1.05, z0 + h * 0.72), (top_r * s * 1.22, z0 + h * 0.9), (top_r * s * 1.22, z0 + h)],
+          "Ceramic", seg=28)
+    kind_band(b, kind, 0.33 * s, z0 + 0.075 * s, lv)
+    cyl(b, top_r * s * 1.32, top_r * s * 1.28, 0.06 * s, "Bronze", mat4((0, 0, z0 + h - 0.015 * s)), seg=28,
+        bevel=0.008)
     if lv >= 2:
-        cyl(b, 0.36 * s, 0.36 * s, 0.035, "Metal" if not metal_body else "Ceramic", mat4((0, 0, z0 + 0.0)), seg=28)
+        cyl(b, 0.38 * s, 0.38 * s, 0.04, "BronzeDark", mat4((0, 0, z0 + 0.0)), seg=28)
+        for i in range(6):
+            a = TAU * i / 6
+            box(b, (0.05 * s, 0.03 * s, h * 0.5), "Bronze",
+                mat4((math.cos(a) * top_r * s * 1.12, math.sin(a) * top_r * s * 1.12, z0 + h * 0.55), (0, 0, a + math.pi / 2)) @
+                mat4(rot=(0.18, 0, 0)), bevel=0.008, segs=1)
     if lv == 3:
-        torus(b, top_r * s * 1.27, 0.018, "Gold", mat4((0, 0, z0 + h * 0.93)), seg=28, rseg=6)
-        torus(b, 0.34 * s, 0.016, "Gold", mat4((0, 0, z0 + 0.13 * s)), seg=28, rseg=6)
-    return z0 + h
+        torus(b, top_r * s * 1.34, 0.02, "Gold", mat4((0, 0, z0 + h - 0.015 * s)), seg=28, rseg=6)
+        torus(b, 0.345 * s, 0.017, "Gold", mat4((0, 0, z0 + 0.135 * s)), seg=28, rseg=6)
+    return z0 + h + 0.015 * s
 
 
 def side_lens(b, x, z, r, lv, y=0.0):
     sign = 1 if x > 0 else -1
     rot = (0, math.pi / 2, 0)
-    torus(b, r, r * 0.26, "Gold" if lv == 3 else "Metal", mat4((x, y, z), rot), seg=24, rseg=8)
-    cyl(b, r * 0.85, r * 0.85, 0.03, "Metal", mat4((x - sign * 0.01, y, z), rot), seg=20)
-    sphere(b, r * 0.72, "GlowAmber", mat4((x + sign * 0.005, y, z), rot, (1, 1, 0.35)), seg=16, rings=8)
+    torus(b, r, r * 0.3, "Gold" if lv == 3 else "Bronze", mat4((x, y, z), rot), seg=24, rseg=8)
+    cyl(b, r * 0.9, r * 0.9, 0.04, "BronzeDark", mat4((x - sign * 0.012, y, z), rot), seg=20)
+    sphere(b, r * 0.76, "GlowAmber", mat4((x + sign * 0.006, y, z), rot, (1, 1, 0.4)), seg=16, rings=8)
 
 
 # ---- laser turret ------------------------------------------------------------------------------------------------------
 
 def build_laser(mats, root, name, lv, z0):
-    s = (1.0, 1.14, 1.28)[lv - 1]
+    s = (0.95, 1.0, 1.05)[lv - 1]
     b = Builder(mats)
-    ztop = plinth(b, z0, s, lv, top_r=0.19, height=0.36)
-    cyl(b, 0.2 * s, 0.2 * s, 0.05, "Metal", mat4((0, 0, ztop + 0.02)), seg=24)
+    ztop = plinth(b, z0, s, lv, "laser", top_r=0.2, height=0.3)
+    cyl(b, 0.25 * s, 0.25 * s, 0.05, "BronzeDark", mat4((0, 0, ztop + 0.02)), seg=24)
+    team_pennant(b, z0, lv)
     obj_from_mesh(name + "_body", b.mesh(name + "_body"), root)
 
     head = empty(name + "_head", root, (0, 0, ztop + 0.045))
     h = Builder(mats)
-    # turntable + neck
-    cyl(h, 0.19 * s, 0.17 * s, 0.07 * s, "Metal", mat4((0, 0, 0.035 * s)), seg=24)
-    s = s * (1.42, 1.3, 1.2)[lv - 1]
-    zc = 0.24 * s
-    cyl(h, 0.1 * s, 0.13 * s, 0.14 * s, "Metal", mat4((0, -0.02 * s, 0.1 * s)), seg=16)
-    # rounded ceramic body
-    sphere(h, 1.0, "Ceramic", mat4((0, -0.02 * s, zc), scale=(0.2 * s, 0.25 * s, 0.2 * s)), seg=24, rings=14)
-    torus(h, 0.2 * s, 0.022 * s, "Gold" if lv == 3 else "Metal", mat4((0, -0.02 * s, zc), (math.pi / 2, 0, 0)),
-          seg=28, rseg=6)
-    side_lens(h, 0.215 * s, zc, 0.085 * s, lv)
-    side_lens(h, -0.215 * s, zc, 0.085 * s, lv)
-    # rear housing
-    box(h, (0.22 * s, 0.14 * s, 0.18 * s), "CeramicMatte", mat4((0, -0.25 * s, zc)), bevel=0.04 * s, segs=3)
+    k = (1.12, 1.2, 1.3)[lv - 1]
+    # turntable + bronze neck
+    cyl(h, 0.24 * k, 0.22 * k, 0.07 * k, "BronzeDark", mat4((0, 0, 0.035 * k)), seg=24)
+    cyl(h, 0.12 * k, 0.15 * k, 0.16 * k, "Bronze", mat4((0, -0.02 * k, 0.12 * k)), seg=16)
+    zc = 0.31 * k
+    # rounded ceramic body with a bronze belt
+    sphere(h, 1.0, "Ceramic", mat4((0, -0.03 * k, zc), scale=(0.27 * k, 0.3 * k, 0.26 * k)), seg=22, rings=12)
+    torus(h, 0.262 * k, 0.034 * k, "Gold" if lv == 3 else "Bronze", mat4((0, -0.04 * k, zc), (math.pi / 2, 0, 0)),
+          seg=28, rseg=8)
+    side_lens(h, 0.275 * k, zc, 0.11 * k, lv, y=-0.03 * k)
+    side_lens(h, -0.275 * k, zc, 0.11 * k, lv, y=-0.03 * k)
+    # rear housing (dark bronze) with a vent glow
+    box(h, (0.27 * k, 0.17 * k, 0.21 * k), "BronzeDark", mat4((0, -0.33 * k, zc)), bevel=0.045 * k, segs=3)
+    box(h, (0.16 * k, 0.02, 0.05 * k), "GlowAmber", mat4((0, -0.42 * k, zc + 0.03 * k)), bevel=0.008)
     if lv >= 2:
-        # armour shells and a top sensor
-        box(h, (0.09 * s, 0.36 * s, 0.07 * s), "CeramicMatte", mat4((0, -0.06 * s, zc + 0.18 * s), (0.12, 0, 0)),
-            bevel=0.03 * s, segs=3)
-        cyl(h, 0.035 * s, 0.045 * s, 0.05 * s, "Metal", mat4((0, 0.08 * s, zc + 0.2 * s)), seg=12)
-        sphere(h, 0.028 * s, "GlowAmber", mat4((0, 0.08 * s, zc + 0.235 * s)), seg=10, rings=6)
-    # barrel(s)
-    barrels = [0.0] if lv < 3 else [-0.075 * s, 0.075 * s]
-    br = (0.055, 0.06, 0.05)[lv - 1] * s
-    blen = (0.3, 0.32, 0.3)[lv - 1] * s
-    y0 = 0.13 * s
+        # bronze armour crest and a top sensor
+        box(h, (0.12 * k, 0.42 * k, 0.07 * k), "Bronze", mat4((0, -0.08 * k, zc + 0.24 * k), (0.1, 0, 0)),
+            bevel=0.03 * k, segs=3)
+        cyl(h, 0.04 * k, 0.05 * k, 0.05 * k, "BronzeDark", mat4((0, 0.1 * k, zc + 0.26 * k)), seg=12)
+        sphere(h, 0.034 * k, "GlowAmber", mat4((0, 0.1 * k, zc + 0.3 * k)), seg=10, rings=6)
+    if lv == 3:
+        # cheek plates
+        for sx in (-1, 1):
+            box(h, (0.05 * k, 0.26 * k, 0.2 * k), "Bronze", mat4((sx * 0.2 * k, -0.2 * k, zc - 0.02 * k), (0, 0, sx * 0.25)),
+                bevel=0.02 * k, segs=2)
+    # barrel(s): bronze, amber lens at the tip
+    barrels = [0.0] if lv < 3 else [-0.085 * k, 0.085 * k]
+    br = (0.075, 0.082, 0.068)[lv - 1] * k
+    y0 = 0.2 * k
+    ty = (0.62, 0.69, 0.76)[lv - 1]
+    blen = ty - y0
     tips = []
     for bx in barrels:
-        cyl(h, br, br * 0.9, blen, "Metal", mat4((bx, y0 + blen / 2, zc), (-math.pi / 2, 0, 0)), seg=16)
-        cyl(h, br * 1.45, br * 1.45, 0.12 * s, "Ceramic", mat4((bx, y0 + 0.08 * s, zc), (-math.pi / 2, 0, 0)),
-            seg=20, bevel=0.012)
-        nfins = (0, 3, 3)[lv - 1]
-        for k in range(nfins):
-            cyl(h, br * 1.35, br * 1.35, 0.018 * s, "Metal" if lv < 3 else "Gold",
-                mat4((bx, y0 + (0.2 + 0.07 * k) * s, zc), (-math.pi / 2, 0, 0)), seg=16)
-        ty = y0 + blen
-        if lv == 3:
-            box(h, (br * 2.6, 0.1 * s, br * 2.6), "Ceramic", mat4((bx, ty - 0.02 * s, zc)), bevel=0.018)
-            torus(h, br * 1.05, br * 0.28, "GlowAmber", mat4((bx, ty + 0.035 * s, zc), (math.pi / 2, 0, 0)),
-                  seg=16, rseg=6)
-        else:
-            cyl(h, br * 1.4, br * 1.25, 0.07 * s, "Ceramic", mat4((bx, ty, zc), (-math.pi / 2, 0, 0)), seg=18,
-                bevel=0.01)
-            torus(h, br * 0.95, br * 0.28, "GlowAmber", mat4((bx, ty + 0.038 * s, zc), (math.pi / 2, 0, 0)),
-                  seg=16, rseg=6)
-        sphere(h, br * 0.7, "GlowAmber", mat4((bx, ty + 0.03 * s, zc), scale=(1, 0.6, 1)), seg=12, rings=6)
-        tips.append((bx, ty + 0.06 * s, zc))
+        cyl(h, br, br * 0.92, blen, "Bronze", mat4((bx, y0 + blen / 2, zc), (-math.pi / 2, 0, 0)), seg=16)
+        cyl(h, br * 1.55, br * 1.55, 0.14 * k, "Ceramic", mat4((bx, y0 + 0.07 * k, zc), (-math.pi / 2, 0, 0)),
+            seg=20, bevel=0.014)
+        nfins = (1, 3, 3)[lv - 1]
+        for j in range(nfins):
+            cyl(h, br * 1.38, br * 1.38, 0.022 * k, "BronzeDark" if lv < 3 else "Gold",
+                mat4((bx, y0 + 0.18 * k + (blen - 0.3 * k) * (j + 0.5) / max(nfins, 1), zc), (-math.pi / 2, 0, 0)), seg=16)
+        cyl(h, br * 1.5, br * 1.32, 0.08 * k, "BronzeDark", mat4((bx, ty, zc), (-math.pi / 2, 0, 0)), seg=18, bevel=0.01)
+        torus(h, br * 1.05, br * 0.3, "GlowAmber", mat4((bx, ty + 0.042 * k, zc), (math.pi / 2, 0, 0)), seg=16, rseg=6)
+        sphere(h, br * 0.95, "GlowAmber", mat4((bx, ty + 0.03 * k, zc), scale=(1, 0.55, 1)), seg=14, rings=8)
+        tips.append((bx, ty + 0.07 * k, zc))
     obj_from_mesh(name + "_turret", h.mesh(name + "_turret"), head)
     if len(tips) == 1:
         empty(name + "_muzzle", head, tips[0])
@@ -487,72 +526,74 @@ def build_laser(mats, root, name, lv, z0):
 # ---- missile pod -------------------------------------------------------------------------------------------------------
 
 def build_missile(mats, root, name, lv, z0):
-    s = (1.0, 1.12, 1.24)[lv - 1]
+    s = (0.95, 1.0, 1.05)[lv - 1]
     b = Builder(mats)
-    ztop = plinth(b, z0, s, lv, top_r=0.19, height=0.5)
-    cyl(b, 0.22 * s, 0.22 * s, 0.05, "Metal", mat4((0, 0, ztop + 0.02)), seg=24)
+    ztop = plinth(b, z0, s, lv, "missile", top_r=0.21, height=0.34)
+    cyl(b, 0.26 * s, 0.26 * s, 0.05, "BronzeDark", mat4((0, 0, ztop + 0.02)), seg=24)
+    team_pennant(b, z0, lv)
     obj_from_mesh(name + "_body", b.mesh(name + "_body"), root)
 
     head = empty(name + "_head", root, (0, 0, ztop + 0.045))
     h = Builder(mats)
-    cyl(h, 0.21 * s, 0.19 * s, 0.07 * s, "Metal", mat4((0, 0, 0.035 * s)), seg=24)
-    s = s * 1.22
-    zc = 0.26 * s
-    pitch = math.radians(10)
+    k = (1.1, 1.2, 1.3)[lv - 1]
+    cyl(h, 0.25 * k, 0.23 * k, 0.07 * k, "BronzeDark", mat4((0, 0, 0.035 * k)), seg=24)
+    zc = 0.32 * k
+    pitch = math.radians(22)
     P = mat4((0, 0, zc), (pitch, 0, 0))     # pod frame: tubes along local +Y, tilted up
-    # trunnion core
-    box(h, (0.2 * s, 0.24 * s, 0.22 * s), "Metal", mat4((0, -0.02 * s, 0.17 * s)), bevel=0.03 * s)
-    # tube layout per level
-    tr = 0.07 * s
+    # tube layout per level (2x2, 2x2 heavier, 3x2)
     if lv == 1:
-        layout = [(-0.085, 0.0), (0.085, 0.0)]
+        tr, sp = 0.075 * k, 0.17 * k
+        layout = [(-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)]
     elif lv == 2:
-        layout = [(-0.085, -0.075), (0.085, -0.075), (-0.085, 0.075), (0.085, 0.075)]
+        tr, sp = 0.08 * k, 0.18 * k
+        layout = [(-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)]
     else:
-        layout = [(-0.17, -0.07), (0.0, -0.07), (0.17, -0.07), (-0.17, 0.075), (0.0, 0.075), (0.17, 0.075)]
-    tlen = (0.5, 0.52, 0.56)[lv - 1] * s
-    ty0 = -0.2 * s
-    xs = [x for x, _ in layout]
-    zs = [z for _, z in layout]
-    w = (max(xs) - min(xs)) * s + tr * 2 + 0.07 * s
-    hh = (max(zs) - min(zs)) * s + tr * 2 + 0.07 * s
-    # ceramic housing wrapping the tube bundle (rear two thirds)
-    box(h, (w, tlen * 0.62, hh), "Ceramic", P @ mat4((0, ty0 + tlen * 0.31, 0)), bevel=0.05 * s, segs=3)
-    box(h, (w * 0.9, 0.06 * s, hh * 0.9), "CeramicMatte", P @ mat4((0, ty0 - 0.02 * s, 0)), bevel=0.025 * s)
-    if lv == 3:
-        for yy in (ty0 + 0.05 * s, ty0 + tlen * 0.6):
-            box(h, (w + 0.012, 0.02 * s, hh + 0.012), "Gold", P @ mat4((0, yy, 0)), bevel=0.006)
+        tr, sp = 0.075 * k, 0.17 * k
+        layout = [(-1, -0.5), (0, -0.5), (1, -0.5), (-1, 0.5), (0, 0.5), (1, 0.5)]
+    tlen = (0.46, 0.48, 0.5)[lv - 1] * k
+    ty0 = -0.24 * k
+    xs = [x * sp for x, _ in layout]
+    zs = [z * sp for _, z in layout]
+    w = (max(xs) - min(xs)) + tr * 2 + 0.08 * k
+    hh = (max(zs) - min(zs)) + tr * 2 + 0.08 * k
+    # yoke: bronze trunnion block + side arms with ceramic drums
+    box(h, (w * 0.55, 0.26 * k, 0.2 * k), "Bronze", mat4((0, -0.02 * k, 0.17 * k)), bevel=0.03 * k)
+    for sx in (-1, 1):
+        dx = sx * (w / 2 + 0.045 * k)
+        box(h, (0.06 * k, 0.2 * k, 0.26 * k), "BronzeDark", mat4((dx, -0.02 * k, zc - 0.06 * k)), bevel=0.02 * k)
+        cyl(h, 0.11 * k, 0.11 * k, 0.08 * k, "Ceramic", mat4((dx + sx * 0.03 * k, -0.02 * k, zc), (0, math.pi / 2, 0)),
+            seg=20, bevel=0.016)
+        cyl(h, 0.06 * k, 0.06 * k, 0.1 * k, "Bronze", mat4((dx + sx * 0.05 * k, -0.02 * k, zc), (0, math.pi / 2, 0)),
+            seg=14)
+        sphere(h, 0.04 * k, "GlowMissile", mat4((dx + sx * 0.1 * k, -0.02 * k, zc), scale=(0.5, 1, 1)), seg=10, rings=6)
+    # bronze housing round the tube bundle (rear 70 %) and a dark back plate
+    box(h, (w, tlen * 0.7, hh), "Bronze", P @ mat4((0, ty0 + tlen * 0.35, 0)), bevel=0.05 * k, segs=3)
+    box(h, (w * 0.9, 0.06 * k, hh * 0.9), "BronzeDark", P @ mat4((0, ty0 - 0.02 * k, 0)), bevel=0.025 * k)
+    # glowing stripes on top so the kind reads from above
+    for sx in ((-0.25, 0.25) if lv < 3 else (-0.33, 0.0, 0.33)):
+        box(h, (0.035 * k, tlen * 0.5, 0.02), "GlowMissile", P @ mat4((sx * w, ty0 + tlen * 0.36, hh / 2 + 0.004)),
+            bevel=0.006, segs=1)
+    if lv >= 2:
+        for yy in (ty0 + 0.05 * k, ty0 + tlen * 0.62):
+            box(h, (w + 0.014, 0.025 * k, hh + 0.014), "Gold" if lv == 3 else "BronzeDark", P @ mat4((0, yy, 0)),
+                bevel=0.006)
     tips = []
     for x, z in layout:
-        x, z = x * s, z * s
-        cyl(h, tr, tr, tlen, "Metal", P @ mat4((x, ty0 + tlen / 2, z), (-math.pi / 2, 0, 0)), seg=16)
-        cyl(h, tr * 1.12, tr * 1.12, 0.05 * s, "Gold" if lv == 3 else "CeramicMatte",
-            P @ mat4((x, ty0 + tlen - 0.025 * s, z), (-math.pi / 2, 0, 0)), seg=16, bevel=0.008)
-        cyl(h, tr * 0.8, tr * 0.8, 0.02, "Soil", P @ mat4((x, ty0 + tlen + 0.0005, z), (-math.pi / 2, 0, 0)),
-            seg=14)
+        x, z = x * sp, z * sp
+        cyl(h, tr, tr, tlen, "BronzeDark", P @ mat4((x, ty0 + tlen / 2, z), (-math.pi / 2, 0, 0)), seg=16)
+        cyl(h, tr * 1.14, tr * 1.14, 0.05 * k, "Gold" if lv == 3 else "Bronze",
+            P @ mat4((x, ty0 + tlen - 0.025 * k, z), (-math.pi / 2, 0, 0)), seg=16, bevel=0.008)
+        torus(h, tr * 0.9, tr * 0.18, "GlowMissile", P @ mat4((x, ty0 + tlen + 0.003, z), (math.pi / 2, 0, 0)),
+              seg=16, rseg=5)
+        cyl(h, tr * 0.78, tr * 0.78, 0.02, "Soil", P @ mat4((x, ty0 + tlen - 0.004, z), (-math.pi / 2, 0, 0)), seg=14)
         # missile nose peeking out of the tube
-        cyl(h, tr * 0.62, 0.0, 0.1 * s, "GlowAmber", P @ mat4((x, ty0 + tlen + 0.02 * s, z), (-math.pi / 2, 0, 0)),
+        cyl(h, tr * 0.66, 0.0, 0.11 * k, "GlowMissile", P @ mat4((x, ty0 + tlen + 0.03 * k, z), (-math.pi / 2, 0, 0)),
             seg=12)
-        tips.append((P @ Vector((x, ty0 + tlen + 0.08 * s, z)))[:])
-    # side drums with a lens (level 1 and 2), extra side pods on level 3 already cover that
-    if lv < 3:
-        for sx in (-1, 1):
-            dx = sx * (w / 2 + 0.05 * s)
-            cyl(h, 0.085 * s, 0.085 * s, 0.09 * s, "Ceramic", P @ mat4((dx, ty0 + 0.15 * s, -0.01), (0, math.pi / 2, 0)),
-                seg=20, bevel=0.015)
-            cyl(h, 0.05 * s, 0.05 * s, 0.1 * s, "Metal", P @ mat4((dx + sx * 0.01, ty0 + 0.15 * s, -0.01),
-                                                                  (0, math.pi / 2, 0)), seg=14)
-            sphere(h, 0.035 * s, "GlowAmber", P @ mat4((dx + sx * 0.05 * s, ty0 + 0.15 * s, -0.01)), seg=10, rings=6)
+        tips.append((P @ Vector((x, ty0 + tlen + 0.09 * k, z)))[:])
     if lv >= 2:
         # targeting sensor on top
-        box(h, (0.08 * s, 0.12 * s, 0.05 * s), "Metal", P @ mat4((0, ty0 + 0.12 * s, hh / 2 + 0.02 * s)), bevel=0.01)
-        sphere(h, 0.025 * s, "GlowAmber", P @ mat4((0, ty0 + 0.18 * s, hh / 2 + 0.03 * s)), seg=10, rings=6)
-    if lv == 3:
-        for sx in (-1, 1):
-            torus(h, 0.08 * s, 0.018 * s, "Gold", P @ mat4((sx * (w / 2 + 0.005), ty0 + 0.22 * s, 0),
-                                                         (0, math.pi / 2, 0)), seg=20, rseg=6)
-            sphere(h, 0.05 * s, "GlowAmber", P @ mat4((sx * (w / 2 + 0.01), ty0 + 0.22 * s, 0), scale=(0.4, 1, 1)),
-                   seg=12, rings=8)
+        box(h, (0.09 * k, 0.13 * k, 0.05 * k), "BronzeDark", P @ mat4((0, ty0 + 0.1 * k, hh / 2 + 0.025 * k)), bevel=0.01)
+        sphere(h, 0.03 * k, "GlowMissile", P @ mat4((0, ty0 + 0.16 * k, hh / 2 + 0.035 * k)), seg=10, rings=6)
     obj_from_mesh(name + "_turret", h.mesh(name + "_turret"), head)
     for i, t in enumerate(tips):
         empty(f"{name}_muzzle{i}", head, t)
@@ -561,155 +602,178 @@ def build_missile(mats, root, name, lv, z0):
 # ---- bubble shield -----------------------------------------------------------------------------------------------------
 
 def build_shield(mats, root, name, lv, z0):
-    s = (1.0, 1.1, 1.2)[lv - 1]
+    s = (1.0, 1.04, 1.08)[lv - 1]
     b = Builder(mats)
-    # vase pedestal
-    ph = 0.36 * s
-    lathe(b, [(0.32 * s, z0 - 0.04), (0.33 * s, z0 + 0.05 * s), (0.25 * s, z0 + 0.12 * s), (0.16 * s, z0 + ph * 0.6),
-              (0.2 * s, z0 + ph * 0.85), (0.27 * s, z0 + ph), (0.24 * s, z0 + ph + 0.03)], "Ceramic", seg=28)
-    team_band(b, 0.305 * s, z0 + 0.075 * s, lv)
+    # low ceramic pedestal: the amber dome is the tower
+    lathe(b, [(0.36 * s, z0 - 0.04), (0.37 * s, z0 + 0.05 * s), (0.33 * s, z0 + 0.1 * s), (0.3 * s, z0 + 0.14 * s),
+              (0.34 * s, z0 + 0.17 * s), (0.31 * s, z0 + 0.19 * s)], "Ceramic", seg=32)
+    kind_band(b, "shield", 0.35 * s, z0 + 0.075 * s, lv)
+    team_pennant(b, z0, lv)
     if lv >= 2:
-        cyl(b, 0.35 * s, 0.35 * s, 0.035, "Metal", mat4((0, 0, z0)), seg=28)
-    R = (0.4, 0.44, 0.47)[lv - 1] * s
-    zc = z0 + ph + R * 0.82
-    # claws cupping the bubble
+        cyl(b, 0.39 * s, 0.39 * s, 0.04, "BronzeDark", mat4((0, 0, z0)), seg=28)
+    R = (0.55, 0.59, 0.62)[lv - 1]
+    cut = 0.3                                     # dome is cut 0.3 R below its centre
+    zc = z0 + 0.18 * s + R * cut
+    # bronze seat ring the dome stands in
+    torus(b, R * math.sqrt(1 - cut * cut) + 0.01, 0.04, "Bronze", mat4((0, 0, zc - R * cut + 0.01)), seg=40, rseg=8)
+    # claws cupping the dome
     nclaw = (4, 5, 6)[lv - 1]
     for i in range(nclaw):
         a = TAU * i / nclaw + math.pi / nclaw
-        for k in range(3):
-            t = -1.05 + 0.32 * k
-            px, pz = math.cos(t) * (R + 0.02), math.sin(t) * (R + 0.02)
+        for j in range(2 + (lv >= 2)):
+            t = -0.28 + 0.3 * j
+            px, pz = math.cos(t) * (R + 0.022), math.sin(t) * (R + 0.022)
             M = mat4((math.cos(a) * px, math.sin(a) * px, zc + pz), (0, 0, a)) @ mat4(rot=(0, -t, 0))
-            box(b, (0.035 * s, 0.07 * s, 0.13 * s), "Gold" if lv == 3 else "Metal", M, bevel=0.012)
-    # core on a stalk
-    cyl(b, 0.04 * s, 0.06 * s, R * 0.8, "Metal", mat4((0, 0, zc - R * 0.42)), seg=12)
-    cyl(b, 0.08 * s, 0.06 * s, 0.05 * s, "Ceramic", mat4((0, 0, zc - 0.09 * s)), seg=16)
-    sphere(b, (0.09, 0.1, 0.11)[lv - 1] * s, "GlowGreen", mat4((0, 0, zc)), seg=16, rings=10)
-    # glass bubble with a glowing hex lattice
-    sphere(b, R, "Glass", mat4((0, 0, zc)), seg=32, rings=18)
-    hex_shell(b, R + 0.004, "GlowAmber", mat4((0, 0, zc)), sub=2, thickness=0.014 if lv == 1 else 0.016,
-              cut_below=-R * 0.86)
+            box(b, (0.04, 0.08, 0.15), "Gold" if lv == 3 else "Bronze", M, bevel=0.014)
+    # core on a bronze stalk
+    cyl(b, 0.045, 0.07, R * 0.55, "Bronze", mat4((0, 0, zc - R * 0.2)), seg=12)
+    cyl(b, 0.1, 0.07, 0.05, "Ceramic", mat4((0, 0, zc + 0.02)), seg=16)
+    sphere(b, (0.11, 0.12, 0.13)[lv - 1], "GlowGreen", mat4((0, 0, zc + 0.11)), seg=16, rings=10)
+    # amber glass dome with a glowing hex lattice
+    prof = []
+    a0 = -math.asin(cut)
+    for i in range(15):
+        t = a0 + (math.pi / 2 - a0) * i / 14
+        prof.append((max(R * math.cos(t), 0.0) if i < 14 else 0.0, zc + R * math.sin(t)))
+    lathe(b, prof, "GlowShield", seg=32, cap_top=False)
+    hex_shell(b, R + 0.005, "GlowAmber", mat4((0, 0, zc)), sub=2, thickness=0.02 if lv == 1 else 0.022,
+              cut_below=-R * cut)
     if lv >= 2:
-        torus(b, R + 0.025, 0.02, "Gold" if lv == 3 else "Metal", mat4((0, 0, zc)), seg=40, rseg=6)
+        torus(b, R + 0.02, 0.024, "Gold" if lv == 3 else "Bronze", mat4((0, 0, zc + R * 0.35), ), seg=40, rseg=6)
     if lv == 3:
-        torus(b, R + 0.04, 0.016, "Gold", mat4((0, 0, zc), (math.radians(70), 0, 0)), seg=40, rseg=6)
-        # crown finial
-        cyl(b, 0.07 * s, 0.03 * s, 0.06 * s, "Gold", mat4((0, 0, zc + R + 0.02)), seg=12)
-        crystal(b, [(0, 0), (0.035, 0.05), (0, 0.16)], "GlowAmber", mat4((0, 0, zc + R + 0.04)), sides=6)
+        cyl(b, 0.08, 0.035, 0.07, "Gold", mat4((0, 0, zc + R + 0.025)), seg=12)
+        crystal(b, [(0, 0), (0.04, 0.05), (0, 0.17)], "GlowAmber", mat4((0, 0, zc + R + 0.05)), sides=6)
     obj_from_mesh(name + "_body", b.mesh(name + "_body"), root)
-    empty(name + "_muzzle", root, (0, 0, zc))
+    empty(name + "_muzzle", root, (0, 0, zc + 0.11))
 
 
 # ---- slow flower -------------------------------------------------------------------------------------------------------
 
-def petal_ring(b, n, length, width, zc, tilt, offset, mat, thick=0.035):
+def petal(b, length, width, mat, M, cup=0.05, lift=0.06, nu=7, nv=5):
+    """Broad rounded petal along +X: cupped across, lifted towards the tip (single surface, double-sided material)."""
+    tmp = bmesh.new()
+    rows = []
+    for i in range(nu + 1):
+        u = i / nu
+        half = width * 0.5 * (0.25 + 0.75 * math.sin(math.pi * u ** 0.62) ** 0.55) if u < 1 else 0.0
+        row = []
+        for j in range(nv):
+            v = -1 + 2 * j / (nv - 1)
+            row.append(tmp.verts.new((u * length, v * half, cup * v * v * (1 - 0.3 * u) + lift * u * u)))
+        rows.append(row)
+    for i in range(nu):
+        for j in range(nv - 1):
+            try:
+                tmp.faces.new((rows[i][j], rows[i + 1][j], rows[i + 1][j + 1], rows[i][j + 1]))
+            except ValueError:
+                pass
+    bmesh.ops.remove_doubles(tmp, verts=tmp.verts, dist=1e-6)
+    bmesh.ops.recalc_face_normals(tmp, faces=tmp.faces)
+    for f in tmp.faces:
+        if f.normal.z < 0:
+            f.normal_flip()
+    b.merge(tmp, mat, M, True)
+
+
+def petal_ring(b, n, length, width, zc, tilt, offset, mat, r0=0.05, cup=0.05):
     for i in range(n):
         a = TAU * i / n + offset
-        M = mat4((0, 0, zc), (0, 0, a)) @ mat4(rot=(0, -tilt, 0)) @ \
-            mat4((length * 0.5, 0, 0), scale=(length * 0.5, width * 0.5, thick))
-        ico(b, 1.0, mat, M, sub=1, smooth=False)
+        M = mat4((0, 0, zc), (0, 0, a)) @ mat4((r0, 0, 0), (0, -tilt, 0))
+        petal(b, length, width, mat, M, cup=cup)
 
 
 def build_slow(mats, root, name, lv, z0):
-    s = (1.0, 1.15, 1.3)[lv - 1]
+    s = (1.0, 1.05, 1.1)[lv - 1]
     b = Builder(mats)
     # ceramic cup the flower grows from
-    lathe(b, [(0.22 * s, z0 - 0.04), (0.24 * s, z0 + 0.04 * s), (0.2 * s, z0 + 0.1 * s), (0.17 * s, z0 + 0.16 * s),
-              (0.19 * s, z0 + 0.2 * s), (0.15 * s, z0 + 0.21 * s)], "Ceramic", seg=24)
-    team_band(b, 0.225 * s, z0 + 0.06 * s, lv)
-    if lv == 3:
-        torus(b, 0.19 * s, 0.014, "Gold", mat4((0, 0, z0 + 0.19 * s)), seg=24, rseg=6)
-    stem_h = (0.7, 0.78, 0.86)[lv - 1] * s
+    lathe(b, [(0.26 * s, z0 - 0.04), (0.28 * s, z0 + 0.04 * s), (0.24 * s, z0 + 0.1 * s), (0.2 * s, z0 + 0.16 * s),
+              (0.23 * s, z0 + 0.2 * s), (0.18 * s, z0 + 0.21 * s)], "Ceramic", seg=28)
+    kind_band(b, "slow", 0.27 * s, z0 + 0.06 * s, lv)
+    team_pennant(b, z0, lv)
+    torus(b, 0.215 * s, 0.022, "Gold" if lv == 3 else "Bronze", mat4((0, 0, z0 + 0.2 * s)), seg=28, rseg=6)
+    stem_h = (0.35, 0.39, 0.43)[lv - 1]
     zc = z0 + 0.2 * s + stem_h
-    # slightly curved stem
-    pts = 6
+    # short, thick, slightly curved stem
+    pts = 5
     for i in range(pts):
         t0, t1 = i / pts, (i + 1) / pts
-        x0, x1 = 0.04 * math.sin(t0 * math.pi), 0.04 * math.sin(t1 * math.pi)
+        x0, x1 = 0.035 * math.sin(t0 * math.pi), 0.035 * math.sin(t1 * math.pi)
         p0 = Vector((x0, 0, z0 + 0.15 * s + stem_h * t0))
         p1 = Vector((x1, 0, z0 + 0.15 * s + stem_h * t1))
         d = p1 - p0
         rot = d.to_track_quat("Z", "Y").to_euler()
-        r = 0.035 * s * (1 - 0.3 * t0)
-        cyl(b, r, r * 0.95, d.length + 0.01, "LeafDark", mat4((p0 + p1) / 2, rot), seg=10)
-    # stem leaves
-    nleaf = (2, 3, 4)[lv - 1]
-    for i in range(nleaf):
-        a = TAU * i / nleaf + 0.6
-        zz = z0 + 0.25 * s + stem_h * (0.25 + 0.3 * (i % 2))
-        M = mat4((0.02, 0, zz), (0, 0, a)) @ mat4(rot=(0.3, -0.5, 0))
-        leaf(b, 0.32 * s, 0.15 * s, "Leaf", M, curl=0.4, droop=0.35)
+        r = 0.07 * (1 - 0.25 * t0)
+        cyl(b, r, 0.07 * (1 - 0.25 * t1), d.length + 0.01, "LeafDark", mat4((p0 + p1) / 2, rot), seg=12)
+    # two broad leaves
+    for i, (a, zf) in enumerate(((0.5, 0.25), (0.5 + math.pi, 0.5))):
+        M = mat4((0.02, 0, z0 + 0.2 * s + stem_h * zf), (0, 0, a)) @ mat4(rot=(0.2, -0.45, 0))
+        leaf(b, 0.42 * s, 0.22 * s, "Leaf", M, curl=0.45, droop=0.3)
     # sepals
-    for i in range(6):
-        a = TAU * i / 6
-        M = mat4((0.03, 0, zc - 0.05 * s), (0, 0, a)) @ mat4(rot=(0, 0.2, 0))
-        leaf(b, 0.13 * s, 0.07 * s, "Gold" if lv == 3 else "LeafDark", M, curl=0.2, droop=0.05)
-    # crystal petals
-    plen = (0.38, 0.4, 0.42)[lv - 1] * s
-    if lv == 1:
-        petal_ring(b, 6, plen, 0.2 * s, zc, math.radians(22), 0.0, "GlowPetal")
-    elif lv == 2:
-        petal_ring(b, 8, plen, 0.19 * s, zc - 0.01, math.radians(14), 0.0, "GlowPetal")
-        petal_ring(b, 8, plen * 0.72, 0.15 * s, zc + 0.02, math.radians(38), TAU / 16, "GlowPetal")
-    else:
-        petal_ring(b, 10, plen, 0.18 * s, zc - 0.02, math.radians(10), 0.0, "GlowPetal")
-        petal_ring(b, 10, plen * 0.75, 0.15 * s, zc + 0.01, math.radians(32), TAU / 20, "GlowPetal")
-        petal_ring(b, 6, plen * 0.45, 0.11 * s, zc + 0.04, math.radians(58), 0.0, "GlowMint")
-        torus(b, 0.1 * s, 0.016, "Gold", mat4((0, 0, zc + 0.03)), seg=24, rseg=6)
-        for i in range(10):
-            a = TAU * (i + 0.5) / 10
-            sphere(b, 0.018 * s, "Gold", mat4((math.cos(a) * 0.12 * s, math.sin(a) * 0.12 * s, zc + 0.035)),
-                   seg=8, rings=5)
-    # glowing centre
-    rc = (0.08, 0.095, 0.105)[lv - 1] * s
-    sphere(b, rc, "GlowYellow", mat4((0, 0, zc + 0.03 + 0.02 * (lv - 1)), scale=(1, 1, 0.7)), seg=16, rings=10)
-    for i in range(8 + 2 * lv):
-        a = TAU * i / (8 + 2 * lv)
-        sphere(b, 0.016 * s, "GlowYellow", mat4((math.cos(a) * rc * 1.15, math.sin(a) * rc * 1.15,
-                                                 zc + 0.04 + 0.02 * (lv - 1))),
+    for i in range(8):
+        a = TAU * (i + 0.5) / 8
+        M = mat4((0.04, 0, zc - 0.05), (0, 0, a)) @ mat4(rot=(0, 0.15, 0))
+        leaf(b, 0.17, 0.09, "Gold" if lv == 3 else "LeafDark", M, curl=0.2, droop=0.05)
+    # bloom: 8 broad mint petals, about 1.0-1.1 m across
+    plen = (0.45, 0.47, 0.5)[lv - 1]
+    pw = (0.3, 0.31, 0.32)[lv - 1]
+    petal_ring(b, 8, plen, pw, zc, math.radians(12), 0.0, "GlowPetal", r0=0.06, cup=0.05)
+    if lv == 2:
+        petal_ring(b, 8, plen * 0.5, pw * 0.7, zc + 0.03, math.radians(30), TAU / 16, "GlowPetal", r0=0.05, cup=0.03)
+    if lv == 3:
+        petal_ring(b, 8, plen * 0.72, pw * 0.85, zc + 0.04, math.radians(28), TAU / 16, "GlowPetal", r0=0.05, cup=0.04)
+        torus(b, 0.15, 0.02, "Gold", mat4((0, 0, zc + 0.06)), seg=28, rseg=6)
+    # amber centre
+    rc = (0.13, 0.135, 0.14)[lv - 1]
+    zcore = zc + 0.05 + 0.02 * (lv - 1)
+    sphere(b, rc, "GlowYellow", mat4((0, 0, zcore), scale=(1, 1, 0.6)), seg=18, rings=10)
+    for i in range(10 + 2 * lv):
+        a = TAU * i / (10 + 2 * lv)
+        sphere(b, 0.02, "GlowYellow", mat4((math.cos(a) * rc * 1.12, math.sin(a) * rc * 1.12, zcore + 0.02)),
                seg=6, rings=4)
     obj_from_mesh(name + "_body", b.mesh(name + "_body"), root)
-    empty(name + "_muzzle", root, (0, 0, zc + 0.07 + 0.02 * (lv - 1)))
+    empty(name + "_muzzle", root, (0, 0, zcore + 0.06))
 
 
 # ---- energy beacon -----------------------------------------------------------------------------------------------------
 
 def build_beacon(mats, root, name, lv, z0):
-    s = (1.0, 1.13, 1.26)[lv - 1]
+    s = (1.0, 1.1, 1.2)[lv - 1]
     b = Builder(mats)
-    ph = 0.3 * s
-    lathe(b, [(0.3 * s, z0 - 0.04), (0.31 * s, z0 + 0.05 * s), (0.22 * s, z0 + 0.1 * s), (0.17 * s, z0 + ph * 0.7),
+    ph = 0.28 * s
+    lathe(b, [(0.32 * s, z0 - 0.04), (0.33 * s, z0 + 0.05 * s), (0.24 * s, z0 + 0.1 * s), (0.18 * s, z0 + ph * 0.7),
               (0.24 * s, z0 + ph * 0.9), (0.25 * s, z0 + ph), (0.14 * s, z0 + ph + 0.02)], "Ceramic", seg=28)
-    team_band(b, 0.29 * s, z0 + 0.075 * s, lv)
-    cyl(b, 0.16 * s, 0.12 * s, 0.06 * s, "Metal", mat4((0, 0, z0 + ph + 0.04 * s)), seg=16)
+    kind_band(b, "beacon", 0.31 * s, z0 + 0.075 * s, lv)
+    team_pennant(b, z0, lv)
+    cyl(b, 0.17 * s, 0.13 * s, 0.07 * s, "Bronze", mat4((0, 0, z0 + ph + 0.04 * s)), seg=16, bevel=0.01)
+    torus(b, 0.25 * s, 0.025, "Bronze", mat4((0, 0, z0 + ph)), seg=28, rseg=6)
     if lv >= 2:
-        cyl(b, 0.34 * s, 0.34 * s, 0.035, "Metal", mat4((0, 0, z0)), seg=28)
+        cyl(b, 0.36 * s, 0.36 * s, 0.04, "BronzeDark", mat4((0, 0, z0)), seg=28)
     # crystal spindle
-    ch = (0.78, 0.92, 1.06)[lv - 1] * s
-    cr = (0.17, 0.18, 0.19)[lv - 1] * s
-    zb = z0 + ph + 0.06 * s
+    ch = (0.8, 0.88, 0.96)[lv - 1] * s
+    cr = (0.18, 0.19, 0.2)[lv - 1] * s
+    zb = z0 + ph + 0.07 * s
     crystal(b, [(0.0, 0.0), (cr * 0.7, ch * 0.13), (cr, ch * 0.38), (cr * 0.9, ch * 0.6), (cr * 0.5, ch * 0.84),
                 (0.0, ch)], "GlowMint", mat4((0, 0, zb)), sides=8, twist=0.0)
     zm = zb + ch * 0.45
-    # gyro rings
-    rr = cr + (0.17, 0.2, 0.22)[lv - 1] * s
-    rings = [((math.radians(90), 0, 0), "Gold")]
+    # thick gold gyro rings
+    rr = cr + (0.15, 0.17, 0.19)[lv - 1] * s
+    rings = [(math.radians(90), 0, 0)]
     if lv >= 2:
-        rings.append(((math.radians(90), 0, math.radians(90)), "Gold"))
+        rings.append((math.radians(90), 0, math.radians(90)))
     if lv == 3:
-        rings.append(((0, 0, 0), "Gold"))
-    for i, (rot, mat) in enumerate(rings):
-        R = rr + 0.035 * i
-        torus(b, R, 0.022 * s, mat, mat4((0, 0, zm), rot), seg=40, rseg=8)
-    # lower gold cradle ring on short posts
-    torus(b, cr + 0.08 * s, 0.02 * s, "Gold", mat4((0, 0, zb + 0.04 * s)), seg=32, rseg=6)
+        rings.append((0, 0, 0))
+    for i, rot in enumerate(rings):
+        R = rr + 0.05 * i
+        torus(b, R, 0.04 * s, "Gold", mat4((0, 0, zm), rot), seg=40, rseg=8)
+    # lower gold cradle ring on short bronze posts
+    torus(b, cr + 0.08 * s, 0.03 * s, "Gold", mat4((0, 0, zb + 0.04 * s)), seg=32, rseg=8)
     for i in range(3 + lv):
         a = TAU * i / (3 + lv)
         cx, cy = math.cos(a) * (cr + 0.08 * s), math.sin(a) * (cr + 0.08 * s)
-        cyl(b, 0.014 * s, 0.014 * s, 0.08 * s, "Gold", mat4((cx, cy, zb)), seg=8)
-    # ring pivots (little gold beads where the rings would hinge)
+        cyl(b, 0.02 * s, 0.02 * s, 0.09 * s, "Bronze", mat4((cx, cy, zb)), seg=8)
+    # ring pivots
     for sx in (-1, 1):
-        sphere(b, 0.035 * s, "Gold", mat4((sx * rr, 0, zm)), seg=10, rings=6)
+        sphere(b, 0.055 * s, "Bronze", mat4((sx * rr, 0, zm)), seg=12, rings=8)
     if lv >= 2:
         for i in range(lv + 1):
             a = TAU * i / (lv + 1) + 0.4
@@ -719,12 +783,12 @@ def build_beacon(mats, root, name, lv, z0):
     if lv == 3:
         # crown above the tip
         zt = zb + ch + 0.02
-        torus(b, 0.09 * s, 0.014 * s, "Gold", mat4((0, 0, zt - 0.08 * s)), seg=24, rseg=6)
+        torus(b, 0.09 * s, 0.02 * s, "Gold", mat4((0, 0, zt - 0.08 * s)), seg=24, rseg=6)
         for i in range(6):
             a = TAU * i / 6
             M = mat4((math.cos(a) * 0.09 * s, math.sin(a) * 0.09 * s, zt - 0.08 * s), (0, 0, a)) @ \
                 mat4(rot=(0, -0.35, 0))
-            crystal(b, [(0, 0), (0.016 * s, 0.03 * s), (0, 0.1 * s)], "Gold", M, sides=4)
+            crystal(b, [(0, 0), (0.018 * s, 0.03 * s), (0, 0.1 * s)], "Gold", M, sides=4)
     obj_from_mesh(name + "_body", b.mesh(name + "_body"), root)
     empty(name + "_muzzle", root, (0, 0, zb + ch + 0.03))
 
