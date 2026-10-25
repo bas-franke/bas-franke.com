@@ -75,7 +75,8 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
           // ramp out of the horizon colour so no hard step sits right on the skyline.
           float x = smoothstep(0.0, 0.92, h);
           float t = mix(x, floor(x * 7.0) / 7.0, smoothstep(0.12, 0.3, x) * bands);
-          col = mix(horizon, zenith, min(t * 1.7, 1.0));
+          // Printed skies clamp into the zenith colour; a smooth one eases all the way (no crease when you look up).
+          col = mix(horizon, zenith, mix(smoothstep(0.0, 0.75, t), min(t * 1.7, 1.0), bands));
           col = mix(col, zenith * 0.62, smoothstep(0.55, 1.0, t));
           // A soft haze lifting off the horizon, smooth on both edges.
           float hz = smoothstep(0.0, 0.05, h) * (1.0 - smoothstep(0.05, 0.24, h));

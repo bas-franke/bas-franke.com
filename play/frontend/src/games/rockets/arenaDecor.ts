@@ -232,6 +232,8 @@ export interface PropBuckets {
   glow: Bucket;
   /** Additive fades (the hazard fences). */
   fade: Bucket;
+  /** Where the billboards' lettering goes (neon themes print real signs there instead of flat bars). */
+  signs?: { x: number; y: number; z: number; yaw: number }[];
 }
 
 const cyl = (r: number, h: number, seg = 8) => new THREE.CylinderGeometry(r, r, h, seg);
@@ -359,7 +361,12 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
       solid.add(at(box(0.25, 1.6, 0.25), x + nz * 2.5, wallTop + 0.8, z - nx * 2.5), dark);
       solid.add(at(box(7.2, 3.4, 0.35), x, y + 1.7, z, yaw), dark);
       const face = rand() < 0.5 ? accent : 0xff6ab0;
-      glow.add(at(box(6.6, 2.8, 0.05), x + nx * 0.19, y + 1.7, z + nz * 0.19, yaw), face);
+      // Lettered neon signs sit on a deeper face, so the white letters stand out.
+      glow.add(at(box(6.6, 2.8, 0.05), x + nx * 0.19, y + 1.7, z + nz * 0.19, yaw), out.signs ? shade(face, 0.5) : face);
+      if (out.signs) {
+        out.signs.push({ x: x + nx * 0.23, y: y + 1.7, z: z + nz * 0.23, yaw });
+        return;
+      }
       glow.add(at(box(4.2, 0.4, 0.06), x + nx * 0.2, y + 2.2, z + nz * 0.2, yaw), 0xffffff);
       glow.add(at(box(2.6, 0.3, 0.06), x + nx * 0.2, y + 1.4, z + nz * 0.2, yaw), 0x16121c);
     });

@@ -10,6 +10,7 @@ import type { MapBox, MapData } from '@shared/rockets/map';
 import { INK, hullGeometry, inkLineMaterial, inkMaterial, toonRamp } from '../../engine/toon';
 import { BASE_SURFACES, Bucket, type Surface, type Visible, at, buildProps, edgeHazards, themeOf } from './arenaDecor';
 import { buildSky, sunDirOf } from './arenaSky';
+import { buildSigns } from './arenaSigns';
 import { TEX_SIZE, type TexKey, arenaTexture, mulberry } from './arenaTextures';
 
 /** Comic defaults; maps override per kind through `tint`. */
@@ -265,7 +266,12 @@ export function buildArena(map: MapData): ArenaView {
   const glow = new Bucket();
   const fade = new Bucket();
   const decal = new Bucket();
-  buildProps(map, theme, { solid, glow, fade });
+  const signs = theme.neon ? [] : undefined;
+  buildProps(map, theme, { solid, glow, fade, signs });
+  if (signs) {
+    const lettering = buildSigns(map, signs, disposables);
+    if (lettering) group.add(lettering);
+  }
   const hazards = edgeHazards(map, fade);
   if (hazards.stripes) {
     const mat = new THREE.MeshToonMaterial({ color: 0xffffff, map: tex('hazard'), gradientMap: toonRamp(), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
@@ -326,7 +332,16 @@ export function buildArena(map: MapData): ArenaView {
   }
 
   // ---- health pack beacons: a ring on the floor and a soft beam, so pickups read from range ----
+  // Neon maps: a hexagonal holo pad instead, a dark plinth with a cyan rim, a lit inner hex and a taller beam.
   for (const p of map.packs) {
+    if (theme.neon) {
+      solid.add(at(new THREE.CylinderGeometry(1.05, 1.15, 0.14, 6), p.x, p.y + 0.07, p.z), 0x2a2e3c);
+      glow.add(at(new THREE.TorusGeometry(0.98, 0.07, 3, 6).rotateX(Math.PI / 2).rotateY(Math.PI / 6), p.x, p.y + 0.15, p.z), 0x7af6ff);
+      glow.add(at(new THREE.CylinderGeometry(0.7, 0.7, 0.02, 6), p.x, p.y + 0.15, p.z), 0x2a9ab8);
+      glow.add(at(new THREE.TorusGeometry(0.6, 0.035, 3, 6).rotateX(Math.PI / 2).rotateY(Math.PI / 6), p.x, p.y + 0.17, p.z), 0xc8fcff);
+      fade.add(at(new THREE.CylinderGeometry(0.8, 0.95, 3, 6, 1, true), p.x, p.y + 1.6, p.z), 0x56e8ff, (_x, by) => (by < p.y + 0.2 ? 0.38 : 0));
+      continue;
+    }
     glow.add(at(new THREE.TorusGeometry(0.8, 0.06, 3, 20).rotateX(Math.PI / 2), p.x, p.y + 0.04, p.z), PACK_COLOR);
     fade.add(at(new THREE.CylinderGeometry(0.55, 0.65, 2.4, 14, 1, true), p.x, p.y + 1.2, p.z), PACK_COLOR, (_x, by) => (by < p.y + 0.1 ? 0.3 : 0));
   }
