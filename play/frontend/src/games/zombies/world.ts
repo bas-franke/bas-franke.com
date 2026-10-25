@@ -404,8 +404,8 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   const travSet = texSet('travertine');
   const brassSet = texSet('brass');
   const floorMat = keep(projMaterial({ set: floorSet, env: 1.25 }));
-  // Wet paving after rain: darker, glossier, so every lamp pool mirrors in it.
-  const plazaMat = keep(projMaterial({ set: yardSet, env: 1.1, rough: 0.32, color: 0x9a948c }));
+  // Wet paving after rain: darker and glossy, so lamp pools and lit windows smear across it (not a mirror).
+  const plazaMat = keep(projMaterial({ set: yardSet, env: 0.9, rough: 0.5, color: 0x9a948c }));
   const travMat = keep(projMaterial({ set: travSet, env: 0.45, grime: true }));
   const ceilingMat = keep(projMaterial({ set: travSet, color: 0xf2eadc, env: 0.25, normalScale: 0.4 }));
   // A trace of street light bounced off the floor keeps the coffers from going pure black.
