@@ -2207,4 +2207,9 @@ fieldset.panel {
   .feed-has-before.feed-topic-mode .story:first-of-type {
     padding-top: 152px;
   }
+
+  /* The two-line trending panel ends at 148px and the pill below it at 196px: keep the tags clear of both. */
+  .feed-has-before.feed-has-strip .story:first-of-type {
+    padding-top: 208px;
+  }
 }
