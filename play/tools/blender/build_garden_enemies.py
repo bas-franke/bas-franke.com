@@ -12,7 +12,7 @@ Output: <output-dir>/enemies.glb. Conventions the frontend relies on (frontend/s
   * Clips <kind>_walk (in-place loop), <kind>_idle (loop), <kind>_die (one-shot, ends lying on its side) and
     disruptor_cast (rear up + crest pulse), exported as separate glTF animations via NLA tracks.
   * Two materials per enemy: Body (vertex colours, COLOR_0) and Crystal (emissive crystals + eyes; base colour and
-    emission from a small palette texture via TEXCOORD_0).
+    emission from two small palette textures via TEXCOORD_0, the emission one dimmed per cell).
 Everything is procedural: bodies are low-res ellipsoids and tapered limbs, crystals are faceted pointed prisms.
 """
 
@@ -53,18 +53,38 @@ def srgb(h):
 
 # Two materials per enemy (draw calls dominate with hundreds on screen):
 #   Body     non-emissive; its colours come from the COLOR_0 vertex colours.
-#   Crystal  emissive crystals + eyes; base colour and emission both sample a tiny palette texture (TEXCOORD_0 puts
+#   Crystal  emissive crystals + eyes; base colour and emission sample two tiny palette textures (TEXCOORD_0 puts
 #            every face in the centre of one flat colour cell), since three.js does not tint emission by vertex colour.
 BODY_COLORS = {
     "orange": "#F2802E", "cream": "#F5E7D6", "char": "#2A211E", "teal": "#23797A", "deep": "#1B4A52",
-    "violet": "#6A35C2", "stone": "#2E3550",
+    "violet": "#7440CC", "lilac": "#C9B2EE", "stone": "#2E3550", "plate": "#143840",
 }
-GLOW_COLORS = {  # palette cell order
-    "amber": "#FFA940", "mint": "#4EE6D9", "cviolet": "#A869FF", "cyan": "#5FF2FF", "core": "#FFD27A", "eyes": "#FFF6D8",
+# Palette cell order: key -> (colour, emission factor). The emission texture is the base colour scaled by the factor,
+# so each cell glows at its own strength inside one material (strong glow + bloom blows faceted crystals out into
+# fuzz at gameplay scale; most crystals glow softly so their facets read, eyes and the colossus core stay bright).
+GLOW_COLORS = {
+    "amber": ("#FFA940", 0.65),     # runner blade edges, tail flame
+    "skbase": ("#2BB3A8", 0.25),    # skitter crystal bases
+    "sktip": ("#9FF7EF", 0.25),     # skitter crystal tips
+    "cviolet": ("#9A5CF0", 0.45),   # disruptor crystals
+    "vtip": ("#D2A8FF", 0.55),       # disruptor crystal tips
+    "cyan": ("#5FE8F2", 0.31),       # brute / colossus crystals
+    "ctip": ("#B4FBFF", 0.36),      # brute / colossus crystal tips
+    "core": ("#FF9A2A", 1.0),       # colossus core
+    "eyes": ("#FFF6D8", 0.8),
+    "aeyes": ("#FFB347", 1.0),      # amber eyes (brute, colossus)
 }
-GLOW_CELLS = 8      # cells across the palette texture
+GLOW_CELLS = 16     # cells across the palette texture
 CELL_PX = 4
-GLOW_STRENGTH = 1.25
+GLOW_STRENGTH = 1.6
+
+
+def srgb_to_lin(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def lin_to_srgb(c):
+    return c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
 
 
 def glow_uv(key):
@@ -94,29 +114,41 @@ def materials():
     nt.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
 
     w, h = GLOW_CELLS * CELL_PX, CELL_PX
-    img = bpy.data.images.new("crystal_palette", w, h, alpha=False)
-    px = [1.0] * (w * h * 4)
-    cols = list(GLOW_COLORS.values())
-    for y in range(h):
-        for x in range(w):
-            c = srgb(cols[min(x // CELL_PX, len(cols) - 1)])
-            i = (y * w + x) * 4
-            px[i:i + 3] = c
-    img.pixels = px
-    img.pack()
-    img.use_fake_user = True
+    cells = list(GLOW_COLORS.values())
+
+    def palette_image(name, emissive):
+        img = bpy.data.images.new(name, w, h, alpha=False)
+        px = [1.0] * (w * h * 4)
+        for y in range(h):
+            for x in range(w):
+                col, k = cells[min(x // CELL_PX, len(cells) - 1)]
+                lin = [srgb_to_lin(c) for c in srgb(col)]
+                if emissive:
+                    lin = [min(1.0, c * k) for c in lin]
+                i = (y * w + x) * 4
+                px[i:i + 3] = [lin_to_srgb(c) for c in lin]
+        img.pixels = px
+        img.pack()
+        img.use_fake_user = True
+        return img
+
+    img = palette_image("crystal_palette", False)
+    emi = palette_image("crystal_glow", True)
     crystal = bpy.data.materials.new("Crystal")
     crystal.use_fake_user = True
     crystal.use_backface_culling = True
     crystal.use_nodes = True
     nt = crystal.node_tree
     bsdf = nt.nodes.get("Principled BSDF")
-    bsdf.inputs["Roughness"].default_value = 0.22
+    bsdf.inputs["Roughness"].default_value = 0.4
     tex = nt.nodes.new("ShaderNodeTexImage")
     tex.image = img
     tex.interpolation = "Closest"
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-    nt.links.new(tex.outputs["Color"], bsdf.inputs["Emission Color"])
+    etex = nt.nodes.new("ShaderNodeTexImage")
+    etex.image = emi
+    etex.interpolation = "Closest"
+    nt.links.new(etex.outputs["Color"], bsdf.inputs["Emission Color"])
     bsdf.inputs["Emission Strength"].default_value = GLOW_STRENGTH
     _mats["Body"], _mats["Crystal"] = body, crystal
     return body, crystal
@@ -189,23 +221,32 @@ class Body:
         if joint:
             self.blob(b, (r2, r2, r2), bone, key, seg=seg, rings=5, smooth=smooth)
 
-    def crystal(self, base, d, length, r, bone, key, tip=None, sides=5, tipf=0.32, embed=0.25, lean=0.0):
-        """Faceted pointed prism from `base` along `d` (open at the embedded base); `tip` colours the pointed end."""
+    def crystal(self, base, d, length, r, bone, key, tip=None, sides=5, tipf=0.32, embed=0.25, lean=0.0, wide=None,
+                flat=1.0, taper=None):
+        """Faceted pointed prism from `base` along `d` (open at the embedded base); `tip` colours the pointed end.
+        `wide` + `flat` make a blade: full radius along `wide` (projected off `d`), `flat` x radius across it;
+        `taper` narrows the shaft towards the tip (r at the base, taper * r where the point starts)."""
         d = Vector(d).normalized()
         base = Vector(base)
-        u, v = frame(d)
         rng = self.rng
-        spin = rng.uniform(0, math.tau)
+        if wide is not None:
+            u = Vector(wide) - d * Vector(wide).dot(d)
+            u.normalize()
+            v = d.cross(u).normalized()
+            spin = 0.0
+        else:
+            u, v = frame(d)
+            spin = rng.uniform(0, math.tau)
         b0 = base - d * (length * embed)
         b1 = base + d * (length * (1 - tipf))
         apex = base + d * length + u * (lean * length)
-        r0, r1 = r * 0.72, r
+        r0, r1 = (r * 0.72, r) if taper is None else (r, r * taper)
         bm = self.bm
         ring0, ring1 = [], []
         for i in range(sides):
             ang = spin + math.tau * i / sides
             j = 1.0 + rng.uniform(-0.12, 0.12)
-            off = (u * math.cos(ang) + v * math.sin(ang))
+            off = (u * math.cos(ang) + v * (flat * math.sin(ang)))
             ring0.append(bm.verts.new(b0 + off * r0 * j))
             ring1.append(bm.verts.new(b1 + off * r1 * j))
         top = bm.verts.new(apex)
@@ -486,20 +527,25 @@ def build_runner(P):
     b.blob((0, 0.34, 0.39), (0.1, 0.09, 0.07), "head", C)
     b.limb((0, 0.37, 0.40), (0, 0.475, 0.38), 0.055, 0.02, "head", C, seg=8, joint=False)
     b.blob((0, 0.48, 0.38), (0.022, 0.02, 0.018), "head", K, seg=8, rings=5)
-    eye_pair(b, P, 0.06, 0.39, 0.455, 0.03)
+    eye_pair(b, P, 0.066, 0.384, 0.458, 0.043, yaw=22)
     for sx in (-1, 1):
-        b.crystal((sx * 0.075, 0.26, 0.5), (sx * 0.5, -0.3, 1), 0.2, 0.055, "head", O, tip=K, sides=4, tipf=0.45)
+        # big pointed fox ears (broad face forward) with charcoal tips, cream cheek tufts
+        b.crystal((sx * 0.08, 0.28, 0.49), (sx * 0.55, -0.15, 1), 0.19, 0.062, "head", O, tip=K, sides=4, tipf=0.42,
+                  wide=(1, 0, 0), flat=0.42)
         b.crystal((sx * 0.115, 0.28, 0.4), (sx * 1, -0.8, -0.15), 0.12, 0.04, "head", C, sides=4, tipf=0.6)
-    # spiky mane: dark spikes with glowing amber tips along the back, swept back
-    ridge = [((0, 0.26, 0.52), 0.24, "head"), ((0, 0.15, 0.47), 0.38, "chest"), ((0, 0.03, 0.47), 0.36, "chest"),
-             ((0, -0.09, 0.45), 0.3, "hips"), ((0, -0.2, 0.43), 0.24, "hips"), ((0, -0.29, 0.39), 0.17, "hips")]
-    for p, ln, bone in ridge:
-        b.crystal(p, (0, -0.72, 1), ln, 0.055, bone, K, tip=A, tipf=0.3, sides=5)
-    side = [((0.08, 0.2, 0.45), 0.26, "chest"), ((0.1, 0.09, 0.45), 0.27, "chest"), ((0.1, -0.03, 0.44), 0.24, "chest"),
-            ((0.095, -0.15, 0.42), 0.2, "hips"), ((0.08, -0.25, 0.38), 0.15, "hips")]
-    for p, ln, bone in side:
-        for sx in (-1, 1):
-            b.crystal((sx * p[0], p[1], p[2]), (sx * 0.65, -0.8, 0.7), ln, 0.046, bone, K, tip=A, tipf=0.3)
+    # mane: six long backswept charcoal blades, amber along the outer quarter. Spine blades are thin across X; the
+    # fanned pairs lie broad side up so they read from the top-down camera.
+    blades = [((0, 0.2, 0.51), (0, -0.95, 1), 0.37, 0.085, "head", None),
+              ((0, -0.04, 0.46), (0, -1, 0.72), 0.5, 0.095, "chest", None),
+              ((0.075, 0.1, 0.45), (0.8, -0.95, 0.62), 0.46, 0.09, "chest", (0.95, 0.8, 0)),
+              ((0.075, -0.14, 0.43), (0.9, -1, 0.42), 0.4, 0.08, "hips", (1, 0.9, 0))]
+    for p, d, ln, r, bone, wide in blades:
+        if wide is None:
+            b.crystal(p, d, ln, r, bone, K, tip=A, tipf=0.25, sides=4, wide=(0, 1, 0), flat=0.3, taper=0.6)
+        else:
+            for sx in (-1, 1):
+                b.crystal((sx * p[0], p[1], p[2]), (sx * d[0], d[1], d[2]), ln, r, bone, K, tip=A, tipf=0.25, sides=4,
+                          wide=(sx * wide[0], wide[1], wide[2]), flat=0.3, taper=0.6)
     # bushy tail with a flame tip
     b.limb((0, -0.24, 0.34), (0, -0.45, 0.45), 0.06, 0.08, "tail", O, joint=True)
     for d, ln in (((0, -1, 0.7), 0.22), ((0.5, -1, 0.5), 0.16), ((-0.5, -1, 0.5), 0.16), ((0, -0.6, 1), 0.18)):
@@ -530,8 +576,9 @@ def build_skitter(P):
                   back=((-0.10, 0.09), (-0.125, 0.05), (-0.105, 0.018)), w={"F": 0.095, "B": 0.1}))
     spec = rig_spec(J)
     b = Body(kind, [s[0] for s in spec])
-    T, C, K, M = P["teal"], P["cream"], P["char"], P["mint"]
+    T, C, K, M, MT = P["teal"], P["cream"], P["char"], P["skbase"], P["sktip"]
     b.blob((0, -0.03, 0.145), (0.14, 0.17, 0.115), "hips", T)
+    b.blob((0, 0.02, 0.105), (0.115, 0.17, 0.07), "chest", C)
     b.blob((0, 0.07, 0.14), (0.125, 0.10, 0.10), "chest", T)
     b.blob((0, 0.165, 0.14), (0.095, 0.09, 0.082), "head", T)
     b.blob((0, 0.205, 0.125), (0.075, 0.07, 0.06), "head", C)
@@ -539,9 +586,9 @@ def build_skitter(P):
     b.blob((0, 0.303, 0.11), (0.016, 0.015, 0.013), "head", K, seg=8, rings=5)
     eye_pair(b, P, 0.048, 0.228, 0.16, 0.027, yaw=24)
     for sx in (-1, 1):
-        b.crystal((sx * 0.065, 0.15, 0.205), (sx * 0.6, -0.2, 1), 0.08, 0.028, "head", T, tip=M, sides=4, tipf=0.5)
-    # crystal coat: fibonacci points over the upper back, pointing out and back
-    n = 46
+        b.crystal((sx * 0.065, 0.15, 0.205), (sx * 0.6, -0.2, 1), 0.09, 0.03, "head", T, tip=MT, sides=4, tipf=0.5)
+    # crystal coat: fewer, bigger backswept shards over the upper back (teal base, pale tip, soft glow)
+    n = 26
     for i in range(n):
         zf = 1 - (i + 0.5) / n
         rr = math.sqrt(1 - zf * zf)
@@ -550,10 +597,10 @@ def build_skitter(P):
         if nz < 0.18 or ny > 0.55:
             continue
         p = Vector((0.14 * nx * 0.92, -0.03 + 0.17 * ny * 0.92, 0.145 + 0.115 * nz * 0.92))
-        d = Vector((nx * 0.9, ny * 0.6 - 0.8, nz * 1.3)).normalized()
-        ln = 0.14 + 0.17 * nz * (1 - 0.35 * max(0.0, ny)) + b.rng.uniform(-0.02, 0.02)
+        d = Vector((nx * 0.8, ny * 0.5 - 1.0, nz * 1.2)).normalized()
+        ln = 0.16 + 0.19 * nz * (1 - 0.35 * max(0.0, ny)) + b.rng.uniform(-0.02, 0.02)
         bone = "chest" if p.y > 0.03 else "hips"
-        b.crystal(p, d, ln, 0.034 + 0.01 * nz, bone, M, sides=5, tipf=0.38)
+        b.crystal(p, d, ln, 0.046 + 0.014 * nz, bone, M, tip=MT, sides=5, tipf=0.3)
     for leg in LEGS:
         top, knee, paw = J["leg" + leg]
         b.limb(top, knee, 0.04, 0.03, f"leg{leg}_up", T, seg=8)
@@ -576,7 +623,7 @@ def build_disruptor(P):
     crest = [("crest", (0, 0.30, 0.54), (0, 0.27, 0.68), "head")]
     spec = rig_spec(J, crest)
     b = Body(kind, [s[0] for s in spec])
-    V, C, K, CV = P["violet"], P["cream"], P["char"], P["cviolet"]
+    V, C, K, CV, VT = P["violet"], P["lilac"], P["char"], P["cviolet"], P["vtip"]
     b.blob((0, -0.15, 0.31), (0.12, 0.15, 0.115), "hips", V)
     b.blob((0, 0.07, 0.34), (0.13, 0.16, 0.13), "chest", V)
     b.blob((0, -0.04, 0.32), (0.12, 0.14, 0.12), "hips", V)
@@ -586,20 +633,22 @@ def build_disruptor(P):
     b.limb((0, 0.41, 0.45), (0, 0.50, 0.43), 0.05, 0.02, "head", C, seg=8, joint=False)
     b.blob((0, 0.503, 0.43), (0.02, 0.018, 0.016), "head", K, seg=8, rings=5)
     eye_pair(b, P, 0.062, 0.425, 0.495, 0.031)
-    # crest: a fan of tall violet crystals on the head (bone "crest", it flashes / swells while casting)
-    for d, ln, r, x in (((0, -0.25, 1), 0.32, 0.055, 0), ((0.45, -0.3, 1), 0.26, 0.048, 0.04),
-                        ((-0.45, -0.3, 1), 0.26, 0.048, -0.04), ((0.9, -0.3, 0.8), 0.19, 0.04, 0.07),
-                        ((-0.9, -0.3, 0.8), 0.19, 0.04, -0.07), ((0, -1, 0.6), 0.2, 0.045, 0)):
-        b.crystal((x, 0.30, 0.55), d, ln * 1.2, r * 1.1, "crest", CV, sides=5, tipf=0.35)
-    # back plates: shorter violet crystals
-    for p, ln, bone in (((0, 0.13, 0.46), 0.2, "chest"), ((0, 0.0, 0.47), 0.22, "chest"), ((0, -0.13, 0.43), 0.19, "hips"),
-                        ((0, -0.24, 0.39), 0.14, "hips")):
-        b.crystal(p, (0, -0.6, 1), ln, 0.05, bone, CV, sides=5)
+    # crest: a big fan of violet crystals flaring back off the head (bone "crest", it flashes / swells while casting);
+    # wide and swept back so the disruptor reads from the top-down camera
+    for d, ln, r, x in (((0, -0.85, 1), 0.46, 0.095, 0), ((0.6, -0.75, 0.8), 0.46, 0.088, 0.045),
+                        ((-0.6, -0.75, 0.8), 0.46, 0.088, -0.045), ((1.2, -0.5, 0.45), 0.4, 0.078, 0.08),
+                        ((-1.2, -0.5, 0.45), 0.4, 0.078, -0.08)):
+        b.crystal((x, 0.30, 0.55), d, ln, r, "crest", CV, tip=VT, sides=5, tipf=0.35)
+    # back: tall spine shards with wide flaring side shards
+    for p, ln, bone in (((0, 0.1, 0.46), 0.34, "chest"), ((0, -0.06, 0.46), 0.36, "chest"), ((0, -0.2, 0.42), 0.28, "hips"),
+                        ((0, -0.31, 0.37), 0.2, "hips")):
+        b.crystal(p, (0, -0.9, 1), ln, 0.07, bone, CV, tip=VT, sides=5, tipf=0.35)
         for sx in (-1, 1):
-            b.crystal((sx * 0.08, p[1] - 0.04, p[2] - 0.04), (sx * 0.8, -0.5, 0.8), ln * 0.7, 0.038, bone, CV)
+            b.crystal((sx * 0.09, p[1] - 0.03, p[2] - 0.05), (sx * 1.2, -0.6, 0.6), ln * 0.9, 0.065, bone, CV, tip=VT,
+                      tipf=0.35)
     # long tail ending in a crystal
     b.limb((0, -0.27, 0.33), (0, -0.50, 0.3), 0.055, 0.035, "tail", V, seg=8)
-    b.crystal((0, -0.52, 0.3), (0, -1, 0.35), 0.16, 0.045, "tail", CV, sides=5, tipf=0.4)
+    b.crystal((0, -0.52, 0.3), (0, -1, 0.35), 0.2, 0.055, "tail", CV, tip=VT, sides=5, tipf=0.4)
     for leg in LEGS:
         top, knee, paw = J["leg" + leg]
         big = 0.065 if leg[0] == "B" else 0.058
@@ -644,7 +693,7 @@ def build_brute(P):
                   w={"F": (0.5, 0.6, 0.54), "B": (0.27, 0.3, 0.29)}))
     spec = rig_spec(J)
     b = Body(kind, [s[0] for s in spec])
-    D, CY, S = P["deep"], P["cyan"], P["stone"]
+    D, CY, CT, S = P["deep"], P["cyan"], P["ctip"], P["stone"]
     # hunched gorilla mass: huge chest and shoulders, smaller rear
     b.blob((0, -0.32, 0.68), (0.34, 0.32, 0.30), "hips", D, seg=12, rings=8)
     b.blob((0, 0.04, 0.86), (0.46, 0.42, 0.40), "chest", D, seg=14, rings=9)
@@ -655,7 +704,7 @@ def build_brute(P):
     b.blob((0, 0.6, 0.76), (0.15, 0.11, 0.11), "head", S, seg=10, rings=7)
     b.blob((0, 0.58, 0.91), (0.2, 0.08, 0.055), "head", S, rot=(-12, 0, 0), seg=10, rings=6)
     for sx in (-1, 1):
-        b.blob((sx * 0.09, 0.645, 0.855), (0.045, 0.022, 0.032), "head", P["eyes"], rot=(0, sx * -12, sx * -20),
+        b.blob((sx * 0.09, 0.645, 0.855), (0.045, 0.022, 0.032), "head", P["aeyes"], rot=(0, sx * -12, sx * -20),
                seg=10, rings=6)
         b.crystal((sx * 0.13, 0.44, 0.98), (sx * 0.5, -0.4, 1), 0.18, 0.055, "head", CY, sides=5)
     # big cyan crystal clusters on the shoulders and along the back (tallest tip ~1.8 m)
@@ -663,12 +712,12 @@ def build_brute(P):
         for d, ln, r, off in (((0.3, -0.25, 1), 0.78, 0.13, (0.4, 0.16, 1.1)), ((0.9, 0.1, 0.75), 0.5, 0.1, (0.55, 0.22, 1.02)),
                               ((0.55, -0.7, 0.9), 0.55, 0.1, (0.34, 0.02, 1.1)), ((0.15, 0.45, 1), 0.42, 0.09, (0.34, 0.3, 1.06)),
                               ((0.95, -0.3, 0.35), 0.34, 0.08, (0.6, 0.08, 0.92))):
-            b.crystal((sx * off[0], off[1], off[2]), (sx * d[0], d[1], d[2]), ln, r, "chest", CY, sides=6, tipf=0.3)
+            b.crystal((sx * off[0], off[1], off[2]), (sx * d[0], d[1], d[2]), ln, r, "chest", CY, tip=CT, sides=6, tipf=0.3)
     for p, ln, r, bone in (((0, 0.0, 1.2), 0.62, 0.13, "chest"), ((0, -0.2, 1.1), 0.5, 0.11, "chest"),
                            ((0, -0.36, 0.94), 0.4, 0.1, "hips"), ((0, -0.54, 0.84), 0.28, 0.08, "hips"),
                            ((0.17, -0.24, 1.0), 0.34, 0.085, "hips"), ((-0.17, -0.24, 1.0), 0.34, 0.085, "hips"),
                            ((0.16, -0.48, 0.84), 0.22, 0.065, "hips"), ((-0.16, -0.48, 0.84), 0.22, 0.065, "hips")):
-        b.crystal(p, (p[0] * 2.5, -0.55, 1), ln, r, bone, CY, sides=6, tipf=0.3)
+        b.crystal(p, (p[0] * 2.5, -0.55, 1), ln, r, bone, CY, tip=CT, sides=6, tipf=0.3)
     # arms (front legs): thick, knuckle-walking fists with crystal knuckles; short heavy hind legs
     for leg in LEGS:
         top, knee, paw = J["leg" + leg]
@@ -703,8 +752,10 @@ def build_colossus(P):
     core = [("core", (0, -0.15, 2.05), (0, -0.15, 2.4), "hips")]
     spec = rig_spec(J, core)
     b = Body(kind, [s[0] for s in spec])
-    S, D, K = P["stone"], P["deep"], P["char"]
-    CV, CY, CA, CO = P["cviolet"], P["cyan"], P["amber"], P["core"]
+    # brute palette: deep teal body, darker plates, soft cyan crystals, one bright amber core
+    S, D, K = P["deep"], P["plate"], P["char"]
+    CY, CT, CO = P["cyan"], P["ctip"], P["core"]
+    CV = CA = CY
     # massive faceted stone body with darker teal armour plates
     b.blob((0, -0.62, 1.45), (0.74, 0.8, 0.66), "hips", S, seg=12, rings=8, smooth=False)
     b.blob((0, 0.32, 1.58), (0.84, 0.74, 0.72), "chest", S, seg=12, rings=8, smooth=False)
@@ -716,13 +767,13 @@ def build_colossus(P):
     b.blob((0, 1.38, 1.32), (0.32, 0.26, 0.2), "head", D, seg=10, rings=6, smooth=False)
     b.blob((0, 1.32, 1.68), (0.42, 0.14, 0.09), "head", D, rot=(-15, 0, 0), seg=8, rings=5, smooth=False)
     for sx in (-1, 1):
-        b.blob((sx * 0.2, 1.47, 1.55), (0.085, 0.04, 0.06), "head", P["eyes"], rot=(0, 0, sx * -20), seg=10, rings=6)
-        b.blob((sx * 0.33, 1.38, 1.47), (0.05, 0.03, 0.04), "head", P["eyes"], rot=(0, 0, sx * -35), seg=8, rings=5)
+        b.blob((sx * 0.2, 1.47, 1.55), (0.085, 0.04, 0.06), "head", P["aeyes"], rot=(0, 0, sx * -20), seg=10, rings=6)
+        b.blob((sx * 0.33, 1.38, 1.47), (0.05, 0.03, 0.04), "head", P["aeyes"], rot=(0, 0, sx * -35), seg=8, rings=5)
         b.crystal((sx * 0.3, 1.05, 1.78), (sx * 0.5, -0.3, 1), 0.5, 0.1, "head", CV, sides=5)
         b.crystal((sx * 0.42, 1.35, 1.25), (sx * 0.4, 1, 0.2), 0.32, 0.07, "head", CA, sides=5)
-    b.crystal((0, 1.45, 1.62), (0, 1, 0.9), 0.6, 0.12, "head", CY, sides=6, tipf=0.4)
+    b.crystal((0, 1.45, 1.62), (0, 1, 0.9), 0.6, 0.12, "head", CY, tip=CT, sides=6, tipf=0.4)
     # glowing core on the back, ringed by tall prismatic crystals: reads as the boss from the top-down camera
-    b.gem((0, -0.15, 2.18), 0.34, "core", CO, subdiv=1)
+    b.gem((0, -0.15, 2.2), 0.4, "core", CO, subdiv=1)
     b.blob((0, -0.15, 2.0), (0.48, 0.48, 0.18), "core", D, seg=10, rings=5, smooth=False)
     ring = [CV, CY, CA]
     for i in range(9):
@@ -730,7 +781,7 @@ def build_colossus(P):
         p = (0.52 * math.cos(a), -0.15 + 0.6 * math.sin(a), 2.0 - 0.05 * abs(math.sin(a)))
         d = (math.cos(a) * 0.55, math.sin(a) * 0.55, 1)
         ln = 1.05 + 0.12 * math.cos(3 * a) if math.sin(a) < 0.5 else 0.75
-        b.crystal(p, d, ln, 0.15, "chest" if p[1] > -0.1 else "hips", ring[i % 3], sides=6, tipf=0.3)
+        b.crystal(p, d, ln, 0.15, "chest" if p[1] > -0.1 else "hips", ring[i % 3], tip=CT, sides=6, tipf=0.3)
     # shoulder + flank clusters and a spiked tail
     for sx in (-1, 1):
         for off, d, ln, r, m, bone in (((0.72, 0.45, 1.92), (0.8, 0.2, 0.9), 0.62, 0.13, CV, "chest"),
@@ -739,7 +790,7 @@ def build_colossus(P):
                                        ((0.68, -0.7, 1.8), (0.8, -0.3, 0.9), 0.55, 0.12, CY, "hips"),
                                        ((0.55, -1.05, 1.6), (0.6, -0.8, 0.7), 0.42, 0.1, CA, "hips"),
                                        ((0.78, -0.4, 1.55), (1, 0, 0.3), 0.35, 0.09, CV, "hips")):
-            b.crystal((sx * off[0], off[1], off[2]), (sx * d[0], d[1], d[2]), ln, r, bone, m, sides=6, tipf=0.3)
+            b.crystal((sx * off[0], off[1], off[2]), (sx * d[0], d[1], d[2]), ln, r, bone, m, tip=CT, sides=6, tipf=0.3)
     for p, ln, m in (((0, -1.0, 1.98), 0.6, CV), ((0, 0.62, 2.12), 0.55, CA), ((0, -1.3, 1.72), 0.45, CY)):
         b.crystal(p, (0, -0.5 if p[1] < 0 else 0.3, 1), ln, 0.13, "hips" if p[1] < 0 else "chest", m, sides=6)
     b.limb((0, -1.2, 1.4), (0, -1.9, 1.0), 0.32, 0.16, "tail", S, seg=8, smooth=False)
