@@ -22,17 +22,20 @@ const SURVIVOR_CLIPS: SurvivorClip[] = ['idle', 'walk', 'run', 'downed', 'reload
 const ONE_SHOT = new Set(['attack', 'vault', 'rise', 'death_back', 'death_fwd', 'reload']);
 const BONE_NAMES = ['root', 'hips', 'spine', 'chest', 'neck', 'head', ...['upperarm', 'forearm', 'hand', 'thigh', 'shin', 'foot'].flatMap((b) => [`${b}.L`, `${b}.R`])];
 
-/** Drab shirts and trousers; a zombie's variant picks one of each. */
-const SHIRTS = [0x6b5f4e, 0x4a5560, 0x8a8478, 0x3e4a3a, 0x5a3c34, 0x7d7a70, 0x2f3540, 0x6e6a5a, 0x50463c];
-const TROUSERS = [0x2d2a26, 0x3b3f46, 0x4a4234, 0x23262b, 0x56503f, 0x34302a];
+/** Default jacket colour before a zombie's variant tint is applied. */
+const SHIRTS = [0x3a3836];
 
-/** Zombie bodies in zombie.glb (build_zombies.py ZOMBIE_VARIANTS) and their clothing colours: [top, bottom]. */
+/**
+ * Zombie bodies in zombie.glb (build_zombies.py ZOMBIE_VARIANTS: businessman, bellhop, housekeeper, businesswoman) and
+ * their clothing colours: [top (Cloth), bottom (ClothB)]. The albedo texture carries dirt, blood and weave; these
+ * colours multiply it.
+ */
 const ZOMBIE_BODIES = 4;
 const ZOMBIE_CLOTHES: [number[], number[]][] = [
-  [SHIRTS, TROUSERS],
-  [[0x5a4632, 0x2c3440, 0x7a6a2a, 0x4a3a2c], TROUSERS],
-  [[0x6a3a44, 0x3c4a5e, 0x7a6e58, 0x4b5a46, 0x5e4a5a], TROUSERS],
-  [[0x8fa3a8, 0x9aa894, 0x7f95a6], [0x8a8a84, 0x6e6e68]],
+  [[0x3a3836, 0x2d2f36, 0x4a4036, 0x30302e, 0x3b3530], [0x26262a, 0x2e2b28, 0x1f2023, 0x34302a]],
+  [[0x7a1c18, 0x6e1a24, 0x5c1a1a, 0x7a2a1c], [0x1a1a1c, 0x222226]],
+  [[0x6a6c70, 0x5a5e66, 0x4c5a5a, 0x5e5a62], [0x2a2624, 0x1e1c1c, 0x302826]],
+  [[0xd8cfc0, 0xc9b9a8, 0xa9b4c2, 0xc8c0cc], [0x2a2a2e, 0x3a2e2a, 0x2c3040]],
 ];
 
 /** Where the hold poses put the rifle grip, in the survivor's own space (build_zombies.py GRIP, converted to y-up). */
@@ -155,6 +158,31 @@ function fallbackGun(): THREE.Group {
   return g;
 }
 
+/** Width, height, depth (m) and colour of each hotel prop, for the fallback boxes. */
+const HOTEL_FALLBACK: Record<string, [number, number, number, number]> = {
+  sofa: [2.2, 0.95, 1.0, 0xd8cdb8],
+  armchair: [0.85, 0.85, 0.85, 0xd8cdb8],
+  brassTable: [0.64, 0.56, 0.64, 0xb08a3e],
+  coffeeTable: [1.2, 0.5, 0.7, 0x1a1a1a],
+  tableLamp: [0.4, 0.68, 0.4, 0xe8dcc0],
+  floorLamp: [0.5, 1.68, 0.5, 0xe8dcc0],
+  planterTree: [1.6, 2.6, 1.5, 0x2e4a24],
+  flowers: [0.8, 1.27, 0.7, 0xe8e4da],
+  sconce: [0.1, 0.42, 0.15, 0xb08a3e],
+  pendant: [1.05, 0.25, 1.05, 0xb08a3e],
+  revolvingDoor: [4.1, 3.1, 4.1, 0xb08a3e],
+  elevatorDoors: [2.7, 2.95, 0.25, 0xb08a3e],
+  securityShutter: [6.2, 4.4, 0.4, 0x6a6864],
+  barStool: [0.44, 0.97, 0.45, 0x222222],
+  booth: [2.0, 1.22, 0.71, 0x4a2a16],
+  diningTable: [1.0, 0.77, 1.0, 0xe8e4da],
+  diningChair: [0.5, 1.0, 0.55, 0x4a2a16],
+  luggageCart: [1.12, 1.85, 0.62, 0xb08a3e],
+  stanchion: [0.32, 0.97, 0.32, 0xb08a3e],
+  receptionBell: [0.11, 0.08, 0.11, 0xb08a3e],
+  computer: [0.55, 0.47, 0.41, 0x111111],
+};
+
 function fallbackProp(name: string): THREE.Object3D {
   const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
   const g = new THREE.Group();
@@ -190,6 +218,12 @@ function fallbackProp(name: string): THREE.Object3D {
       m.position.y = 3;
       g.add(m);
       break;
+    }    default: {
+      // Hotel props: a box of the right size so a failed load still blocks the eye the same way.
+      const [w, h, d, color] = HOTEL_FALLBACK[name] ?? [0.5, 0.5, 0.5, 0x777777];
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
+      m.position.y = h / 2;
+      g.add(m);
     }
   }
   prepare(g, false);
@@ -292,7 +326,7 @@ export function createModels(): Models {
     ready,
     zombie(variant: number) {
       const inst = character(zombieGltf, true, SHIRTS[0]);
-      // zombie.glb holds four bodies (civilian, worker, woman, patient) as Zombie_<Part>_<k>: keep one, drop the rest.
+      // zombie.glb holds four bodies (businessman, bellhop, housekeeper, businesswoman) as Zombie_<Part>_<k>: keep one, drop the rest.
       const k = Math.floor(hash(variant, 8) * ZOMBIE_BODIES);
       const model = inst.root.children[0];
       if (model?.getObjectByName(`Zombie_Head_${k}`)) {

@@ -1,25 +1,41 @@
-// The destructible world of a Last Light map, built identically on the server and in the browser from the map id.
+// The destructible world of a Last Light map, built identically on the server and in the browser from the map id and
+// the zones that are open (see maps.ts: the hotel opens its wings by party size).
 //
-// - Walls and props are made of chunks: axis-aligned boxes about 0.5 m across with health. Bullets chip them,
-//   grenades and zombies bash them, and chunks no longer connected to the floor or ceiling collapse (collapse()).
-//   Chunk indices are stable, so the server only ever sends indices and health values.
-// - Solids are what never breaks: floor, ceiling, corner posts, lockers, the yard boundary and window sills.
-//   Clips block players only (the window openings).
+// - Walls and breakable architecture are made of chunks: axis-aligned boxes about 0.5 m across with health. Bullets
+//   chip them, grenades and zombies bash them, and chunks no longer connected to the floor or a ceiling collapse
+//   (collapse()). Chunk indices are stable and do not depend on the open zones, so the server only sends indices and
+//   health values.
+// - Solids never break: floor, ceilings, corner posts, brass mullions, lockers, furniture, the mezzanine slabs, the
+//   elevator doors, the shutters of closed wings, the boundary. Clips block players and zombies but not bullets or
+//   grenades (boarded entrances: zombies get through by tearing the boards and vaulting).
 // - A 1 m grid over the whole map indexes the chunks for collision and ray casts.
 
 import type { AABB, Vec3 } from '../math.js';
 import { LOCKER_ORDER, type WeaponId } from './weapons.js';
-import type { MapDef, Mat, PropDef, Side, StationKind } from './maps.js';
+import { FURNITURE_SIZE, type FurnitureDef, type MapDef, type Mat, type OpeningDef, type Side, type StationKind, type WallDef, type ZoneId } from './maps.js';
 
 export const CHUNK = 0.5;
+/** Wall thickness of the old rectangle maps; the hotel's walls carry their own (WallDef.thick). */
 export const WALL_T = 0.4;
 export const YARD = 9;
 export const SILL_Y = 1;
 export const WINDOW_TOP = 2.5;
-/** Window opening width in chunk columns. */
+/** Entrance width in chunk columns. */
 const WINDOW_COLS = 3;
+/** Walls use 0.5 m rows up to this height and 1 m rows above (fewer chunks up where nobody fights). */
+const FINE_ROWS = 6;
 
-export const MAT_HP: Record<Mat, number> = { brick: 110, plaster: 70, concrete: 240, wood: 45, metal: 420 };
+export const MAT_HP: Record<Mat, number> = {
+  brick: 110,
+  plaster: 70,
+  concrete: 240,
+  wood: 45,
+  metal: 420,
+  marble: 200,
+  travertine: 150,
+  walnut: 60,
+  glass: 6,
+};
 
 export interface Chunk {
   min: Vec3;
@@ -28,29 +44,58 @@ export interface Chunk {
   maxHp: number;
   /** Never breaks (window sills). */
   hard: boolean;
-  /** Touches the floor or the ceiling: holds up whatever is connected to it. */
+  /** Touches the floor or its ceiling: holds up whatever is connected to it. */
   anchored: boolean;
   /** Face-touching neighbours. */
   nb: number[];
-  /** Part of an outer wall (for the nav grid and rendering). */
+  /** Part of a wall (not a column, desk or bar). */
   wall: boolean;
+  /** The wall id (maps.ts WallDef.id) or prop kind ('column', 'desk', 'bar') it belongs to. */
+  part: string;
+  zone: ZoneId;
 }
 
+export type SolidKind =
+  | 'floor'
+  | 'ceiling'
+  | 'post'
+  | 'locker'
+  | 'bound'
+  | 'clip'
+  | 'sill'
+  | 'mullion'
+  | 'shutter'
+  | 'elevator'
+  | 'mezzanine'
+  | 'furniture';
+
 export interface Solid extends AABB {
-  kind: 'floor' | 'ceiling' | 'post' | 'locker' | 'bound' | 'clip' | 'sill';
+  kind: SolidKind;
+  /** Zone the solid belongs to (a shutter: the closed wing behind it). */
+  zone?: ZoneId;
 }
 
 export interface WindowInfo {
   i: number;
   side: Side;
-  /** Centre of the opening on the wall's centre plane, at sill height. */
+  /** Wall id it is cut into. */
+  wall: string;
+  zone: ZoneId;
+  /** A doorway from the floor, or a window over a 1 m sill. */
+  door: boolean;
+  look: 'revolving' | 'glassDoor' | 'serviceDoor' | 'window';
+  /** False in a closed wing: no zombies come through and nobody repairs it. */
+  active: boolean;
+  /** Centre of the opening on the wall's centre plane, at the bottom of the opening (0 for doors, the sill else). */
   center: Vec3;
-  /** Unit vector pointing out of the room. */
+  /** Top of the opening. */
+  top: number;
+  /** Unit vector pointing out of the building. */
   out: Vec3;
   /** Where a player stands to repair, and where a zombie stands to tear boards. */
   inside: Vec3;
   outside: Vec3;
-  /** Where zombies for this window rise from the ground. */
+  /** Where zombies for this entrance rise from the ground. */
   spawns: Vec3[];
   width: number;
 }
@@ -59,6 +104,7 @@ export interface StationInfo {
   i: number;
   kind: StationKind;
   item?: WeaponId;
+  zone: ZoneId;
   /** Front centre of the locker at floor height, and the direction it faces (into the room). */
   pos: Vec3;
   facing: Vec3;
@@ -72,8 +118,36 @@ export interface Rect {
   maxZ: number;
 }
 
+export interface ZoneInfo {
+  id: ZoneId;
+  name: string;
+  rect: Rect;
+  /** Ceiling height. */
+  h: number;
+  minPlayers: number;
+  open: boolean;
+  /** The passage between this wing and the atrium (null for the atrium): shutter raised when open, closed when not. */
+  passage: AABB | null;
+}
+
+export interface FurnitureInfo extends FurnitureDef {
+  box: AABB;
+}
+
+export interface LampInfo {
+  pos: Vec3;
+  flicker: number;
+  zone: ZoneId;
+  kind: 'chandelier' | 'pendant';
+}
+
 export interface World {
   def: MapDef;
+  zones: ZoneInfo[];
+  /** Ids of the open zones. */
+  open: ZoneId[];
+  /** Floor areas players can be in: open zones plus the passages between them (inside() uses these). */
+  areas: Rect[];
   chunks: Chunk[];
   /** 1 while a chunk stands. */
   alive: Uint8Array;
@@ -81,9 +155,12 @@ export interface World {
   solids: Solid[];
   windows: WindowInfo[];
   stations: StationInfo[];
-  lamps: { pos: Vec3; flicker: number }[];
+  furniture: FurnitureInfo[];
+  lamps: LampInfo[];
+  /** The atrium's floor rectangle (older code treats it as "the room"). */
   interior: Rect;
   bounds: Rect;
+  /** Highest ceiling (the atrium). */
   height: number;
   spawns: Vec3[];
   // Chunk grid (1 m cells).
@@ -95,121 +172,254 @@ export interface World {
   cells: number[][];
   stamp: Uint32Array;
   stampN: number;
+  /** Solids per 1 m column of the same grid (x, z only), for firstBlock. */
+  solidCells: number[][];
 }
 
 const v = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
+const EPS = 1e-3;
+
+const FACING: Record<Side, Vec3> = { n: v(0, 0, -1), s: v(0, 0, 1), w: v(-1, 0, 0), e: v(1, 0, 0) };
+
+/** Row boundaries from the floor to `h`: 0.5 m up to `fine`, then 1 m. */
+function rows(h: number, fine = FINE_ROWS): number[] {
+  const out = [0];
+  let y = 0;
+  while (y < h - EPS) {
+    y = Math.min(h, y + (y < fine - EPS ? CHUNK : 1));
+    out.push(y);
+  }
+  return out;
+}
+
+const sideOf = (w: WallDef): Side => (w.along === 'x' ? (w.out < 0 ? 'n' : 's') : w.out < 0 ? 'w' : 'e');
+
+/** A box spanning [a0, a1] along the wall, [y0, y1] up and the wall's thickness (plus `pad` either side). */
+export function wallBox(w: WallDef, a0: number, a1: number, y0: number, y1: number, pad = 0): AABB {
+  const f0 = Math.min(w.fixed, w.fixed + w.out * w.thick) - pad;
+  const f1 = Math.max(w.fixed, w.fixed + w.out * w.thick) + pad;
+  return w.along === 'x' ? { min: v(a0, y0, f0), max: v(a1, y1, f1) } : { min: v(f0, y0, a0), max: v(f1, y1, a1) };
+}
+
+/** Point `along` the wall at distance `off` from its inner face (positive = outwards). */
+function wallPoint(w: WallDef, along: number, off: number): Vec3 {
+  const f = w.fixed + w.out * off;
+  return w.along === 'x' ? v(along, 0, f) : v(f, 0, along);
+}
 
 // ---- building -------------------------------------------------------------------------------------------------
 
-export function buildWorld(def: MapDef): World {
-  const hw = def.w / 2;
-  const hd = def.d / 2;
-  const h = def.h;
+/** Builds the world with the given zones open (default: every zone, for labs and tools). The atrium is always open. */
+export function buildWorld(def: MapDef, openZones?: readonly ZoneId[]): World {
+  const open = new Set<ZoneId>(openZones ?? def.zones.map((z) => z.id));
+  open.add('atrium');
+  const zoneH = (id: ZoneId) => def.zones.find((z) => z.id === id)?.h ?? def.h;
   const chunks: Chunk[] = [];
   const solids: Solid[] = [];
   const windows: WindowInfo[] = [];
-  const add = (min: Vec3, max: Vec3, mat: Mat, wall = false, hard = false) => {
-    chunks.push({ min, max, mat, maxHp: hard ? Infinity : MAT_HP[mat], hard, anchored: min.y <= 1e-3 || max.y >= h - 1e-3, nb: [], wall });
+  const add = (min: Vec3, max: Vec3, mat: Mat, part: string, zone: ZoneId, ceil: number, wall = false, hard = false) => {
+    chunks.push({ min, max, mat, maxHp: hard ? Infinity : MAT_HP[mat], hard, anchored: min.y <= EPS || max.y >= ceil - EPS, nb: [], wall, part, zone });
   };
 
-  // Outer walls, one side at a time. Each side runs along an axis between the corner posts.
-  const sides: { side: Side; along: 'x' | 'z'; len: number; fixed: number; out: number }[] = [
-    { side: 'n', along: 'x', len: def.w, fixed: -hd, out: -1 },
-    { side: 's', along: 'x', len: def.w, fixed: hd, out: 1 },
-    { side: 'w', along: 'z', len: def.d, fixed: -hw, out: -1 },
-    { side: 'e', along: 'z', len: def.d, fixed: hw, out: 1 },
-  ];
-  const rows = Math.round(h / CHUNK);
-  for (const s of sides) {
-    const cols = Math.round(s.len / CHUNK);
-    const start = -s.len / 2;
-    // Window columns for this side: the column nearest `at`, and one either side.
-    const winCols = new Map<number, number>();
-    for (const wdef of def.windows) {
-      if (wdef.side !== s.side) continue;
-      const k = Math.round((wdef.at - start) / CHUNK - 0.5);
+  // Walls, with their openings and entrances.
+  for (const w of def.walls) {
+    const ops = def.openings.filter((o) => o.wall === w.id);
+    const start = w.a0;
+    const cols = Math.round((w.a1 - w.a0) / CHUNK);
+    // Entrance columns: the column whose centre is `at`, and one either side.
+    const entCols = new Map<number, number>();
+    for (const e of def.entrances) {
+      if (e.wall !== w.id) continue;
+      const k = Math.round((e.at - start) / CHUNK - 0.5);
       const wi = windows.length;
-      for (let c = k - 1; c <= k + 1; c++) winCols.set(c, wi);
+      for (let c = k - 1; c <= k + 1; c++) entCols.set(c, wi);
       const along = start + (k + 0.5) * CHUNK;
-      const wallMid = s.fixed + (s.out * WALL_T) / 2;
-      const out = s.along === 'x' ? v(0, 0, s.out) : v(s.out, 0, 0);
-      const at = (a: number, b: number) => (s.along === 'x' ? v(a, 0, b) : v(b, 0, a));
-      const center = at(along, wallMid);
-      center.y = SILL_Y;
-      const inside = at(along, s.fixed - s.out * 0.7);
-      const outside = at(along, s.fixed + s.out * (WALL_T + 0.65));
-      const spawns = [-2.2, 0, 2.2].map((lat, j) => at(along + lat, s.fixed + s.out * (WALL_T + 4.5 + j * 0.8)));
-      windows.push({ i: wi, side: s.side, center, out, inside, outside, spawns, width: WINDOW_COLS * CHUNK });
-      // Players may not climb out; zombies vault (the server moves them through without collision).
+      const center = wallPoint(w, along, w.thick / 2);
+      center.y = e.door ? 0 : SILL_Y;
+      windows.push({
+        i: wi,
+        side: sideOf(w),
+        wall: w.id,
+        zone: e.zone,
+        door: e.door,
+        look: e.look,
+        active: open.has(e.zone),
+        center,
+        top: WINDOW_TOP,
+        out: FACING[sideOf(w)],
+        inside: wallPoint(w, along, -0.7),
+        outside: wallPoint(w, along, w.thick + 0.65),
+        spawns: [-2.2, 0, 2.2].map((lat, j) => wallPoint(w, along + lat, w.thick + 4.5 + j * 0.8)),
+        width: WINDOW_COLS * CHUNK,
+      });
+      // Nobody walks through a boarded entrance; zombies vault (the server moves them through).
       const a0 = start + (k - 1) * CHUNK;
       const a1 = start + (k + 2) * CHUNK;
-      const f0 = Math.min(s.fixed, s.fixed + s.out * WALL_T);
-      const f1 = Math.max(s.fixed, s.fixed + s.out * WALL_T);
-      solids.push(s.along === 'x' ? { kind: 'clip', min: v(a0, SILL_Y, f0 - 0.05), max: v(a1, h, f1 + 0.05) } : { kind: 'clip', min: v(f0 - 0.05, SILL_Y, a0), max: v(f1 + 0.05, h, a1) });
+      solids.push({ kind: 'clip', zone: e.zone, ...wallBox(w, a0, a1, e.door ? 0 : SILL_Y, w.h, 0.05) });
     }
+    const ys = rows(w.h, w.mat === 'glass' ? 3 : FINE_ROWS);
     for (let c = 0; c < cols; c++) {
       const a0 = start + c * CHUNK;
       const a1 = a0 + CHUNK;
-      const f0 = Math.min(s.fixed, s.fixed + s.out * WALL_T);
-      const f1 = Math.max(s.fixed, s.fixed + s.out * WALL_T);
-      const isWin = winCols.has(c);
-      for (let r = 0; r < rows; r++) {
-        const y0 = r * CHUNK;
-        const y1 = Math.min(h, y0 + CHUNK);
-        if (isWin && y0 >= SILL_Y - 1e-3 && y1 <= WINDOW_TOP + 1e-3) continue;
-        const sill = isWin && y1 <= SILL_Y + 1e-3;
-        const min = s.along === 'x' ? v(a0, y0, f0) : v(f0, y0, a0);
-        const max = s.along === 'x' ? v(a1, y1, f1) : v(f1, y1, a1);
-        add(min, max, sill ? 'concrete' : def.wall, true, sill);
+      const mid = (a0 + a1) / 2;
+      const ent = entCols.get(c);
+      const door = ent !== undefined && windows[ent].door;
+      const gap = ops.find((o) => mid > o.a0 && mid < o.a1);
+      for (let r = 0; r + 1 < ys.length; r++) {
+        const y0 = ys[r];
+        const y1 = ys[r + 1];
+        if (gap && y1 <= gap.y1 + EPS) continue;
+        let hard = false;
+        if (ent !== undefined) {
+          if (door && y1 <= WINDOW_TOP + EPS) continue;
+          if (!door && y0 >= SILL_Y - EPS && y1 <= WINDOW_TOP + EPS) continue;
+          if (!door && y1 <= SILL_Y + EPS) hard = true;
+        }
+        const b = wallBox(w, a0, a1, y0, y1);
+        add(b.min, b.max, hard && w.mat === 'glass' ? 'marble' : w.mat, w.id, w.zone, w.h, true, hard);
       }
     }
+    for (const o of ops) fillOpening(w, o, open, solids);
   }
-  // Corner posts.
-  for (const sx of [-1, 1])
-    for (const sz of [-1, 1]) {
-      const x0 = sx < 0 ? -hw - WALL_T : hw;
-      const z0 = sz < 0 ? -hd - WALL_T : hd;
-      solids.push({ kind: 'post', min: v(x0, 0, z0), max: v(x0 + WALL_T, h, z0 + WALL_T) });
+
+  for (const [x0, x1, z0, z1, h] of def.posts) solids.push({ kind: 'post', min: v(x0, 0, z0), max: v(x1, h, z1) });
+  for (const m of def.walls.filter((w) => w.id === def.mullions.wall)) {
+    for (const at of def.mullions.at) {
+      // Mullions stand a little proud of the glass on the inside.
+      const b = wallBox(m, at - 0.1, at + 0.1, 0, m.h, 0.08);
+      solids.push({ kind: 'mullion', ...b });
     }
+  }
 
-  for (const p of def.props) addProp(p, h, add);
+  // Breakable architecture.
+  for (const p of def.props) {
+    const ceil = zoneH(p.zone);
+    if (p.kind === 'column') {
+      const n = p.n ?? 1.2;
+      const k = Math.max(1, Math.round(n / 0.6));
+      const s = n / k;
+      const ys = rows(ceil);
+      for (let i = 0; i < k; i++)
+        for (let j = 0; j < k; j++)
+          for (let r = 0; r + 1 < ys.length; r++) {
+            const x0 = p.x - n / 2 + i * s;
+            const z0 = p.z - n / 2 + j * s;
+            add(v(x0, ys[r], z0), v(x0 + s, ys[r + 1], z0 + s), 'travertine', 'column', p.zone, ceil);
+          }
+    } else {
+      // Reception desk / bar counter: a walnut body on the floor under a marble top slab, 1 m deep.
+      const len = p.n ?? 6;
+      const cols = Math.round(len / CHUNK);
+      for (let i = 0; i < cols; i++)
+        for (let j = 0; j < 2; j++) {
+          const a = -len / 2 + i * CHUNK;
+          const d = -0.5 + j * CHUNK;
+          const x0 = p.r === 1 ? p.x + d : p.x + a;
+          const z0 = p.r === 1 ? p.z + a : p.z + d;
+          add(v(x0, 0, z0), v(x0 + CHUNK, 0.5, z0 + CHUNK), 'walnut', p.kind, p.zone, ceil);
+          add(v(x0, 0.5, z0), v(x0 + CHUNK, 1.0, z0 + CHUNK), 'walnut', p.kind, p.zone, ceil);
+          add(v(x0, 1.0, z0), v(x0 + CHUNK, 1.1, z0 + CHUNK), 'marble', p.kind, p.zone, ceil);
+        }
+    }
+  }
 
-  // Floor, ceiling (with skylight holes), the yard boundary.
-  const bounds: Rect = { minX: -hw - YARD, maxX: hw + YARD, minZ: -hd - YARD, maxZ: hd + YARD };
+  // Floor, ceilings, mezzanines, the boundary.
+  const ext = extents(def);
+  const bounds: Rect = { minX: ext.minX - YARD, maxX: ext.maxX + YARD, minZ: ext.minZ - YARD, maxZ: ext.maxZ + YARD };
   solids.push({ kind: 'floor', min: v(bounds.minX - 1, -1, bounds.minZ - 1), max: v(bounds.maxX + 1, 0, bounds.maxZ + 1) });
-  for (const c of ceilingPieces(def)) solids.push({ kind: 'ceiling', min: v(c.minX, h, c.minZ), max: v(c.maxX, h + 0.35, c.maxZ) });
+  for (const z of def.zones) {
+    const r = { ...z.rect };
+    for (const w of def.walls.filter((x) => x.zone === z.id)) {
+      const b = wallBox(w, w.a0, w.a1, 0, 1);
+      r.minX = Math.min(r.minX, b.min.x);
+      r.maxX = Math.max(r.maxX, b.max.x);
+      r.minZ = Math.min(r.minZ, b.min.z);
+      r.maxZ = Math.max(r.maxZ, b.max.z);
+    }
+    solids.push({ kind: 'ceiling', zone: z.id, min: v(r.minX, z.h, r.minZ), max: v(r.maxX, z.h + 0.35, r.maxZ) });
+  }
+  for (const m of def.mezzanine) {
+    const w = def.walls.find((x) => x.id === m.wall);
+    if (!w) continue;
+    // From the wall's inner face, `depth` metres into the room, along the whole wall.
+    const lo = w.out > 0 ? w.fixed - m.depth : w.fixed;
+    const hi = w.out > 0 ? w.fixed : w.fixed + m.depth;
+    solids.push(
+      w.along === 'z'
+        ? { kind: 'mezzanine', zone: w.zone, min: v(lo, m.y, w.a0), max: v(hi, m.y + 0.35, w.a1) }
+        : { kind: 'mezzanine', zone: w.zone, min: v(w.a0, m.y, lo), max: v(w.a1, m.y + 0.35, hi) },
+    );
+  }
   const B = 1;
-  solids.push({ kind: 'bound', min: v(bounds.minX - B, 0, bounds.minZ - B), max: v(bounds.minX, 12, bounds.maxZ + B) });
-  solids.push({ kind: 'bound', min: v(bounds.maxX, 0, bounds.minZ - B), max: v(bounds.maxX + B, 12, bounds.maxZ + B) });
-  solids.push({ kind: 'bound', min: v(bounds.minX, 0, bounds.minZ - B), max: v(bounds.maxX, 12, bounds.minZ) });
-  solids.push({ kind: 'bound', min: v(bounds.minX, 0, bounds.maxZ), max: v(bounds.maxX, 12, bounds.maxZ + B) });
+  solids.push({ kind: 'bound', min: v(bounds.minX - B, 0, bounds.minZ - B), max: v(bounds.minX, 14, bounds.maxZ + B) });
+  solids.push({ kind: 'bound', min: v(bounds.maxX, 0, bounds.minZ - B), max: v(bounds.maxX + B, 14, bounds.maxZ + B) });
+  solids.push({ kind: 'bound', min: v(bounds.minX, 0, bounds.minZ - B), max: v(bounds.maxX, 14, bounds.minZ) });
+  solids.push({ kind: 'bound', min: v(bounds.minX, 0, bounds.maxZ), max: v(bounds.maxX, 14, bounds.maxZ + B) });
 
-  const stations = placeStations(def, windows);
-  for (const st of stations) solids.push({ kind: 'locker', min: st.box.min, max: st.box.max });
+  const furniture = def.furniture.map((f) => ({ ...f, box: furnitureBox(f) }));
+  for (const f of furniture) solids.push({ kind: 'furniture', zone: f.zone, min: f.box.min, max: f.box.max });
 
+  const stations = placeStations(def, open);
+  for (const st of stations) solids.push({ kind: 'locker', zone: st.zone, min: st.box.min, max: st.box.max });
+
+  const zones: ZoneInfo[] = def.zones.map((z) => ({
+    id: z.id,
+    name: z.name,
+    rect: { ...z.rect },
+    h: z.h,
+    minPlayers: z.minPlayers,
+    open: open.has(z.id),
+    passage: passageBox(def, z.id),
+  }));
+  const areas: Rect[] = [];
+  for (const z of zones) {
+    if (!z.open) continue;
+    areas.push(z.rect);
+    if (z.passage) areas.push({ minX: z.passage.min.x, maxX: z.passage.max.x, minZ: z.passage.min.z, maxZ: z.passage.max.z });
+  }
+
+  const lamps: LampInfo[] = def.lamps.map((l) => ({
+    pos: v(l.x, l.y ?? zoneH(l.zone ?? 'atrium') - 0.95, l.z),
+    flicker: l.flicker ?? 0,
+    zone: l.zone ?? 'atrium',
+    kind: l.kind ?? 'pendant',
+  }));
+
+  const height = Math.max(...def.zones.map((z) => z.h));
+  const atrium = def.zones.find((z) => z.id === 'atrium')?.rect;
   const world: World = {
     def,
+    zones,
+    open: [...open],
+    areas,
     chunks,
     alive: new Uint8Array(chunks.length).fill(1),
     hp: Float32Array.from(chunks, (c) => (c.hard ? 1e9 : c.maxHp)),
     solids,
     windows,
     stations,
-    lamps: def.lamps.map((l) => ({ pos: v(l.x, h - 0.95, l.z), flicker: l.flicker ?? 0 })),
-    interior: { minX: -hw, maxX: hw, minZ: -hd, maxZ: hd },
+    furniture,
+    lamps,
+    interior: atrium ? { ...atrium } : { minX: -def.w / 2, maxX: def.w / 2, minZ: -def.d / 2, maxZ: def.d / 2 },
     bounds,
-    height: h,
+    height,
     spawns: def.spawns.map((s) => v(s.x, 0, s.z)),
     gx0: bounds.minX,
     gz0: bounds.minZ,
     gnx: Math.ceil(bounds.maxX - bounds.minX),
-    gny: Math.ceil(h + 1),
+    gny: Math.ceil(height + 1),
     gnz: Math.ceil(bounds.maxZ - bounds.minZ),
     cells: [],
     stamp: new Uint32Array(chunks.length),
     stampN: 0,
+    solidCells: [],
   };
   world.cells = Array.from({ length: world.gnx * world.gny * world.gnz }, () => []);
+  world.solidCells = Array.from({ length: world.gnx * world.gnz }, () => []);
+  solids.forEach((sd, i) => {
+    const [x0, x1, , , z0, z1] = cellRange(world, sd);
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) world.solidCells[x * world.gnz + z].push(i);
+  });
   chunks.forEach((c, i) => {
     const [x0, x1, y0, y1, z0, z1] = cellRange(world, c);
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) world.cells[cellIndex(world, x, y, z)].push(i);
@@ -223,143 +433,88 @@ export function buildWorld(def: MapDef): World {
       const ox = Math.min(c.max.x, o.max.x) - Math.max(c.min.x, o.min.x);
       const oy = Math.min(c.max.y, o.max.y) - Math.max(c.min.y, o.min.y);
       const oz = Math.min(c.max.z, o.max.z) - Math.max(c.min.z, o.min.z);
-      const pos = [ox > 0.04, oy > 0.04, oz > 0.04].filter(Boolean).length;
+      const pos = (ox > 0.04 ? 1 : 0) + (oy > 0.04 ? 1 : 0) + (oz > 0.04 ? 1 : 0);
       if (pos >= 2) c.nb.push(j);
     });
   });
   return world;
 }
 
-type Adder = (min: Vec3, max: Vec3, mat: Mat) => void;
-
-function addProp(p: PropDef, h: number, add: Adder) {
-  const box = (x0: number, y0: number, z0: number, sx: number, sy: number, sz: number, mat: Mat) => add(v(x0, y0, z0), v(x0 + sx, y0 + sy, z0 + sz), mat);
-  const grid = (cx: number, cz: number, nx: number, ny: number, nz: number, size: number, mat: Mat, y0 = 0, sy = size) => {
-    const x0 = cx - (nx * size) / 2;
-    const z0 = cz - (nz * size) / 2;
-    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) box(x0 + i * size, y0 + j * sy, z0 + k * size, size, sy, size, mat);
-  };
-  switch (p.kind) {
-    case 'crate':
-      grid(p.x, p.z, 2, 2 * (p.n ?? 1), 2, 0.5, 'wood');
-      break;
-    case 'pillar':
-      grid(p.x, p.z, 1, Math.round(h / 0.5), 1, 0.5, 'concrete');
-      break;
-    case 'altar':
-      grid(p.x, p.z, 4, 2, 2, 0.5, 'concrete');
-      break;
-    case 'tank':
-      grid(p.x, p.z, 3, 5, 3, 0.5, 'metal');
-      break;
-    case 'lowwall': {
-      const n = Math.round((p.n ?? 2) / 0.5);
-      for (let i = 0; i < n; i++)
-        for (let j = 0; j < 2; j++) {
-          const a = -((n * 0.5) / 2) + i * 0.5;
-          if (p.r === 1) box(p.x - 0.15, j * 0.5, p.z + a, 0.3, 0.5, 0.5, 'brick');
-          else box(p.x + a, j * 0.5, p.z - 0.15, 0.5, 0.5, 0.3, 'brick');
-        }
-      break;
-    }
-    case 'pew': {
-      // Seat blocks with a thin back on the south edge; along x.
-      const n = Math.round((p.n ?? 3) / 0.5);
-      const x0 = p.x - (n * 0.5) / 2;
-      for (let i = 0; i < n; i++) {
-        box(x0 + i * 0.5, 0, p.z - 0.25, 0.5, 0.45, 0.45, 'wood');
-        box(x0 + i * 0.5, 0, p.z + 0.2, 0.5, 0.45, 0.1, 'wood');
-        box(x0 + i * 0.5, 0.45, p.z + 0.2, 0.5, 0.5, 0.1, 'wood');
-      }
-      break;
-    }
-    case 'table': {
-      // 2 x 1 m top on four legs: shoot a leg out and that corner drops.
-      const x0 = p.x - 1;
-      const z0 = p.z - 0.5;
-      for (const [lx, lz] of [
-        [0, 0],
-        [1.9, 0],
-        [0, 0.9],
-        [1.9, 0.9],
-      ])
-        box(x0 + lx, 0, z0 + lz, 0.1, 0.72, 0.1, 'wood');
-      for (let i = 0; i < 4; i++) for (let k = 0; k < 2; k++) box(x0 + i * 0.5, 0.72, z0 + k * 0.5, 0.5, 0.08, 0.5, 'wood');
-      break;
-    }
-  }
+/** Passages get a shutter while their wing is closed; elevator alcoves are always filled with the doors. */
+function fillOpening(w: WallDef, o: OpeningDef, open: Set<ZoneId>, solids: Solid[]) {
+  if (o.kind === 'passage' && o.zone && open.has(o.zone)) return;
+  solids.push({ kind: o.kind === 'passage' ? 'shutter' : 'elevator', zone: o.zone ?? w.zone, ...wallBox(w, o.a0, o.a1, 0, o.y1) });
 }
 
-/** The ceiling as rectangles around the skylight holes (a hole splits its band into strips). */
-function ceilingPieces(def: MapDef): Rect[] {
-  const hw = def.w / 2 + WALL_T;
-  const hd = def.d / 2 + WALL_T;
-  let pieces: Rect[] = [{ minX: -hw, maxX: hw, minZ: -hd, maxZ: hd }];
-  for (const s of def.skylights ?? []) {
-    const hole: Rect = { minX: s.x - s.w / 2, maxX: s.x + s.w / 2, minZ: s.z - s.d / 2, maxZ: s.z + s.d / 2 };
-    const next: Rect[] = [];
-    for (const p of pieces) {
-      if (hole.minX >= p.maxX || hole.maxX <= p.minX || hole.minZ >= p.maxZ || hole.maxZ <= p.minZ) {
-        next.push(p);
-        continue;
-      }
-      if (hole.minZ > p.minZ) next.push({ ...p, maxZ: hole.minZ });
-      if (hole.maxZ < p.maxZ) next.push({ ...p, minZ: hole.maxZ });
-      const z0 = Math.max(p.minZ, hole.minZ);
-      const z1 = Math.min(p.maxZ, hole.maxZ);
-      if (hole.minX > p.minX) next.push({ minX: p.minX, maxX: hole.minX, minZ: z0, maxZ: z1 });
-      if (hole.maxX < p.maxX) next.push({ minX: hole.maxX, maxX: p.maxX, minZ: z0, maxZ: z1 });
-    }
-    pieces = next;
-  }
-  return pieces;
+function passageBox(def: MapDef, zone: ZoneId): AABB | null {
+  const o = def.openings.find((x) => x.kind === 'passage' && x.zone === zone);
+  const w = o && def.walls.find((x) => x.id === o.wall);
+  return o && w ? wallBox(w, o.a0, o.a1, 0, o.y1) : null;
 }
 
-/** Lockers stand against the inside of the walls, spread evenly and clear of the windows and corners. */
-function placeStations(def: MapDef, windows: WindowInfo[]): StationInfo[] {
-  const wanted: { kind: StationKind; item?: WeaponId }[] = [
+/** Outer bounds of all walls, snapped outwards to the 0.5 m grid so nav cells line up with them. */
+function extents(def: MapDef): Rect {
+  const r: Rect = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  for (const w of def.walls) {
+    const b = wallBox(w, w.a0, w.a1, 0, 1);
+    r.minX = Math.min(r.minX, b.min.x);
+    r.maxX = Math.max(r.maxX, b.max.x);
+    r.minZ = Math.min(r.minZ, b.min.z);
+    r.maxZ = Math.max(r.maxZ, b.max.z);
+  }
+  r.minX = Math.floor(r.minX * 2) / 2;
+  r.minZ = Math.floor(r.minZ * 2) / 2;
+  r.maxX = Math.ceil(r.maxX * 2) / 2;
+  r.maxZ = Math.ceil(r.maxZ * 2) / 2;
+  return r;
+}
+
+/** Axis-aligned bounds of a piece of furniture's rotated footprint. */
+export function furnitureBox(f: FurnitureDef): AABB {
+  const s = FURNITURE_SIZE[f.kind];
+  const c = Math.abs(Math.cos(f.yaw));
+  const sn = Math.abs(Math.sin(f.yaw));
+  const hx = (s.w * c + s.d * sn) / 2;
+  const hz = (s.w * sn + s.d * c) / 2;
+  return { min: v(f.x - hx, 0, f.z - hz), max: v(f.x + hx, s.h, f.z + hz) };
+}
+
+/** Lockers stand against the walls at the map's spots; an open wing takes its share of the expensive guns. */
+function placeStations(def: MapDef, open: Set<ZoneId>): StationInfo[] {
+  const rest: { kind: StationKind; item?: WeaponId }[] = [
     ...LOCKER_ORDER.map((item) => ({ kind: 'weapon' as const, item })),
     { kind: 'ammo' },
     { kind: 'nades' },
     { kind: 'armor' },
   ];
-  const hw = def.w / 2;
-  const hd = def.d / 2;
-  const spots: { pos: Vec3; facing: Vec3 }[] = [];
-  // Walk the walls clockwise from the north-west corner in 1 m steps.
-  const step = 1;
-  const walls: { from: Vec3; dir: Vec3; len: number; facing: Vec3 }[] = [
-    { from: v(-hw, 0, -hd), dir: v(1, 0, 0), len: def.w, facing: v(0, 0, 1) },
-    { from: v(hw, 0, -hd), dir: v(0, 0, 1), len: def.d, facing: v(-1, 0, 0) },
-    { from: v(hw, 0, hd), dir: v(-1, 0, 0), len: def.w, facing: v(0, 0, -1) },
-    { from: v(-hw, 0, hd), dir: v(0, 0, -1), len: def.d, facing: v(1, 0, 0) },
-  ];
-  const blocked = (p: Vec3) =>
-    windows.some((w) => Math.hypot(w.inside.x - p.x, w.inside.z - p.z) < 2.1) ||
-    def.props.some((pr) => Math.abs(pr.x - p.x) < 2.2 && Math.abs(pr.z - p.z) < 2.2);
-  for (const w of walls) {
-    for (let a = 1.5; a <= w.len - 1.5 + 1e-6; a += step) {
-      const p = v(w.from.x + w.dir.x * a + w.facing.x * 0.55, 0, w.from.z + w.dir.z * a + w.facing.z * 0.55);
-      if (!blocked(p)) spots.push({ pos: p, facing: w.facing });
-    }
+  const assigned: { spot: MapDef['stations'][number]; item: { kind: StationKind; item?: WeaponId } }[] = [];
+  for (const zone of ['lounge', 'restaurant'] as ZoneId[]) {
+    const items = def.wingItems[zone];
+    if (!items || !open.has(zone)) continue;
+    const spots = def.stations.filter((s) => s.zone === zone);
+    items.forEach((id, k) => {
+      const at = rest.findIndex((x) => x.item === id);
+      if (at < 0 || !spots[k]) return;
+      assigned.push({ spot: spots[k], item: rest[at] });
+      rest.splice(at, 1);
+    });
   }
-  // Pick evenly spaced spots, never two side by side.
-  const out: StationInfo[] = [];
-  const stride = spots.length / wanted.length;
-  for (let i = 0; i < wanted.length && spots.length; i++) {
-    const s = spots[Math.min(spots.length - 1, Math.floor(i * stride + stride / 2))];
-    const f = s.facing;
-    // Box: 1.0 wide, 2.0 tall, 0.5 deep, back against the wall.
-    const back = { x: s.pos.x - f.x * 0.55, z: s.pos.z - f.z * 0.55 };
-    const front = { x: s.pos.x - f.x * 0.05, z: s.pos.z - f.z * 0.05 };
+  const atrium = def.stations.filter((s) => s.zone === 'atrium');
+  rest.forEach((item, k) => {
+    if (atrium[k]) assigned.push({ spot: atrium[k], item });
+  });
+  return assigned.map(({ spot, item }, i) => {
+    const f = FACING[spot.facing];
+    // Box: 1.0 wide, 2.0 tall, 0.5 deep, back against the wall (the spot is 0.05 m in front of the box).
+    const back = { x: spot.x - f.x * 0.55, z: spot.z - f.z * 0.55 };
+    const front = { x: spot.x - f.x * 0.05, z: spot.z - f.z * 0.05 };
     const side = { x: Math.abs(f.z) * 0.5, z: Math.abs(f.x) * 0.5 };
     const box: AABB = {
       min: v(Math.min(back.x, front.x) - side.x, 0, Math.min(back.z, front.z) - side.z),
       max: v(Math.max(back.x, front.x) + side.x, 2, Math.max(back.z, front.z) + side.z),
     };
-    out.push({ i, kind: wanted[i].kind, item: wanted[i].item, pos: v(s.pos.x, 0, s.pos.z), facing: f, box });
-  }
-  return out;
+    return { i, kind: item.kind, item: item.item, zone: spot.zone, pos: v(spot.x, 0, spot.z), facing: f, box };
+  });
 }
 
 // ---- grid ---------------------------------------------------------------------------------------------------------
@@ -401,10 +556,16 @@ export type Mover = 'player' | 'zombie' | 'nade';
 
 /** The first solid or standing chunk overlapping `box`, or null. */
 export function firstBlock(w: World, box: AABB, who: Mover): AABB | null {
-  for (const s of w.solids) {
-    if (s.kind === 'clip' && who !== 'player') continue;
-    if (overlap(box, s.min, s.max)) return s;
-  }
+  const [x0, x1, , , z0, z1] = cellRange(w, box);
+  for (let x = x0; x <= x1; x++)
+    for (let z = z0; z <= z1; z++) {
+      const list = w.solidCells[x * w.gnz + z];
+      for (let k = 0; k < list.length; k++) {
+        const s = w.solids[list[k]];
+        if (s.kind === 'clip' && who === 'nade') continue;
+        if (overlap(box, s.min, s.max)) return s;
+      }
+    }
   let hit: AABB | null = null;
   forChunks(w, box, (i) => {
     const c = w.chunks[i];
@@ -453,7 +614,20 @@ function faceNormal(p: Vec3, min: Vec3, max: Vec3): Vec3 {
   return [v(-1, 0, 0), v(1, 0, 0), v(0, -1, 0), v(0, 1, 0), v(0, 0, -1), v(0, 0, 1)][k];
 }
 
-const SOLID_MAT: Record<Solid['kind'], Mat> = { floor: 'concrete', ceiling: 'concrete', post: 'concrete', locker: 'metal', bound: 'concrete', clip: 'concrete', sill: 'concrete' };
+const SOLID_MAT: Record<SolidKind, Mat> = {
+  floor: 'marble',
+  ceiling: 'plaster',
+  post: 'travertine',
+  locker: 'metal',
+  bound: 'concrete',
+  clip: 'concrete',
+  sill: 'concrete',
+  mullion: 'metal',
+  shutter: 'metal',
+  elevator: 'metal',
+  mezzanine: 'marble',
+  furniture: 'wood',
+};
 
 /** Nearest solid or standing chunk along the ray (clips are ignored: bullets fly through windows). */
 export function raycast(w: World, o: Vec3, d: Vec3, maxT: number): RayHit | null {
@@ -587,7 +761,8 @@ export function chunksInSphere(w: World, c: Vec3, r: number, fn: (i: number, d: 
   });
 }
 
+/** Inside the building: in an open zone or a passage between two. */
 export const inside = (w: World, x: number, z: number, margin = 0) =>
-  x > w.interior.minX + margin && x < w.interior.maxX - margin && z > w.interior.minZ + margin && z < w.interior.maxZ - margin;
+  w.areas.some((a) => x > a.minX + margin && x < a.maxX - margin && z > a.minZ + margin && z < a.maxZ - margin);
 
 export const chunkCenter = (c: Chunk): Vec3 => v((c.min.x + c.max.x) / 2, (c.min.y + c.max.y) / 2, (c.min.z + c.max.z) / 2);

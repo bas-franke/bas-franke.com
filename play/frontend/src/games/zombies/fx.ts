@@ -1257,7 +1257,15 @@ const MAT_LOOK: Record<Debris, { color: number; rough: number; metal: number; du
   metal: { color: 0x5c6166, rough: 0.42, metal: 0.85, dust: 0.08, dustColor: 0x5a5a5a, grit: 0x55595e, chips: 0x9aa0a6 },
 };
 
-const asDebris = (m: string): Debris => (m === 'brick' || m === 'plaster' || m === 'concrete' || m === 'wood' || m === 'metal' ? m : 'concrete');
+/** The hotel's materials break like their closest classic one: stone like concrete, walnut like wood, glass like plaster (bright, flaky). */
+const asDebris = (m: string): Debris =>
+  m === 'brick' || m === 'plaster' || m === 'concrete' || m === 'wood' || m === 'metal'
+    ? m
+    : m === 'walnut'
+      ? 'wood'
+      : m === 'glass'
+        ? 'plaster'
+        : 'concrete';
 
 // ---- the effects system ---------------------------------------------------------------------------------------------
 

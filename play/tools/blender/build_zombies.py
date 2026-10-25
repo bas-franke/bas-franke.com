@@ -414,18 +414,6 @@ def push_verts(obj, fn):
 
 
 
-def survivor_palette():
-    return {
-        "team": material("Team", (0.5, 0.5, 0.5), rough=0.72, spec=0.35),
-        "skin": material("SurvivorSkin", (0.33, 0.2, 0.14), rough=0.55, spec=0.45),
-        "pants": material("Pants", (0.075, 0.075, 0.065), rough=0.88),
-        "boots": material("Boots", (0.025, 0.02, 0.016), rough=0.45),
-        "gear": material("Gear", (0.075, 0.08, 0.06), rough=0.75, metal=0.0),
-        "strap": material("Strap", (0.018, 0.018, 0.018), rough=0.6),
-        "eyes": material("SurvivorEyes", (0.6, 0.6, 0.58), rough=0.05),
-    }
-
-
 def decimate(obj, ratio):
     d = obj.modifiers.new("Dec", "DECIMATE")
     d.ratio = ratio
@@ -700,37 +688,43 @@ def head_mesh(name, p, zombie=True):
 
 # ---- zombie ---------------------------------------------------------------------------------------------------------
 #
-# Four zombie bodies on one armature and one clip set: a ragged civilian, a heavy man in a work jacket, a woman in a
-# torn dress and a hospital patient in a gown. Each variant has its own parts named Zombie_<Part>_<k> (Body, Head,
+# Four hotel guests and staff on one armature and one clip set, after the concept reference (a gaunt businessman in a
+# torn dark suit jacket over a stained cream shirt, belt, holed trousers and worn boots): the businessman, a bellhop in
+# a red uniform with brass buttons and a pillbox cap, a housekeeper in a grey dress with a white apron and collar, and a
+# businesswoman in a torn blouse and pencil skirt. Each variant has its own parts named Zombie_<Part>_<k> (Body, Head,
 # ArmL, ArmR, LegL, LegR); models.ts keeps one variant per instance and hides the rest. Faces are modelled for rot:
-# asymmetric, sunken sockets with clouded eyes and drooping lids, a nose partly gone, a cheek torn open onto the gums
-# and molars, broken irregular teeth and a crooked hanging jaw. Skin colour (mottling, bruises, veins, lesions) is in
-# the vertex colours; a shared atlas carries a baked normal map (wrinkles, pores, veins, weave) and a baked roughness
-# map (wet wounds and lips glossy, dry skin and cloth matte).
+# stretched skin over the skull, sunken cheeks, deep sockets with milky eyes, an open mouth with yellowed broken teeth.
+# Colour is baked: vertex colours (dirt, blood, livor, veins, lesions) times procedural detail per material (skin
+# mottling and veins, fabric weave, shirt stains) into one albedo atlas, plus a baked normal map and roughness map.
+# Cloth and ClothB bake without their own colour so the game can tint them per zombie.
 
 ZOMBIE_VARIANTS = [
-    dict(key="civilian", bulk=0.97, gaunt=0.8, arm=0.82, leg=0.9, female=False, top="shirt", sleeves=(1.27, 1.1),
-         legs="trousers", rips=(0.46, 0.18), feet=("bare", "shoe"), hair="matted", tear=1, nose=0.8, seed=1),
-    dict(key="worker", bulk=1.12, gaunt=1.05, arm=0.96, leg=1.03, female=False, top="jacket", sleeves=(0.99, 0.99),
-         legs="trousers", rips=(0.13, 0.34), feet=("shoe", "shoe"), hair="short", tear=-1, nose=0.5, seed=2),
-    dict(key="woman", bulk=0.85, gaunt=0.9, arm=0.74, leg=0.82, female=True, top="dress", sleeves=(None, None),
-         legs="bare", rips=(0, 0), feet=("bare", "bare"), hair="long", tear=-1, nose=1.0, seed=3),
-    dict(key="patient", bulk=0.9, gaunt=1.35, arm=0.75, leg=0.83, female=False, top="gown", sleeves=(1.29, 1.29),
-         legs="bare", rips=(0, 0), feet=("sock", "bare"), hair="bald", tear=1, nose=1.0, seed=4),
+    dict(key="businessman", bulk=1.06, gaunt=1.0, arm=1.0, leg=1.08, female=False, top="suit", sleeves=(0.965, 0.955),
+         legs="trousers", skirt=None, rips=(0.0, 0.47), feet=("boot", "boot"), hair="thin", hat=None, tear=0, nose=0.12, seed=1),
+    dict(key="bellhop", bulk=1.0, gaunt=0.95, arm=0.96, leg=1.04, female=False, top="bellhop", sleeves=(0.97, 1.08),
+         legs="trousers", skirt=None, rips=(0.36, 0.0), feet=("shoe", "shoe"), hair="short", hat="pillbox", tear=1, nose=0.5, seed=2),
+    dict(key="housekeeper", bulk=0.95, gaunt=0.9, arm=0.86, leg=0.94, female=True, top="housekeeper", sleeves=(1.2, 1.2),
+         legs="tights", skirt="dress", rips=(0, 0), feet=("shoe", "shoe"), hair="bun", hat=None, tear=-1, nose=0.3, seed=3),
+    dict(key="businesswoman", bulk=0.9, gaunt=0.95, arm=0.82, leg=0.9, female=True, top="blouse", sleeves=(1.0, 1.14),
+         legs="bare", skirt="pencil", rips=(0, 0), feet=("shoe", "bare"), hair="long", hat=None, tear=1, nose=0.6, seed=4),
 ]
 ZOMBIE_PARTS = ("Body", "Head", "ArmL", "ArmR", "LegL", "LegR")
 
 
 def zombie_palette():
     pal = {
-        "skin": material("Skin", (0.125, 0.125, 0.098), rough=0.7, spec=0.4),
-        "cloth": material("Cloth", (0.3, 0.28, 0.25), rough=0.95, spec=0.2),
-        "clothb": material("ClothB", (0.1, 0.1, 0.11), rough=0.92, spec=0.2),
-        "blood": material("Blood", (0.09, 0.006, 0.006), rough=0.22, spec=0.75),
-        "eyes": material("Eyes", (0.19, 0.2, 0.17), rough=0.12, emission=(0.2, 0.21, 0.16), strength=0.025),
-        "teeth": material("Teeth", (0.36, 0.32, 0.25), rough=0.4),
-        "hair": material("Hair", (0.022, 0.018, 0.015), rough=0.55, spec=0.4),
-        "shoe": material("Shoe", (0.03, 0.025, 0.02), rough=0.5),
+        "skin": material("Skin", (0.15, 0.14, 0.125), rough=0.7, spec=0.35),
+        # Cloth (tops) and ClothB (trousers, skirts) are tinted per zombie in the game; this grey is for previews.
+        "cloth": material("Cloth", (0.26, 0.25, 0.24), rough=0.92, spec=0.2),
+        "clothb": material("ClothB", (0.08, 0.08, 0.085), rough=0.9, spec=0.2),
+        "blood": material("Blood", (0.07, 0.01, 0.008), rough=0.25, spec=0.7),
+        "mouth": material("Mouth", (0.012, 0.006, 0.005), rough=0.35, spec=0.5),
+        "eyes": material("Eyes", (0.6, 0.6, 0.55), rough=0.08, emission=(0.3, 0.3, 0.27), strength=0.04),
+        "teeth": material("Teeth", (0.42, 0.33, 0.17), rough=0.45),
+        "hair": material("Hair", (0.03, 0.026, 0.022), rough=0.55, spec=0.4),
+        "shoe": material("Shoe", (0.07, 0.045, 0.03), rough=0.55),
+        "shirt": material("Shirt", (0.4, 0.36, 0.28), rough=0.9, spec=0.25),
+        "trim": material("Trim", (0.6, 0.45, 0.2), rough=0.35, metal=0.9),
     }
     for m in pal.values():
         m.use_backface_culling = True
@@ -831,7 +825,7 @@ def zombie_teeth(p, front_y, jaw_move, seed, missing=0.2):
             parts.append(t)
         # Gums: a swollen dark tube along the arch.
         verts = [tuple(q) for q in gum_pts]
-        gum = skin_mesh(f"gum{row}", verts, [(i, i + 1) for i in range(len(verts) - 1)], [0.0045] * len(verts), subsurf=0, mats=[p["blood"]])
+        gum = skin_mesh(f"gum{row}", verts, [(i, i + 1) for i in range(len(verts) - 1)], [0.0045] * len(verts), subsurf=0, mats=[p["mouth"]])
         parts.append(gum)
     # Lower row and gum move with the jaw.
     lower_z = HEAD_C.z - 0.052
@@ -891,7 +885,7 @@ def zombie_head(name, p, spec):
             prof = 0.35 + 0.65 * ((0.26 - u.z) / 0.5)
             tail = 1.0 if u.z > -0.2 else max(0.0, (u.z + 0.34) / 0.14)
             keep = 1.0 if u.z > 0.02 else 1.0 - gone * min(1.0, (0.02 - u.z) / 0.12)
-            off.y += 0.024 * w * prof * tail * keep
+            off.y += 0.033 * w * prof * tail * keep
         for sx in (-1, 1):
             off.y -= 0.017 * gone * bump(u, (sx * 0.08, 0.98, -0.2), 0.12)
         # Lips shrunk back from the teeth.
@@ -908,7 +902,7 @@ def zombie_head(name, p, spec):
     # Holes: the mouth slit, the torn cheek (ragged edge), the nostril cavities painted dark.
     def mouth_cut(c, n):
         u = head_u(c)
-        return u.y > 0.55 and (u.x / 0.31) ** 2 + ((u.z + 0.43) / 0.065) ** 2 + 0.35 * noise(c, 90) < 1.0
+        return u.y > 0.55 and (u.x / 0.24) ** 2 + ((u.z + 0.43) / 0.052) ** 2 + 0.35 * noise(c, 90) < 1.0
 
     def cheek_cut(c, n):
         if not tear:
@@ -944,7 +938,7 @@ def zombie_head(name, p, spec):
     # The inside of the mouth and the torn cheek: wet dark flesh (only the lower face, so it never shows in the sockets).
     bpy.ops.mesh.primitive_uv_sphere_add(radius=1, segments=24, ring_count=16)
     inner = bpy.context.active_object
-    inner.data.materials.append(p["blood"])
+    inner.data.materials.append(p["mouth"])
     for v in inner.data.vertices:
         v.co = _ellipsoid_point(Vector((v.co.x * 0.86, v.co.y * 0.82, v.co.z * 0.86)))
     delete_faces(inner, lambda c, n: head_u(c).z > -0.18)
@@ -959,11 +953,11 @@ def zombie_head(name, p, spec):
     for sx in (-1, 1):
         ey = HEAD_C.y + 0.047
         ez = HEAD_C.z + 0.012 - (0.006 if sx == sag else 0)
-        eye = prim("sphere", p["eyes"], loc=(sx * 0.031, ey, ez), radius=0.0108, segments=12, ring_count=8)
+        eye = prim("sphere", p["eyes"], loc=(sx * 0.031, ey + 0.003, ez), radius=0.0128, segments=14, ring_count=10)
         parts.append(eye)
         lid = prim("sphere", p["skin"], loc=(sx * 0.031, ey - 0.001, ez), radius=0.0135, segments=14, ring_count=10)
         lid = apply_all(lid)
-        droop = 0.55 if sx == sag else 0.25
+        droop = 0.38 if sx == sag else 0.14
         delete_faces(lid, lambda c, n, ez=ez, droop=droop: c.z < ez + 0.0135 * (1 - 2 * droop) or c.y < ey - 0.004)
         parts.append(lid)
         lower = prim("sphere", p["blood"], loc=(sx * 0.031, ey - 0.002, ez - 0.001), radius=0.0132, segments=12, ring_count=8)
@@ -972,6 +966,7 @@ def zombie_head(name, p, spec):
         parts.append(lower)
         parts.append(zombie_ear(p, sx, torn=(sx == -tear if tear else sx > 0) and spec["key"] != "woman", seed=spec["seed"] + sx))
     parts += zombie_hair(p, spec)
+    parts += zombie_headwear(p, spec)
     return join(parts, name)
 
 
@@ -981,7 +976,8 @@ def _scalp(u):
 
 
 def zombie_hair(p, spec):
-    style = spec["hair"]
+    # Thin, dishevelled hair is the matted style; a bun is short hair plus the bun (zombie_headwear).
+    style = {"thin": "matted", "bun": "short"}.get(spec["hair"], spec["hair"])
     if style == "bald":
         # A few stitches across the surgical scar.
         out = []
@@ -1060,8 +1056,99 @@ def zombie_hair(p, spec):
 
 # ---- body -----------------------------------------------------------------------------------------------------------
 
+def torso_front(x, z, spec):
+    """Approximate front surface (y) of the torso at (x, z), from the torso_graph radii; for placing clothes on it."""
+    b, g = spec["bulk"], spec["gaunt"]
+    rings = [(0.92, 0.0, 0.11 * b, 0.155 * b), (1.07, 0.012, 0.085 * b * g, 0.13 * b * g), (1.21, 0.016, 0.1 * b * g, 0.145 * b * g),
+             (1.35, 0.008, 0.112 * b, 0.168 * b), (1.44, -0.004, 0.095 * b, 0.15 * b)]
+    z = max(rings[0][0], min(rings[-1][0], z))
+    for (z0, c0, ry0, rx0), (z1, c1, ry1, rx1) in zip(rings, rings[1:]):
+        if z0 <= z <= z1:
+            t = (z - z0) / (z1 - z0)
+            c, ry, rx = c0 + (c1 - c0) * t, ry0 + (ry1 - ry0) * t, rx0 + (rx1 - rx0) * t
+            return c + ry * math.sqrt(max(0.05, 1 - (x / rx) ** 2))
+    return 0.1
+
+
+def panel_strip(mat, rows, thickness=0.005, sub=1):
+    """A cloth panel from rows of (left, right) points (top to bottom), solidified and smoothed."""
+    verts, faces = [], []
+    for k, (a, b_) in enumerate(rows):
+        verts += [tuple(a), tuple(b_)]
+        if k:
+            i = 2 * (k - 1)
+            faces.append((i, i + 1, i + 3, i + 2))
+    me = bpy.data.meshes.new("panel")
+    me.from_pydata(verts, [], faces)
+    obj = link(bpy.data.objects.new("panel", me))
+    obj.data.materials.append(mat)
+    sol = obj.modifiers.new("Solid", "SOLIDIFY")
+    sol.thickness = thickness
+    if sub:
+        s = obj.modifiers.new("Sub", "SUBSURF")
+        s.levels = sub
+    return smooth(apply_all(obj))
+
+
+def lapel(mat, sx, spec):
+    """A suit lapel lying on the chest along the jacket's V opening, widest (with the notch) up by the collar."""
+    rows = []
+    n = 8
+    for k in range(n + 1):
+        t = k / n
+        z = 1.425 - t * 0.4
+        inner = sx * (0.088 - 0.074 * t)
+        width = 0.055 * (1 - t) ** 0.8 + 0.004
+        if t < 0.12:
+            width *= 0.55 + 0.45 * t / 0.12  # notch
+        outer = inner + sx * width
+        rows.append((Vector((inner, torso_front(inner, z, spec) + 0.008, z)), Vector((outer, torso_front(outer, z, spec) + 0.004, z - 0.01 * (1 - t)))))
+    return panel_strip(mat, rows, 0.005)
+
+
+def ring_band(mat, z0, z1, rx, ry, segs=32):
+    """A closed band around the body (a belt): elliptical, flat sides."""
+    verts, faces = [], []
+    for z in (z0, z1):
+        for j in range(segs):
+            a = j / segs * math.tau
+            verts.append((math.sin(a) * rx, math.cos(a) * ry, z))
+    for j in range(segs):
+        a, b_ = j, (j + 1) % segs
+        faces.append((a, b_, b_ + segs, a + segs))
+    me = bpy.data.meshes.new("band")
+    me.from_pydata(verts, [], faces)
+    obj = link(bpy.data.objects.new("band", me))
+    obj.data.materials.append(mat)
+    sol = obj.modifiers.new("Solid", "SOLIDIFY")
+    sol.thickness = 0.006
+    return smooth(apply_all(obj))
+
+
+def arc_panel(mat, z0, z1, r0, r1, half, rag=0.2, seed=0, centre=0.0):
+    """A front panel following a skirt's curve (apron), from z0 down to z1, `half` radians either side of `centre`."""
+    rng = random.Random(seed)
+    rows = []
+    n = 6
+    for k in range(n + 1):
+        t = k / n
+        z = z0 + (z1 - z0) * t
+        r = (r0 + (r1 - r0) * t ** 0.8) + 0.008
+        jag = rag * t * t * rng.uniform(-0.04, 0.04)
+        a0, a1 = centre - half, centre + half
+        rows.append((Vector((math.sin(a0) * r, math.cos(a0) * r * 0.8, z + jag)), Vector((math.sin(a1) * r, math.cos(a1) * r * 0.8, z - jag))))
+    return panel_strip(mat, rows, 0.004)
+
+
+def buttons(mat, pts, r=0.008):
+    out = []
+    for q in pts:
+        out.append(apply_all(prim("sphere", mat, loc=tuple(q), radius=r, segments=8, ring_count=6)))
+    return out
+
+
 def zombie_body(p, spec):
-    mats = [p["cloth"], p["skin"], p["blood"], p["clothb"]]
+    mats = [p["cloth"], p["skin"], p["blood"], p["clothb"], p["shirt"], p["trim"]]
     female = spec["female"]
     v, e, r = torso_graph(1, bulk=spec["bulk"], gaunt=spec["gaunt"])
     if female:
@@ -1069,51 +1156,59 @@ def zombie_body(p, spec):
         v[7] = (-0.13, -0.005, 1.425)
         v[8] = (0.13, -0.005, 1.425)
         r[0] = (r[0][0] * 1.12, r[0][1] * 1.05)
+    if not female:
+        # Broad shoulders under the jacket's pads.
+        v[7] = (-0.165, -0.005, 1.43)
+        v[8] = (0.165, -0.005, 1.43)
+        r[7] = r[8] = (0.085 * spec["bulk"], 0.072 * spec["bulk"])
     body = skin_mesh(f"Zombie_Body_{spec['k']}", v, e, r, subsurf=2, disp=0.008, disp_scale=0.05, mats=mats)
     if female:
-        push_verts(body, lambda co, n: n * 0.03 * max(0.0, 1 - min((Vector((co.x, co.z)) - Vector((s * 0.068, 1.31))).length for s in (-1, 1)) / 0.075) ** 1.5 if n.y > 0.1 else None)
-    if spec["key"] == "worker":
-        # A belly that has started to bloat.
-        push_verts(body, lambda co, n: n * 0.03 * max(0.0, 1 - (Vector((co.x, co.z - 1.12))).length / 0.16) if n.y > 0.0 else None)
+        push_verts(body, lambda co, n: n * 0.026 * max(0.0, 1 - min((Vector((co.x, co.z)) - Vector((s * 0.068, 1.31))).length for s in (-1, 1)) / 0.075) ** 1.5 if n.y > 0.1 else None)
     top = spec["top"]
 
     def pick(c, n):
         z = c.z
         hole = noise(c, 5) + 0.35 * noise(c, 14)
-        trousers = top in ("shirt", "jacket")
-        if z < 0.99 + 0.025 * noise(c, 30) and trousers:
-            return 2 if hole > 0.58 else 3
-        if top == "shirt":
-            if z < 1.05 + 0.05 * noise(c, 25):
-                return 1
-            if n.y > 0.25 and abs(c.x + 0.02 * math.sin(z * 40)) < 0.07 + 0.04 * (1.4 - z) and z > 1.12:
-                return 1
-            if hole > 0.3:
-                return 1
-        elif top == "jacket":
-            if n.y > 0.3 and abs(c.x - 0.01 * math.sin(z * 30)) < 0.045 and z > 1.0:
-                return 1  # open front: bare chest
-            if hole > 0.48:
-                return 2
-        elif top == "dress":
-            if z > 1.34 + 0.03 * noise(c, 20) and not (abs(abs(c.x) - 0.09) < 0.025 and n.y < 0.9):
-                return 1  # neckline and bare shoulders, thin straps
-            if hole > 0.42:
-                return 1
-        elif top == "gown":
-            if n.y < -0.45 and abs(c.x + 0.015 * math.sin(z * 25)) < 0.07 and z > 1.0:
-                return 1  # gown open at the back
-            if z > 1.46:
-                return 1
+        front = n.y > 0.25
+        if z < 0.99 + 0.025 * noise(c, 30):
+            if spec["skirt"] == "dress":
+                return 0
+            return 2 if hole > 0.62 else 3
+        if top == "suit":
+            w = max(0.0, (z - 1.02) / 0.4) * 0.082 + 0.014  # the open jacket's V
+            if front and abs(c.x) < w:
+                if z > 1.39 and abs(c.x) < 0.045:
+                    return 1  # open collar: the throat
+                if hole > 0.52:
+                    return 1 if hole < 0.66 else 2  # shirt torn open
+                return 4
+            return 4 if hole > 0.63 else 0
+        if top == "bellhop":
+            if hole > 0.6:
+                return 2 if hole > 0.7 else 1
+            return 0
+        if top == "housekeeper":
+            if z > 1.41 and n.y > 0.0:
+                return 4  # white collar
+            if front and abs(c.x) < 0.085 and 1.08 < z < 1.34:
+                return 4  # apron bib
+            return 1 if hole > 0.63 else 0
+        if top == "blouse":
+            if front and z > 1.25 and abs(c.x) < 0.012 + (z - 1.25) * 0.38:
+                return 1  # open neckline
             if hole > 0.5:
-                return 2
-        if -0.12 < c.x < -0.02 and 1.17 < z < 1.27 and n.y > 0.2 and top != "jacket":
-            return 2  # bite wound
-        if 0.04 < c.x < 0.14 and 1.07 < z < 1.13 and n.y > 0.1:
-            return 2  # gash
+                return 1 if hole < 0.63 else 2
+            return 0
         return 0
 
-    paint_faces(body, pick)
+    def wounds(c, n, base):
+        if -0.12 < c.x < -0.02 and 1.17 < c.z < 1.27 and n.y > 0.2 and base in (1, 4):
+            return 2  # bite wound through the shirt
+        if 0.04 < c.x < 0.14 and 1.07 < c.z < 1.13 and n.y > 0.1:
+            return 2  # gash
+        return base
+
+    paint_faces(body, lambda c, n: wounds(c, n, pick(c, n)))
     bare = set()
     for poly in body.data.polygons:
         if poly.material_index in (1, 2):
@@ -1127,49 +1222,94 @@ def zombie_body(p, spec):
             vv.co -= nn * (0.009 * groove + 0.003) * spec["gaunt"]
             if abs(co.x) < 0.012 and nn.y > 0.5:
                 vv.co -= nn * 0.006
-        elif 1.0 < co.z <= 1.13 and nn.y > 0.0 and spec["key"] != "worker":
+        elif 1.0 < co.z <= 1.13 and nn.y > 0.0:
             vv.co -= nn * 0.016 * math.sin((co.z - 1.0) / 0.13 * math.pi)
-        # Spine and shoulder blades through the skin on the back.
-        if nn.y < -0.5 and 1.0 < co.z < 1.45:
-            vv.co += nn * 0.006 * math.exp(-(co.x / 0.012) ** 2) * (0.5 + 0.5 * math.cos(co.z / 0.028 * math.tau))
+        # Collarbones and the throat's tendons.
+        if 1.38 < co.z < 1.46 and nn.y > 0.3:
+            vv.co += nn * 0.004 * math.exp(-((co.z - 1.415) / 0.012) ** 2)
     for poly in body.data.polygons:
         if poly.material_index == 2:
             for i in poly.vertices:
                 body.data.vertices[i].co -= body.data.vertices[i].normal * 0.005
-    cloth_vg = group_from_mats(body, [p["cloth"], p["clothb"]], "cloth")
-    body = displace_group(body, cloth_vg.name, 0.016 if top == "jacket" else 0.013, 0.05, "WOOD", "folds_z")
+    if top in ("suit", "bellhop"):
+        for poly in body.data.polygons:
+            if poly.material_index == 0 and poly.center.z > 1.0:
+                for i in poly.vertices:
+                    vv = body.data.vertices[i]
+                    vv.co += vv.normal * 0.0015
+        pad = {i for poly in body.data.polygons if poly.material_index == 0 and poly.center.z > 1.0 for i in poly.vertices}
+        for i in pad:
+            vv = body.data.vertices[i]
+            vv.co += vv.normal * (0.014 if vv.co.z < 1.43 else 0.006)
+    cloth_vg = group_from_mats(body, [p["cloth"], p["clothb"], p["shirt"]], "cloth")
+    body = displace_group(body, cloth_vg.name, 0.015, 0.05, "WOOD", "folds_z")
     body = decimate(body, 0.62)
     extras = []
     rng = random.Random(spec["seed"] * 5)
-    if top == "shirt":
-        for k in range(9):
-            a = rng.uniform(-math.pi, math.pi)
-            if abs(a) < 0.35:
-                continue
-            tp = Vector((math.sin(a) * 0.135, math.cos(a) * 0.095, 1.065 + rng.uniform(-0.01, 0.02)))
-            extras.append(strip(tp, rng.uniform(0.1, 0.24), rng.uniform(0.03, 0.06), (math.sin(a), math.cos(a), 0), p["cloth"], sway=rng.uniform(-0.03, 0.03), seed=k))
-        for side in (-1, 1):
-            extras.append(strip((side * 0.06, 0.12, 1.32), 0.18, 0.05, (side * 0.3, 1, 0), p["cloth"], sway=side * 0.02, seed=20 + side))
-    elif top == "jacket":
-        # Jacket hem and collar: a skirt below the waist, a turned-up collar.
-        extras.append(skirt(p["cloth"], 1.02, 0.86, 0.165 * spec["bulk"], 0.175 * spec["bulk"], rag=0.15, seed=spec["seed"], front_open=0.045))
+    b = spec["bulk"]
+    if top == "suit":
+        # Jacket: hem below the waist (open at the front), lapels, collar, flap pockets, a frayed hem; under it a belt
+        # with a brass buckle and a shirt tail hanging out.
+        extras.append(skirt(p["cloth"], 1.03, 0.8, 0.166 * b, 0.18 * b, rag=0.14, seed=spec["seed"], front_open=0.06))
+        extras += [lapel(p["cloth"], s, spec) for s in (-1, 1)]
         extras.append(collar(p["cloth"], spec))
+        for s in (-1, 1):
+            y = 0.8 * 0.176 * b + 0.004
+            extras.append(box((0.1, 0.006, 0.034), (s * 0.105, y, 0.93), p["cloth"], rot=(0, 0, -s * 0.2), bevel=0.002))
+        extras.append(box((0.07, 0.006, 0.012), (0.095, torso_front(0.095, 1.33, spec) + 0.005, 1.33), p["cloth"], bevel=0.001))
+        extras.append(ring_band(p["shoe"], 0.985, 1.02, 0.15 * b, 0.112 * b))
+        extras.append(box((0.034, 0.008, 0.026), (0.0, 0.112 * b + 0.006, 1.0), p["trim"], bevel=0.002))
+        extras.append(strip((0.03, torso_front(0.03, 1.0, spec) + 0.006, 0.99), 0.13, 0.08, (0.1, 1, 0), p["shirt"], sway=0.02, seed=7))
+        for k in range(5):
+            a = rng.uniform(1.4, 4.9)
+            tp = Vector((math.sin(a) * 0.18 * b, math.cos(a) * 0.145 * b, 0.82))
+            extras.append(strip(tp, rng.uniform(0.06, 0.14), rng.uniform(0.025, 0.045), (math.sin(a), math.cos(a), 0), p["cloth"], seed=30 + k))
+        # Shirt collar points either side of the throat.
+        for s in (-1, 1):
+            extras.append(strip((s * 0.035, torso_front(0.035, 1.44, spec) + 0.004, 1.455), 0.05, 0.03, (s * 0.6, 1, 0), p["shirt"], seed=60 + s))
+    elif top == "bellhop":
+        extras.append(skirt(p["cloth"], 1.02, 0.9, 0.163 * b, 0.168 * b, rag=0.1, seed=spec["seed"]))
+        extras.append(collar(p["cloth"], spec))
+        pts = [Vector((s * 0.045, torso_front(s * 0.045, z, spec) + 0.004, z)) for s in (-1, 1) for z in (1.06, 1.14, 1.22, 1.3, 1.38)]
+        extras += buttons(p["trim"], pts)
         for k in range(3):
-            a = rng.uniform(1.6, 4.6)
-            tp = Vector((math.sin(a) * 0.17, math.cos(a) * 0.12, 0.88))
-            extras.append(strip(tp, rng.uniform(0.08, 0.15), 0.04, (math.sin(a), math.cos(a), 0), p["cloth"], seed=30 + k))
-    elif top == "dress":
-        extras.append(skirt(p["cloth"], 0.98, 0.5, 0.165, 0.27, rag=0.6, seed=spec["seed"]))
-        for k in range(7):
+            a = rng.uniform(1.5, 4.8)
+            extras.append(strip(Vector((math.sin(a) * 0.168 * b, math.cos(a) * 0.134 * b, 0.91)), rng.uniform(0.05, 0.1), 0.035, (math.sin(a), math.cos(a), 0), p["cloth"], seed=70 + k))
+        # Epaulettes of braid.
+        for s in (-1, 1):
+            extras.append(box((0.07, 0.05, 0.008), (s * 0.135, -0.005, 1.455), p["trim"], rot=(0, s * 0.35, 0), bevel=0.002))
+    elif top == "housekeeper":
+        extras.append(skirt(p["cloth"], 0.99, 0.5, 0.165, 0.25, rag=0.32, seed=spec["seed"]))
+        extras.append(arc_panel(p["shirt"], 0.985, 0.62, 0.165, 0.235, 0.62, rag=0.3, seed=spec["seed"]))
+        for s in (-1, 1):
+            extras.append(strip((s * 0.12, -0.11, 0.99), 0.22, 0.025, (s * 0.3, -1, 0), p["shirt"], sway=s * 0.03, seed=80 + s))
+        for k in range(6):
             a = rng.uniform(-math.pi, math.pi)
-            tp = Vector((math.sin(a) * 0.25, math.cos(a) * 0.25, 0.53))
-            extras.append(strip(tp, rng.uniform(0.07, 0.17), rng.uniform(0.03, 0.05), (math.sin(a), math.cos(a), 0), p["cloth"], seed=40 + k))
-    elif top == "gown":
-        extras.append(skirt(p["cloth"], 0.98, 0.58, 0.16, 0.235, rag=0.25, seed=spec["seed"], back_open=0.07))
-        # Ties hanging at the back.
-        for side in (-1, 1):
-            extras.append(strip((side * 0.05, -0.105, 1.2), 0.16, 0.012, (side * 0.4, -1, 0), p["cloth"], seed=50 + side))
+            extras.append(strip(Vector((math.sin(a) * 0.25, math.cos(a) * 0.2, 0.53)), rng.uniform(0.05, 0.13), rng.uniform(0.03, 0.05), (math.sin(a), math.cos(a), 0), p["cloth"], seed=40 + k))
+    elif top == "blouse":
+        extras.append(skirt(p["clothb"], 1.0, 0.5, 0.16, 0.168, rag=0.22, seed=spec["seed"], back_open=0.03))
+        for k in range(4):
+            a = rng.uniform(-math.pi, math.pi)
+            tp = Vector((math.sin(a) * 0.15, math.cos(a) * 0.11, 1.02))
+            extras.append(strip(tp, rng.uniform(0.07, 0.15), rng.uniform(0.03, 0.05), (math.sin(a), math.cos(a), 0), p["cloth"], seed=90 + k))
+        pts = [Vector((0.0, torso_front(0.0, z, spec) + 0.004, z)) for z in (1.08, 1.15, 1.22)]
+        extras += buttons(p["shirt"], pts, r=0.006)
     return body, extras
+
+
+def zombie_headwear(p, spec):
+    """Pillbox cap (bellhop) and a hair bun (housekeeper)."""
+    out = []
+    if spec.get("hat") == "pillbox":
+        c = HEAD_C + Vector((0.03, 0.0, HEAD_R.z * 0.86))
+        cap = cyl(0.056, 0.06, tuple(c), p["cloth"], rot=(math.radians(-6), math.radians(14), 0), verts=24)
+        band = cyl(0.058, 0.014, tuple(c + Vector((0, 0, -0.022))), p["trim"], rot=(math.radians(-6), math.radians(14), 0), verts=24)
+        out += [apply_all(cap), apply_all(band)]
+    if spec.get("hair") == "bun":
+        bun = prim("sphere", p["hair"], loc=tuple(HEAD_C + Vector((0, -HEAD_R.y * 0.95, HEAD_R.z * 0.35))), radius=0.042, segments=16, ring_count=10)
+        bun.scale = (1.0, 0.8, 0.85)
+        out.append(apply_all(bun))
+    return out
 
 
 def skirt(mat, z0, z1, r0, r1, rag=0.3, seed=0, front_open=0.0, back_open=0.0):
@@ -1232,7 +1372,7 @@ def collar(mat, spec):
 
 
 def zombie_limbs(p, spec):
-    mats = [p["cloth"], p["skin"], p["blood"], p["clothb"], p["shoe"]]
+    mats = [p["cloth"], p["skin"], p["blood"], p["clothb"], p["shoe"], p["shirt"]]
     out, extras = {}, {}
     k_ = spec["k"]
     for side, x in (("L", -1), ("R", 1)):
@@ -1240,30 +1380,38 @@ def zombie_limbs(p, spec):
         palm = Vector(v[5])
         for i in range(6, len(v)):
             q = Vector(v[i])
-            v[i] = tuple(palm + (q - palm) * 1.4)
+            v[i] = tuple(palm + (q - palm) * 1.35)
             r[i] = r[i] * 0.85 if not isinstance(r[i], tuple) else r[i]
-        arm = skin_mesh(f"Zombie_Arm{side}_{k_}", v, e, r, subsurf=2, disp=0.006, disp_scale=0.1, mats=mats)
         sleeve = spec["sleeves"][0 if x < 0 else 1]
+        if sleeve is not None and sleeve < 1.25:
+            for i in range(4):
+                r[i] = r[i] * 1.22 if not isinstance(r[i], tuple) else r[i]
+        arm = skin_mesh(f"Zombie_Arm{side}_{k_}", v, e, r, subsurf=2, disp=0.006, disp_scale=0.1, mats=mats)
 
         def arm_pick(c, n, s=sleeve):
-            if s is not None and c.z > s + 0.035 * noise(c, 45):
-                return 2 if noise(c, 8) > 0.62 else 0
-            return 2 if noise(c + Vector((spec["seed"], 0, 0)), 9) > 0.52 else 1
+            if s is not None and c.z > s + 0.03 * noise(c, 45):
+                return 2 if noise(c, 8) > 0.66 else 0
+            return 2 if noise(c + Vector((spec["seed"], 0, 0)), 9) > 0.56 else 1
         paint_faces(arm, arm_pick)
         for vv in arm.data.vertices:
+            # Tendons on the backs of the hands, knuckles, wrist and elbow bones under thin skin.
             if vv.co.z < 0.95:
                 vv.co += vv.normal * 0.002 * max(0.0, math.sin(vv.co.z * 300))
-            # Bones of the wrist and elbow show through.
             if 0.92 < vv.co.z < 0.97:
                 vv.co += vv.normal * 0.003
         out[f"arm{side}"] = decimate(arm, 0.17)
         ex = []
-        if sleeve is not None and sleeve > 1.0:
-            ex.append(strip((x * 0.33 + x * 0.04, 0.0, sleeve + 0.01), 0.12, 0.035, (x, 0.3, 0), p["cloth"], seed=40 + x + 7 * k_))
+        if sleeve is not None:
+            # Frayed cuff, and the shirt cuff hanging out of a suit sleeve.
+            cuff = Vector((x * (0.155 + (0.462 - 0.155) * max(0.0, min(1.0, (1.42 - sleeve) / 0.545))), 0.02, sleeve + 0.01))
+            for kk in range(2):
+                ex.append(strip(cuff + Vector((x * 0.012 * kk, 0.02 * kk - 0.01, 0)), 0.05 + 0.03 * kk, 0.03, (x, 0.3 - 0.6 * kk, 0), p["cloth"], seed=40 + x + 7 * k_ + kk))
+            if spec["top"] == "suit":
+                ex.append(strip(cuff + Vector((x * 0.01, 0.0, -0.02)), 0.06, 0.04, (x, 0.5, 0), p["shirt"], seed=50 + x))
         extras[f"arm{side}"] = ex
         foot = spec["feet"][0 if x < 0 else 1]
-        v, e, r = leg_graph(x, bulk=spec["leg"], boot=1.1 if foot == "shoe" else 0.92)
-        if foot != "shoe":
+        v, e, r = leg_graph(x, bulk=spec["leg"], boot={"boot": 1.18, "shoe": 1.05}.get(foot, 0.92))
+        if foot == "bare":
             heel = Vector(v[6])
             for kk, dx in enumerate((-0.022, -0.009, 0.004, 0.016, 0.027)):
                 a = len(v)
@@ -1271,27 +1419,31 @@ def zombie_limbs(p, spec):
                 v += [tuple(base), tuple(base + Vector((x * 0.003, 0.028 - kk * 0.003, -0.006)))]
                 r += [0.011 if kk == 0 else 0.008, 0.007 if kk == 0 else 0.0055]
                 e += [(6, a), (a, a + 1)]
+        legs = spec["legs"]
+        if legs == "trousers":
+            for i in range(4):
+                r[i] = r[i] * (1.16 if i < 2 else 1.3) if not isinstance(r[i], tuple) else r[i]
         leg = skin_mesh(f"Zombie_Leg{side}_{k_}", v, e, r, subsurf=2, disp=0.007, disp_scale=0.07, mats=mats)
         rip = spec["rips"][0 if x < 0 else 1]
-        trousers = spec["legs"] == "trousers"
+        top_z = 0.13 if foot != "boot" else 0.2
 
-        def leg_pick(c, n, rp=rip, foot=foot):
-            if c.z < 0.13:
-                return {"bare": 1, "shoe": 4, "sock": 3}[foot]
-            if not trousers:
-                h = noise(c + Vector((spec["seed"], 0, 0)), 8)
-                return 2 if h > 0.55 else 1
-            if c.z < rp + 0.05 * noise(c, 25):
+        def leg_pick(c, n, rp=rip, foot=foot, top_z=top_z):
+            if c.z < top_z:
+                return {"bare": 1, "shoe": 4, "boot": 4, "sock": 3}[foot]
+            h = noise(c + Vector((spec["seed"], 0, 0)), 6) + 0.3 * noise(c, 19)
+            if legs == "bare":
+                return 2 if h > 0.62 else 1
+            if legs == "tights":
+                return 1 if h > 0.55 else 3  # ladders show the skin
+            if rp and abs(c.z - rp) < 0.055 + 0.02 * noise(c, 30) and n.y > 0.1:
+                return 1  # the knee through a hole
+            if h > 0.6:
                 return 1
-            h = noise(c, 6) + 0.3 * noise(c, 19)
-            if h > 0.52:
-                return 1
-            if h > 0.44:
+            if h > 0.54:
                 return 2
             return 3
         paint_faces(leg, leg_pick)
-        if not trousers:
-            # Knees, shin bones and ankles under thin skin.
+        if legs == "bare":
             for vv in leg.data.vertices:
                 if 0.45 < vv.co.z < 0.56 and vv.normal.y > 0.3:
                     vv.co += vv.normal * 0.006
@@ -1301,8 +1453,17 @@ def zombie_limbs(p, spec):
         leg = displace_group(leg, vg.name, 0.012, 0.05, "WOOD", "folds_z")
         out[f"leg{side}"] = decimate(leg, 0.4)
         ex = []
-        if trousers and rip > 0.3:
-            ex = [strip((x * 0.115 + x * 0.04 * kk, 0.03 - 0.06 * kk, rip + 0.03), 0.14 + 0.05 * kk, 0.04, (x * 0.6, 0.8 - 1.6 * kk, 0), p["clothb"], seed=60 + kk + x + 9 * k_) for kk in range(2)]
+        if foot in ("boot", "shoe"):
+            # A worn sole under the boot / shoe, scuffed and slightly split at the toe.
+            h = 0.022 if foot == "boot" else 0.014
+            ex.append(box((0.078 if foot == "boot" else 0.066, 0.215 if foot == "boot" else 0.19, h), (x * 0.121, 0.05, h / 2), p["shoe"], bevel=0.006))
+        if legs == "trousers":
+            # Frayed trouser hems over the boots, and strips hanging from the knee hole.
+            for kk in range(2):
+                a = (kk - 0.5) * 2.4
+                ex.append(strip((x * 0.12 + math.sin(a) * 0.05, math.cos(a) * 0.05, top_z + 0.04), 0.05, 0.03, (math.sin(a), math.cos(a), 0), p["clothb"], seed=60 + kk + x + 9 * k_))
+            if rip:
+                ex.append(strip((x * 0.112, 0.05, rip - 0.03), 0.09, 0.035, (x * 0.3, 1, 0), p["clothb"], seed=66 + x + 9 * k_))
         extras[f"leg{side}"] = ex
     return out, extras
 
@@ -1359,7 +1520,7 @@ def zombie_colors(obj, p, spec, blood=0.42, dirt=0.62, low=0.9, head=False):
             col *= 1 - 0.4 * bump(u, (0, 0.95, -0.42), 0.3)
             # Blood run from the mouth and nose down the chin.
             if abs(u.x - 0.05 * math.sin(u.z * 9)) < 0.12 and -1.0 < u.z < -0.25 and u.y > 0.5:
-                col = col.lerp(Vector(stain), 0.65)
+                col = col.lerp(Vector(stain), 0.3)
         attr.data[v.index].color = (max(0, col.x), max(0, col.y), max(0, col.z), 1.0)
     obj.data.color_attributes.active_color = attr
     return obj
@@ -1377,11 +1538,13 @@ ZOMBIE_DETAIL = {
     "Teeth": (0.5, 0.002, [("noise", 120, 4, 1.0)]),
     "Shoe": (0.5, 0.003, [("noise", 90, 6, 1.0)]),
     "Eyes": (0.2, 0.002, [("noise", 200, 3, 1.0)]),
+    "Shirt": (0.5, 0.004, [("wave", 300, 0, 0.12), ("waveb", 300, 0, 0.12), ("noise", 8, 3, 1.0)]),
+    "Trim": (0.3, 0.002, [("noise", 120, 4, 1.0)]),
 }
 
 # Roughness per material: (low, high, noise scale). Wet wounds and lips glossy, dry skin matte, cloth matte.
 ZOMBIE_ROUGH = {
-    "Skin": (0.38, 0.85, 14),
+    "Skin": (0.58, 0.92, 14),
     "Blood": (0.12, 0.35, 30),
     "Cloth": (0.82, 1.0, 9),
     "ClothB": (0.8, 1.0, 9),
@@ -1389,6 +1552,8 @@ ZOMBIE_ROUGH = {
     "Teeth": (0.25, 0.55, 40),
     "Shoe": (0.35, 0.7, 20),
     "Eyes": (0.05, 0.15, 10),
+    "Shirt": (0.78, 0.97, 9),
+    "Trim": (0.25, 0.5, 30),
 }
 
 
@@ -1404,8 +1569,8 @@ def bake_zombie_maps(meshes, size=2048, rough_size=1024):
     bpy.context.view_layer.objects.active = meshes[0]
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.003, scale_to_bounds=False)
-    bpy.ops.uv.pack_islands(margin=0.003, rotate=True)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(72), island_margin=0.001, area_weight=0.6, scale_to_bounds=False)
+    bpy.ops.uv.pack_islands(margin=0.0012, rotate=True)
     bpy.ops.object.mode_set(mode="OBJECT")
     nrm = bpy.data.images.new("ZombieNormal", size, size, alpha=False, float_buffer=False, is_data=True)
     nrm.generated_color = (0.5, 0.5, 1.0, 1.0)
@@ -1458,6 +1623,117 @@ def bake_zombie_maps(meshes, size=2048, rough_size=1024):
                 total = addn.outputs[0]
                 nodes.append(addn)
         return total, nodes
+
+    # Pass 0: albedo = vertex colour (dirt, blood, livor, veins, lesions) x procedural detail x the material colour
+    # (except Cloth / ClothB, which the game tints), baked as emission into an sRGB atlas.
+    alb = bpy.data.images.new("ZombieAlbedo", size, size, alpha=False, float_buffer=False)
+    alb.colorspace_settings.name = "sRGB"
+    temp = {}
+    for mat in used:
+        nt = mat.node_tree
+        out_node = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL")
+        bsdf = nt.nodes.get("Principled BSDF")
+        base = tuple(bsdf.inputs["Base Color"].default_value)[:3]
+        nodes = []
+
+        def node(kind, **props):
+            n = nt.nodes.new(kind)
+            for k, val in props.items():
+                setattr(n, k, val)
+            nodes.append(n)
+            return n
+
+        def vmul(a, b_):
+            m = node("ShaderNodeVectorMath", operation="MULTIPLY")
+            nt.links.new(a, m.inputs[0])
+            if isinstance(b_, tuple):
+                m.inputs[1].default_value = b_
+            else:
+                nt.links.new(b_, m.inputs[1])
+            return m.outputs[0]
+
+        def vscale(a, s):
+            m = node("ShaderNodeVectorMath", operation="SCALE")
+            nt.links.new(a, m.inputs[0])
+            nt.links.new(s, m.inputs["Scale"])
+            return m.outputs[0]
+
+        def tex(kind, scale, detail=0.0, **props):
+            t = node(kind, **props)
+            t.inputs["Scale"].default_value = scale
+            if "Detail" in t.inputs:
+                t.inputs["Detail"].default_value = detail
+            nt.links.new(tc.outputs["Object"], t.inputs["Vector"])
+            return t
+
+        def remap(sock, a, b_, lo, hi):
+            mr = node("ShaderNodeMapRange")
+            mr.inputs["From Min"].default_value = a
+            mr.inputs["From Max"].default_value = b_
+            mr.inputs["To Min"].default_value = lo
+            mr.inputs["To Max"].default_value = hi
+            nt.links.new(sock, mr.inputs["Value"])
+            return mr.outputs["Result"]
+
+        tc = node("ShaderNodeTexCoord")
+        vc = node("ShaderNodeVertexColor", layer_name="Col")
+        col = vc.outputs["Color"]
+        if mat.name not in ("Cloth", "ClothB"):
+            col = vmul(col, base)
+        if mat.name == "Skin":
+            col = vscale(col, remap(tex("ShaderNodeTexNoise", 7, 4).outputs["Fac"], 0.3, 0.7, 0.84, 1.1))
+            ridge = tex("ShaderNodeTexNoise", 26, 3)
+            sub = node("ShaderNodeMath", operation="SUBTRACT")
+            nt.links.new(ridge.outputs["Fac"], sub.inputs[0])
+            sub.inputs[1].default_value = 0.5
+            ab = node("ShaderNodeMath", operation="ABSOLUTE")
+            nt.links.new(sub.outputs[0], ab.inputs[0])
+            vein = remap(ab.outputs[0], 0.0, 0.022, 0.0, 1.0)
+            dark = vmul(col, (0.55, 0.6, 0.72))
+            lerp = node("ShaderNodeMix", data_type="RGBA", blend_type="MIX")
+            nt.links.new(vein, lerp.inputs["Factor"])
+            nt.links.new(dark, lerp.inputs[6])
+            nt.links.new(col, lerp.inputs[7])
+            col = lerp.outputs[2]
+        elif mat.name in ("Cloth", "ClothB", "Shirt"):
+            wa = tex("ShaderNodeTexWave", 560, wave_type="BANDS", bands_direction="X")
+            wb = tex("ShaderNodeTexWave", 560, wave_type="BANDS", bands_direction="Z")
+            w = node("ShaderNodeMath", operation="MULTIPLY")
+            nt.links.new(wa.outputs["Fac"], w.inputs[0])
+            nt.links.new(wb.outputs["Fac"], w.inputs[1])
+            col = vscale(col, remap(w.outputs[0], 0.0, 1.0, 0.94, 1.02))
+            col = vscale(col, remap(tex("ShaderNodeTexNoise", 3, 3).outputs["Fac"], 0.3, 0.7, 0.72, 1.05))
+            if mat.name == "Shirt":
+                st = remap(tex("ShaderNodeTexNoise", 2.6, 2).outputs["Fac"], 0.45, 0.68, 0.0, 1.0)
+                stained = vmul(col, (0.78, 0.66, 0.45))
+                lerp = node("ShaderNodeMix", data_type="RGBA", blend_type="MIX")
+                nt.links.new(st, lerp.inputs["Factor"])
+                nt.links.new(col, lerp.inputs[6])
+                nt.links.new(stained, lerp.inputs[7])
+                col = lerp.outputs[2]
+        elif mat.name == "Hair":
+            col = vscale(col, remap(tex("ShaderNodeTexWave", 420, wave_type="BANDS", bands_direction="Z").outputs["Fac"], 0.0, 1.0, 0.7, 1.15))
+        elif mat.name == "Shoe":
+            col = vscale(col, remap(tex("ShaderNodeTexNoise", 14, 6).outputs["Fac"], 0.35, 0.65, 0.55, 1.25))
+        em = node("ShaderNodeEmission")
+        nt.links.new(col, em.inputs["Color"])
+        old_link = out_node.inputs["Surface"].links[0].from_socket if out_node.inputs["Surface"].links else None
+        nt.links.new(em.outputs["Emission"], out_node.inputs["Surface"])
+        timg = node("ShaderNodeTexImage")
+        timg.image = alb
+        nt.nodes.active = timg
+        temp[mat] = (nodes, out_node, old_link)
+    bpy.ops.object.select_all(action="DESELECT")
+    for m in meshes:
+        m.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    bpy.ops.object.bake(type="EMIT", margin=6, use_clear=True)
+    alb.pack()
+    for mat, (nodes, out_node, old_link) in temp.items():
+        for n in nodes:
+            mat.node_tree.nodes.remove(n)
+        if old_link:
+            mat.node_tree.links.new(old_link, out_node.inputs["Surface"])
 
     # Pass 1: normals.
     temp = {}
@@ -1518,10 +1794,13 @@ def bake_zombie_maps(meshes, size=2048, rough_size=1024):
             nt.nodes.remove(n)
         if old:
             nt.links.new(old, out_node.inputs["Surface"])
-    # Rewire for export.
+    # Rewire for export: albedo into Base Color (the factor becomes white; the game tints Cloth / ClothB through it).
     for mat in used:
         nt = mat.node_tree
         bsdf = nt.nodes.get("Principled BSDF")
+        ta = nt.nodes.new("ShaderNodeTexImage")
+        ta.image = alb
+        nt.links.new(ta.outputs["Color"], bsdf.inputs["Base Color"])
         tn = nt.nodes.new("ShaderNodeTexImage")
         tn.image = nrm
         nm = nt.nodes.new("ShaderNodeNormalMap")
@@ -1535,6 +1814,7 @@ def bake_zombie_maps(meshes, size=2048, rough_size=1024):
         nt.links.new(sep.outputs["Green"], bsdf.inputs["Roughness"])
     scene.render.engine = "BLENDER_WORKBENCH"
     if PREVIEW:
+        alb.save(filepath=str(Path(PREVIEW) / "Zombie_albedo.png"))
         nrm.save(filepath=str(Path(PREVIEW) / "Zombie_normal.png"))
         rgh.save(filepath=str(Path(PREVIEW) / "Zombie_rough.png"))
     print("BAKED zombie maps")
@@ -1573,16 +1853,22 @@ def build_zombie(only_variants=None):
         meshes += parts
         print("ZOMBIE variant", k, spec["key"], "tris", sum(tris(m) for m in parts), [(m.name, tris(m)) for m in parts])
     bake_zombie_maps(meshes)
+    for m in meshes:
+        while m.data.color_attributes:
+            m.data.color_attributes.remove(m.data.color_attributes[0])
     zombie_anims(arm)
     return arm, meshes
 
 
 def zombie_anims(arm):
-    def base(t=0.0):
+    def base(t=0.0, reach=False):
         s = math.sin(t * math.tau)
+        # Arms hang, one a little raised, hands half clawed; `reach` is the old arms-out pose (tearing at boards).
+        arms = {"upperarm.L": (80 + 4 * s, 0, -18), "upperarm.R": (68 - 3 * s, 0, 14), "forearm.L": (26, 0, 0), "forearm.R": (38, 0, 0)} if reach else \
+            {"upperarm.L": (30 + 4 * s, 0, -10), "upperarm.R": (10 - 3 * s, 0, 8), "forearm.L": (34, 0, 0), "forearm.R": (20, 0, 0)}
         return {
-            "hips": (8, 0, 0), "spine": (14 + 2 * s, 0, 3), "chest": (12, 0, 5), "neck": (12, 0, 0), "head": (-8, 6, 15 + 3 * s),
-            "upperarm.L": (80 + 4 * s, 0, -18), "upperarm.R": (68 - 3 * s, 0, 14), "forearm.L": (26, 0, 0), "forearm.R": (38, 0, 0),
+            "hips": (5, 0, 0), "spine": (8 + 2 * s, 0, 3), "chest": (6, 0, 4), "neck": (10, 0, 0), "head": (-6, 6, 14 + 3 * s),
+            **arms,
             "hand.L": (-14, 0, 0), "hand.R": (-20, 0, 0),
             "thigh.L": (6, 0, -3), "thigh.R": (2, 0, 5), "shin.L": (-10, 0, 0), "shin.R": (-6, 0, 0), "foot.L": (4, 0, 0), "foot.R": (6, 0, 0),
         }
@@ -1596,12 +1882,12 @@ def zombie_anims(arm):
         c = math.cos(ph * math.tau)
         b = base(ph)
         b.update({
-            "hips": (8, 7 * s, 4 * s), "spine": (15, -5 * s, 3), "chest": (12, -4 * s, 5 + 2 * c),
+            "hips": (5, 7 * s, 4 * s), "spine": (9, -5 * s, 3), "chest": (7, -4 * s, 5 + 2 * c),
             "head": (-8 + 3 * math.sin(ph * 2 * math.tau), 10 * s, 16),
             "thigh.L": (26 * s + 2, 0, -3), "thigh.R": (-13 * s - 2, 0, 7),
             "shin.L": (-8 - 42 * max(0, c), 0, 0), "shin.R": (-10 - 16 * max(0, -c), 0, 0),
             "foot.L": (10 * max(0, c) - 6 * s, 0, 0), "foot.R": (-12, 0, 6),
-            "upperarm.L": (82 + 8 * s, 0, -18), "upperarm.R": (68 - 9 * s, 0, 14), "forearm.L": (24 + 6 * c, 0, 0), "forearm.R": (36 - 6 * c, 0, 0),
+            "upperarm.L": (42 + 7 * s, 0, -12), "upperarm.R": (12 - 10 * s, 0, 8), "forearm.L": (30 + 6 * c, 0, 0), "forearm.R": (18 - 6 * c, 0, 0),
         })
         return b, (-0.03 * s, -0.035 + 0.03 * abs(c), 0)
 
@@ -1640,8 +1926,8 @@ def zombie_anims(arm):
         (1, b0, (0, -0.02, 0)), (10, swing_up, (0, 0, -0.03)), (17, strike, (0, -0.06, 0.06)), (23, lerp_pose(strike, b0, 0.4), (0, -0.05, 0.04)), (31, b0, (0, -0.02, 0)),
     ])
 
-    reach = add(b0, {"upperarm.L": (24, 0, 8), "upperarm.R": (34, 0, -6), "forearm.L": (-16, 0, 0), "forearm.R": (-26, 0, 0), "chest": (10, 0, 0), "spine": (6, 0, 0), "hand.L": (20, 0, 0), "hand.R": (20, 0, 0)})
-    yank = add(b0, {"upperarm.L": (-18, 0, 4), "upperarm.R": (-10, 0, -4), "forearm.L": (50, 0, 0), "forearm.R": (40, 0, 0), "chest": (-16, 0, 0), "spine": (-8, 0, 0), "hand.L": (-30, 0, 0), "hand.R": (-30, 0, 0)})
+    reach = add(base(reach=True), {"upperarm.L": (24, 0, 8), "upperarm.R": (34, 0, -6), "forearm.L": (-16, 0, 0), "forearm.R": (-26, 0, 0), "chest": (10, 0, 0), "spine": (6, 0, 0), "hand.L": (20, 0, 0), "hand.R": (20, 0, 0)})
+    yank = add(base(reach=True), {"upperarm.L": (-18, 0, 4), "upperarm.R": (-10, 0, -4), "forearm.L": (50, 0, 0), "forearm.R": (40, 0, 0), "chest": (-16, 0, 0), "spine": (-8, 0, 0), "hand.L": (-30, 0, 0), "hand.R": (-30, 0, 0)})
     keyframes(arm, "tear", [(1, reach, (0, -0.02, 0.05)), (14, lerp_pose(reach, yank, 0.25), (0, -0.03, 0.03)), (24, yank, (0, -0.06, -0.08)), (41, reach, (0, -0.02, 0.05))])
 
     hands_down = add(b0, {"upperarm.L": (-10, 0, 10), "upperarm.R": (-4, 0, -10), "forearm.L": (-20, 0, 0), "forearm.R": (-30, 0, 0), "spine": (26, 0, 0), "chest": (22, 0, 0)})
@@ -1666,107 +1952,218 @@ def zombie_anims(arm):
 
 
 # ---- survivor ---------------------------------------------------------------------------------------------------------
+#
+# A modern SWAT operator, all black: combat shirt and trousers, balaclava under tinted goggles, a high-cut ballistic
+# helmet with rails, NVG shroud and ear protection, a heavy plate carrier (rifle and pistol mag pouches, admin pouch,
+# radio, MOLLE rows, cummerbund, shoulder pads, groin flap, back panel), a battle belt, a drop-leg holster, hard knee
+# pads, gloves and tactical boots. The player colour (`Team`) is only a small armband and a helmet patch.
+
+def survivor_palette():
+    return {
+        "team": material("Team", (0.5, 0.5, 0.5), rough=0.7, spec=0.35),
+        "skin": material("SurvivorSkin", (0.33, 0.2, 0.14), rough=0.55, spec=0.45),
+        "uniform": material("Uniform", (0.05, 0.05, 0.053), rough=0.82, spec=0.35),
+        "pants": material("Pants", (0.045, 0.045, 0.048), rough=0.85, spec=0.35),
+        "boots": material("Boots", (0.022, 0.021, 0.02), rough=0.38, spec=0.5),
+        "gear": material("Gear", (0.034, 0.034, 0.036), rough=0.72, spec=0.4),
+        "strap": material("Strap", (0.02, 0.02, 0.021), rough=0.6, spec=0.4),
+        "helmet": material("Helmet", (0.03, 0.03, 0.032), rough=0.48, spec=0.45),
+        "balaclava": material("Balaclava", (0.028, 0.028, 0.03), rough=0.92, spec=0.25),
+        "lens": material("Lens", (0.22, 0.1, 0.025), rough=0.06, metal=0.35, spec=0.9),
+        "metal": material("GearMetal", (0.06, 0.06, 0.065), rough=0.35, metal=0.85),
+        "eyes": material("SurvivorEyes", (0.05, 0.045, 0.04), rough=0.05),
+    }
+
 
 def build_survivor():
     clear_scene()
     p = survivor_palette()
     S = 1.02
     arm = build_armature("Survivor", S)
-    mats = [p["team"], p["skin"], p["pants"], p["boots"], p["gear"], p["strap"]]
+    # Material slots shared by the skinned body parts (indices used by paint_faces below).
+    mats = [p["uniform"], p["skin"], p["pants"], p["boots"], p["gear"], p["strap"], p["team"]]
+    UNI, PANTS, BOOTS, GLOVE = 0, 2, 3, 5
     sc = lambda pts: [(a * S, b * S, c * S) for a, b, c in pts]  # noqa: E731
-    v, e, r = torso_graph(1, bulk=1.17, gaunt=1.15)
-    body = skin_mesh("Survivor_Body", sc(v), e, r, subsurf=2, disp=0.004, disp_scale=0.08, mats=mats)
-    # Jacket down to the hips, a high collar, trousers below.
-    paint_faces(body, lambda c, n: 2 if c.z < 0.97 * S else (1 if c.z > 1.56 * S else 0))
-    vg = group_from_mats(body, [p["team"], p["pants"]], "cloth")
-    body = displace_group(body, vg.name, 0.01, 0.06, "WOOD", "folds_s")
-    collar = prim("torus", p["team"], loc=(0, 0.005, 1.49 * S), major_radius=0.066, minor_radius=0.012, major_segments=20, minor_segments=6)
-    hem = prim("torus", p["team"], loc=(0, 0.004, 0.985 * S), scale=(1.0, 0.72, 1.0), major_radius=0.165, minor_radius=0.018, major_segments=24, minor_segments=6)
-    belt = prim("torus", p["strap"], loc=(0, 0.004, 0.955 * S), scale=(1.0, 0.72, 1.0), major_radius=0.16, minor_radius=0.016, major_segments=24, minor_segments=6)
-    body = join([body, collar, hem, belt], "Survivor_Body")
+    v, e, r = torso_graph(1, bulk=1.2, gaunt=1.18)
+    body = skin_mesh("Survivor_Body", sc(v), e, r, subsurf=2, disp=0.003, disp_scale=0.08, mats=mats)
+    paint_faces(body, lambda c, n: PANTS if c.z < 0.97 * S else UNI)
+    vg = group_from_mats(body, [p["uniform"], p["pants"]], "cloth")
+    body = displace_group(body, vg.name, 0.009, 0.05, "WOOD", "folds_s")
+    collar = prim("torus", p["uniform"], loc=(0, 0.005, 1.5 * S), major_radius=0.064, minor_radius=0.014, major_segments=20, minor_segments=6)
+    body = join([body, collar], "Survivor_Body")
+
     limbs = []
     for side, x in (("L", -1), ("R", 1)):
         v, e, r = arm_graph(x, bulk=1.0, claw=False)
-        r = [(rr * 1.45 if i < 4 else rr) if not isinstance(rr, tuple) else rr for i, rr in enumerate(r)]
+        r = [(rr * 1.55 if i < 4 else rr * 1.12) if not isinstance(rr, tuple) else (rr[0] * 1.15, rr[1] * 1.15) for i, rr in enumerate(r)]
         a = skin_mesh(f"Survivor_Arm{side}", sc(v), e, r, subsurf=2, mats=mats)
-        paint_faces(a, lambda c, n: 0 if c.z > 0.965 * S else 5)  # sleeve to the wrist, gloves
-        vg = group_from_mats(a, [p["team"]], "cloth")
-        a = displace_group(a, vg.name, 0.007, 0.045, "WOOD", "folds_s2")
-        cuff = prim("torus", p["team"], loc=(x * 0.425 * S, 0.026 * S, 0.975 * S), rot=(0, math.radians(x * -24), 0), major_radius=0.036, minor_radius=0.012, major_segments=16, minor_segments=6)
-        patch = box((0.012, 0.07, 0.06), (x * 0.235 * S, 0.0, 1.31 * S), p["gear"], rot=(0, math.radians(x * -33), 0), bevel=0.006)
-        a = join([decimate(a, 0.55), cuff, patch], f"Survivor_Arm{side}")
-        v, e, r = leg_graph(x, bulk=1.18, boot=1.35)
-        r = [rr * 1.08 if (not isinstance(rr, tuple) and i < 3) else rr for i, rr in enumerate(r)]
+        paint_faces(a, lambda c, n: UNI if c.z > 0.965 * S else GLOVE)
+        vg = group_from_mats(a, [p["uniform"]], "cloth")
+        a = displace_group(a, vg.name, 0.008, 0.04, "WOOD", "folds_s2")
+        cuff = prim("torus", p["uniform"], loc=(x * 0.425 * S, 0.026 * S, 0.975 * S), rot=(0, math.radians(x * -24), 0), major_radius=0.038, minor_radius=0.013, major_segments=16, minor_segments=6)
+        # Hard shoulder pad, and the glove's knuckle armour.
+        pad = prim("sphere", p["gear"], loc=(x * 0.205 * S, 0.0, 1.385 * S), scale=(0.55, 0.85, 0.6), radius=0.09, segments=16, ring_count=10)
+        pad = apply_all(pad)
+        knuckle = box((0.02, 0.04, 0.045), (x * 0.478 * S, 0.05 * S, 0.865 * S), p["strap"], rot=(0, math.radians(x * -12), 0), bevel=0.008)
+        parts = [decimate(a, 0.6), cuff, pad, knuckle]
+        if x < 0:
+            # Team armband with a velcro patch on the left upper arm.
+            band = prim("torus", p["team"], loc=(x * 0.265 * S, 0.0, 1.28 * S), rot=(0, math.radians(x * -50), 0), scale=(1.0, 1.0, 1.6), major_radius=0.058, minor_radius=0.008, major_segments=20, minor_segments=6)
+            patch = box((0.012, 0.065, 0.045), (x * 0.3 * S, 0.0, 1.235 * S), p["team"], rot=(0, math.radians(x * -40), 0), bevel=0.004)
+            parts += [band, patch]
+        a = join(parts, f"Survivor_Arm{side}")
+
+        v, e, r = leg_graph(x, bulk=1.32, boot=1.42)
+        r = [rr * 1.1 if (not isinstance(rr, tuple) and i < 3) else rr for i, rr in enumerate(r)]
         l = skin_mesh(f"Survivor_Leg{side}", sc(v), e, r, subsurf=2, mats=mats)
-        paint_faces(l, lambda c, n: 3 if c.z < 0.25 * S else 2)
+        paint_faces(l, lambda c, n: BOOTS if c.z < 0.27 * S else PANTS)
         vg = group_from_mats(l, [p["pants"]], "cloth")
-        l = displace_group(l, vg.name, 0.013, 0.05, "WOOD", "folds_s3")
+        l = displace_group(l, vg.name, 0.012, 0.045, "WOOD", "folds_s3")
         extras = [
-            box((0.03, 0.12, 0.13), (x * 0.19 * S, 0.0, 0.66 * S), p["pants"], bevel=0.015),  # cargo pocket
-            box((0.024, 0.11, 0.02), (x * 0.195 * S, 0.0, 0.73 * S), p["pants"], bevel=0.008),  # pocket flap
-            box((0.11, 0.05, 0.12), (x * 0.112 * S, 0.075 * S, 0.5 * S), p["gear"], rot=(math.radians(-6), 0, 0), bevel=0.02),  # knee pad
-            prim("torus", p["boots"], loc=(x * 0.115 * S, -0.008 * S, 0.24 * S), major_radius=0.05, minor_radius=0.012, major_segments=16, minor_segments=6),  # boot collar
-            box((0.1, 0.27, 0.035), (x * 0.122 * S, 0.06 * S, 0.016), p["strap"], bevel=0.012),  # sole
+            box((0.032, 0.13, 0.14), (x * 0.192 * S, 0.0, 0.66 * S), p["pants"], bevel=0.016),  # cargo pocket
+            box((0.026, 0.12, 0.022), (x * 0.197 * S, 0.0, 0.735 * S), p["pants"], bevel=0.008),  # flap
+            # Hard knee pad: a cap over a strap.
+            prim("sphere", p["gear"], loc=(x * 0.112 * S, 0.068 * S, 0.5 * S), scale=(0.62, 0.42, 0.72), radius=0.095, segments=18, ring_count=12),
+            prim("torus", p["strap"], loc=(x * 0.112 * S, 0.0, 0.47 * S), scale=(1.0, 0.95, 1.0), major_radius=0.06, minor_radius=0.008, major_segments=18, minor_segments=5),
+            # Boot: collar, lace panel, toe cap, heavy sole.
+            prim("torus", p["boots"], loc=(x * 0.115 * S, -0.008 * S, 0.27 * S), major_radius=0.054, minor_radius=0.013, major_segments=18, minor_segments=6),
+            box((0.05, 0.06, 0.13), (x * 0.12 * S, 0.06 * S, 0.17 * S), p["boots"], rot=(math.radians(-22), 0, 0), bevel=0.012),
+            box((0.105, 0.29, 0.04), (x * 0.122 * S, 0.06 * S, 0.018), p["strap"], bevel=0.014),
+            box((0.095, 0.08, 0.05), (x * 0.122 * S, 0.17 * S, 0.045), p["boots"], bevel=0.02),
         ]
         if x > 0:
-            extras.append(box((0.045, 0.1, 0.17), (x * 0.18 * S, 0.02, 0.8 * S), p["strap"], rot=(math.radians(8), 0, 0), bevel=0.01))  # holster
+            # Drop-leg holster with a pistol, hung from the belt on two thigh straps.
+            extras += [
+                box((0.03, 0.09, 0.2), (x * 0.18 * S, 0.0, 0.78 * S), p["gear"], rot=(0, math.radians(6), 0), bevel=0.012),
+                box((0.04, 0.075, 0.16), (x * 0.205 * S, 0.005, 0.76 * S), p["strap"], rot=(0, math.radians(6), 0), bevel=0.01),
+                box((0.036, 0.045, 0.08), (x * 0.205 * S, -0.03, 0.87 * S), p["metal"], rot=(math.radians(-12), math.radians(6), 0), bevel=0.006),
+                prim("torus", p["strap"], loc=(x * 0.105 * S, 0.0, 0.8 * S), scale=(1.0, 0.95, 1.0), major_radius=0.098, minor_radius=0.007, major_segments=20, minor_segments=5),
+                prim("torus", p["strap"], loc=(x * 0.106 * S, 0.0, 0.69 * S), scale=(1.0, 0.95, 1.0), major_radius=0.088, minor_radius=0.007, major_segments=20, minor_segments=5),
+            ]
         l = join([l] + extras, f"Survivor_Leg{side}")
         limbs.append((side, a, l))
-    head = head_mesh("Survivor_Head", {"skin": p["skin"], "blood": p["skin"], "eyes": p["eyes"]}, zombie=False)
+
+    # Head under a balaclava; goggles over the eyes.
+    head = head_mesh("Survivor_Head", {"skin": p["balaclava"], "blood": p["balaclava"], "eyes": p["eyes"]}, zombie=False)
     activate(head)
     head.scale = (S, S, S)
     bpy.ops.object.transform_apply(scale=True)
-    # Plate carrier with mag pouches, shoulder straps, cummerbund; a pack on the back.
-    vest_parts = [
-        box((0.3, 0.06, 0.33), (0, 0.15, 1.28 * S), p["gear"], bevel=0.025),
-        box((0.3, 0.06, 0.33), (0, -0.135, 1.29 * S), p["gear"], bevel=0.025),
-        box((0.06, 0.11, 0.17), (-0.175, 0.0, 1.2 * S), p["gear"], bevel=0.02),
-        box((0.06, 0.11, 0.17), (0.175, 0.0, 1.2 * S), p["gear"], bevel=0.02),
+    eye_z = (HEAD_C.z + 0.014) * S
+
+    def band(radius, height, keep, mat, cy, thick):
+        o = prim("cyl", mat, loc=(0, cy, eye_z), radius=radius, depth=height, vertices=48)
+        o = apply_all(o)
+        activate(o)
+        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        delete_faces(o, lambda c, n: c.y < cy + keep or abs(n.z) > 0.9)
+        s = o.modifiers.new("Solid", "SOLIDIFY")
+        s.thickness = thick
+        s.offset = 1.0
+        o = apply_all(o)
+        return smooth(o)
+
+    goggles = [
+        band(0.0815, 0.05, 0.028, p["strap"], 0.064 * S, 0.006),
+        band(0.0845, 0.038, 0.034, p["lens"], 0.064 * S, 0.003),
+        prim("torus", p["strap"], loc=(0, HEAD_C.y * S, eye_z), scale=(0.95, 1.18, 1.0), major_radius=0.088, minor_radius=0.007, major_segments=28, minor_segments=5),
     ]
-    for sx in (-1, 1):
-        sh = box((0.065, 0.3, 0.025), (sx * 0.1, 0.005, 1.46 * S), p["gear"], rot=(0, math.radians(sx * 8), 0), bevel=0.01)
-        vest_parts.append(sh)
-    for k, px in enumerate((-0.085, 0.0, 0.085)):
-        vest_parts.append(box((0.075, 0.05, 0.12), (px, 0.2, 1.2 * S), p["gear"], bevel=0.014))
-        vest_parts.append(box((0.078, 0.052, 0.028), (px, 0.202, 1.27 * S), p["gear"], bevel=0.01))
-        vest_parts.append(box((0.03, 0.006, 0.03), (px, 0.228, 1.255 * S), p["strap"], bevel=0.003))
-    vest_parts.append(box((0.12, 0.04, 0.08), (0.05, 0.195, 1.37 * S), p["gear"], bevel=0.012))  # admin pouch
-    vest_parts.append(box((0.04, 0.05, 0.14), (-0.2, 0.06, 1.22 * S), p["gear"], bevel=0.012))  # radio
-    vest_parts.append(cyl(0.004, 0.18, (-0.21, 0.06, 1.35 * S), p["strap"], verts=6))  # antenna
-    for row in range(4):
-        vest_parts.append(box((0.29, 0.004, 0.006), (0, 0.181, (1.14 + row * 0.03) * S), p["strap"], bevel=0))  # MOLLE webbing
-        vest_parts.append(box((0.29, 0.004, 0.006), (0, -0.166, (1.2 + row * 0.03) * S), p["strap"], bevel=0))
-    pack = [
-        box((0.3, 0.17, 0.42), (0, -0.26, 1.24 * S), p["gear"], bevel=0.05),
-        box((0.31, 0.12, 0.08), (0, -0.25, 1.47 * S), p["gear"], bevel=0.035),
-        box((0.08, 0.08, 0.2), (-0.17, -0.26, 1.16 * S), p["gear"], bevel=0.02),
-        box((0.08, 0.08, 0.2), (0.17, -0.26, 1.16 * S), p["gear"], bevel=0.02),
-        box((0.22, 0.015, 0.025), (0, -0.35, 1.3 * S), p["strap"], bevel=0.004),
-        box((0.22, 0.015, 0.025), (0, -0.35, 1.12 * S), p["strap"], bevel=0.004),
-        cyl(0.045, 0.32, (0, -0.24, 1.03 * S), p["team"], rot=(0, math.radians(90), 0), verts=14),  # bedroll
-    ]
-    vest = join(vest_parts + pack, "Survivor_Vest")
-    # Helmet: shell, brim, side rails, a night-vision mount, straps.
-    shell = prim("sphere", p["gear"], loc=(0, 0.018, 1.71 * S), scale=(1.0, 1.1, 0.86), radius=0.128, segments=28, ring_count=16)
+    head = join([head] + goggles, "Survivor_Head")
+
+    # Helmet: high-cut shell with ear cut-outs, side rails, NVG shroud and mount, counterweight, ear protection.
+    shell = prim("sphere", p["helmet"], loc=(0, 0.018, 1.712 * S), scale=(1.02, 1.12, 0.88), radius=0.13, segments=32, ring_count=18)
     shell = apply_all(shell)
     activate(shell)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    cut = 1.665 * S
+    cut = 1.68 * S
     for vv in shell.data.vertices:
         if vv.co.z < cut:
-            vv.co.z = cut + (vv.co.z - cut) * 0.12
-            # Lower at the back and the ears than over the brow.
+            vv.co.z = cut + (vv.co.z - cut) * 0.15
             if vv.co.y < 0.0:
-                vv.co.z -= 0.035 * min(1.0, -vv.co.y / 0.1)
+                vv.co.z -= 0.03 * min(1.0, -vv.co.y / 0.1)
+        # High cut: the shell stops above the ears.
+        if abs(vv.co.x) > 0.08 and -0.05 < vv.co.y < 0.07:
+            vv.co.z = max(vv.co.z, 1.725 * S - 0.25 * abs(vv.co.y - 0.01))
+    s = shell.modifiers.new("Solid", "SOLIDIFY")
+    s.thickness = 0.012
+    shell = smooth(apply_all(shell))
     helmet_parts = [shell]
     for sx in (-1, 1):
-        helmet_parts.append(box((0.012, 0.11, 0.022), (sx * 0.127, 0.01, 1.69 * S), p["strap"], bevel=0.004))
-        helmet_parts.append(cyl(0.004, 0.11, (sx * 0.09, 0.04, 1.62 * S), p["strap"], rot=(math.radians(15), 0, 0), verts=6))
-    helmet_parts.append(box((0.05, 0.02, 0.04), (0, 0.145, 1.75 * S), p["strap"], bevel=0.006))
-    helmet_parts.append(box((0.06, 0.08, 0.025), (0, -0.07, 1.82 * S), p["gear"], bevel=0.01))
+        helmet_parts += [
+            box((0.014, 0.13, 0.024), (sx * 0.13, 0.01, 1.712 * S), p["strap"], rot=(0, 0, math.radians(sx * 2)), bevel=0.004),  # rail
+            box((0.006, 0.12, 0.004), (sx * 0.138, 0.01, 1.722 * S), p["metal"], bevel=0.001),
+            # Ear protection cups with a headband under the shell.
+            cyl(0.04, 0.03, (sx * 0.093, 0.015, 1.66 * S), p["strap"], rot=(0, math.radians(90), 0), verts=18),
+            cyl(0.03, 0.012, (sx * 0.112, 0.015, 1.66 * S), p["gear"], rot=(0, math.radians(90), 0), verts=14),
+            box((0.012, 0.012, 0.09), (sx * 0.09, 0.015, 1.715 * S), p["strap"], bevel=0.003),
+        ]
+    helmet_parts += [
+        box((0.055, 0.024, 0.042), (0, 0.148, 1.75 * S), p["metal"], bevel=0.006),  # NVG shroud
+        box((0.03, 0.04, 0.03), (0, 0.17, 1.735 * S), p["strap"], bevel=0.006),  # mount arm
+        cyl(0.017, 0.07, (0.0, 0.178, 1.79 * S), p["strap"], rot=(math.radians(12), 0, 0), verts=14),  # folded-up tube
+        box((0.08, 0.04, 0.05), (0, -0.115, 1.73 * S), p["gear"], rot=(math.radians(-25), 0, 0), bevel=0.012),  # counterweight
+        box((0.05, 0.006, 0.032), (0, -0.142, 1.745 * S), p["team"], rot=(math.radians(-25), 0, 0), bevel=0.002),  # team patch (back)
+        box((0.006, 0.04, 0.028), (0.128, -0.03, 1.745 * S), p["team"], bevel=0.002),  # team patch (side)
+        box((0.07, 0.07, 0.006), (0, 0.0, 1.855), p["gear"], bevel=0.003),  # loop velcro on top
+    ]
     helmet = join(helmet_parts, "Survivor_Helmet")
+
+    # Plate carrier.
+    G = p["gear"]
+    vest_parts = [
+        box((0.33, 0.075, 0.36), (0, 0.158, 1.27 * S), G, bevel=0.03),  # front plate bag
+        box((0.33, 0.075, 0.37), (0, -0.142, 1.28 * S), G, bevel=0.03),  # back plate bag
+        box((0.07, 0.13, 0.18), (-0.18, 0.006, 1.2 * S), G, bevel=0.022),  # cummerbund
+        box((0.07, 0.13, 0.18), (0.18, 0.006, 1.2 * S), G, bevel=0.022),
+        box((0.16, 0.05, 0.12), (0, 0.17, 1.03 * S), G, rot=(math.radians(6), 0, 0), bevel=0.02),  # groin flap
+        box((0.12, 0.08, 0.06), (0, 0.11, 1.5 * S), G, rot=(math.radians(-30), 0, 0), bevel=0.02),  # throat collar
+    ]
+    for sx in (-1, 1):
+        vest_parts.append(box((0.075, 0.31, 0.032), (sx * 0.105, 0.008, 1.465 * S), G, rot=(0, math.radians(sx * 8), 0), bevel=0.012))  # shoulder strap
+        vest_parts.append(box((0.08, 0.12, 0.03), (sx * 0.11, 0.06, 1.455 * S), p["strap"], rot=(math.radians(10), math.radians(sx * 8), 0), bevel=0.01))  # pad
+    # Four rifle mag pouches with flaps and bungee pulls, two pistol pouches above.
+    for k, px in enumerate((-0.12, -0.04, 0.04, 0.12)):
+        vest_parts += [
+            box((0.074, 0.052, 0.13), (px, 0.215, 1.175 * S), G, bevel=0.014),
+            box((0.077, 0.055, 0.03), (px, 0.217, 1.245 * S), G, bevel=0.01),
+            box((0.026, 0.008, 0.02), (px, 0.245, 1.235 * S), p["strap"], bevel=0.003),
+        ]
+    for px in (-0.05, 0.05):
+        vest_parts += [box((0.045, 0.035, 0.08), (px, 0.212, 1.32 * S), G, bevel=0.01)]
+    vest_parts += [
+        box((0.13, 0.04, 0.09), (0.0, 0.205, 1.4 * S), G, bevel=0.012),  # admin pouch
+        box((0.1, 0.006, 0.05), (0.0, 0.226, 1.405 * S), p["strap"], bevel=0.002),  # placard window
+        box((0.05, 0.055, 0.15), (-0.2, 0.08, 1.31 * S), G, bevel=0.012),  # radio pouch
+        box((0.04, 0.045, 0.1), (-0.2, 0.082, 1.36 * S), p["strap"], bevel=0.01),  # radio
+        cyl(0.005, 0.2, (-0.205, 0.07, 1.5 * S), p["strap"], verts=6),  # antenna
+        cyl(0.005, 0.18, (-0.13, 0.17, 1.42 * S), p["strap"], rot=(math.radians(10), math.radians(60), 0), verts=6),  # PTT cable
+        box((0.035, 0.02, 0.05), (-0.07, 0.205, 1.46 * S), p["strap"], bevel=0.006),  # PTT button
+    ]
+    # MOLLE rows on the plates and cummerbund.
+    for row in range(5):
+        z = (1.12 + row * 0.028) * S
+        vest_parts.append(box((0.32, 0.005, 0.008), (0, 0.197, z), p["strap"], bevel=0))
+        vest_parts.append(box((0.32, 0.005, 0.008), (0, -0.181, z + 0.06), p["strap"], bevel=0))
+        for sx in (-1, 1):
+            vest_parts.append(box((0.005, 0.12, 0.008), (sx * 0.217, 0.006, z), p["strap"], bevel=0))
+    # Back panel: hydration carrier and two utility pouches, a drag handle.
+    vest_parts += [
+        box((0.26, 0.06, 0.26), (0, -0.21, 1.25 * S), G, bevel=0.03),
+        box((0.1, 0.05, 0.12), (-0.08, -0.25, 1.12 * S), G, bevel=0.015),
+        box((0.1, 0.05, 0.12), (0.08, -0.25, 1.12 * S), G, bevel=0.015),
+        prim("torus", p["strap"], loc=(0, -0.19, 1.47 * S), rot=(math.radians(90), 0, 0), scale=(1.0, 1.0, 0.6), major_radius=0.04, minor_radius=0.008, major_segments=14, minor_segments=5),
+    ]
+    # Battle belt with pouches.
+    vest_parts += [
+        prim("torus", p["strap"], loc=(0, 0.004, 0.965 * S), scale=(1.0, 0.74, 1.0), major_radius=0.172, minor_radius=0.024, major_segments=28, minor_segments=6),
+        box((0.06, 0.05, 0.08), (-0.16, 0.08, 0.95 * S), G, rot=(0, 0, math.radians(-40)), bevel=0.012),
+        box((0.06, 0.05, 0.08), (0.17, 0.07, 0.95 * S), G, rot=(0, 0, math.radians(40)), bevel=0.012),
+        box((0.14, 0.05, 0.1), (0, -0.14, 0.95 * S), G, bevel=0.02),  # dump pouch
+        box((0.05, 0.045, 0.08), (-0.18, -0.07, 0.95 * S), G, bevel=0.01),
+    ]
+    vest = join(vest_parts, "Survivor_Vest")
+
     skin_to(body, arm, ["hips", "spine", "chest", "neck", "upperarm.L", "upperarm.R", "thigh.L", "thigh.R"], scale=S)
-    skin_to(vest, arm, ["spine", "chest"], scale=S, power=2)
+    skin_to(vest, arm, ["hips", "spine", "chest"], scale=S, power=2)
     skin_to(head, arm, ["neck", "head"], scale=S, power=6)
     skin_to(helmet, arm, ["head"], scale=S, rigid="head")
     for side, a, l in limbs:
@@ -1774,7 +2171,7 @@ def build_survivor():
         skin_to(l, arm, ["hips", f"thigh.{side}", f"shin.{side}", f"foot.{side}"], scale=S)
     meshes = [body, vest, head, helmet] + [m for _, a, l in limbs for m in (a, l)]
     for m in meshes:
-        grime(m, dirt=0.4, low=0.6, blood=0.12, stain=(0.18, 0.1, 0.05))
+        grime(m, dirt=0.18, low=0.35, blood=0.0)
     bake_normals("Survivor", meshes, SURVIVOR_DETAIL)
     print("SURVIVOR tris", sum(tris(m) for m in meshes), [(m.name, tris(m)) for m in meshes])
     survivor_anims(arm)
@@ -1786,12 +2183,17 @@ def build_survivor():
 # Procedural bump per material: (strength, distance, [(kind, scale, detail/extra, weight)]). ZOMBIE_DETAIL is in the
 # zombie section.
 SURVIVOR_DETAIL = {
-    "Team": (0.35, 0.006, [("noise", 5, 2, 1.0), ("noise", 18, 2, 0.3), ("wave", 300, 0, 0.08)]),
+    "Team": (0.35, 0.004, [("noise", 6, 2, 1.0), ("wave", 300, 0, 0.1), ("waveb", 300, 0, 0.1)]),
     "SurvivorSkin": (0.12, 0.002, [("noise", 160, 6, 0.6), ("noise", 25, 2, 0.4)]),
-    "Pants": (0.35, 0.005, [("wave", 240, 0, 0.1), ("waveb", 240, 0, 0.1), ("noise", 6, 2, 1.0)]),
-    "Boots": (0.5, 0.003, [("noise", 70, 6, 1.0), ("noise", 12, 2, 0.4)]),
-    "Gear": (0.35, 0.003, [("wave", 160, 0, 0.25), ("waveb", 160, 0, 0.25), ("noise", 10, 2, 0.6)]),
+    "Uniform": (0.4, 0.004, [("wave", 260, 0, 0.12), ("waveb", 260, 0, 0.12), ("noise", 6, 2, 1.0), ("noise", 30, 3, 0.25)]),
+    "Pants": (0.4, 0.004, [("wave", 240, 0, 0.12), ("waveb", 240, 0, 0.12), ("noise", 6, 2, 1.0), ("noise", 28, 3, 0.25)]),
+    "Boots": (0.5, 0.003, [("noise", 70, 6, 1.0), ("wave", 90, 0, 0.3), ("noise", 12, 2, 0.4)]),
+    "Gear": (0.45, 0.003, [("wave", 180, 0, 0.3), ("waveb", 180, 0, 0.3), ("noise", 10, 2, 0.6), ("voronoi", 25, 0, 0.15)]),
     "Strap": (0.6, 0.002, [("wave", 320, 0, 1.0)]),
+    "Helmet": (0.25, 0.002, [("noise", 60, 4, 0.6), ("noise", 9, 2, 0.4)]),
+    "Balaclava": (0.4, 0.002, [("wave", 380, 0, 0.6), ("waveb", 190, 0, 0.3), ("noise", 40, 3, 0.4)]),
+    "Lens": (0.02, 0.001, [("noise", 4, 1, 1.0)]),
+    "GearMetal": (0.2, 0.001, [("noise", 120, 4, 1.0)]),
 }
 
 BAKE_SIZE = 1024
@@ -2705,39 +3107,160 @@ def build_props():
 
 # ---- first-person arms ----------------------------------------------------------------------------------------------
 
+# Camera at the origin looking along +Y (glTF -Z), x right, z up. The right palm grips a pistol grip whose origin is
+# ARM_PALM_R (the gun's own origin); the left palm sits under a handguard at ARM_PALM_L (viewmodel.ts moves ArmL so
+# this point lands under the gun it holds). Both must stay where viewmodel.ts expects them (PALM, LEFT_PALM).
+ARM_PALM_R = Vector((0.12, 0.33, -0.21))
+ARM_PALM_L = Vector((0.02, 0.53, -0.19))
+
+ARMS_DETAIL = {
+    "Sleeve": (0.4, 0.004, [("wave", 220, 0, 0.12), ("waveb", 220, 0, 0.12), ("noise", 7, 2, 1.0)]),
+    "Glove": (0.45, 0.002, [("noise", 90, 6, 0.6), ("voronoi", 60, 0, 0.5), ("noise", 14, 2, 0.4)]),
+    "GloveArmor": (0.25, 0.002, [("noise", 40, 4, 1.0)]),
+    "Strap": (0.6, 0.002, [("wave", 320, 0, 1.0)]),
+}
+
+
+def _chain(name, pts, radii, mat, subsurf=1):
+    return skin_mesh(name, [tuple(q) for q in pts], [(i, i + 1) for i in range(len(pts) - 1)], radii, subsurf=subsurf, mats=[mat])
+
+
+def _blob(center, axes, mat, segs=20, rings=12):
+    """A smooth ellipsoid with its three semi-axes given as vectors (an oriented palm or pad)."""
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1, location=(0, 0, 0), segments=segs, ring_count=rings)
+    o = bpy.context.active_object
+    a, b, c = (Vector(v) for v in axes)
+    for v in o.data.vertices:
+        v.co = Vector(center) + a * v.co.x + b * v.co.y + c * v.co.z
+    o.data.materials.append(mat)
+    return smooth(o)
+
+
+def _arm_tube(name, pts, radii, sleeve, glove, cut_at):
+    """Forearm + upper arm: gloved below `cut_at` (index into pts), sleeved above, with a cuff at the cut."""
+    obj = _chain(name, pts, radii, sleeve, subsurf=2)
+    obj.data.materials.append(glove)
+    a, b = Vector(pts[cut_at]), Vector(pts[cut_at - 1])
+    d = (b - a).normalized()
+    paint_faces(obj, lambda c, n: 1 if (c - a).dot(d) < 0 else 0)
+    vg = group_from_mats(obj, [sleeve], "cloth")
+    obj = displace_group(obj, vg.name, 0.006, 0.035, "WOOD", "folds_arms")
+    return obj
+
+
+def right_hand(p):
+    """Gun-local frame: grip axis roughly vertical through (0, cy(z), z), fingers around its front, thumb on the left."""
+    glove, armor = p["glove"], p["armor"]
+    rx, ry = 0.016, 0.024
+
+    def cy(z):
+        return -0.012 + 0.11 * z
+
+    def around(z, phi, extra):
+        f = math.radians(phi)
+        return Vector(((rx + extra) * math.cos(f), cy(z) + (ry + extra) * math.sin(f), z))
+
+    parts = []
+    # Middle, ring and little fingers wrap the grip; knuckles stand off the back of the hand.
+    for z, scale in ((-0.03, 1.0), (-0.05, 0.96), (-0.069, 0.82)):
+        mcp = around(z + 0.002, -18, 0.03)
+        pip = around(z, 52 * scale + 3, 0.0115)
+        dip = around(z - 0.002, 122 * scale + 8, 0.0105)
+        tip = around(z - 0.004, 170 * scale + 5, 0.0105)
+        r = 0.0112 * (0.92 + 0.08 * scale)
+        parts.append(_chain("finger", [mcp, pip, dip, tip], [r * 1.12, r * 1.05, r * 0.95, r * 0.82], glove))
+        # Padded knuckle armour on each finger.
+        mid = (mcp + pip) / 2
+        out = Vector((mid.x - 0, mid.y - cy(z), 0)).normalized()
+        parts.append(_blob(mid + out * 0.009, (out * 0.005, Vector((0, 0, 1)) * 0.009, (pip - mcp).normalized() * 0.013), armor, 10, 6))
+    # Index finger along the frame to the trigger.
+    idx = [Vector((0.039, cy(-0.006) - 0.01, -0.007)), Vector((0.024, 0.026, -0.006)), Vector((0.006, 0.046, -0.012)), Vector((-0.005, 0.042, -0.022))]
+    parts.append(_chain("index", idx, [0.0122, 0.0112, 0.0102, 0.0088], glove))
+    # Thumb from the heel of the hand over the back strap to the left side of the grip.
+    th = [Vector((0.03, cy(-0.03) - 0.045, -0.035)), Vector((0.006, cy(0.0) - 0.04, -0.004)), Vector((-0.02, cy(0.0) - 0.014, 0.004)), Vector((-0.028, cy(0.0) + 0.012, 0.0))]
+    parts.append(_chain("thumb", th, [0.0148, 0.0128, 0.0114, 0.0098], glove))
+    # Palm against the right side and back of the grip, and the back-of-hand armour plate.
+    palm_c = Vector((0.03, cy(-0.036) - 0.022, -0.036))
+    length = (Vector((0.044, cy(-0.04) - 0.012, -0.04)) - Vector((0.04, -0.085, -0.05))).normalized()
+    normal = Vector((1, -0.35, 0)).normalized()
+    width = length.cross(normal).normalized()
+    parts.append(_blob(palm_c, (normal * 0.017, length * 0.048, width * 0.046), glove))
+    parts.append(_blob(palm_c + normal * 0.015 + length * 0.008, (normal * 0.008, length * 0.03, width * 0.036), armor, 14, 8))
+    return parts
+
+
+def left_hand(p):
+    """Rig frame around ARM_PALM_L: palm under a handguard running along +Y, fingers up its right side, thumb up the left."""
+    glove, armor = p["glove"], p["armor"]
+    C = ARM_PALM_L + Vector((0, 0, 0.042))  # handguard axis
+    R = 0.03
+
+    def at(y, psi, extra):
+        s = math.radians(psi)
+        return C + Vector(((R + extra) * math.sin(s), y, -(R + extra) * math.cos(s)))
+
+    parts = []
+    for y, scale in ((0.03, 1.0), (0.011, 1.03), (-0.008, 0.98), (-0.026, 0.84)):
+        mcp = at(y, 18, 0.02)
+        pip = at(y, 62 * scale, 0.011)
+        dip = at(y, 98 * scale, 0.0105)
+        tip = at(y, 128 * scale, 0.0105)
+        r = 0.0112 * (0.92 + 0.08 * scale)
+        parts.append(_chain("finger", [mcp, pip, dip, tip], [r * 1.12, r * 1.05, r * 0.95, r * 0.82], glove))
+        mid = (mcp + pip) / 2
+        out = (mid - Vector((C.x, mid.y, C.z))).normalized()
+        parts.append(_blob(mid + out * 0.009, (out * 0.005, Vector((0, 1, 0)) * 0.009, (pip - mcp).normalized() * 0.013), armor, 10, 6))
+    th = [at(-0.02, -58, 0.03), at(-0.004, -92, 0.016), at(0.016, -118, 0.012), at(0.034, -134, 0.011)]
+    parts.append(_chain("thumb", th, [0.0148, 0.013, 0.0116, 0.0098], glove))
+    palm_c = at(0.002, -22, 0.022)
+    normal = (palm_c - Vector((C.x, palm_c.y, C.z))).normalized()
+    length = Vector((0, 0, 0)) + (at(0.0, 18, 0.02) - at(0.0, -62, 0.03)).normalized()
+    width = normal.cross(length).normalized()
+    parts.append(_blob(palm_c, (normal * 0.016, length * 0.046, width * 0.046), glove))
+    parts.append(_blob(palm_c + normal * 0.014, (normal * 0.008, length * 0.03, width * 0.036), armor, 14, 8))
+    return parts
+
+
 def build_arms():
-    """Camera at the origin looking along +Y. Right hand closes around a grip at GRIP; the left supports at LEFT_HAND."""
+    """First-person SWAT arms: black sleeves with cuffs and black tactical gloves with knuckle armour."""
     clear_scene()
-    sleeve = material("Sleeve", (0.13, 0.14, 0.12), rough=0.85)
-    glove = material("Glove", (0.035, 0.035, 0.035), rough=0.7)
+    p = {
+        "sleeve": material("Sleeve", (0.042, 0.042, 0.045), rough=0.85, spec=0.35),
+        "glove": material("Glove", (0.024, 0.024, 0.025), rough=0.55, spec=0.45),
+        "armor": material("GloveArmor", (0.032, 0.032, 0.034), rough=0.35, spec=0.5),
+        "strap": material("Strap", (0.02, 0.02, 0.021), rough=0.6, spec=0.4),
+    }
     out = []
-    for name, elbow, wrist, palm, fingers_dir in (
-        ("ArmR", (0.26, 0.05, -0.42), (0.13, 0.3, -0.235), (0.12, 0.33, -0.21), (-1, 0.15, -0.3)),
-        ("ArmL", (-0.2, 0.32, -0.42), (0.0, 0.5, -0.22), (0.02, 0.53, -0.19), (1, 0.1, 0.3)),
-    ):
-        e, w, pm = Vector(elbow), Vector(wrist), Vector(palm)
-        fd = Vector(fingers_dir).normalized()
-        verts = [tuple(e - (w - e).normalized() * 0.25), tuple(e), tuple(e.lerp(w, 0.55)), tuple(w), tuple(pm)]
-        radii = [0.06, 0.055, 0.045, 0.034, (0.036, 0.02)]
-        edges = [(0, 1), (1, 2), (2, 3), (3, 4)]
-        for k in range(4):
-            off = Vector((0, 0, 0.012 * (k - 1.5))) + Vector((0, 0.01 * (k - 1.5), 0))
-            a = len(verts)
-            b0 = pm + off + fd * 0.035
-            b1 = b0 + fd * 0.025 + Vector((0, -0.02, -0.01))
-            b2 = b1 + Vector((0, -0.025, -0.008)) - fd * 0.01
-            verts += [tuple(b0), tuple(b1), tuple(b2)]
-            radii += [0.011, 0.0095, 0.008]
-            edges += [(4, a), (a, a + 1), (a + 1, a + 2)]
-        a = len(verts)
-        verts += [tuple(pm + Vector((0, 0.03, 0.02))), tuple(pm + Vector((0, 0.05, 0.03)) + fd * 0.02)]
-        radii += [0.012, 0.0095]
-        edges += [(4, a), (a, a + 1)]
-        obj = skin_mesh(name, verts, edges, radii, subsurf=1, mats=[sleeve, glove])
-        cut = e.lerp(w, 0.75)
-        paint_faces(obj, lambda c, n, cut=cut, w=w: 1 if (c - cut).dot((w - cut).normalized()) > 0 else 0)
-        out.append(obj)
-    print("ARMS tris", sum(tris(o) for o in out))
+    # Right: hand in gun-local space moved to the palm point; forearm back towards the elbow, below and to the right.
+    hand = right_hand(p)
+    for o in hand:
+        o.location += ARM_PALM_R
+    wrist = ARM_PALM_R + Vector((0.042, -0.088, -0.05))
+    elbow = ARM_PALM_R + Vector((0.15, -0.3, -0.22))
+    shoulder = elbow + Vector((0.08, -0.22, -0.12))
+    tube = _arm_tube("forearmR", [shoulder, elbow, wrist.lerp(elbow, 0.45), wrist + (wrist - elbow).normalized() * 0.015, wrist + (wrist - elbow).normalized() * 0.03],
+                     [0.06, 0.055, 0.047, 0.033, 0.028], p["sleeve"], p["glove"], 3)
+    cuff = prim("torus", p["sleeve"], loc=tuple(wrist - (wrist - elbow).normalized() * 0.03), major_radius=0.041, minor_radius=0.011, major_segments=20, minor_segments=6)
+    cuff.rotation_euler = (wrist - elbow).to_track_quat("Z", "Y").to_euler()
+    strap = prim("torus", p["strap"], loc=tuple(wrist), major_radius=0.031, minor_radius=0.006, major_segments=18, minor_segments=5)
+    strap.rotation_euler = cuff.rotation_euler
+    out.append(join([tube, cuff, strap] + hand, "ArmR"))
+    # Left: palm under the handguard, forearm down and back to the left.
+    hand = left_hand(p)
+    wrist = ARM_PALM_L + Vector((-0.06, -0.045, -0.045))
+    elbow = ARM_PALM_L + Vector((-0.22, -0.2, -0.23))
+    shoulder = elbow + Vector((-0.06, -0.24, -0.1))
+    tube = _arm_tube("forearmL", [shoulder, elbow, wrist.lerp(elbow, 0.45), wrist + (wrist - elbow).normalized() * 0.015, wrist + (wrist - elbow).normalized() * 0.03],
+                     [0.06, 0.055, 0.047, 0.033, 0.028], p["sleeve"], p["glove"], 3)
+    cuff = prim("torus", p["sleeve"], loc=tuple(wrist - (wrist - elbow).normalized() * 0.03), major_radius=0.041, minor_radius=0.011, major_segments=20, minor_segments=6)
+    cuff.rotation_euler = (wrist - elbow).to_track_quat("Z", "Y").to_euler()
+    strap = prim("torus", p["strap"], loc=tuple(wrist), major_radius=0.031, minor_radius=0.006, major_segments=18, minor_segments=5)
+    strap.rotation_euler = cuff.rotation_euler
+    out.append(join([tube, cuff, strap] + hand, "ArmL"))
+    for o in out:
+        grime(o, dirt=0.12)
+    bake_normals("Arms", out, ARMS_DETAIL)
+    print("ARMS tris", sum(tris(o) for o in out), [(o.name, tris(o)) for o in out])
     return out
 
 
@@ -2771,7 +3294,7 @@ def build_all():
         export("props", objs)
     if ONLY == "arms":
         objs = build_arms()
-        export("arms", objs)
+        export("arms", objs, textures=True)
 
 
 if __name__ == "__main__":

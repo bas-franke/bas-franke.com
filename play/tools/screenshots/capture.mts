@@ -268,7 +268,7 @@ async function shootDustrunners(context: BrowserContext): Promise<Shot[]> {
   return shots;
 }
 
-/** Last Light: every map once the first wave is in, looking at the nearest window from the middle of the room. */
+/** Last Light: the hotel once the first wave is in, looking at the glass facade from the middle of the lobby. */
 async function shootZombies(context: BrowserContext): Promise<Shot[]> {
   const shots: Shot[] = [];
   for (const m of ZMAP_LIST) {
@@ -276,16 +276,11 @@ async function shootZombies(context: BrowserContext): Promise<Shot[]> {
     const page = await startMatch(context, await createRoom('zombies', m.id));
     // First wave after 6 s; give it time to rise and reach the boards.
     await sleep(17_000);
+    // Face the sunlit glass facade (north, yaw 0), like the concept art.
     await page.evaluate(() => {
-      interface Dev {
-        world: { windows: { inside: { x: number; z: number } }[] };
-        me: { yaw: number; pitch: number; body: { pos: { x: number; z: number } } };
-      }
-      const c = (window as unknown as { __zombies: Dev }).__zombies;
-      const p = c.me.body.pos;
-      const w = [...c.world.windows].sort((a, b) => Math.hypot(a.inside.x - p.x, a.inside.z - p.z) - Math.hypot(b.inside.x - p.x, b.inside.z - p.z))[0];
-      c.me.yaw = Math.atan2(-(w.inside.x - p.x), -(w.inside.z - p.z));
-      c.me.pitch = 0.02;
+      const c = (window as unknown as { __zombies: { me: { yaw: number; pitch: number } } }).__zombies;
+      c.me.yaw = 0;
+      c.me.pitch = 0.04;
     });
     await sleep(900);
     const file = `zombies-${m.id}.jpg`;

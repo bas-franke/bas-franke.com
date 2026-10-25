@@ -12,7 +12,7 @@ import { createPipeline } from './post';
 import { createWorldView } from './world';
 
 const params = new URLSearchParams(location.search);
-let mapIndex = Math.max(0, MAPS.findIndex((m) => m.id === (params.get('map') ?? 'storage')));
+let mapIndex = Math.max(0, MAPS.findIndex((m) => m.id === (params.get('map') ?? 'hotel')));
 let quality = (params.get('q') as Quality) || 'medium';
 
 const stubModels: Models = {
@@ -101,7 +101,8 @@ function build() {
   pipe?.dispose();
   view?.dispose();
   const def = MAPS[mapIndex];
-  world = buildWorld(zmapById(def.id)!);
+  const zonesParam = params.get('zones');
+  world = zonesParam ? buildWorld(zmapById(def.id)!, zonesParam.split(',') as never) : buildWorld(zmapById(def.id)!);
   const t0 = performance.now();
   view = createWorldView(scene, world, models, quality);
   const t1 = performance.now();

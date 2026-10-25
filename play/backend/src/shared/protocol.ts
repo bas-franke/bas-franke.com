@@ -66,12 +66,12 @@ export const GAMES: Record<GameId, GameMeta> = {
   zombies: {
     id: 'zombies',
     name: 'Last Light',
-    tagline: 'Board up the windows. They keep coming.',
+    tagline: 'A SWAT team, a grand hotel lobby, endless dead.',
     description:
-      'Co-op zombie survival in one dark, fully destructible room. Endless waves rise outside, one by one, tear the ' +
-      'boards off the windows and shamble in. Earn points for every hit to buy guns old and new, ammo, grenades and ' +
-      'armor from the lockers, rebuild the barricades and revive each other. Bullets chip the walls; grenades blow ' +
-      'holes in them, and the dead can come through those too.',
+      'Co-op zombie survival as a SWAT team holding the lobby of the Grand Meridian Hotel. Endless waves break in, one ' +
+      'by one, through the boarded doors and windows. Earn points for every hit to buy guns old and new, ammo, grenades ' +
+      'and armor, nail the barricades back up and revive each other. Everything breaks: marble, glass, columns, the ' +
+      'reception desk. Bigger squads open the lounge bar and the restaurant.',
     minPlayers: 1,
     maxPlayers: 10,
     accent: '#c8463a',

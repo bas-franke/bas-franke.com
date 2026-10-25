@@ -65,7 +65,8 @@ export class NavField {
         const z = w.center.z + (along === 'z' ? k * CELL : 0);
         const c = this.cellOf(x, z);
         if (c >= 0) {
-          this.kind[c] = Kind.Window;
+          // Entrances of a closed wing are walled off for zombies.
+          this.kind[c] = w.active ? Kind.Window : Kind.Blocked;
           this.win[c] = w.i;
         }
       }
@@ -115,14 +116,15 @@ export class NavField {
   }
 
   /** A chunk broke or fell: its cells get re-checked before the next solve. */
-  chunkChanged(j: number) {
+  chunkChanged(j: number): boolean {
     const ch = this.world.chunks[j];
-    if (ch.min.y >= BODY_TOP) return;
+    if (ch.min.y >= BODY_TOP) return false;
     for (let x = ch.min.x; x < ch.max.x + CELL - 1e-6; x += CELL)
       for (let z = ch.min.z; z < ch.max.z + CELL - 1e-6; z += CELL) {
         const c = this.cellOf(Math.min(x, ch.max.x - 1e-3), Math.min(z, ch.max.z - 1e-3));
         if (c >= 0) this.dirty.add(c);
       }
+    return true;
   }
 
   /** Chunks standing in a bash cell, below body height. */
@@ -188,7 +190,8 @@ export class NavField {
     }
     const nz = this.nz;
     while (this.heapN > 0) {
-      const [c, d] = this.pop();
+      const c = this.pop();
+      const d = this.popD;
       if (d > dist[c]) continue;
       const i = Math.floor(c / nz);
       const k = c - i * nz;
@@ -256,7 +259,10 @@ export class NavField {
     key[i] = d;
   }
 
-  private pop(): [number, number] {
+  /** Key of the cell the last pop() returned (kept in a field so the hot loop allocates nothing). */
+  private popD = 0;
+
+  private pop(): number {
     const h = this.heap;
     const key = this.heapKey;
     const top = h[0];
@@ -275,7 +281,8 @@ export class NavField {
     }
     h[i] = last;
     key[i] = lastD;
-    return [top, topD];
+    this.popD = topD;
+    return top;
   }
 }
 

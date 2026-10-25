@@ -235,9 +235,9 @@ export class Viewmodel {
     // muzzle) for everything else.
     if (this.armL) {
       this.armL.position.copy(this.armLRest);
-      if (WEAPONS[id].kind === 'pistol') this.armL.position.add(new THREE.Vector3(0.06, -0.01, 0.17));
+      if (WEAPONS[id].kind === 'pistol') this.armL.position.add(new THREE.Vector3(0.1, -0.122, 0.22));
       else {
-        const support = new THREE.Vector3(0, 0.0, Math.max(-0.46, Math.min(-0.14, this.gun.front * 0.47)));
+        const support = new THREE.Vector3(0, 0.043, Math.max(-0.46, Math.min(-0.14, this.gun.front * 0.47)));
         this.armL.position.add(support.sub(LEFT_PALM));
       }
       this.armLRest2.copy(this.armL.position);

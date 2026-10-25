@@ -225,8 +225,10 @@ export class SurvivorBot {
     const m = 2.5;
     let best = { ...from };
     let bestScore = -Infinity;
-    for (let x = w.interior.minX + m; x <= w.interior.maxX - m; x += 1.5)
-      for (let z = w.interior.minZ + m; z <= w.interior.maxZ - m; z += 1.5) {
+    // Every open zone (passages are too narrow to hold).
+    for (const area of w.areas.filter((a) => a.maxX - a.minX > 4 && a.maxZ - a.minZ > 4))
+    for (let x = area.minX + m; x <= area.maxX - m; x += 1.5)
+      for (let z = area.minZ + m; z <= area.maxZ - m; z += 1.5) {
         const box = { min: { x: x - 0.45, y: 0.05, z: z - 0.45 }, max: { x: x + 0.45, y: 1.8, z: z + 0.45 } };
         if (firstBlock(w, box, 'player')) continue;
         if (w.stations.some((s) => hdist(s.pos, { x, y: 0, z }) < 2)) continue;
@@ -234,6 +236,7 @@ export class SurvivorBot {
         let seen = 0;
         let nearest = Infinity;
         for (const win of w.windows) {
+          if (!win.active) continue;
           const t = { x: win.inside.x, y: 1.6, z: win.inside.z };
           const dx = t.x - x;
           const dz = t.z - z;
@@ -286,7 +289,7 @@ export class SurvivorBot {
     let best = -1;
     let bestD = 14;
     for (const w of view.world.windows) {
-      if (view.boards[w.i] >= ZB.boardsPerWindow) continue;
+      if (!w.active || view.boards[w.i] >= ZB.boardsPerWindow) continue;
       const d = hdist(w.inside, pos);
       const busy = [...view.players.values()].some((o) => o !== me && o.life === 0 && hdist(o.body.pos, w.inside) < 1.2);
       if (d < bestD && !busy) {
@@ -305,6 +308,7 @@ function nearestWindow(w: World, p: Vec3): Vec3 | null {
   let best: Vec3 | null = null;
   let bestD = Infinity;
   for (const win of w.windows) {
+    if (!win.active) continue;
     const d = hdist(win.inside, p);
     if (d < bestD) {
       bestD = d;

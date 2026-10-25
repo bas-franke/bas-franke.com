@@ -1,8 +1,12 @@
 """
-Builds the Last Light props (props.glb) in Blender: weapon locker, hanging lamp, barricade board, frag grenade,
-chain-link fence section and a dead tree.
+Builds the Last Light props (props.glb) in Blender: the hotel lobby furniture and fittings (sofa, armchair, brass and
+coffee tables, lamps, planter tree, flowers, sconce, pendant, revolving door, elevator doors, security shutter, bar
+stool, booth, dining table and chair, luggage cart, stanchion, reception bell, computer) plus the game props: armory
+locker, hanging lamp, barricade board, frag grenade, chain-link fence section and a dead tree.
 
-    blender --background --factory-startup --python build_props.py -- <output-dir> [preview-dir]
+    blender --background --factory-startup --python build_props.py -- <output-dir> [preview-dir] [hotel]
+
+(`hotel` renders a preview of every hotel prop, a contact sheet and a lobby vignette into preview-dir.)
 
 Everything is procedural: modelled geometry plus textures painted with numpy (paint scratches and rust, wood grain,
 bark fissures, a chain-link alpha mask) and turned into normal / roughness maps, embedded in the GLB.
@@ -385,17 +389,17 @@ def orm(rough, metal):
     return np.stack([np.ones((h, w)), rough, metal, np.ones((h, w))], axis=-1)
 
 
-def paint_textures(size=512, base=(0.075, 0.105, 0.085), seed=1):
+def paint_textures(size=512, base=(0.075, 0.105, 0.085), seed=1, wear=1.0):
     """Chipped green paint over steel: scratches to bare metal, rust blotches with streaks, grime."""
     h = w = size
     tone = fnoise(h, w, 1.8, seed)
     grime_n = fnoise(h, w, 1.2, seed + 1, stretch=(1.0, 0.35))
     rust_seed = (fnoise(h, w, 2.2, seed + 2) > 0.72).astype(np.float32) * fnoise(h, w, 1.0, seed + 3)
-    rust = np.clip(smear_down(rust_seed, 0.992) * 1.3, 0, 1)
+    rust = np.clip(smear_down(rust_seed, 0.992) * 1.3, 0, 1) * (0.3 + 0.7 * wear)
     scratch = lines(h, w, 260, seed + 4, (4, 40), width=1) + lines(h, w, 40, seed + 5, (20, 120), angle_bias=1.45, width=1) * 0.8
     scratch = np.clip(scratch, 0, 1)
     chips = (fnoise(h, w, 1.0, seed + 6) > 0.86).astype(np.float32)
-    bare = np.clip(scratch + chips, 0, 1)
+    bare = np.clip(scratch + chips, 0, 1) * wear
     paint = np.array(base)[None, None, :] * (0.8 + 0.4 * tone[..., None]) * (0.75 + 0.25 * grime_n[..., None])
     steel = np.array((0.32, 0.31, 0.29))[None, None, :] * (0.8 + 0.3 * tone[..., None])
     rustc = np.array((0.16, 0.06, 0.025))[None, None, :] * (0.6 + 0.6 * fnoise(h, w, 0.8, seed + 7)[..., None])
@@ -510,7 +514,8 @@ def enamel_texture(size=256, seed=9):
 
 def palette():
     p = {}
-    alb, rm, nrm = paint_textures(512)
+    # Black tactical finish (the SWAT armory locker).
+    alb, rm, nrm = paint_textures(512, base=(0.013, 0.014, 0.016), wear=0.25)
     p["paint"] = tex_material("LockerPaint", image("locker_albedo", alb), image("locker_rm", rm, noncolor=True), image("locker_n", nrm, noncolor=True), 1.0)
     p["inside"] = plain("LockerInside", (0.03, 0.035, 0.032), rough=0.8, metal=0.3)
     alb, rm, nrm = wood_textures()
@@ -620,7 +625,7 @@ def prop_locker(p):
     shackle = [(-0.468, 0.27, 1.018), (-0.47, 0.27, 1.045), (-0.455, 0.27, 1.058), (-0.44, 0.27, 1.045), (-0.44, 0.27, 1.03)]
     parts.append(tubes_obj("shackle", [(shackle, [0.004] * 5, 6, True)], p["steel"]))
     # Stencilled number on the header, a riveted plate and the indicator lamp in a little cage.
-    parts.append(stencil("LOCKER 13", 0.055, (0, 0.2515, 1.93), (math.radians(90), 0, math.radians(180)), p["stencil"]))
+    parts.append(stencil("ARMORY 13", 0.055, (0, 0.2515, 1.93), (math.radians(90), 0, math.radians(180)), p["stencil"]))
     for x in (-0.44, 0.44):
         for z in (1.87, 1.97):
             parts.append(prim("sphere", p["steel"], loc=(x, 0.251, z), radius=0.006, segments=8, ring_count=5))
@@ -883,7 +888,750 @@ def prop_tree(p):
     return tree
 
 
+# ---- hotel lobby: textures ---------------------------------------------------------------------------------------------
+
+def marble_textures(size=1024, seed=11, dark=True):
+    """Polished marble: soft cloudy body, fine branching veins (gold and white on the dark one, grey on the white one)."""
+    h = w = size
+    y = np.linspace(0, 1, h, endpoint=False)[:, None]
+    x = np.linspace(0, 1, w, endpoint=False)[None, :]
+    warp = fnoise(h, w, 1.9, seed)
+    warp2 = fnoise(h, w, 1.5, seed + 1)
+    cloud = fnoise(h, w, 1.4, seed + 2)
+    # Main veins: thin bands where a warped linear field crosses an integer (integer slopes keep it tileable).
+    f1 = np.abs(np.sin((x * 2 + y * 1 + warp * 2.6) * math.pi * 2))
+    v1 = np.clip(1 - f1 / 0.035, 0, 1) ** 1.5
+    f2 = np.abs(np.sin((x * 1 - y * 3 + warp2 * 3.2) * math.pi * 2))
+    v2 = np.clip(1 - f2 / 0.02, 0, 1) ** 2 * (fnoise(h, w, 1.2, seed + 3) > 0.45)
+    # Hairline crackle from ridged noise.
+    r = 1 - np.abs(fnoise(h, w, 1.7, seed + 4) * 2 - 1)
+    hair = np.clip((r - 0.93) / 0.07, 0, 1)
+    if dark:
+        base = np.array((0.010, 0.010, 0.011))[None, None, :] * (0.6 + 0.9 * cloud[..., None])
+        gold = np.array((0.45, 0.30, 0.10))
+        white = np.array((0.55, 0.53, 0.48))
+        col = base * (1 - v1[..., None]) + gold * v1[..., None] * (0.6 + 0.6 * warp2[..., None])
+        col = col * (1 - v2[..., None]) + white * v2[..., None]
+        col = col * (1 - hair[..., None] * 0.7) + white * 0.5 * hair[..., None] * 0.7
+    else:
+        base = np.array((0.62, 0.60, 0.55))[None, None, :] * (0.85 + 0.2 * cloud[..., None])
+        grey = np.array((0.22, 0.21, 0.2))
+        col = base * (1 - v1[..., None] * 0.8) + grey * v1[..., None] * 0.8
+        col = col * (1 - v2[..., None] * 0.5) + grey * 1.3 * v2[..., None] * 0.5
+        col = col * (1 - hair[..., None] * 0.35)
+    rough = np.clip(0.07 + 0.08 * cloud + 0.1 * v1, 0, 1)
+    hgt = 0.15 * cloud - 0.4 * hair - 0.1 * v1
+    return srgb(col), orm(rough, np.zeros_like(rough)), normal_from_height(hgt, 1.0)
+
+
+def travertine_textures(size=512, seed=13):
+    """Cream travertine: horizontal bedding, small elongated pores."""
+    h = w = size
+    band = fnoise(h, w, 1.6, seed, stretch=(10.0, 1.0))
+    tone = fnoise(h, w, 1.4, seed + 1)
+    pores = np.clip((fnoise(h, w, 0.9, seed + 2, stretch=(4.0, 1.0)) - 0.78) * 6, 0, 1)
+    col = np.array((0.50, 0.42, 0.31))[None, None, :] * (0.85 + 0.2 * band[..., None] + 0.08 * tone[..., None])
+    col = col * (1 - pores[..., None] * 0.45)
+    rough = np.clip(0.45 + 0.2 * pores, 0, 1)
+    return srgb(col), orm(rough, np.zeros_like(rough)), normal_from_height(0.3 * band - 0.8 * pores, 2.0)
+
+
+def walnut_textures(w=1024, h=256, seed=17):
+    """Polished walnut: dark flowing grain with lighter streaks, satin finish."""
+    v = np.linspace(0, 1, h, endpoint=False)[:, None]
+    warp = fnoise(h, w, 2.0, seed, stretch=(6.0, 1.0))
+    rings = 0.5 + 0.5 * np.sin((v * 30 + warp * 6) * math.pi * 2)
+    fibre = fnoise(h, w, 1.0, seed + 1, stretch=(14.0, 1.0))
+    figure = fnoise(h, w, 1.6, seed + 2, stretch=(2.0, 1.0))
+    col = np.array((0.075, 0.035, 0.016))[None, None, :] * (0.6 + 0.6 * rings[..., None] ** 2) * (0.8 + 0.35 * fibre[..., None]) * (0.85 + 0.3 * figure[..., None])
+    rough = np.clip(0.32 + 0.12 * fibre, 0, 1)
+    return srgb(col), orm(rough, np.zeros_like(rough)), normal_from_height(0.3 * rings + 0.4 * fibre, 1.2)
+
+
+def brass_textures(size=512, seed=19):
+    """Brushed brass: fine streaks along u, faint tarnish."""
+    h = w = size
+    streak = fnoise(h, w, 1.0, seed, stretch=(40.0, 1.0))
+    tarnish = np.clip((fnoise(h, w, 1.8, seed + 1) - 0.62) * 2.5, 0, 1)
+    col = np.array((0.78, 0.55, 0.22))[None, None, :] * (0.85 + 0.25 * streak[..., None])
+    col = col * (1 - tarnish[..., None] * 0.35) + np.array((0.3, 0.2, 0.08)) * tarnish[..., None] * 0.35
+    rough = np.clip(0.22 + 0.16 * streak + 0.15 * tarnish, 0, 1)
+    return srgb(col), orm(rough, np.ones_like(rough)), normal_from_height(streak * 0.6, 0.8)
+
+
+def fabric_textures(size=512, seed=23, base=(0.55, 0.48, 0.38), weave=96):
+    """Woven upholstery: a fine basket weave, slubs, soft fuzz."""
+    h = w = size
+    y = np.linspace(0, 1, h, endpoint=False)[:, None]
+    x = np.linspace(0, 1, w, endpoint=False)[None, :]
+    a = np.sin(x * weave * math.pi * 2)
+    b = np.sin(y * weave * math.pi * 2)
+    cell = (np.floor(x * weave) + np.floor(y * weave)) % 2
+    weave_h = np.where(cell > 0, np.abs(a), np.abs(b))
+    slub = fnoise(h, w, 1.0, seed, stretch=(8.0, 1.0))
+    tone = fnoise(h, w, 1.5, seed + 1)
+    col = np.array(base)[None, None, :] * (0.78 + 0.22 * weave_h[..., None]) * (0.9 + 0.15 * slub[..., None] + 0.08 * tone[..., None])
+    rough = np.clip(0.88 + 0.08 * slub, 0, 1)
+    return srgb(col), orm(rough, np.zeros_like(rough)), normal_from_height(weave_h * 0.8 + 0.3 * slub, 2.0)
+
+
+def leather_textures(size=512, seed=29, base=(0.02, 0.018, 0.017)):
+    h = w = size
+    peb = 1 - np.abs(fnoise(h, w, 0.6, seed) * 2 - 1)
+    tone = fnoise(h, w, 1.6, seed + 1)
+    col = np.array(base)[None, None, :] * (0.8 + 0.4 * tone[..., None]) * (0.85 + 0.25 * peb[..., None])
+    rough = np.clip(0.45 + 0.2 * (1 - peb), 0, 1)
+    return srgb(col), orm(rough, np.zeros_like(rough)), normal_from_height(peb, 2.5)
+
+
+def leaf_atlas(size=512, seed=31):
+    """4 x 4 leaves with alpha: ellipses with a midrib and side veins, varied greens."""
+    h = w = size
+    rgba = np.zeros((h, w, 4))
+    rng = np.random.default_rng(seed)
+    n = 4
+    cs = size // n
+    yy, xx = np.mgrid[0:cs, 0:cs] / cs
+    for i in range(n):
+        for j in range(n):
+            # Pointed lance shape: the half-width tapers to a tip at both ends.
+            v = (yy - 0.5) / 0.47
+            half = 0.2 * np.clip(1 - np.abs(v) ** 1.6, 0, 1) ** 0.8
+            inside = (np.abs(xx - 0.5) < half) & (np.abs(v) < 1)
+            midrib = np.exp(-((xx - 0.5) / 0.012) ** 2)
+            veins = np.clip(np.abs(np.sin((yy * 9 + np.abs(xx - 0.5) * 6) * math.pi)) - 0.85, 0, 1) * 4
+            g = np.array((rng.uniform(0.012, 0.025), rng.uniform(0.035, 0.06), rng.uniform(0.008, 0.018)))
+            col = g[None, None, :] * (0.8 + 0.5 * yy[..., None]) * (1 + 0.6 * midrib[..., None] + 0.25 * veins[..., None])
+            tile = np.concatenate([srgb(col), inside[..., None].astype(float)], axis=-1)
+            rgba[i * cs:(i + 1) * cs, j * cs:(j + 1) * cs] = tile
+    rough = np.full((h, w), 0.55)
+    return rgba, orm(rough, np.zeros_like(rough))
+
+
+def hotel_palette(p):
+    def tex(name, fn, size_note="", **kw):
+        alb, rm, nrm = fn(**kw)
+        return tex_material(name, image(f"{name}_albedo", alb), image(f"{name}_rm", rm, noncolor=True), image(f"{name}_n", nrm, noncolor=True), 1.0)
+
+    p["marbleDark"] = tex("MarbleDark", marble_textures, size=1024, seed=11, dark=True)
+    p["marbleWhite"] = tex("MarbleWhite", marble_textures, size=512, seed=12, dark=False)
+    p["travertine"] = tex("Travertine", travertine_textures)
+    p["walnut"] = tex("Walnut", walnut_textures)
+    p["brassB"] = tex("BrushedBrass", brass_textures)
+    p["cream"] = tex("Upholstery", fabric_textures)
+    p["charcoal"] = tex("PillowFabric", fabric_textures, seed=24, base=(0.025, 0.03, 0.04), weave=70)
+    p["leather"] = tex("Leather", leather_textures)
+    p["leatherBrown"] = tex("LeatherBrown", leather_textures, seed=30, base=(0.06, 0.03, 0.015))
+    rgba, rm = leaf_atlas()
+    p["leaf"] = tex_material("Leaves", image("leaves_albedo", rgba, fmt="PNG"), image("leaves_rm", rm, noncolor=True), None, 1.0, alpha_clip=True, double_sided=True)
+    p["glass"] = glass_material("Glass", (0.75, 0.82, 0.8), 0.18)
+    p["vaseGlass"] = glass_material("VaseGlass", (0.85, 0.9, 0.88), 0.25)
+    p["petal"] = plain("Petal", (0.82, 0.8, 0.74), rough=0.55, double_sided=True)
+    p["pistil"] = plain("Pistil", (0.55, 0.38, 0.05), rough=0.6)
+    p["stem"] = plain("Stem", (0.04, 0.09, 0.025), rough=0.6)
+    p["soil"] = plain("Soil", (0.025, 0.018, 0.012), rough=0.95)
+    p["shade"] = plain("Shade", (0.85, 0.78, 0.64), rough=0.85, emission=(1.0, 0.78, 0.5), strength=1.5, double_sided=True)
+    p["glow"] = p["bulb"]
+    p["sconceGlow"] = plain("SconceGlow", (0.95, 0.88, 0.75), rough=0.4, emission=(1.0, 0.76, 0.48), strength=4.0)
+    p["blackPlastic"] = plain("BlackPlastic", (0.012, 0.012, 0.013), rough=0.4)
+    p["screen"] = plain("Screen", (0.01, 0.015, 0.02), rough=0.08, emission=(0.05, 0.09, 0.15), strength=0.6)
+    p["shutter"] = plain("ShutterSteel", (0.32, 0.31, 0.29), rough=0.38, metal=0.95)
+    p["darkSteel"] = plain("DarkSteel", (0.04, 0.04, 0.042), rough=0.45, metal=0.8)
+    p["velvet"] = plain("Velvet", (0.22, 0.015, 0.025), rough=0.9)
+    p["carpet"] = plain("Carpet", (0.2, 0.02, 0.03), rough=0.95)
+    p["linen"] = plain("Linen", (0.8, 0.78, 0.72), rough=0.9)
+    p["rubber"] = plain("Rubber", (0.015, 0.015, 0.015), rough=0.8)
+    p["indicatorWarm"] = plain("FloorIndicator", (1.0, 0.7, 0.35), emission=(1.0, 0.65, 0.3), strength=5.0)
+    p["suitcase"] = plain("Suitcase", (0.05, 0.08, 0.12), rough=0.5)
+    return p
+
+
+def glass_material(name, color, alpha):
+    mat = plain(name, color, rough=0.04, metal=0.0, double_sided=True)
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf.inputs["Alpha"].default_value = alpha
+    for attr, val in (("surface_render_method", "BLENDED"), ("blend_method", "BLEND")):
+        try:
+            setattr(mat, attr, val)
+        except Exception:
+            pass
+    return mat
+
+
+# ---- hotel lobby: geometry helpers -------------------------------------------------------------------------------------
+
+def soft_box(size, loc, mat, radius=0.04, segs=4, rot=(0, 0, 0)):
+    """Rounded upholstery block."""
+    return prim("cube", mat, loc=loc, rot=rot, scale=size, bevel=radius, segs=segs)
+
+
+def cushion(size, loc, mat, radius=0.05, puff=0.012, buttons=None, button_mat=None, rot=(0, 0, 0)):
+    """Seat/back cushion: rounded block, slightly puffed, optional tufting buttons on the +face given by `buttons`."""
+    o = soft_box(size, loc, mat, radius=radius, segs=4, rot=rot)
+    o = apply_all(o)
+    # Puff: push vertices out along their normal by a bulge that peaks in the middle of each face.
+    sx, sy, sz = size
+    # Vertex positions are local to the block (its location and rotation are not applied yet).
+    for v in o.data.vertices:
+        lx = min(1.0, abs(v.co.x) / (sx / 2))
+        ly = min(1.0, abs(v.co.y) / (sy / 2))
+        lz = min(1.0, abs(v.co.z) / (sz / 2))
+        bulge = (1 - lx * lx * 0.8) * (1 - ly * ly * 0.8) * (1 - lz * lz * 0.8)
+        v.co += v.normal * puff * bulge
+    parts = [o]
+    if buttons:
+        axis, sign, grid = buttons
+        for (a, b) in grid:
+            if axis == "z":
+                pos = (loc[0] + a, loc[1] + b, loc[2] + sign * (sz / 2 + puff * 0.2))
+            elif axis == "y":
+                pos = (loc[0] + a, loc[1] + sign * (sy / 2 + puff * 0.2), loc[2] + b)
+            else:
+                pos = (loc[0] + sign * (sx / 2 + puff * 0.2), loc[1] + a, loc[2] + b)
+            parts.append(prim("sphere", button_mat or mat, loc=pos, radius=0.011, segments=8, ring_count=5))
+    return parts
+
+
+def finish(parts, name, uv=2.0, dirt=0.0):
+    obj = join(parts, name)
+    box_uv(obj, per_metre=uv)
+    set_origin(obj, (0, 0, 0))
+    if dirt:
+        grime(obj, dirt=dirt, low=0.0, seed=len(name))
+    return obj
+
+
+# ---- hotel lobby: props ------------------------------------------------------------------------------------------------
+# Blender +Y is the front (glTF -Z). Origins at the floor centre unless noted.
+
+def prop_sofa(p):
+    W, D = 2.2, 0.95
+    parts = []
+    parts.append(soft_box((W, D - 0.1, 0.32), (0, -0.03, 0.27), p["cream"], radius=0.03))          # base
+    parts.append(soft_box((0.2, D, 0.62), (-(W / 2 - 0.1), 0, 0.42), p["cream"], radius=0.06))      # arms
+    parts.append(soft_box((0.2, D, 0.62), ((W / 2 - 0.1), 0, 0.42), p["cream"], radius=0.06))
+    parts.append(soft_box((W - 0.4, 0.2, 0.42), (0, -(D / 2 - 0.12), 0.6), p["cream"], radius=0.05))  # back frame
+    cw = (W - 0.42) / 3
+    for i in range(3):
+        x = -((W - 0.42) / 2) + cw * (i + 0.5)
+        parts += cushion((cw - 0.02, D - 0.32, 0.16), (x, 0.08, 0.5), p["cream"], radius=0.05, puff=0.014)
+        parts += cushion((cw - 0.02, 0.18, 0.44), (x, -(D / 2 - 0.3), 0.8), p["cream"], radius=0.06, puff=0.02,
+                         buttons=("y", 1, [(-0.18, 0.08), (0.0, 0.08), (0.18, 0.08), (-0.09, -0.08), (0.09, -0.08)]), button_mat=p["cream"], rot=(math.radians(-8), 0, 0))
+    # Dark throw pillows in the corners.
+    for sx in (-1, 1):
+        pil = cushion((0.4, 0.12, 0.36), (sx * (W / 2 - 0.42), -0.16, 0.76), p["charcoal"], radius=0.05, puff=0.03, rot=(math.radians(-12), 0, sx * math.radians(10)))
+        parts += pil
+    # Brass plinth trim and short square legs.
+    parts.append(box((W + 0.01, D - 0.08, 0.025), (0, -0.03, 0.115), p["brassB"], bevel=0.004))
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            parts.append(box((0.04, 0.04, 0.1), (sx * (W / 2 - 0.06), sy * (D / 2 - 0.1), 0.05), p["brassB"], bevel=0.004))
+    return finish(parts, "sofa", uv=2.5)
+
+
+def prop_armchair(p):
+    W, D = 0.85, 0.85
+    parts = []
+    parts.append(soft_box((W, D - 0.06, 0.24), (0, -0.02, 0.3), p["cream"], radius=0.03))
+    for sx in (-1, 1):
+        parts.append(soft_box((0.14, D, 0.38), (sx * (W / 2 - 0.07), 0, 0.5), p["cream"], radius=0.05))
+    parts.append(soft_box((W, 0.14, 0.5), (0, -(D / 2 - 0.07), 0.54), p["cream"], radius=0.05))
+    parts += cushion((W - 0.3, D - 0.2, 0.14), (0, 0.06, 0.48), p["cream"], radius=0.05, puff=0.015)
+    parts += cushion((W - 0.3, 0.14, 0.34), (0, -(D / 2 - 0.2), 0.7), p["cream"], radius=0.05, puff=0.02, rot=(math.radians(-8), 0, 0))
+    # Brass sled frame (as in the reference lobby chair): two U-runners joined at the back.
+    for sx in (-1, 1):
+        x = sx * (W / 2 - 0.05)
+        path = [(x, D / 2 - 0.04, 0.18), (x, D / 2 - 0.04, 0.02), (x, -(D / 2 - 0.04), 0.02), (x, -(D / 2 - 0.04), 0.18)]
+        parts.append(tubes_obj("sled", [(path, [0.012] * 4, 10, False)], p["brassB"]))
+    parts.append(tubes_obj("sledbar", [([(-(W / 2 - 0.05), -(D / 2 - 0.04), 0.02), ((W / 2 - 0.05), -(D / 2 - 0.04), 0.02)], [0.011] * 2, 10, False)], p["brassB"]))
+    parts.append(box((W - 0.02, D - 0.1, 0.02), (0, -0.02, 0.18), p["brassB"], bevel=0.004))
+    return finish(parts, "armchair", uv=2.5)
+
+
+def prop_brass_table(p):
+    parts = []
+    r, h = 0.3, 0.55
+    # Drum with vertical fluting: a revolve of the profile, then flutes pushed in.
+    drum = revolve("drum", [(0.0, 0.0), (r - 0.01, 0.0), (r, 0.01), (r, h - 0.03), (r - 0.01, h - 0.02), (0.0, h - 0.02)], 64, p["brassB"], uv_rep=4)
+    for v in drum.data.vertices:
+        rr = math.hypot(v.co.x, v.co.y)
+        if rr > r - 0.002 and 0.03 < v.co.z < h - 0.05:
+            a = math.atan2(v.co.y, v.co.x)
+            k = 1 - 0.012 * (0.5 + 0.5 * math.cos(a * 32))
+            v.co.x *= k
+            v.co.y *= k
+    parts.append(drum)
+    parts.append(cyl(r + 0.02, 0.025, (0, 0, h - 0.0125 + 0.01), p["marbleWhite"], verts=48))
+    parts.append(cyl(r + 0.005, 0.012, (0, 0, 0.006), p["darkSteel"], verts=40))
+    return finish(parts, "brassTable", uv=2.0)
+
+
+def prop_coffee_table(p):
+    W, D, H = 1.2, 0.7, 0.42
+    parts = [box((W, D, 0.04), (0, 0, H - 0.02), p["marbleDark"], bevel=0.008)]
+    # Brass frame: four legs and a lower rectangle.
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            parts.append(box((0.025, 0.025, H - 0.04), (sx * (W / 2 - 0.05), sy * (D / 2 - 0.05), (H - 0.04) / 2), p["brassB"], bevel=0.003))
+    parts.append(box((W - 0.1, 0.02, 0.02), (0, D / 2 - 0.05, 0.06), p["brassB"]))
+    parts.append(box((W - 0.1, 0.02, 0.02), (0, -(D / 2 - 0.05), 0.06), p["brassB"]))
+    parts.append(box((0.02, D - 0.1, 0.02), (W / 2 - 0.05, 0, 0.06), p["brassB"]))
+    parts.append(box((0.02, D - 0.1, 0.02), (-(W / 2 - 0.05), 0, 0.06), p["brassB"]))
+    # A brass tray with two decorative spheres.
+    parts.append(cyl(0.16, 0.012, (0.25, 0.05, H + 0.006), p["brassB"], verts=32))
+    parts.append(prim("sphere", p["brassB"], loc=(0.22, 0.04, H + 0.05), radius=0.04, segments=16, ring_count=10))
+    parts.append(prim("sphere", p["marbleWhite"], loc=(0.3, 0.09, H + 0.04), radius=0.03, segments=16, ring_count=10))
+    return finish(parts, "coffeeTable", uv=1.5)
+
+
+def drum_shade(r_bot, r_top, h, z0, mat):
+    return revolve("shade", [(r_bot, z0), (r_top, z0 + h)], 40, mat, uv_rep=3)
+
+
+def prop_table_lamp(p):
+    parts = []
+    parts.append(revolve("base", [(0.0, 0.0), (0.09, 0.0), (0.095, 0.01), (0.085, 0.03), (0.03, 0.05), (0.022, 0.08), (0.022, 0.4), (0.04, 0.42), (0.04, 0.44), (0.012, 0.46), (0.012, 0.52), (0.0, 0.52)], 32, p["brassB"]))
+    parts.append(drum_shade(0.2, 0.18, 0.26, 0.42, p["shade"]))
+    parts.append(prim("sphere", p["glow"], loc=(0, 0, 0.5), radius=0.03, segments=12, ring_count=8))
+    for k in range(3):
+        a = k * 2 * math.pi / 3
+        parts.append(tubes_obj("spider", [([(0, 0, 0.6), (0.185 * math.cos(a), 0.185 * math.sin(a), 0.675)], [0.003] * 2, 4, False)], p["brassB"]))
+    return finish(parts, "tableLamp", uv=3.0)
+
+
+def prop_floor_lamp(p):
+    parts = []
+    parts.append(cyl(0.18, 0.025, (0, 0, 0.0125), p["marbleDark"], verts=40))
+    parts.append(revolve("pole", [(0.0, 0.025), (0.03, 0.025), (0.016, 0.06), (0.012, 0.07), (0.012, 1.42), (0.025, 1.44), (0.012, 1.46), (0.012, 1.52), (0.0, 1.52)], 24, p["brassB"]))
+    parts.append(drum_shade(0.25, 0.22, 0.3, 1.38, p["shade"]))
+    parts.append(prim("sphere", p["glow"], loc=(0, 0, 1.48), radius=0.035, segments=12, ring_count=8))
+    return finish(parts, "floorLamp", uv=3.0)
+
+
+def foliage(p, center, radius, height, count, seed, leaf=0.13):
+    """Leaf cards scattered in an ellipsoid crown, each picking one of 16 atlas tiles."""
+    rng = random.Random(seed)
+    verts, faces, uvs = [], [], []
+    for i in range(count):
+        while True:
+            q = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1)))
+            if q.length < 1:
+                break
+        pos = Vector(center) + Vector((q.x * radius, q.y * radius, q.z * height))
+        out = (pos - Vector(center)).normalized()
+        n = (out + Vector((rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5), rng.uniform(-0.2, 0.6)))).normalized()
+        t = n.cross(Vector((0, 0, 1)))
+        if t.length < 1e-3:
+            t = Vector((1, 0, 0))
+        t.normalize()
+        b = n.cross(t).normalized()
+        s = leaf * rng.uniform(0.7, 1.3)
+        # Long axis along b (drooping), narrow along t.
+        droop = Vector((0, 0, -0.35 * s))
+        corners = [pos - t * s * 0.5 - b * s, pos + t * s * 0.5 - b * s, pos + t * s * 0.5 + b * s + droop, pos - t * s * 0.5 + b * s + droop]
+        tile = rng.randrange(16)
+        tu, tv = (tile % 4) / 4, (tile // 4) / 4
+        base = len(verts)
+        verts += corners
+        uvs += [(tu, tv), (tu + 0.25, tv), (tu + 0.25, tv + 0.25), (tu, tv + 0.25)]
+        faces.append((base, base + 1, base + 2, base + 3))
+    return mesh_obj("leaves", verts, faces, p["leaf"], uvs=uvs, smooth_shade=False)
+
+
+def prop_planter_tree(p):
+    parts = []
+    parts.append(revolve("planter", [(0.0, 0.02), (0.28, 0.0), (0.3, 0.02), (0.34, 0.55), (0.36, 0.58), (0.33, 0.6), (0.31, 0.56), (0.0, 0.56)], 48, p["brassB"], uv_rep=3))
+    parts.append(cyl(0.31, 0.02, (0, 0, 0.54), p["soil"], verts=32))
+    rng = random.Random(41)
+    paths = []
+    trunk = [(0, 0, 0.5)]
+    for s in range(1, 8):
+        trunk.append((0.03 * math.sin(s * 0.9), 0.03 * math.cos(s * 1.3), 0.5 + s * 0.22))
+    paths.append((trunk, [0.045 - s * 0.004 for s in range(8)], 8, True))
+    crowns = []
+    for k in range(6):
+        a = k * 2 * math.pi / 6 + rng.uniform(-0.3, 0.3)
+        start = Vector(trunk[3 + k % 4])
+        end = start + Vector((math.cos(a) * 0.45, math.sin(a) * 0.45, rng.uniform(0.25, 0.6)))
+        mid = (start + end) / 2 + Vector((0, 0, 0.08))
+        paths.append(([start, mid, end], [0.018, 0.013, 0.007], 6, True))
+        crowns.append(end)
+    bark = p["bark"]
+    parts.append(tubes_obj("trunk", paths, bark, uv_tile=0.2))
+    parts.append(foliage(p, (0, 0, 2.0), 0.7, 0.55, 1100, 43, leaf=0.09))
+    for i, c in enumerate(crowns[:4]):
+        parts.append(foliage(p, tuple(c), 0.32, 0.25, 220, 50 + i, leaf=0.08))
+    return finish(parts, "planterTree", uv=2.0)
+
+
+def blossom(p, center, size, seed):
+    """A lily-like bloom: six petals in a shallow cup around yellow stamens."""
+    rng = random.Random(seed)
+    objs = []
+    up = Vector((rng.uniform(-0.6, 0.6), rng.uniform(-0.6, 0.6), 1)).normalized()
+    for k in range(6):
+        a = k * math.pi / 3 + rng.uniform(-0.15, 0.15)
+        o = prim("sphere", p["petal"], loc=(0, 0, 0), radius=1, segments=6, ring_count=4)
+        o.scale = (size * 0.22, size * 0.55, size * 0.05)
+        o.location = (math.cos(a) * size * 0.45, math.sin(a) * size * 0.45, size * 0.12)
+        o.rotation_euler = (0.55, 0, a - math.pi / 2)
+        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        objs.append(o)
+    objs.append(prim("sphere", p["pistil"], loc=(0, 0, size * 0.15), radius=size * 0.08, segments=5, ring_count=3))
+    b = join(objs, "bloom")
+    rot = Vector((0, 0, 1)).rotation_difference(up)
+    b.data.transform(rot.to_matrix().to_4x4())
+    b.data.transform(Matrix.Translation(Vector(center)))
+    b.location = (0, 0, 0)
+    return b
+
+
+def prop_flowers(p):
+    parts = []
+    parts.append(revolve("vase", [(0.0, 0.0), (0.09, 0.0), (0.1, 0.01), (0.11, 0.2), (0.1, 0.38), (0.085, 0.45), (0.0, 0.45)], 40, p["vaseGlass"]))
+    parts.append(revolve("water", [(0.0, 0.01), (0.095, 0.01), (0.1, 0.2), (0.0, 0.2)], 24, p["stem"]))
+    rng = random.Random(61)
+    stems = []
+    k = 0
+    for i in range(16):
+        a = rng.uniform(0, math.pi * 2)
+        spread = rng.uniform(0.05, 0.38)
+        top = Vector((math.cos(a) * spread, math.sin(a) * spread, 0.75 + rng.uniform(0, 0.55) - spread * 0.4))
+        base = Vector((math.cos(a) * 0.03, math.sin(a) * 0.03, 0.05))
+        mid = base.lerp(top, 0.5) + Vector((0, 0, 0.05))
+        stems.append(([base, mid, top], [0.005, 0.004, 0.003], 4, True))
+        for j in range(rng.randint(1, 3)):
+            off = Vector((rng.uniform(-0.06, 0.06), rng.uniform(-0.06, 0.06), rng.uniform(-0.12, 0.04)))
+            parts.append(blossom(p, top + off, rng.uniform(0.06, 0.09), 100 + k))
+            k += 1
+    parts.append(tubes_obj("stems", stems, p["stem"]))
+    parts.append(foliage(p, (0, 0, 0.55), 0.22, 0.18, 70, 63, leaf=0.12))
+    return finish(parts, "flowers", uv=3.0)
+
+
+def prop_sconce(p):
+    """Wall sconce. Origin at the wall plate centre; it sticks out along +Y (the room side)."""
+    parts = []
+    parts.append(box((0.1, 0.02, 0.42), (0, 0.01, 0), p["brassB"], bevel=0.004))
+    parts.append(box((0.03, 0.08, 0.03), (0, 0.06, 0), p["brassB"], bevel=0.003))
+    parts.append(revolve("glowtube", [(0.0, -0.17), (0.035, -0.17), (0.035, 0.17), (0.0, 0.17)], 20, p["sconceGlow"]))
+    parts[-1].location = (0, 0.11, 0)
+    parts.append(revolve("cap", [(0.0, 0.17), (0.04, 0.17), (0.04, 0.2), (0.0, 0.2)], 20, p["brassB"]))
+    parts[-1].location = (0, 0.11, 0)
+    parts.append(revolve("cap2", [(0.0, -0.2), (0.04, -0.2), (0.04, -0.17), (0.0, -0.17)], 20, p["brassB"]))
+    parts[-1].location = (0, 0.11, 0)
+    obj = join(parts, "sconce")
+    box_uv(obj, per_metre=3.0)
+    set_origin(obj, (0, 0, 0))
+    return obj
+
+
+def prop_pendant(p):
+    """Brass ring chandelier with glowing glass cylinders. Origin at the ring centre; rod 1 m up."""
+    parts = []
+    parts.append(prim("torus", p["brassB"], loc=(0, 0, 0), major_radius=0.5, minor_radius=0.02, major_segments=48, minor_segments=8))
+    parts.append(prim("torus", p["brassB"], loc=(0, 0, -0.12), major_radius=0.42, minor_radius=0.012, major_segments=48, minor_segments=6))
+    for k in range(12):
+        a = k * 2 * math.pi / 12
+        x, y = math.cos(a) * 0.5, math.sin(a) * 0.5
+        g = revolve("tube", [(0.0, -0.02), (0.025, -0.02), (0.025, 0.22), (0.0, 0.22)], 12, p["sconceGlow"])
+        g.location = (x, y, 0)
+        parts.append(g)
+        parts.append(tubes_obj("chain", [([(x, y, 0.0), (x * 0.1, y * 0.1, 0.65)], [0.0025] * 2, 4, False)], p["brassB"]))
+    parts.append(cyl(0.012, 1.0, (0, 0, 0.6), p["brassB"], verts=10))
+    parts.append(cyl(0.1, 0.04, (0, 0, 1.08), p["brassB"], verts=24))
+    obj = join(parts, "pendant")
+    box_uv(obj, per_metre=3.0)
+    set_origin(obj, (0, 0, 0))
+    return obj
+
+
+def prop_revolving_door(p):
+    """4 m revolving door: brass canopy and drum walls with curved glass; the wings are a child node that can spin."""
+    R, H = 1.9, 2.7
+    parts = []
+    parts.append(cyl(R + 0.1, 0.03, (0, 0, 0.015), p["brassB"], verts=64))
+    parts.append(revolve("canopy", [(0.0, H), (R + 0.12, H), (R + 0.14, H + 0.05), (R + 0.14, H + 0.38), (R + 0.1, H + 0.42), (0.0, H + 0.42)], 64, p["brassB"], uv_rep=8))
+    # Curved glass walls on the two closed sides (left and right), with brass mullions.
+    for side in (-1, 1):
+        verts, faces, uvs = [], [], []
+        a0, a1 = math.radians(45), math.radians(135)
+        segs = 16
+        for i in range(segs + 1):
+            t = i / segs
+            a = a0 + (a1 - a0) * t
+            x = side * R * math.sin(a)
+            y = R * math.cos(a)
+            verts += [(x, y, 0.03), (x, y, H)]
+            uvs += [(t, 0), (t, 1)]
+        for i in range(segs):
+            faces.append((2 * i, 2 * i + 2, 2 * i + 3, 2 * i + 1))
+        parts.append(mesh_obj("drumglass", verts, faces, p["glass"], uvs=uvs))
+        for a in (45, 90, 135):
+            ar = math.radians(a)
+            parts.append(box((0.05, 0.05, H), (side * R * math.sin(ar), R * math.cos(ar), H / 2), p["brassB"], bevel=0.006))
+    door = finish(parts, "revolvingDoor", uv=1.0)
+    wings = []
+    wings.append(cyl(0.07, H, (0, 0, H / 2), p["brassB"], verts=20))
+    for k in range(4):
+        a = k * math.pi / 2 + math.pi / 4
+        c, s = math.cos(a), math.sin(a)
+        L = R - 0.08
+        mid = (c * L / 2, s * L / 2)
+        wings.append(box((L, 0.018, H - 0.1), (mid[0], mid[1], H / 2), p["glass"], rot=(0, 0, a), bevel=0))
+        for z in (0.1, H - 0.08):
+            wings.append(box((L, 0.04, 0.06), (mid[0], mid[1], z), p["brassB"], rot=(0, 0, a), bevel=0.004))
+        wings.append(box((0.05, 0.04, H - 0.1), (c * L, s * L, H / 2), p["brassB"], rot=(0, 0, a), bevel=0.004))
+        wings.append(box((0.5, 0.06, 0.03), (c * L * 0.6, s * L * 0.6, 1.05), p["brassB"], rot=(0, 0, a), bevel=0.008))
+    w = finish(wings, "revolvingDoor_wings", uv=1.0)
+    w.parent = door
+    return door, w
+
+
+def prop_elevator_doors(p):
+    """Elevator front: travertine surround, two brass doors (2 m opening, 2.6 m tall), a floor indicator above."""
+    parts = []
+    parts.append(box((2.7, 0.2, 0.35), (0, 0, 2.78), p["travertine"], bevel=0.005))
+    for sx in (-1, 1):
+        parts.append(box((0.35, 0.2, 2.95), (sx * 1.175, 0, 1.475), p["travertine"], bevel=0.005))
+        parts.append(box((0.04, 0.22, 2.6), (sx * 1.0, 0.0, 1.3), p["brassB"], bevel=0.004))
+    for sx in (-1, 1):
+        parts.append(box((0.99, 0.05, 2.58), (sx * 0.5, 0.06, 1.3), p["brassB"], bevel=0.003))
+        for z in (0.6, 1.3, 2.0):
+            parts.append(box((0.9, 0.006, 0.01), (sx * 0.5, 0.088, z), p["darkSteel"], bevel=0))
+    parts.append(box((2.0, 0.04, 0.04), (0, 0.12, 2.62), p["brassB"], bevel=0.004))
+    parts.append(box((0.5, 0.02, 0.12), (0, 0.11, 2.8), p["darkSteel"], bevel=0.004))
+    parts.append(box((0.4, 0.01, 0.06), (0, 0.122, 2.8), p["indicatorWarm"], bevel=0))
+    # Call buttons on the right.
+    parts.append(box((0.08, 0.02, 0.2), (1.25, 0.11, 1.15), p["brassB"], bevel=0.004))
+    for z in (1.2, 1.1):
+        parts.append(cyl(0.018, 0.01, (1.25, 0.125, z), p["indicatorWarm"], rot=(math.radians(90), 0, 0), verts=12))
+    return finish(parts, "elevatorDoors", uv=2.5)
+
+
+def prop_security_shutter(p):
+    """Closed rolling shutter, 6 m wide x 4 m tall, slats as one corrugated mesh, guides and a roller box."""
+    W, H = 6.0, 4.0
+    verts, faces, uvs = [], [], []
+    rows = int(H / 0.08)
+    cols = 2
+    prof = [(0.0, 0.0), (0.008, 0.01), (0.012, 0.04), (0.008, 0.07), (0.0, 0.08)]
+    for r in range(rows):
+        for j, (yy, zz) in enumerate(prof):
+            z = 0.02 + r * 0.08 + zz
+            for c in range(cols):
+                x = -W / 2 + 0.06 + c * (W - 0.12)
+                verts.append((x, 0.04 + yy, z))
+                uvs.append((x / 1.0, z / 1.0))
+    per_row = len(prof) * cols
+    for r in range(rows):
+        for j in range(len(prof) - 1):
+            a = r * per_row + j * cols
+            faces.append((a, a + 1, a + cols + 1, a + cols))
+    slats = mesh_obj("slats", verts, faces, p["shutter"], uvs=uvs, smooth_shade=False)
+    parts = [slats]
+    for sx in (-1, 1):
+        parts.append(box((0.12, 0.16, H + 0.2), (sx * (W / 2 - 0.02), 0.04, (H + 0.2) / 2), p["darkSteel"], bevel=0.006))
+    parts.append(box((W + 0.2, 0.42, 0.4), (0, -0.02, H + 0.2), p["darkSteel"], bevel=0.01))
+    parts.append(box((W - 0.2, 0.08, 0.06), (0, 0.08, 0.05), p["brassB"], bevel=0.006))
+    for x in (-0.6, 0.6):
+        parts.append(box((0.18, 0.04, 0.04), (x, 0.12, 0.35), p["darkSteel"], bevel=0.005))
+    return finish(parts, "securityShutter", uv=1.0, dirt=0.15)
+
+
+def prop_bar_stool(p):
+    parts = []
+    parts.append(revolve("stoolbase", [(0.0, 0.0), (0.22, 0.0), (0.22, 0.015), (0.06, 0.03), (0.03, 0.05), (0.03, 0.66), (0.06, 0.68), (0.0, 0.68)], 32, p["brassB"]))
+    parts.append(prim("torus", p["brassB"], loc=(0, 0, 0.3), major_radius=0.18, minor_radius=0.01, major_segments=32, minor_segments=8))
+    for k in range(3):
+        a = k * 2 * math.pi / 3
+        parts.append(tubes_obj("spoke", [([(0, 0, 0.3), (0.18 * math.cos(a), 0.18 * math.sin(a), 0.3)], [0.008] * 2, 6, False)], p["brassB"]))
+    parts += cushion((0.4, 0.4, 0.08), (0, 0, 0.72), p["leather"], radius=0.035, puff=0.012)
+    parts.append(soft_box((0.4, 0.06, 0.22), (0, -0.2, 0.86), p["leather"], radius=0.025))
+    return finish(parts, "barStool", uv=3.0)
+
+
+def prop_booth(p):
+    """Leather booth bench, 2 m wide x 0.75 deep, tufted back 1.2 m tall, walnut base."""
+    W, D = 2.0, 0.75
+    parts = []
+    parts.append(box((W, D - 0.05, 0.38), (0, 0.0, 0.19), p["walnut"], bevel=0.008))
+    parts += cushion((W - 0.04, D - 0.2, 0.12), (0, 0.06, 0.44), p["leatherBrown"], radius=0.04, puff=0.012)
+    grid = [(-0.8 + i * 0.2 + (0.1 if j % 2 else 0), -0.25 + j * 0.17) for j in range(4) for i in range(8 if j % 2 else 9) if -0.9 <= -0.8 + i * 0.2 + (0.1 if j % 2 else 0) <= 0.9]
+    parts += cushion((W - 0.04, 0.16, 0.66), (0, -(D / 2 - 0.12), 0.85), p["leatherBrown"], radius=0.05, puff=0.02, buttons=("y", 1, grid), button_mat=p["leatherBrown"])
+    parts.append(box((W, 0.12, 0.05), (0, -(D / 2 - 0.1), 1.2), p["walnut"], bevel=0.008))
+    parts.append(box((W, 0.02, 0.02), (0, D / 2 - 0.02, 0.05), p["brassB"], bevel=0.003))
+    return finish(parts, "booth", uv=2.5)
+
+
+def prop_dining_table(p):
+    """Round dining table, 0.9 m diameter, linen cloth over walnut, brass pedestal."""
+    parts = []
+    parts.append(revolve("cloth", [(0.0, 0.76), (0.47, 0.76), (0.48, 0.75), (0.5, 0.55), (0.49, 0.54), (0.0, 0.54)], 48, p["linen"]))
+    parts.append(revolve("pedestal", [(0.0, 0.0), (0.28, 0.0), (0.28, 0.02), (0.06, 0.05), (0.04, 0.08), (0.04, 0.54), (0.0, 0.54)], 32, p["brassB"]))
+    # Place setting: two plates and glasses.
+    for a in (math.pi / 2, -math.pi / 2):
+        x, y = math.cos(a) * 0.3, math.sin(a) * 0.3
+        parts.append(cyl(0.12, 0.012, (x, y, 0.766), p["linen"], verts=24))
+        g = revolve("wine", [(0.0, 0.0), (0.035, 0.0), (0.004, 0.01), (0.004, 0.08), (0.03, 0.1), (0.04, 0.16), (0.035, 0.2), (0.0, 0.2)], 16, p["vaseGlass"])
+        g.location = (x + 0.12, y * 0.7, 0.766)
+        parts.append(g)
+    return finish(parts, "diningTable", uv=2.0)
+
+
+def prop_dining_chair(p):
+    parts = []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            leg = box((0.035, 0.035, 0.46), (sx * 0.2, sy * 0.2, 0.23), p["walnut"], rot=(sy * 0.05, -sx * 0.05, 0), bevel=0.005)
+            parts.append(leg)
+    parts += cushion((0.46, 0.46, 0.08), (0, 0, 0.5), p["cream"], radius=0.03, puff=0.01)
+    for sx in (-1, 1):
+        parts.append(box((0.035, 0.035, 0.48), (sx * 0.2, -0.21, 0.74), p["walnut"], rot=(-0.12, 0, 0), bevel=0.005))
+    parts += cushion((0.44, 0.06, 0.34), (0, -0.24, 0.8), p["cream"], radius=0.025, puff=0.012, rot=(-0.12, 0, 0))
+    return finish(parts, "diningChair", uv=3.0)
+
+
+def prop_luggage_cart(p):
+    """Hotel bellhop cart: carpeted deck, brass hanger arch, four wheels, a couple of suitcases. 1.1 x 0.6 x 1.85 m."""
+    L, Wd = 1.1, 0.6
+    parts = []
+    parts.append(box((L, Wd, 0.04), (0, 0, 0.2), p["carpet"], bevel=0.01))
+    parts.append(box((L + 0.02, Wd + 0.02, 0.03), (0, 0, 0.175), p["brassB"], bevel=0.006))
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            parts.append(cyl(0.07, 0.04, (sx * (L / 2 - 0.1), sy * (Wd / 2 - 0.06), 0.07), p["rubber"], rot=(0, math.radians(90), 0), verts=16))
+            parts.append(box((0.03, 0.03, 0.1), (sx * (L / 2 - 0.1), sy * (Wd / 2 - 0.06), 0.13), p["brassB"]))
+    for sx in (-1, 1):
+        x = sx * (L / 2 - 0.04)
+        path = [(x, -(Wd / 2 - 0.03), 0.2), (x, -(Wd / 2 - 0.03), 1.6), (x, -0.15, 1.82), (x, 0.15, 1.82), (x, (Wd / 2 - 0.03), 1.6), (x, (Wd / 2 - 0.03), 0.2)]
+        parts.append(tubes_obj("arch", [(path, [0.016] * len(path), 10, False)], p["brassB"]))
+    parts.append(tubes_obj("rail", [([(-(L / 2 - 0.04), 0, 1.84), ((L / 2 - 0.04), 0, 1.84)], [0.015] * 2, 10, False)], p["brassB"]))
+    parts.append(soft_box((0.6, 0.38, 0.24), (-0.15, 0.0, 0.34), p["suitcase"], radius=0.03))
+    parts.append(soft_box((0.45, 0.3, 0.2), (0.25, 0.02, 0.32), p["leatherBrown"], radius=0.03))
+    parts.append(soft_box((0.4, 0.25, 0.55), (0.0, 0.05, 0.74), p["suitcase"], radius=0.03, rot=(0, 0, 0.2)))
+    return finish(parts, "luggageCart", uv=2.0)
+
+
+def prop_stanchion(p):
+    """Brass queue post (0.95 m) with a red velvet rope sagging 1.5 m along +X to the next post."""
+    parts = []
+    parts.append(revolve("post", [(0.0, 0.0), (0.16, 0.0), (0.16, 0.02), (0.05, 0.05), (0.025, 0.08), (0.025, 0.88), (0.04, 0.9), (0.04, 0.93), (0.0, 0.97)], 32, p["brassB"]))
+    rope = [(0.03 + 1.44 * t, 0.0, 0.86 - 0.22 * math.sin(math.pi * t)) for t in [i / 16 for i in range(17)]]
+    parts.append(tubes_obj("rope", [(rope, [0.018] * 17, 10, False)], p["velvet"]))
+    parts.append(prim("sphere", p["brassB"], loc=(0.03, 0, 0.86), radius=0.022, segments=10, ring_count=6))
+    return finish(parts, "stanchion", uv=3.0)
+
+
+def prop_reception_bell(p):
+    parts = []
+    parts.append(revolve("bell", [(0.0, 0.0), (0.05, 0.0), (0.05, 0.012), (0.045, 0.016), (0.047, 0.02), (0.045, 0.035), (0.035, 0.055), (0.018, 0.064), (0.006, 0.068), (0.006, 0.078), (0.01, 0.08), (0.0, 0.084)], 24, p["brassB"]))
+    parts.append(cyl(0.055, 0.008, (0, 0, 0.004), p["walnut"], verts=24))
+    return finish(parts, "receptionBell", uv=8.0)
+
+
+def prop_computer(p):
+    """Front-desk monitor (0.55 x 0.34) on a stand, keyboard in front."""
+    parts = []
+    parts.append(box((0.55, 0.025, 0.34), (0, -0.05, 0.3), p["blackPlastic"], bevel=0.008))
+    parts.append(box((0.52, 0.004, 0.3), (0, -0.0365, 0.305), p["screen"], bevel=0))
+    parts.append(box((0.04, 0.04, 0.16), (0, -0.08, 0.1), p["blackPlastic"], bevel=0.005))
+    parts.append(box((0.22, 0.16, 0.012), (0, -0.08, 0.006), p["blackPlastic"], bevel=0.004))
+    parts.append(box((0.42, 0.13, 0.018), (0, 0.18, 0.009), p["blackPlastic"], bevel=0.004))
+    for r in range(4):
+        parts.append(box((0.38, 0.022, 0.006), (0, 0.13 + r * 0.03, 0.02), p["darkSteel"], bevel=0.001))
+    return finish(parts, "computer", uv=3.0)
+
+
+HOTEL_BUILDERS = [
+    ("sofa", prop_sofa), ("armchair", prop_armchair), ("brassTable", prop_brass_table), ("coffeeTable", prop_coffee_table),
+    ("tableLamp", prop_table_lamp), ("floorLamp", prop_floor_lamp), ("planterTree", prop_planter_tree), ("flowers", prop_flowers),
+    ("sconce", prop_sconce), ("pendant", prop_pendant), ("elevatorDoors", prop_elevator_doors),
+    ("securityShutter", prop_security_shutter), ("barStool", prop_bar_stool), ("booth", prop_booth), ("diningTable", prop_dining_table),
+    ("diningChair", prop_dining_chair), ("luggageCart", prop_luggage_cart), ("stanchion", prop_stanchion),
+    ("receptionBell", prop_reception_bell), ("computer", prop_computer),
+]
+
+
+def build_hotel(p):
+    """Returns {name: object} for every hotel prop plus the extra child nodes to export."""
+    hotel_palette(p)
+    out, extra = {}, []
+    for name, fn in HOTEL_BUILDERS:
+        out[name] = fn(p)
+    door, wings = prop_revolving_door(p)
+    out["revolvingDoor"] = door
+    extra.append(wings)
+    return out, extra
+
+
+def render_vignette(objs, name):
+    """The props arranged like the reference lobby corner, under warm low sun, for a side-by-side look."""
+    scene = bpy.context.scene
+    placed = []
+
+    def put(key, loc, rot=0.0):
+        o = objs[key].copy()
+        o.data = objs[key].data
+        bpy.context.collection.objects.link(o)
+        o.location = loc
+        o.rotation_euler = (0, 0, rot)
+        placed.append(o)
+
+    put("sofa", (0, 0, 0))
+    put("armchair", (-1.9, 1.1, 0), math.radians(-70))
+    put("brassTable", (-1.45, -0.1, 0))
+    put("tableLamp", (-1.45, -0.1, 0.565))
+    put("coffeeTable", (0, 1.25, 0))
+    put("planterTree", (1.8, -0.6, 0))
+    put("floorLamp", (-1.5, -0.8, 0))
+    put("flowers", (0.2, 1.25, 0.44))
+    render_preview(placed, name, (0, 0.6, 0.6), 5.2, elev=14, azim=20, lens=40, res=(960, 640))
+    for o in placed:
+        bpy.data.objects.remove(o, do_unlink=True)
+
+
 # ---- export and preview ------------------------------------------------------------------------------------------------
+
+def auto_preview(objs, name, elev=12, azim=30):
+    """Frames the objects' bounding box."""
+    lo = Vector((1e9, 1e9, 1e9))
+    hi = Vector((-1e9, -1e9, -1e9))
+    for o in objs:
+        for c in o.bound_box:
+            w = o.matrix_world @ Vector(c)
+            lo = Vector((min(lo.x, w.x), min(lo.y, w.y), min(lo.z, w.z)))
+            hi = Vector((max(hi.x, w.x), max(hi.y, w.y), max(hi.z, w.z)))
+    centre = (lo + hi) / 2
+    size = (hi - lo).length
+    render_preview(objs, name, tuple(centre), max(0.25, size * 1.25), elev=elev, azim=azim, lens=50, res=(420, 420))
+
+
+def contact_sheet(names, out_name, cols=6):
+    """Tiles the preview PNGs into one image (for checking everything at a glance)."""
+    tiles = []
+    for n in names:
+        img = bpy.data.images.load(str(PREVIEW / f"{n}.png"))
+        w, h = img.size
+        px = np.array(img.pixels[:]).reshape(h, w, 4)
+        tiles.append(px)
+        bpy.data.images.remove(img)
+    th, tw = tiles[0].shape[:2]
+    rows = (len(tiles) + cols - 1) // cols
+    sheet = np.zeros((rows * th, cols * tw, 4))
+    sheet[..., 3] = 1
+    for k, t in enumerate(tiles):
+        r, c = k // cols, k % cols
+        # Image rows are stored bottom-up: the first tile goes at the top.
+        y0 = (rows - 1 - r) * th
+        sheet[y0:y0 + th, c * tw:(c + 1) * tw] = t[:th, :tw]
+    img = bpy.data.images.new(out_name, cols * tw, rows * th, alpha=False)
+    img.pixels.foreach_set(sheet.astype(np.float32).ravel())
+    img.filepath_raw = str(PREVIEW / f"{out_name}.png")
+    img.file_format = "PNG"
+    img.save()
+    print(f"SHEET {img.filepath_raw}")
+
 
 def export(objects):
     bpy.ops.object.select_all(action="DESELECT")
@@ -981,9 +1729,22 @@ def build_all():
         "fence": prop_fence(p),
         "tree": prop_tree(p),
     }
-    for name, o in objs.items():
-        print(f"PROP {name} tris={tris(o)} mats={[m.name for m in o.data.materials]}")
-    if PREVIEW:
+    hotel, extra = build_hotel(p)
+    objs.update(hotel)
+    for name, o in list(objs.items()) + [(e.name, e) for e in extra]:
+        d = o.dimensions
+        print(f"PROP {name} tris={tris(o)} dims=({d.x:.2f} x {d.z:.2f} x {d.y:.2f}) mats={[m.name for m in o.data.materials]}")
+    if PREVIEW and "hotel" in ARGS[2:]:
+        PREVIEW.mkdir(parents=True, exist_ok=True)
+        names = []
+        for name, o in hotel.items():
+            auto_preview([o] + [e for e in extra if e.parent is o], name)
+            names.append(name)
+        auto_preview([objs["locker"]], "locker")
+        names.append("locker")
+        contact_sheet(names, "hotel_sheet")
+        render_vignette(objs, "hotel_vignette")
+    elif PREVIEW:
         PREVIEW.mkdir(parents=True, exist_ok=True)
         render_preview([objs["locker"]], "locker", (0, 0, 1.0), 3.2, elev=8, azim=28)
         render_preview([objs["locker"]], "locker_close", (-0.3, 0.2, 1.1), 1.2, elev=10, azim=-20)
@@ -992,7 +1753,7 @@ def build_all():
         render_preview([objs["nade"]], "nade", (0, 0, 0.01), 0.22, elev=12, azim=35)
         render_preview([objs["fence"]], "fence", (0, 0, 1.3), 3.6, elev=6, azim=20)
         render_preview([objs["tree"]], "tree", (0, 0, 2.8), 8.5, elev=6, azim=30)
-    export(list(objs.values()))
+    export(list(objs.values()) + extra)
 
 
 if __name__ == "__main__":

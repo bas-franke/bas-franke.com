@@ -2,6 +2,7 @@
 
 import type { Vec3Tuple } from '../math.js';
 import type { ZInput } from './physics.js';
+import type { ZoneId } from './maps.js';
 import type { WeaponId } from './weapons.js';
 
 /** 0 alive, 1 downed, 2 dead (back next wave). */
@@ -90,7 +91,8 @@ export interface ZScore {
 }
 
 /** Material codes for impacts: index into IMPACT_MATS. */
-export const IMPACT_MATS = ['none', 'brick', 'plaster', 'concrete', 'wood', 'metal', 'flesh'] as const;
+/** Appended only: indices are on the wire. */
+export const IMPACT_MATS = ['none', 'brick', 'plaster', 'concrete', 'wood', 'metal', 'flesh', 'marble', 'travertine', 'walnut', 'glass'] as const;
 export type ImpactMat = (typeof IMPACT_MATS)[number];
 
 export type ZEvent =
@@ -127,6 +129,8 @@ export type ZombiesServerMsg =
       down: number[];
       dmg: number[];
       boards: number[];
+      /** Zones open this match (maps.ts ZoneId; picked from the player count at the start). Build the world with them. */
+      zones: ZoneId[];
       wave: number;
       scores: ZScore[];
     }

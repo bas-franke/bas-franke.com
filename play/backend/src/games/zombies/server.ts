@@ -10,7 +10,7 @@
 import { clamp, hdist, rng as makeRng, toTuple, type Vec3, type Vec3Tuple, vdist, yawForward, yawRight } from '../../shared/math.js';
 import type { GameClientMsg } from '../../shared/protocol.js';
 import { ZB, joggerShare, spawnInterval, waveCount, waveHealth } from '../../shared/zombies/constants.js';
-import { type MapDef, MAPS, RANDOM_ZMAP, zmapById } from '../../shared/zombies/maps.js';
+import { type MapDef, zmapById, zonesFor } from '../../shared/zombies/maps.js';
 import { type Body, type NadeBody, type ZInput, eyeHeight, stepNade, stepPlayer } from '../../shared/zombies/physics.js';
 import {
   GIB,
@@ -136,9 +136,9 @@ class ZombiesGame implements GameServer {
   private readonly scratch: number[] = [];
 
   constructor(private readonly host: GameHost) {
-    const pick = host.settings.map === RANDOM_ZMAP ? undefined : zmapById(host.settings.map);
-    this.def = pick ?? MAPS[Math.floor(Math.random() * MAPS.length)];
-    this.world = buildWorld(this.def);
+    // One map; the party size at the start decides how much of it is open (the wings stay shut for small groups).
+    this.def = zmapById(host.settings.map);
+    this.world = buildWorld(this.def, zonesFor(host.players().length, this.def));
     this.nav = new NavField(this.world);
     this.boards = this.world.windows.map(() => ZB.boardsPerWindow);
   }
@@ -209,7 +209,7 @@ class ZombiesGame implements GameServer {
       if (!w.alive[i]) down.push(i);
       else if (!w.chunks[i].hard && w.hp[i] < w.chunks[i].maxHp) dmg.push(i, Math.round(w.hp[i]));
     }
-    return { k: 'init', map: { id: this.def.id, name: this.def.name }, down, dmg, boards: [...this.boards], wave: this.wave, scores: this.scores() };
+    return { k: 'init', map: { id: this.def.id, name: this.def.name }, down, dmg, boards: [...this.boards], zones: [...this.world.open], wave: this.wave, scores: this.scores() };
   }
 
   private scores(): ZScore[] {
@@ -417,7 +417,7 @@ class ZombiesGame implements GameServer {
     let bestD: number = ZB.useRange;
     for (const w of this.world.windows) {
       const d = hdist(w.inside, pos);
-      if (d < bestD && this.boards[w.i] < ZB.boardsPerWindow && inside(this.world, pos.x, pos.z)) {
+      if (d < bestD && w.active && this.boards[w.i] < ZB.boardsPerWindow && inside(this.world, pos.x, pos.z)) {
         bestD = d;
         best = w.i;
       }
@@ -753,12 +753,14 @@ class ZombiesGame implements GameServer {
     }
     if (!this.broken.length) return;
     const fallen = collapse(this.world);
-    for (const i of this.broken) this.nav.chunkChanged(i);
-    for (const i of fallen) this.nav.chunkChanged(i);
+    let navDirty = false;
+    for (const i of this.broken) navDirty = this.nav.chunkChanged(i) || navDirty;
+    for (const i of fallen) navDirty = this.nav.chunkChanged(i) || navDirty;
     this.events.push({ k: 'chunks', d: this.broken, f: fallen, at: toTuple(this.brokenAt), ...(this.brokenBlast ? { x: 1 as const } : {}) });
     this.broken = [];
     this.brokenBlast = false;
-    this.navT = 0;
+    // A new hole at body height is worth an early re-solve, but not one per shot while the glass is being shredded.
+    if (navDirty) this.navT = Math.min(this.navT, 0.25);
   }
 
   // ---- waves ----------------------------------------------------------------------------------------------------
@@ -810,6 +812,7 @@ class ZombiesGame implements GameServer {
     // Rise outside one of the windows nearest the survivors (a random one of the closest few).
     const alive = this.standing();
     const ws = this.world.windows
+      .filter((w) => w.active)
       .map((w) => ({ w, d: alive.length ? Math.min(...alive.map((p) => hdist(p.body.pos, w.outside))) : 0 }))
       .sort((a, b) => a.d - b.d);
     const pool = ws.slice(0, Math.max(3, Math.ceil(ws.length / 2)));
@@ -898,7 +901,8 @@ class ZombiesGame implements GameServer {
     const standing = this.standing();
     this.navT -= dt;
     if (this.navT <= 0) {
-      this.navT = 0.3;
+      // A solve over the whole hotel takes ~3 ms; twice a second is plenty for zombies this slow.
+      this.navT = 0.5;
       this.nav.solve(
         standing.map((p) => p.body.pos),
         this.boards,
@@ -987,7 +991,8 @@ class ZombiesGame implements GameServer {
         const k = Math.min(1, z.t / ZB.vaultTime);
         z.pos.x = z.vaultFrom.x + (z.vaultTo.x - z.vaultFrom.x) * k;
         z.pos.z = z.vaultFrom.z + (z.vaultTo.z - z.vaultFrom.z) * k;
-        z.pos.y = Math.sin(k * Math.PI) * 1.05;
+        // Over a window sill in an arc; through a doorway on the level.
+        z.pos.y = this.world.windows[z.win]?.door ? 0 : Math.sin(k * Math.PI) * 1.05;
         if (k >= 1) {
           z.pos.y = 0;
           this.setState(z, ZState.Walk);
@@ -1112,7 +1117,7 @@ class ZombiesGame implements GameServer {
           if (hdist(z.stuckFrom, z.pos) < 0.15) {
             // Pressed in the crowd beside a boarded window: claw at it with the others instead of walking in place.
             if (!zin) {
-              const w = this.world.windows.find((win) => this.boards[win.i] > 0 && hdist(win.outside, z.pos) < 2.4);
+              const w = this.world.windows.find((win) => win.active && this.boards[win.i] > 0 && hdist(win.outside, z.pos) < 2.4);
               if (w) {
                 z.win = w.i;
                 z.stuckT = 0;

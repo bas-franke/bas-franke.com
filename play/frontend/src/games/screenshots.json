@@ -41,16 +41,8 @@
   ],
   "zombies": [
     {
-      "file": "zombies-storage.jpg",
-      "caption": "Cold Storage"
-    },
-    {
-      "file": "zombies-chapel.jpg",
-      "caption": "St. Agnes Chapel"
-    },
-    {
-      "file": "zombies-station.jpg",
-      "caption": "Pumping Station"
+      "file": "zombies-hotel.jpg",
+      "caption": "Grand Meridian Hotel"
     }
   ],
   "dustrunners": [

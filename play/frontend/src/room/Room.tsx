@@ -2,7 +2,6 @@ import { type FormEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type GameServerMsg, type PlayerInfo, type RoomView, type Team, colorHex } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
-import { ZMAP_LIST } from '@shared/zombies/maps';
 import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
 import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
@@ -316,16 +315,16 @@ function WaitingRoom({
   const start = () => (sfx.unlock(), socket.send({ t: 'start' }));
   const hasMaps = room.game === 'rockets';
   const zombies = room.game === 'zombies';
-  const mapName = (zombies ? ZMAP_LIST : MAP_LIST).find((m) => m.id === room.map)?.name ?? 'Random map';
+  const mapName = zombies ? 'Grand Meridian Hotel' : (MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map');
   const difficulty = DIFFICULTIES.find((d) => d.id === room.botDifficulty) ?? DIFFICULTIES[1];
   const botsLabel = `${bots} ${difficulty.label.toLowerCase()} ${bots === 1 ? 'bot' : 'bots'}`;
   const rules = hasMaps ? MODES[room.mode ?? 'ffa'] : null;
   const teamMode = !!rules?.teams;
-  const onMap = hasMaps || zombies ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : '';
+  const onMap = zombies ? ` in the ${mapName}` : hasMaps ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : '';
   const lineup = teamMode
     ? `${rules!.name}: ${teamCount(room.players, 0)} vs ${teamCount(room.players, 1)}${onMap}, first to ${rules!.limit} ${GOAL_WORDS[rules!.goal]}`
     : zombies
-      ? `${humans} ${humans === 1 ? 'survivor' : 'survivors'}${bots ? ` and ${botsLabel}` : ''}${onMap}, endless waves`
+      ? `${humans} ${humans === 1 ? 'operator' : 'operators'}${bots ? ` and ${botsLabel}` : ''}${onMap}, endless waves`
       : `${rules ? `${rules.name}: ` : ''}${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${onMap}${rules ? `, first to ${rules.limit} frags` : ''}`;
   const myTeam = room.players.find((p) => p.id === you)?.team;
   const playerRow = (p: PlayerInfo) => (
@@ -535,37 +534,21 @@ function WaitingRoom({
           {zombies && (
             <div className="panel">
               <div className="section-head">
-                <h2>Map</h2>
-                <span className="slots">
-                  {mapName}
-                  {!isHost && ' · the host picks'}
-                </span>
+                <h2>Building</h2>
+                <span className="slots">Grand Meridian Hotel</span>
               </div>
-              {isHost && (
-                <select className="visually-hidden" data-testid="map-select" aria-label="Map" value={room.map} onChange={(e) => setMap(e.target.value)}>
-                  <option value={RANDOM_MAP}>Random map</option>
-                  {ZMAP_LIST.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <div className="mode-cards" role="radiogroup" aria-label="Map">
-                {[{ id: RANDOM_MAP, name: 'Random', blurb: 'A different building every match.' }, ...ZMAP_LIST].map((m) => (
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={m.id === room.map}
-                    key={m.id}
-                    className={`mode-card${m.id === room.map ? ' active' : ''}`}
-                    disabled={!isHost}
-                    onClick={() => setMap(m.id)}
-                  >
-                    <b>{m.name}</b>
-                    <span>{m.blurb}</span>
-                  </button>
-                ))}
+              {/* One map: more of the hotel opens up the bigger the squad. */}
+              <div className="mode-cards" role="list" aria-label="Hotel wings">
+                {HOTEL_WINGS.map((z) => {
+                  const open = room.players.length >= z.from;
+                  return (
+                    <div role="listitem" key={z.name} className={`mode-card${open ? ' active' : ''}`}>
+                      <b>{z.name}</b>
+                      <span>{z.blurb}</span>
+                      <em>{z.from <= 1 ? 'Always open' : open ? `Open with ${z.from}+ players` : `Opens with ${z.from}+ players`}</em>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -623,6 +606,13 @@ function WaitingRoom({
     </>
   );
 }
+
+/** Last Light: which wings of the hotel the squad size opens (mirrors the server's zone rule). */
+const HOTEL_WINGS = [
+  { name: 'Atrium', blurb: 'The two-storey lobby: reception, lounge seating, the glass facade.', from: 1 },
+  { name: 'Lounge bar', blurb: 'East wing: bar counter, booths, a window wall.', from: 4 },
+  { name: 'Restaurant', blurb: 'West wing: dining room behind a glass wall.', from: 7 },
+];
 
 const GOAL_WORDS = { frags: 'frags', captures: 'captures', rounds: 'rounds' } as const;
 const teamCount = (players: PlayerInfo[], team: Team) => players.filter((p) => p.team === team).length;

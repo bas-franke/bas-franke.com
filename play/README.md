@@ -8,7 +8,7 @@ Node.js + Express + `ws` backend on port **3004**. No database; rooms live in me
 |-------------|---------------------------------------------------------------------------------------------------------|
 | **Rockets** | First-person rocket arena (Quake 3 "rockets only"): infinite rockets, splash damage, rocket jumps, jump pads, health packs. 5 minutes or 15 frags. |
 | **Ruckus**  | Party game in five rounds (Uther Party style). Each round is a minigame: Hot Potato, Floor is Lava, Coin Rush, Sweeper, Sumo. Points for placement; highest total wins. |
-| **Last Light** | Co-op zombie survival for 1 to 10 (bots fill in): endless waves in one dark, fully destructible room. Board up the windows, buy guns old and new, ammo, grenades and armor with points, revive each other. |
+| **Last Light** | Co-op zombie survival for 1 to 10 SWAT operators (bots fill in): endless waves in a fully destructible grand hotel lobby. Board up the doors, buy guns old and new, ammo, grenades and armor with points, revive each other. |
 | **Dustrunners** | Single-player podracing through red-rock canyons at `/race`: career (cups, prize money, garage), quick race, time trial against AI pilots. Not a room game: listed in the lobby from `SOLO_GAMES`. |
 
 Every room game supports bots (easy / normal / hard), chosen when the room is created or changed by the host in the room.
@@ -69,10 +69,11 @@ next round starts. Each minigame is one small class in `games/ruckus/minigames/`
 
 ### Last Light
 
-One closed room per map (Cold Storage, St. Agnes Chapel, Pumping Station), eight barricaded windows, lockers along the
-walls, a dark yard outside. Zombies rise outside one at a time, shamble to a window, pull its six boards off and vault
-in; players hold E inside a window to nail boards back (+10 points each, capped per wave). Waves never end: counts and
-health grow like CoD zombies, a share of later waves jogs, everyone downed at once ends the match.
+One map, the Grand Meridian Hotel: a two-storey marble and travertine lobby in golden-hour sun, with a lounge bar
+(opens with 4+ players) and a restaurant (7+) behind security shutters. Zombies (hotel guests and staff) rise outside
+one at a time, tear the six boards off a door or window and come in; players hold E inside an entrance to nail boards
+back (+10 points each, capped per wave). Waves never end: counts and health grow like CoD zombies, a share of later
+waves jogs, everyone downed at once ends the match. Players are SWAT operators.
 
 - **Destruction.** `shared/zombies/world.ts` builds every wall and prop out of ~0.5 m chunks with health. Bullets chip
   them, grenades and the Barrett blow holes, zombies bash through when that is much shorter than the nearest window, and
@@ -85,11 +86,12 @@ health grow like CoD zombies, a share of later waves jogs, everyone downed at on
   server rewinds zombies up to 250 ms and traces head sphere, body cylinder and walls. Heavy arm hits take arms off,
   headshot kills take the head, grenades take legs.
 - **Client** (`frontend/src/games/zombies/`, contracts in `api.ts`): `client.ts` (input, prediction, weapons, views),
-  `world.ts` + `textures.ts` (instanced chunks with world-space PBR textures and cracks, lamps, moonlight), `post.ts`
-  (HDR, volumetric fog with moonlight shafts through windows and holes, lit dust, bloom, grade), `fx.ts` (debris,
+  `world.ts` + `decor.ts` + `textures.ts`/`texgen.ts` (instanced chunks with world-space PBR textures and cracks,
+  furniture, chandeliers, the sun), `post.ts` (HDR, volumetric sun shafts through the facade and blasted holes,
+  screen-space floor reflections, bloom, auto exposure, grade), `fx.ts` (debris,
   decals, blood, gibs), `audio.ts` (synthesized, with room reverb), `models.ts` (Blender GLBs from
   `tools/blender/build_zombies.py`, `npm run models:zombies`). Graphics quality (low / medium / high) is in the Esc menu.
-- Dev labs: `/lab-zombies.html?map=storage` (world + lighting), `/lab-zombies-fx.html`, `/lab-zombies-audio.html`.
+- Dev labs: `/lab-zombies.html?zones=atrium,lounge` (world + lighting), `/lab-zombies-fx.html`, `/lab-zombies-audio.html`.
 
 ### Dustrunners (work in progress)
 

@@ -1,7 +1,24 @@
 // Pixel generators for the Last Light texture sets (see textures.ts). No three.js and no DOM here, so the same code
 // runs in the texture workers (texworker.ts) and, as a fallback, on the main thread.
 
-export type SetName = 'brick' | 'plaster' | 'concrete' | 'wood' | 'metal' | 'floorConcrete' | 'floorWood' | 'floorTile' | 'mud';
+export type SetName =
+  | 'brick'
+  | 'plaster'
+  | 'concrete'
+  | 'wood'
+  | 'metal'
+  | 'floorConcrete'
+  | 'floorWood'
+  | 'floorTile'
+  | 'mud'
+  | 'marbleFloor'
+  | 'marbleSlab'
+  | 'travertine'
+  | 'walnut'
+  | 'brass'
+  | 'fabric'
+  | 'leather'
+  | 'plaza';
 
 /** One pixel's material, filled by a set's generator. Colours are sRGB 0..1. */
 interface Px {
@@ -461,6 +478,191 @@ const mud: Gen = (u, v, px) => {
   px.h = mix(px.h, 0.35, wet);
 };
 
+
+// ---- hotel lobby ---------------------------------------------------------------------------------------------------
+
+/**
+ * Black marble with gold and white veins. Veins follow warped sine fields (three families at different angles), so
+ * they branch and thin out like real calcite; a cloudy grey body underneath.
+ */
+function marbleBody(u: number, v: number, px: Px, seed: number) {
+  const cloud = fbm(u, v, 3, 5, seed + 1);
+  const cloud2 = fbm(u, v, 9, 4, seed + 2);
+  px.r = 0.028 + cloud * 0.05 + cloud2 * 0.02;
+  px.g = 0.026 + cloud * 0.046 + cloud2 * 0.018;
+  px.b = 0.026 + cloud * 0.044 + cloud2 * 0.017;
+  let gold = 0;
+  let white = 0;
+  for (let k = 0; k < 3; k++) {
+    const a = 0.6 + k * 1.1 + hash(k, seed, 5) * 0.8;
+    // Each family wraps over the tile an integer number of times so the set stays seamless.
+    const f = [1, 2, 3][k];
+    const fu = Math.round(Math.cos(a) * f);
+    const fv = Math.round(Math.sin(a) * f) || 1;
+    const warp = fbm(u, v, 2 + k, 5, seed + 10 + k) * (1.3 - k * 0.25) + fbm(u, v, 10, 3, seed + 20 + k) * 0.12;
+    const s = Math.abs(Math.sin((fu * u + fv * v + warp) * Math.PI));
+    const width = [0.05, 0.06, 0.03][k] * (0.4 + fbm(u, v, 5, 3, seed + 30 + k) * 1.2);
+    // Gold runs only in some regions; the white threads are everywhere, faint in places.
+    const line = smooth(width, 0, s) * (k === 0 ? smooth(0.36, 0.58, fbm(u, v, 3, 4, seed + 40 + k)) : smooth(0.12, 0.4, fbm(u, v, 3, 4, seed + 40 + k)));
+    if (k === 0) gold = Math.max(gold, line);
+    else white = Math.max(white, line * (k === 1 ? 0.9 : 0.55));
+  }
+  // Milky clouds of calcite drifting through the black.
+  tint(px, 0.32, 0.3, 0.28, smooth(0.62, 0.8, fbm(u, v, 3, 5, seed + 50)) * 0.35);
+  tint(px, 0.16, 0.11, 0.05, smooth(0, 0.6, gold) * 0.35);
+  tint(px, 0.6, 0.44, 0.22, smooth(0.35, 0.9, gold) * 0.9);
+  // White veins with a soft milky edge.
+  tint(px, 0.45, 0.44, 0.42, smooth(0, 0.5, white) * 0.35);
+  tint(px, 0.8, 0.79, 0.75, smooth(0.3, 0.9, white) * 0.8);
+  px.h = 0.5 + cloud * 0.02;
+  px.rough = 0.05 + cloud2 * 0.05 + gold * 0.04;
+  px.metal = 0;
+}
+
+/** 1.2 m polished tiles of the black marble, 2 x 2 on a 2.4 m set, each turned so the veins never line up. */
+const marbleFloor: Gen = (u, v, px) => {
+  const tx = u * 2;
+  const ty = v * 2;
+  const ix = Math.floor(tx);
+  const iy = Math.floor(ty);
+  const lx = tx - ix;
+  const ly = ty - iy;
+  const id = hash(ix, iy, 61);
+  const turn = Math.floor(id * 4);
+  const [ru, rv] = turn === 0 ? [lx, ly] : turn === 1 ? [ly, 1 - lx] : turn === 2 ? [1 - lx, 1 - ly] : [1 - ly, lx];
+  marbleBody(ru, rv, px, 100 + Math.floor(id * 7) * 17);
+  shade(px, 0.85 + hash(ix, iy, 62) * 0.3);
+  const e = Math.min(lx, 1 - lx, ly, 1 - ly) * 1.2;
+  const joint = smooth(0.0035, 0.001, e);
+  tint(px, 0.11, 0.1, 0.09, joint);
+  px.h -= joint * 0.25;
+  px.rough = Math.max(px.rough, joint * 0.6);
+  // Faint scuffs where the polish has worn.
+  const scuff = smooth(0.7, 0.85, fbm(u, v, 18, 3, 63)) * smooth(0.55, 0.8, fbm(u, v, 3, 3, 64));
+  px.rough += scuff * 0.1;
+};
+
+const marbleSlab: Gen = (u, v, px) => marbleBody(u, v, px, 300);
+
+/** Cream travertine: horizontal bedding, long open pores, slabs 1.2 x 0.6 m in running bond with fine joints. */
+const travertine: Gen = (u, v, px) => {
+  const band = fbm(u, v, 2, 3, 72) * 0.4 + (0.5 + 0.5 * Math.sin((v * 7 + fbm(u, v, 2, 4, 71) * 0.35) * Math.PI * 2)) * 0.6;
+  const streak = 0.5 + 0.5 * Math.sin((v * 46 + fbm(u, v, 3, 3, 73) * 0.6) * Math.PI * 2);
+  px.r = 0.8 + band * 0.08 - streak * 0.03;
+  px.g = 0.75 + band * 0.075 - streak * 0.032;
+  px.b = 0.66 + band * 0.07 - streak * 0.035;
+  // Pores: cellular holes squashed along the bedding.
+  const [f1] = worley(u, v, 40, 74);
+  const pore = smooth(0.1, 0.04, f1) * smooth(0.5, 0.72, fbm(u, v, 7, 3, 75)) * smooth(0.3, 0.6, vnoise(u * 160, v * 40, 160, 77));
+  shade(px, 1 - pore * 0.18);
+  tint(px, 0.62, 0.52, 0.38, pore * 0.15);
+  px.h = 0.6 + band * 0.05 - pore * 0.35;
+  px.rough = 0.4 + band * 0.12 + pore * 0.3;
+  px.metal = 0;
+  const ry = v * 4;
+  const row = Math.floor(ry);
+  const rx = u * 2 + (row % 2 ? 0.5 : 0);
+  const lx = rx - Math.floor(rx);
+  const ly = ry - row;
+  const e = Math.min(lx * 1.2, (1 - lx) * 1.2, ly * 0.6, (1 - ly) * 0.6);
+  const joint = smooth(0.004, 0.0012, e);
+  shade(px, 1 - joint * 0.35);
+  px.h -= joint * 0.3;
+  shade(px, 0.94 + hash(wrap(Math.floor(rx), 2), row, 76) * 0.1);
+};
+
+/** Book-matched walnut panels, 0.6 m wide, lacquered, with a dark reveal between them. */
+const walnut: Gen = (u, v, px) => {
+  const cx = u * 2;
+  const col = Math.floor(cx);
+  let lx = cx - col;
+  if (col % 2) lx = 1 - lx;
+  const warp = fbm(lx * 0.5, v, 2, 4, 81) * 0.9;
+  const ring = 0.5 + 0.5 * Math.sin((lx * 14 + warp * 2.2 + Math.sin(v * Math.PI * 2) * 0.25) * Math.PI * 2);
+  const fine = vnoise(u * 900, v * 30, 900, 82);
+  const figure = fbm(u, v, 5, 4, 83);
+  px.r = 0.3 + ring * 0.09 + figure * 0.07;
+  px.g = 0.17 + ring * 0.055 + figure * 0.04;
+  px.b = 0.09 + ring * 0.03 + figure * 0.025;
+  shade(px, 0.82 + fine * 0.3);
+  px.h = 0.55 + ring * 0.03 + fine * 0.02;
+  px.rough = 0.26 + fine * 0.12;
+  px.metal = 0;
+  const e = Math.min(lx, 1 - lx) * 0.6;
+  const reveal = smooth(0.006, 0.002, e);
+  shade(px, 1 - reveal * 0.8);
+  px.h -= reveal * 0.5;
+  px.rough = Math.max(px.rough, reveal * 0.7);
+};
+
+/** Brushed brass: fine horizontal brushing, gentle tarnish clouds. */
+const brass: Gen = (u, v, px) => {
+  const brush = vnoise(u * 4, v * 700, 4, 91) * 0.6 + vnoise(u * 16, v * 1400, 16, 92) * 0.4;
+  const tarnish = smooth(0.55, 0.8, fbm(u, v, 3, 4, 93));
+  px.r = 0.92 - brush * 0.08;
+  px.g = 0.7 - brush * 0.07;
+  px.b = 0.38 - brush * 0.05;
+  tint(px, 0.55, 0.42, 0.24, tarnish * 0.35);
+  px.h = 0.5 + brush * 0.04;
+  px.rough = 0.2 + brush * 0.12 + tarnish * 0.12;
+  px.metal = 1;
+};
+
+/** Cream upholstery: a fine basket weave with soft slubs. */
+const fabric: Gen = (u, v, px) => {
+  const n = 160;
+  const wx = Math.sin(u * n * Math.PI * 2);
+  const wy = Math.sin(v * n * Math.PI * 2);
+  const over = (Math.floor(u * n) + Math.floor(v * n)) % 2 ? wx : wy;
+  const slub = fbm(u, v, 24, 3, 101);
+  px.r = 0.74 + over * 0.03 + slub * 0.05;
+  px.g = 0.69 + over * 0.03 + slub * 0.05;
+  px.b = 0.6 + over * 0.03 + slub * 0.04;
+  px.h = 0.5 + over * 0.15;
+  px.rough = 0.88;
+  px.metal = 0;
+};
+
+/** Black pebbled leather with a soft sheen. */
+const leather: Gen = (u, v, px) => {
+  const [f1, f2] = worley(u, v, 90, 111);
+  const crease = smooth(0.08, 0.0, f2 - f1);
+  const body = fbm(u, v, 4, 4, 112);
+  px.r = 0.045 + body * 0.03;
+  px.g = 0.04 + body * 0.027;
+  px.b = 0.037 + body * 0.024;
+  shade(px, 1 - crease * 0.4);
+  px.h = 0.6 - crease * 0.3 + f1 * 0.1;
+  px.rough = 0.42 + crease * 0.25 + body * 0.1;
+  px.metal = 0;
+};
+
+/** Light granite pavers outside: 0.6 m squares, speckled, dusty joints. */
+const plaza: Gen = (u, v, px) => {
+  const n = 4;
+  const tx = u * n;
+  const ty = v * n;
+  const ix = Math.floor(tx);
+  const iy = Math.floor(ty);
+  const lx = tx - ix;
+  const ly = ty - iy;
+  const speck = vnoise(u * 700, v * 700, 700, 121);
+  const tone = hash(ix, iy, 122);
+  px.r = 0.58 + tone * 0.08;
+  px.g = 0.55 + tone * 0.07;
+  px.b = 0.5 + tone * 0.06;
+  shade(px, 0.85 + speck * 0.3);
+  tint(px, 0.15, 0.14, 0.13, smooth(0.86, 0.93, speck) * 0.6);
+  px.h = 0.6 + speck * 0.05;
+  px.rough = 0.62 + speck * 0.15;
+  px.metal = 0;
+  const e = Math.min(lx, 1 - lx, ly, 1 - ly) * 0.6;
+  const joint = smooth(0.006, 0.002, e);
+  shade(px, 1 - joint * 0.5);
+  px.h -= joint * 0.4;
+  tint(px, 0.42, 0.4, 0.36, smooth(0.6, 0.85, fbm(u, v, 3, 4, 123)) * 0.25);
+};
+
 export const SPECS: Record<SetName, { gen: Gen; size: number; meters: number; normal: number }> = {
   brick: { gen: brick, size: 1024, meters: 1.05, normal: 9 },
   plaster: { gen: plaster, size: 1024, meters: 2, normal: 3 },
@@ -471,6 +673,14 @@ export const SPECS: Record<SetName, { gen: Gen; size: number; meters: number; no
   floorWood: { gen: floorWood, size: 1024, meters: 3, normal: 4 },
   floorTile: { gen: floorTile, size: 1024, meters: 2.4, normal: 4 },
   mud: { gen: mud, size: 512, meters: 6, normal: 3 },
+  marbleFloor: { gen: marbleFloor, size: 1024, meters: 2.4, normal: 2 },
+  marbleSlab: { gen: marbleSlab, size: 1024, meters: 1.6, normal: 1.5 },
+  travertine: { gen: travertine, size: 1024, meters: 2.4, normal: 5 },
+  walnut: { gen: walnut, size: 1024, meters: 1.2, normal: 3 },
+  brass: { gen: brass, size: 512, meters: 1, normal: 1.5 },
+  fabric: { gen: fabric, size: 512, meters: 0.5, normal: 4 },
+  leather: { gen: leather, size: 512, meters: 0.5, normal: 4 },
+  plaza: { gen: plaza, size: 512, meters: 2.4, normal: 3 },
 };
 
 export interface TexData {

@@ -416,7 +416,7 @@ export class ZombiesClient implements GameClient {
       const def = zmapById(m.map.id);
       if (!def) return;
       this.mapId = m.map.id;
-      this.world = buildWorld(def);
+      this.world = buildWorld(def, m.zones);
       this.buildScene();
     }
     const w = this.world!;
@@ -438,7 +438,7 @@ export class ZombiesClient implements GameClient {
     this.view = createWorldView(engine.scene, world, this.models!, q);
     this.pipe = createPipeline(engine.renderer, engine.scene, engine.camera, world, this.view, q);
     this.fx = createFx(engine.scene, world, this.pipe!);
-    if (this.audio) configureZAudio(this.audio, { floor: world.def.floor, interior: world.interior });
+    if (this.audio) configureZAudio(this.audio, { floor: world.def.floor === 'marble' ? 'tile' : world.def.floor, interior: world.interior });
     // Thunder follows each lightning flash, louder for bigger bolts.
     (this.view as WorldView & { onLightning?: (s: number) => void }).onLightning = (strength) =>
       window.setTimeout(() => this.audio?.play('boom', { amount: strength * 0.45 }), 300 + Math.random() * 900);

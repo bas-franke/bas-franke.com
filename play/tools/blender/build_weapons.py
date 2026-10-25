@@ -395,6 +395,7 @@ def pmat(name, base, rough, metal=0.0, wear=None, wear_rough=None, grain=None, b
     if emission:
         bsdf.inputs["Emission Color"].default_value = (*emission, 1.0)
         bsdf.inputs["Emission Strength"].default_value = 4.0
+        mat["emit"] = list(emission)
     mat["base"] = list(base)
     _mats[name] = mat
     return mat
@@ -549,11 +550,13 @@ def merge_slots(o):
         if m not in uniq:
             uniq.append(m)
         remap[i] = uniq.index(m)
-    for p in me.polygons:
-        p.material_index = remap.get(p.material_index, 0)
+    idx = [remap.get(p.material_index, 0) for p in me.polygons]
     me.materials.clear()
     for m in uniq:
         me.materials.append(m)
+    # Clearing the slot list resets every face to slot 0: put the remapped indices back afterwards.
+    for p, i in zip(me.polygons, idx):
+        p.material_index = i
 
 
 def baked_material(name, imgs):
@@ -589,9 +592,9 @@ def glow_material(src):
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     base = src.get("base", [1, 0, 0])
     bsdf.inputs["Base Color"].default_value = (*base, 1.0)
-    em = src.node_tree.nodes.get("Principled BSDF").inputs["Emission Color"].default_value
-    bsdf.inputs["Emission Color"].default_value = em
-    bsdf.inputs["Emission Strength"].default_value = 4.0
+    em = src.get("emit", base)
+    bsdf.inputs["Emission Color"].default_value = (*em, 1.0)
+    bsdf.inputs["Emission Strength"].default_value = 8.0
     bsdf.inputs["Roughness"].default_value = 0.4
     _glows[src.name] = mat
     return mat
@@ -609,13 +612,21 @@ class Gun:
         self.size = size
         self.parts = []
         self.magp = []
+        # Moving sub-parts (slide, bolt, pump) the viewmodel animates: `g.part = "slide"` routes what follows there.
+        self.part = None
+        self.partp = {}
         self.muzzle = (0, 0.2, 0.07)
         self.sight = (0, 0, 0.09)
         # Long guns are drawn in their own coordinates; `shift` then moves the hand's grip point to the origin.
         self.shift = Vector((0, 0, 0))
 
     def add(self, o, mag=False):
-        (self.magp if mag else self.parts).append(o)
+        if mag:
+            self.magp.append(o)
+        elif self.part:
+            self.partp.setdefault(self.part, []).append(o)
+        else:
+            self.parts.append(o)
         return o
 
     def p(self, pts, w, mat, x=0.0, bev=0.0012, segs=2, mag=False):
@@ -643,25 +654,31 @@ class Gun:
         return self.add(sphere(r, loc, mat, scale=scale), mag)
 
     def done(self):
-        for o in self.parts + self.magp:
+        for o in self.parts + self.magp + [o for ps in self.partp.values() for o in ps]:
             o.location = o.location + self.shift
         self.muzzle = tuple(Vector(self.muzzle) + self.shift)
         self.sight = tuple(Vector(self.sight) + self.shift)
         root = join(self.parts, self.id)
         mag = join(self.magp, f"{self.id}_mag") if self.magp else None
+        subs = [join(ps, f"{self.id}_{name}") for name, ps in self.partp.items()]
         if not NOBAKE:
-            bake_set(self.id, [root] + ([mag] if mag else []), self.size)
+            bake_set(self.id, [root] + ([mag] if mag else []) + subs, self.size)
         if mag:
             vs = [v.co for v in mag.data.vertices]
             top = max(v.z for v in vs)
             set_origin(mag, (sum(v.x for v in vs) / len(vs), sum(v.y for v in vs) / len(vs), top))
             mag.parent = root
+        for sub in subs:
+            vs = [v.co for v in sub.data.vertices]
+            mid = lambda a: (min(getattr(v, a) for v in vs) + max(getattr(v, a) for v in vs)) / 2
+            set_origin(sub, (mid("x"), mid("y"), mid("z")))
+            sub.parent = root
         for name, loc in ((f"{self.id}_muzzle", self.muzzle), (f"{self.id}_sight", self.sight)):
             e = link(bpy.data.objects.new(name, None))
             e.empty_display_size = 0.02
             e.location = loc
             e.parent = root
-        n = tris(root) + (tris(mag) if mag else 0)
+        n = tris(root) + (tris(mag) if mag else 0) + sum(tris(o) for o in subs)
         print(f"GUN {self.id} tris {n} sight_z {self.sight[2]:.3f} sight_y {self.sight[1]:.3f} muzzle_y {self.muzzle[1]:.3f}")
         return root
 
@@ -757,7 +774,7 @@ def reddot(g, M, y, z, base_z):
     g.cx(0.006, 0.015, 0.023, y + 0.005, z, M.alu)
     g.b((0.022, 0.05, z - base_z - 0.012), (0, y, (z - 0.012 + base_z) / 2), M.alu, bev=0.002)
     g.cx(0.0035, -0.016, 0.016, y, base_z + 0.006, M.steel, verts=10)
-    g.s(0.0011, (0, y + 0.02, z), M.reticle)
+    g.s(0.0016, (0, y + 0.02, z), M.reticle)
     return (0, y - 0.06, z)
 
 
@@ -855,13 +872,18 @@ def curved_mag(g, mat, y_front, y_back, z_top, depth, curve, w, ribs=0, rib_mat=
 def g_m1911(M):
     g = Gun("m1911", 640)
     bz = 0.068
-    # Slide: rounded top, rear serrations, ejection port, barrel bushing.
+    # Slide: rounded top, rear serrations, ejection port, barrel bushing, both sights.
+    g.part = "slide"
     g.p(P((-0.06, 0.051), (0.155, 0.051), (0.157, 0.078), (0.15, 0.084), (-0.052, 0.084), (-0.06, 0.079)), 0.0232, M.blued, bev=0.0016, segs=3)
     serrations(g, M.blued, -0.055, 11, 0.0034, 0.067, 0.022, 0.0245)
     g.b((0.0022, 0.03, 0.011), (0.0112, 0.033, 0.072), M.black, bev=0.0004)
     g.c(0.0109, 0.15, 0.162, bz, M.blued, verts=28)
     g.c(0.0062, 0.153, 0.1625, bz, M.steel, verts=20)
     g.c(0.0048, 0.161, 0.1629, bz, M.black, verts=16)
+    g.b((0.0028, 0.007, 0.0065), (0, 0.145, 0.0868), M.blued, bev=0.0004)
+    for sx in (-1, 1):
+        g.b((0.006, 0.008, 0.007), (sx * 0.0048, -0.046, 0.0872), M.blued, bev=0.0006)
+    g.part = None
     # Frame: dust cover with the spring plug, beavertail, grip frame.
     g.p(P((-0.045, 0.037), (0.15, 0.037), (0.15, 0.0515), (-0.045, 0.0515)), 0.021, M.blued)
     g.c(0.0065, 0.148, 0.158, 0.044, M.blued, verts=20)
@@ -878,10 +900,7 @@ def g_m1911(M):
     g.cx(0.0045, 0.0105, 0.0128, 0.015, 0.03, M.blued, verts=14)
     guard(g, M.blued, 0.004, 0.05, 0.037, 0.01)
     trigger(g, M.steel, 0.022, 0.036)
-    # Sights: blade front, notched rear.
-    g.b((0.0028, 0.007, 0.0065), (0, 0.145, 0.0868), M.blued, bev=0.0004)
-    for sx in (-1, 1):
-        g.b((0.006, 0.008, 0.007), (sx * 0.0048, -0.046, 0.0872), M.blued, bev=0.0006)
+    # The sights (blade front, notched rear) ride on the slide, above.
     g.sight = (0, -0.05, 0.0885)
     # Magazine: body inside the grip, baseplate below it.
     g.p(grip_pts(0.031, 0.03, -0.074, 16, bulge=0.0), 0.02, M.blued, bev=0.001, mag=True)
@@ -893,10 +912,17 @@ def g_m1911(M):
 def g_glock(M):
     g = Gun("glock", 640)
     bz = 0.064
+    g.part = "slide"
     g.p(P((-0.048, 0.049), (0.14, 0.049), (0.142, 0.077), (0.138, 0.08), (-0.044, 0.08), (-0.048, 0.077)), 0.0254, M.park, bev=0.0028, segs=3)
     serrations(g, M.park, -0.044, 8, 0.0042, 0.064, 0.026, 0.0268)
     g.b((0.0022, 0.03, 0.013), (0.0125, 0.02, 0.07), M.black, bev=0.0004)
     g.c(0.0062, 0.139, 0.1428, bz, M.black, verts=16)
+    g.b((0.004, 0.007, 0.006), (0, 0.13, 0.0832), M.park, bev=0.0006)
+    g.s(0.0012, (0, 0.1265, 0.084), M.tritium)
+    for sx in (-1, 1):
+        g.b((0.0065, 0.009, 0.0068), (sx * 0.0053, -0.038, 0.0834), M.park, bev=0.0008)
+        g.s(0.001, (sx * 0.0053, -0.0425, 0.084), M.tritium)
+    g.part = None
     # Polymer frame: dust cover with an accessory rail, grip with finger grooves and stippling.
     g.p(P((-0.04, 0.034), (0.128, 0.034), (0.132, 0.042), (0.132, 0.05), (-0.04, 0.05)), 0.0225, M.poly, bev=0.0018)
     for k in range(3):
@@ -908,12 +934,7 @@ def g_glock(M):
     g.b((0.002, 0.004, 0.006), (0, 0.0265, 0.027), M.black)
     g.b((0.007, 0.006, 0.006), (0.0115, 0.008, 0.03), M.poly, bev=0.001)
     g.b((0.004, 0.012, 0.004), (-0.0122, 0.035, 0.044), M.park, bev=0.0006)
-    # Night sights.
-    g.b((0.004, 0.007, 0.006), (0, 0.13, 0.0832), M.park, bev=0.0006)
-    g.s(0.0012, (0, 0.1265, 0.084), M.tritium)
-    for sx in (-1, 1):
-        g.b((0.0065, 0.009, 0.0068), (sx * 0.0053, -0.038, 0.0834), M.park, bev=0.0008)
-        g.s(0.001, (sx * 0.0053, -0.0425, 0.084), M.tritium)
+    # The night sights ride on the slide, above.
     g.sight = (0, -0.044, 0.0855)
     g.p(grip_pts(0.033, 0.03, -0.072, 22, bulge=0.0), 0.021, M.park, bev=0.001, mag=True)
     g.p(grip_pts(0.038, -0.072, -0.079, 22, bulge=0.0), 0.026, M.poly, bev=0.0018, mag=True)
@@ -982,9 +1003,11 @@ def g_trench(M):
             g.add(cyl_between(p0, p0 + n * 0.0012, 0.0042, M.black, 10, bev=0))
     g.b((0.008, 0.04, 0.006), (0, 0.68, 0.028), M.blued, bev=0.0008)
     # Corn-cob pump.
+    g.part = "pump"
     g.c(0.0195, 0.23, 0.37, 0.019, M.walnut, verts=24)
     for k in range(9):
         g.ring(0.0196, 0.0022, 0.24 + k * 0.015, 0.019, M.walnut, segs=20)
+    g.part = None
     # Hammer, trigger guard, trigger.
     g.p(P((-0.004, 0.044), (0.006, 0.044), (0.008, 0.072), (0.0, 0.08), (-0.01, 0.075)), 0.007, M.blued, bev=0.0008)
     guard(g, M.blued, 0.02, 0.075, 0.0, -0.028)
@@ -1021,10 +1044,12 @@ def g_kar98k(M):
     g.b((0.042, 0.03, 0.03), (0, 0.49, 0.018), M.blued, bev=0.002)
     g.c(0.003, 0.36, 0.52, 0.006, M.steel, verts=10)
     # Bolt: body, turned-down handle with a pear knob, safety flag.
+    g.part = "bolt"
     g.c(0.0095, -0.075, 0.02, bz + 0.004, M.steel, verts=20)
     g.add(cyl_between((0.006, -0.045, bz + 0.004), (0.046, -0.05, bz - 0.032), 0.0042, M.steel, 14))
     g.s(0.0095, (0.049, -0.051, bz - 0.036), M.steel)
     g.b((0.003, 0.012, 0.014), (0, -0.08, bz + 0.016), M.steel, bev=0.0006)
+    g.part = None
     guard(g, M.blued, -0.035, 0.02, -0.03, -0.058)
     trigger(g, M.blued, -0.015, -0.032)
     sling_loop(g, M, -0.33, -0.075, x=-0.021)
@@ -1078,30 +1103,61 @@ def g_garand(M):
 
 
 def g_mp7(M):
-    g = Gun("mp7", 640)
-    bz = 0.07
-    g.p(P((-0.12, 0.035), (0.13, 0.035), (0.16, 0.05), (0.16, 0.095), (-0.11, 0.1), (-0.12, 0.09)), 0.044, M.poly, bev=0.003, segs=3)
-    rail(g, M.poly, -0.1, 0.13, 0.108)
+    """MP5SD (the `mp7` id): integrally suppressed, red dot on a claw mount, A3 collapsing stock."""
+    g = Gun("mp7", 768)
+    bz = 0.075
+    # Stamped receiver: a tall tube with a rounded top, pressed ribs and the rear sight drum.
+    g.p(P((-0.17, 0.042), (0.15, 0.042), (0.158, 0.05), (0.158, 0.098), (0.15, 0.106), (-0.165, 0.106), (-0.172, 0.098), (-0.172, 0.05)), 0.042, M.park, bev=0.006, segs=4)
     for sx in (-1, 1):
-        side_rail(g, M.poly, 0.09, 0.15, 0.072, sx * 0.0245, w=0.018)
-    barrel(g, M, 0.16, 0.216, bz, 0.0085, M.park)
-    g.c(0.0098, 0.19, 0.212, bz, M.park, verts=20)
-    g.p(P((0.1, 0.035), (0.125, 0.035), (0.13, -0.03), (0.106, -0.036), (0.1, -0.03)), 0.028, M.poly, bev=0.003, segs=3)
-    g.cx(0.004, -0.017, 0.017, 0.112, 0.03, M.steel, verts=10)
-    for sx in (-1, 1):
-        g.c(0.0052, -0.185, -0.12, 0.072, M.park, x=sx * 0.016, verts=14)
-    g.p(P((-0.205, 0.035), (-0.185, 0.035), (-0.185, 0.104), (-0.205, 0.104)), 0.05, M.poly, bev=0.003)
-    grip(g, M.stipple, d=0.042, w=0.03, zt=0.035, zb=-0.07, rake=12)
-    guard(g, M.poly, 0.025, 0.075, 0.035, 0.008, r=0.003)
-    trigger(g, M.poly, 0.044, 0.034)
-    g.p(P((-0.13, 0.092), (-0.115, 0.092), (-0.115, 0.1), (-0.13, 0.104)), 0.05, M.poly, bev=0.0015)
-    g.b((0.004, 0.012, 0.008), (0.0235, -0.02, 0.06), M.park, bev=0.0008)
-    post(g, M, 0.12, 0.125, h=0.012, mat=M.poly)
-    eye = reddot(g, M, -0.015, 0.128, 0.108)
+        g.b((0.0024, 0.25, 0.006), (sx * 0.0214, -0.02, 0.072), M.park, bev=0.0008)
+        g.b((0.0024, 0.09, 0.004), (sx * 0.0214, 0.1, 0.06), M.park, bev=0.0008)
+        screw(g, M, sx * 0.0215, -0.15, 0.06, r=0.0032, mat=M.park)
+        screw(g, M, sx * 0.0215, 0.02, 0.05, r=0.0032, mat=M.park)
+    g.b((0.0022, 0.05, 0.016), (0.0213, 0.03, 0.084), M.black, bev=0.0004)
+    # Cocking tube over the suppressor, front sight hood at its end.
+    g.c(0.0095, 0.15, 0.31, 0.112, M.park, verts=20)
+    g.p(P((0.29, 0.1), (0.322, 0.1), (0.322, 0.13), (0.29, 0.124)), 0.026, M.park, bev=0.003)
+    g.ring(0.0105, 0.0016, 0.312, 0.137, M.park, segs=20)
+    post(g, M, 0.312, 0.142, h=0.012, ears=False, mat=M.park)
+    # Rear drum sight.
+    g.cx(0.011, -0.016, 0.016, -0.14, 0.118, M.park, verts=20)
+    g.b((0.03, 0.02, 0.012), (0, -0.14, 0.107), M.park, bev=0.002)
+    # Claw mount with a rail and the red dot.
+    g.b((0.034, 0.1, 0.012), (0, -0.03, 0.111), M.alu, bev=0.002)
+    rail(g, M.alu, -0.08, 0.02, 0.121)
+    eye = reddot(g, M, -0.03, 0.158, 0.121)
     g.sight = eye
-    g.p(grip_pts(0.03, 0.03, -0.112, 12, bulge=0.0), 0.022, M.park, bev=0.001, mag=True)
-    g.p(grip_pts(0.036, -0.112, -0.12, 12, bulge=0.0), 0.027, M.poly, bev=0.0018, mag=True)
-    g.muzzle = (0, 0.217, bz)
+    # Cocking handle (left, folded forward): the part that racks.
+    g.part = "bolt"
+    g.add(cyl_between((-0.012, 0.27, 0.112), (-0.03, 0.262, 0.118), 0.0035, M.park, 12))
+    g.b((0.008, 0.016, 0.01), (-0.034, 0.262, 0.12), M.poly, bev=0.002)
+    g.part = None
+    # Integral suppressor with the slim SD handguard over its rear half.
+    g.c(0.0245, 0.158, 0.47, bz, M.park, verts=32)
+    g.c(0.0255, 0.465, 0.478, bz, M.park, verts=32)
+    g.c(0.006, 0.476, 0.4785, bz, M.black, verts=16)
+    g.c(0.031, 0.165, 0.31, bz - 0.004, M.poly, verts=28)
+    for k in range(6):
+        g.ring(0.0312, 0.0018, 0.19 + k * 0.022, bz - 0.004, M.stipple, segs=24)
+    g.c(0.032, 0.16, 0.168, bz - 0.004, M.poly, verts=28)
+    # Lower: polymer trigger group with a ribbed grip, guard, selector.
+    g.p(P((-0.05, 0.044), (0.05, 0.044), (0.045, 0.026), (-0.04, 0.022), (-0.06, 0.03)), 0.034, M.poly, bev=0.003)
+    grip(g, M.stipple, d=0.044, w=0.031, zt=0.03, zb=-0.078, rake=20, grooves=3)
+    guard(g, M.poly, 0.012, 0.062, 0.026, 0.0, r=0.0035)
+    trigger(g, M.steel, 0.032, 0.026)
+    g.p(P((-0.045, 0.036), (-0.028, 0.036), (-0.026, 0.044), (-0.045, 0.046)), 0.003, M.park, x=-0.0186, bev=0.0006)
+    g.cx(0.004, -0.019, 0.019, -0.036, 0.036, M.steel, verts=10)
+    # Magazine well and the curved 30-round 9 mm magazine.
+    g.b((0.03, 0.034, 0.022), (0, 0.095, 0.036), M.park, bev=0.002)
+    curved_mag(g, M.park, 0.112, 0.078, 0.03, 0.17, 0.06, 0.024, ribs=4)
+    g.b((0.005, 0.01, 0.008), (0.0, 0.07, 0.03), M.park, bev=0.001)
+    # A3 stock, collapsed (it would poke into the first-person view extended): short struts and a rubber butt cap.
+    for sx in (-1, 1):
+        g.add(cyl_between((sx * 0.017, -0.168, 0.088), (sx * 0.017, -0.215, 0.086), 0.0045, M.park, 12))
+        g.add(cyl_between((sx * 0.017, -0.168, 0.058), (sx * 0.017, -0.215, 0.05), 0.0045, M.park, 12))
+    g.p(P((-0.21, 0.098), (-0.225, 0.1), (-0.233, 0.09), (-0.233, -0.02), (-0.225, -0.03), (-0.21, -0.028)), 0.04, M.rubber, bev=0.004, segs=3)
+    sling_loop(g, M, -0.12, 0.04, x=0.022)
+    g.muzzle = (0, 0.479, bz)
     return g.done()
 
 

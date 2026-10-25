@@ -42,6 +42,17 @@ export interface CharacterInstance {
   dispose(): void;
 }
 
+/**
+ * Props in props.glb (tools/blender/build_props.py). Origins at the floor centre with the front facing -Z, except: lamp
+ * and pendant (origin at the bulb / chandelier ring, cable or rod 1 m up), sconce (origin on the wall plate, sticks out
+ * along -Z), board and nade (centre). revolvingDoor has a child `revolvingDoor_wings` that spins around y.
+ */
+export type PropName =
+  | 'locker' | 'lamp' | 'board' | 'nade' | 'fence' | 'tree'
+  | 'sofa' | 'armchair' | 'brassTable' | 'coffeeTable' | 'tableLamp' | 'floorLamp' | 'planterTree' | 'flowers'
+  | 'sconce' | 'pendant' | 'revolvingDoor' | 'elevatorDoors' | 'securityShutter' | 'barStool' | 'booth'
+  | 'diningTable' | 'diningChair' | 'luggageCart' | 'stanchion' | 'receptionBell' | 'computer';
+
 export interface Models {
   /** Resolves when every GLB is loaded (or fell back to primitives). */
   ready: Promise<void>;
@@ -52,7 +63,7 @@ export interface Models {
   /** First-person arms (origin at the camera), posed to hold a gun at the grip. */
   arms(): THREE.Object3D;
   /** Props: 'locker' (1 x 2 x 0.5 m, front faces -Z, origin floor centre), 'lamp' (origin at the bulb; its bulb material is named Bulb), 'board', 'nade', 'fence', 'tree'. */
-  prop(name: 'locker' | 'lamp' | 'board' | 'nade' | 'fence' | 'tree'): THREE.Object3D;
+  prop(name: PropName): THREE.Object3D;
 }
 
 // ---- world.ts -------------------------------------------------------------------------------------------------------
