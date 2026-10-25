@@ -224,13 +224,16 @@
 .hud-stick-arrow.l { left: -4.2em; }
 .hud-stick-arrow.r { left: 3.6em; }
 .hud-touch-steer-hint { position: absolute; left: 50%; bottom: 40%; transform: translateX(-50%); font-size: 1.3em; color: rgba(255, 255, 255, 0.28); letter-spacing: 0.2em; }
-.hud-pedals { position: absolute; right: max(1.2em, env(safe-area-inset-right)); bottom: 1.6em; width: 21em; height: 17em; pointer-events: auto; touch-action: none; }
+.hud-pedals { position: absolute; right: max(1.2em, env(safe-area-inset-right)); bottom: 1.6em; width: 16em; height: 13.4em; pointer-events: auto; touch-action: none; }
 .hud-pedal { position: absolute; display: grid; place-items: center; border: 0.14em solid rgba(255, 255, 255, 0.5); font-size: 1.3em !important; font-weight: 800; letter-spacing: 0.05em; background: rgba(20, 16, 18, 0.45); text-shadow: 0 0.1em 0.2em rgba(0, 0, 0, 0.6); transform: skewX(var(--hud-skew)); transition: transform 0.06s, background 0.06s; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.hud-pedal.thrust { right: 0; bottom: 0; width: 8.5em; height: 8em; border-radius: 0.6em; border-color: rgba(120, 255, 160, 0.7); }
-.hud-pedal.brake { right: 9.2em; bottom: 0; width: 6em; height: 5em; border-radius: 0.6em; border-color: rgba(255, 120, 100, 0.7); }
-.hud-pedal.boost { right: 0.4em; bottom: 8.6em; width: 7.6em; height: 4.4em; border-radius: 2.2em; border-color: var(--hud-cyan); color: var(--hud-cyan); }
+/* Bottom row: BRAKE then the big BOOST under the resting thumb; top row: the two side rolls (Q/E), left then right. */
+.hud-pedal.boost { right: 0; bottom: 0; width: 8.5em; height: 8em; border-radius: 0.6em; border-color: var(--hud-cyan); color: var(--hud-cyan); }
+.hud-pedal.brake { right: 9.2em; bottom: 0; width: 6.4em; height: 5.6em; border-radius: 0.6em; border-color: rgba(255, 120, 100, 0.7); }
+.hud-pedal.side { bottom: 8.7em; width: 7.4em; height: 4.2em; border-radius: 2.1em; font-size: 1.05em !important; border-color: rgba(255, 210, 120, 0.7); color: #ffe2a8; }
+.hud-pedal.side.r { right: 0; }
+.hud-pedal.side.l { right: 8.2em; }
 .hud-pedal.on { transform: skewX(var(--hud-skew)) scale(0.94); }
-.hud-pedal.thrust.on { background: rgba(80, 220, 120, 0.45); }
+.hud-pedal.side.on { background: rgba(255, 190, 90, 0.45); color: #fff; }
 .hud-pedal.brake.on { background: rgba(230, 80, 60, 0.5); }
 .hud-pedal.boost.on { background: rgba(52, 220, 255, 0.5); color: #fff; box-shadow: 0 0 1.2em rgba(52, 220, 255, 0.8); }
 

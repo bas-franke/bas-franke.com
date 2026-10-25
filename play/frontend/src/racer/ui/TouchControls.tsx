@@ -1,6 +1,6 @@
 // On-screen touch controls for phones: a horizontal steering stick anywhere on the left half (it appears where the
-// thumb lands), and a pedal cluster on the right (THRUST, BRAKE, BOOST) that hit-tests the thumb as it slides so one
-// thumb can roll from thrust onto boost. Writes straight into `view.touch`; no React state on the hot path.
+// thumb lands), and a button cluster on the right (side rolls on top, BRAKE and BOOST below; thrust is always on)
+// that hit-tests the thumb as it slides so one thumb can roll from brake onto boost. Writes straight into `view.touch`; no React state on the hot path.
 
 import { memo, useEffect, useRef } from 'react';
 import type { RaceView } from '../RaceView';
@@ -63,9 +63,9 @@ export const TouchControls = memo(function TouchControls({ view }: { view: RaceV
 
     const apply = () => {
       const held = new Set(over.values());
-      t.throttle = held.has('thrust') || held.has('boost') ? 1 : 0;
       t.brake = held.has('brake') ? 1 : 0;
       t.boost = held.has('boost');
+      t.roll = (held.has('rollR') ? 1 : 0) - (held.has('rollL') ? 1 : 0);
       for (const b of pedalEl.querySelectorAll<HTMLElement>('[data-btn]')) b.classList.toggle('on', held.has(b.dataset.btn!));
     };
     const hit = (x: number, y: number) => {
@@ -109,7 +109,7 @@ export const TouchControls = memo(function TouchControls({ view }: { view: RaceV
       pedalEl.removeEventListener('pointermove', pedalMove);
       pedalEl.removeEventListener('pointerup', pedalUp);
       pedalEl.removeEventListener('pointercancel', pedalUp);
-      Object.assign(t, { steer: 0, throttle: 0, brake: 0, boost: false, active: false });
+      Object.assign(t, { steer: 0, brake: 0, roll: 0, boost: false, active: false });
     };
   }, [view]);
 
@@ -124,9 +124,10 @@ export const TouchControls = memo(function TouchControls({ view }: { view: RaceV
         <div className="hud-touch-steer-hint">‹ STEER ›</div>
       </div>
       <div className="hud-pedals" ref={pedals}>
-        <button className="hud-pedal boost" data-btn="boost" tabIndex={-1}>BOOST</button>
+        <button className="hud-pedal side l" data-btn="rollL" tabIndex={-1}>‹ SIDE</button>
+        <button className="hud-pedal side r" data-btn="rollR" tabIndex={-1}>SIDE ›</button>
         <button className="hud-pedal brake" data-btn="brake" tabIndex={-1}>BRAKE</button>
-        <button className="hud-pedal thrust" data-btn="thrust" tabIndex={-1}>THRUST</button>
+        <button className="hud-pedal boost" data-btn="boost" tabIndex={-1}>BOOST</button>
       </div>
     </div>
   );

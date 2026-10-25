@@ -1,5 +1,5 @@
-// Player controls: keyboard (WASD / arrows, Space or Shift to boost, S/Down for the air brakes, Q/E to roll onto the
-// left/right side, C to look back), gamepad (right trigger throttle, left trigger air brakes, left stick or d-pad to
+// Player controls: the throttle is always wide open (the air brakes cut it). Keyboard (A/D / arrows to steer, Space or
+// Shift to boost, S/Down for the air brakes, Q/E to roll onto the left/right side, C to look back), gamepad (left trigger air brakes, left stick or d-pad to
 // steer, right stick sideways to roll, A or RB to boost, Y or the right stick pushed down to look back) and touch (on-screen pads set `touch`). Digital steering ramps in and out so a
 // key tap is a small correction and a hold a full turn; an analog stick gets a soft centre and only light smoothing.
 // Owned by the feel agent.
@@ -15,7 +15,7 @@ export class Controls {
   private keys = new Set<string>();
   private steer = 0;
   /** Set by on-screen touch controls. */
-  touch = { steer: 0, throttle: 0, brake: 0, boost: false, active: false };
+  touch = { steer: 0, brake: 0, roll: 0, boost: false, active: false };
   private readonly down = (e: KeyboardEvent) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
     this.keys.add(e.code);
@@ -31,7 +31,6 @@ export class Controls {
 
   read(dt: number): PodInput {
     const k = (...codes: string[]) => codes.some((c) => this.keys.has(c));
-    let throttle = k('KeyW', 'ArrowUp') ? 1 : 0;
     let brake = k('KeyS', 'ArrowDown') ? 1 : 0;
     let steerTarget = (k('KeyD', 'ArrowRight') ? 1 : 0) - (k('KeyA', 'ArrowLeft') ? 1 : 0);
     let boost = k('Space', 'ShiftLeft', 'ShiftRight');
@@ -43,7 +42,6 @@ export class Controls {
     if (pad) {
       const b = (i: number) => pad.buttons[i]?.value ?? 0;
       const pressed = (i: number) => !!pad.buttons[i]?.pressed;
-      throttle = Math.max(throttle, b(7));
       brake = Math.max(brake, b(6));
       const ax = pad.axes[0] ?? 0;
       if (Math.abs(ax) > DEADZONE) {
@@ -60,8 +58,8 @@ export class Controls {
       back = back || pressed(3) || pressed(11);
     }
     if (this.touch.active) {
-      throttle = Math.max(throttle, this.touch.throttle);
       brake = Math.max(brake, this.touch.brake);
+      if (this.touch.roll) roll = this.touch.roll;
       if (this.touch.steer) {
         steerTarget = this.touch.steer;
         analog = true;
@@ -78,7 +76,8 @@ export class Controls {
       const rate = reversing ? 10 : steerTarget === 0 ? 7 : 4.5;
       this.steer += Math.max(-rate * dt, Math.min(rate * dt, steerTarget - this.steer));
     }
-    return { throttle, brake, steer: this.steer, boost, roll };
+    // Full thrust all the time; holding the air brakes eases off it so they still bite.
+    return { throttle: 1 - brake, brake, steer: this.steer, boost, roll };
   }
 
   pressed(code: string) {

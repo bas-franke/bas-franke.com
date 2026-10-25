@@ -47,7 +47,7 @@ export function mount(el: HTMLElement) {
     ghost: 0,
     parts,
   });
-  const touch = { steer: 0, throttle: 0, brake: 0, boost: false, active: false };
+  const touch = { steer: 0, brake: 0, roll: 0, boost: false, active: false };
   const view = { hud, touch, setPaused: (p: boolean) => hud.set({ paused: p }) } as unknown as RaceView;
   let t = 0;
   let n = 3;

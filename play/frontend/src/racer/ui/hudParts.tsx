@@ -522,12 +522,12 @@ export const IntroHint = memo(function IntroHint({ view, touch }: P & { touch: b
       {touch ? (
         <div className="hud-hint-keys">
           <span><b>Drag left</b> steer</span>
-          <span><b>THRUST</b> / <b>BRAKE</b> hold</span>
+          <span><b>BRAKE</b> hold</span>
+          <span><b>SIDE</b> roll</span>
           <span><b>BOOST</b> tap</span>
         </div>
       ) : (
         <div className="hud-hint-keys">
-          <span><kbd>W</kbd><kbd>↑</kbd> thrust</span>
           <span><kbd>S</kbd><kbd>↓</kbd> brake</span>
           <span><kbd>A</kbd><kbd>D</kbd> steer</span>
           <span><kbd>Q</kbd><kbd>E</kbd> on its side</span>
