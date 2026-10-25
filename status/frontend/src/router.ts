@@ -6,6 +6,7 @@ import { createElement, useSyncExternalStore, type AnchorHTMLAttributes, type Mo
  *   /p/<site>            project analytics
  *   /p/<site>/health     project health checks
  *   /p/<site>/changes    project change history
+ *   /screenshots         screenshots of design changes, all projects (/screenshots/<site> for one)
  * The visitor range rides along as ?range=7d|30d|90d|1y and is remembered in localStorage.
  */
 
@@ -21,7 +22,11 @@ const STORE_KEY = 'status.range';
 const EVENT = 'status:navigate';
 
 export type Tab = 'analytics' | 'health' | 'changes';
-export type Route = { page: 'overview' } | { page: 'project'; site: string; tab: Tab } | { page: 'missing' };
+export type Route =
+  | { page: 'overview' }
+  | { page: 'project'; site: string; tab: Tab }
+  | { page: 'screenshots'; site?: string }
+  | { page: 'missing' };
 
 export function parseRoute(pathname: string): Route {
   let parts: string[];
@@ -31,6 +36,7 @@ export function parseRoute(pathname: string): Route {
     return { page: 'missing' };
   }
   if (parts.length === 0) return { page: 'overview' };
+  if (parts[0] === 'screenshots' && parts.length <= 2) return { page: 'screenshots', site: parts[1] };
   if (parts[0] === 'p' && parts[1] && parts.length <= 3) {
     if (parts.length === 2) return { page: 'project', site: parts[1], tab: 'analytics' };
     if (parts[2] === 'health') return { page: 'project', site: parts[1], tab: 'health' };

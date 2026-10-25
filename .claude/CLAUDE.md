@@ -36,6 +36,25 @@ Per-project setup lives in each project's own `README.md`.
 4. A change to one project must not require redeploying another.
 5. **inck: bump `PROMPT_VERSION`** in `inck/backend/src/ai.ts` whenever you change the story-writing prompt
    (writer instructions, `STORY_SCHEMA`, text cleanup in `text.ts`); the scheduler then rewrites older stories.
-6. **play: regenerate screenshots after graphical changes**: run `npm run screenshots -- --stale` in `play/` and commit
+6. **Upload screenshots of every design change** to the status page yourself, without being asked (see below).
+7. **play: regenerate screenshots after graphical changes**: run `npm run screenshots -- --stale` in `play/` and commit
    the images, manifests and `screenshots.lock.json` with the change; `npm run screenshots:check` tells you which
    games are stale (see [play/SCREENSHOTS.md](../play/SCREENSHOTS.md)).
+
+## Screenshots of design changes
+
+Whenever you (or a subagent) finish a visible design change in any project, whether it's the final result or a
+finished intermediate step, take a screenshot of the result and upload it:
+
+```bash
+node status/tools/upload-screenshot.mjs --project <project> --title "<what changed>" [--note "<details>"] [--source agent] <file.png> [...]
+```
+
+- `--project` is the folder name from the table above. One upload per meaningful state; use several files for
+  before/after or desktop/phone views. Pass `--source agent` when a subagent uploads, ideally with its role (`--source "agent: hud"`).
+- Prefer JPEG/WebP or a cropped PNG under ~3 MB. Don't upload half-broken work-in-progress frames.
+- The status backend keeps the **20 newest per project** and deletes older ones automatically. All projects show up
+  together, newest first, at <https://status.bas-franke.com/screenshots>.
+- The token comes from the git-ignored `.env.screenshots` in the repo root (`STATUS_SCREENSHOT_TOKEN=...`). If it's
+  missing or an upload fails, say so in your report instead of skipping silently. Setup: status/README.md "Screenshots".
+- Subagents that change visuals must be told to upload too (copy this section into their brief).

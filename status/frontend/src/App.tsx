@@ -6,6 +6,7 @@ import { Link, useLocation } from './router';
 import { StateCard } from './ui';
 import Overview from './pages/Overview';
 import Project from './pages/Project';
+import Screenshots from './pages/Screenshots';
 import type { Report } from './types';
 
 type Auth = { state: 'checking' } | { state: 'login' } | { state: 'in'; user: string | null };
@@ -61,6 +62,9 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
           </span>
         </Link>
         <div className="actions">
+          <Link to="/screenshots" className="btn btn-ghost" aria-current={route.page === 'screenshots' ? 'page' : undefined}>
+            Screenshots
+          </Link>
           {user && (
             <button type="button" className="btn btn-ghost" onClick={logout} title={`Signed in as ${user}`}>
               Sign out
@@ -72,6 +76,7 @@ function Dashboard({ user, onLoggedOut }: { user: string | null; onLoggedOut: ()
       <main className="page" id="main">
         {route.page === 'overview' && <Overview status={status} days={days} />}
         {route.page === 'project' && <Project key={route.site} site={route.site} tab={route.tab} status={status} days={days} />}
+        {route.page === 'screenshots' && <Screenshots project={route.site} />}
         {route.page === 'missing' && (
           <StateCard art="state-warn" title="There's nothing at this address">
             <p className="muted">

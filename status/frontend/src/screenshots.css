@@ -1,0 +1,383 @@
+/* ---------- Screenshots page ---------- */
+.shots-head h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.shots-head p {
+  margin: 4px 0 0;
+}
+
+.shots-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shots-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.shots-chip:hover {
+  border-color: var(--line-strong);
+  background: var(--subtle);
+}
+
+.shots-chip[aria-current='page'] {
+  color: var(--bg);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.shots-chip-count {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.shots-chip[aria-current='page'] .shots-chip-count {
+  color: var(--faint);
+}
+
+.shots-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.shots-day {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shots-day-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.shots-day-title .muted {
+  font-weight: 500;
+}
+
+.shots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shots-grid > li {
+  min-width: 0;
+}
+
+.shot-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition:
+    box-shadow 0.2s,
+    border-color 0.2s,
+    transform 0.2s;
+}
+
+.shot-card:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+.shot-skeleton {
+  cursor: default;
+}
+
+.shot-skeleton:hover {
+  transform: none;
+  box-shadow: var(--shadow);
+  border-color: var(--line);
+}
+
+.shot-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  /* Tall phone captures are cropped from the top so one card doesn't stretch a whole row. */
+  max-height: 300px;
+  overflow: hidden;
+  background: var(--line-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.shot-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+
+.shot-broken {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.shot-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 14px;
+  min-width: 0;
+}
+
+.shot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 0.75rem;
+}
+
+.shot-project {
+  display: inline-flex;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.shot-source {
+  padding: 0 6px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.shot-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.shot-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.shots-cmd {
+  display: inline-block;
+  max-width: 100%;
+  margin: 8px 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  text-align: left;
+  white-space: pre;
+  color: var(--ink-2);
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+/* ---------- Screenshots lightbox ---------- */
+.shot-dialog {
+  width: min(1200px, calc(100vw - 2 * var(--gutter)));
+  max-width: none;
+  max-height: calc(100dvh - 2 * var(--gutter));
+  padding: 0;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hover);
+}
+
+.shot-dialog::backdrop {
+  background: color-mix(in srgb, var(--page) 20%, transparent);
+  backdrop-filter: blur(6px) brightness(0.45);
+}
+
+.sd-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.sd-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sd-title {
+  min-width: 0;
+}
+
+.sd-title h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+
+.sd-title p {
+  margin: 4px 0 0;
+}
+
+.sd-close {
+  flex: none;
+  font-size: 1rem;
+}
+
+.sd-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  background: var(--line-2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sd-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: max(200px, calc(100dvh - 300px));
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.sd-nav {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0 0 3px;
+  font: inherit;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.sd-nav:hover {
+  opacity: 1;
+  border-color: var(--line-strong);
+}
+
+.sd-prev {
+  left: 10px;
+}
+
+.sd-next {
+  right: 10px;
+}
+
+.sd-note {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sd-error {
+  margin: 0;
+  color: var(--fail);
+}
+
+.sd-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.sd-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sd-actions .btn {
+  text-decoration: none;
+}
+
+.sd-delete {
+  color: var(--fail);
+}
+
+.sd-delete:hover:not(:disabled) {
+  background: var(--fail-soft);
+  border-color: var(--fail);
+}
+
+@media (max-width: 640px) {
+  .shots-head h1 {
+    font-size: 1.35rem;
+  }
+
+  .sd-inner {
+    padding: 12px;
+  }
+
+  .sd-nav {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+/* The top-bar "Screenshots" link uses the button look; links are underlined by default. */
+.topbar a.btn {
+  text-decoration: none;
+}
