@@ -285,7 +285,8 @@ export function buildWorld(def: MapDef, openZones?: readonly ZoneId[]): World {
         const y0 = ys[r];
         const y1 = ys[r + 1];
         if (gap && y1 <= gap.y1 + EPS) continue;
-        let hard = false;
+        // Stone and panelled walls never lose blocks (their tiles chip instead, tiles.ts); only glass shatters.
+        let hard = w.mat !== 'glass';
         if (ent !== undefined) {
           if (door && y1 <= WINDOW_TOP + EPS) continue;
           if (!door && y0 >= SILL_Y - EPS && y1 <= WINDOW_TOP + EPS) continue;
@@ -333,9 +334,10 @@ export function buildWorld(def: MapDef, openZones?: readonly ZoneId[]): World {
           const d = -0.5 + j * CHUNK;
           const x0 = p.r === 1 ? p.x + d : p.x + a;
           const z0 = p.r === 1 ? p.z + a : p.z + d;
-          add(v(x0, 0, z0), v(x0 + CHUNK, 0.5, z0 + CHUNK), 'walnut', p.kind, p.zone, ceil);
-          add(v(x0, 0.5, z0), v(x0 + CHUNK, 1.0, z0 + CHUNK), 'walnut', p.kind, p.zone, ceil);
-          add(v(x0, 1.0, z0), v(x0 + CHUNK, 1.1, z0 + CHUNK), 'marble', p.kind, p.zone, ceil);
+          // Indestructible like the columns: bullets leave holes, the counter keeps its blocks.
+          add(v(x0, 0, z0), v(x0 + CHUNK, 0.5, z0 + CHUNK), 'walnut', p.kind, p.zone, ceil, false, true);
+          add(v(x0, 0.5, z0), v(x0 + CHUNK, 1.0, z0 + CHUNK), 'walnut', p.kind, p.zone, ceil, false, true);
+          add(v(x0, 1.0, z0), v(x0 + CHUNK, 1.1, z0 + CHUNK), 'marble', p.kind, p.zone, ceil, false, true);
         }
     }
   }

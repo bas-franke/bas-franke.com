@@ -1,4 +1,4 @@
-// Tiled stone: the lobby's black marble floor (1.2 m tiles) and the travertine cladding on the columns and corner posts
+// Tiled stone: the lobby's black marble floor (1.2 m tiles) and the travertine cladding on the columns, corner posts and walls
 // (1.2 x 0.6 m slabs in running bond, the same grid world.ts's box projection draws). A bullet never takes a block out
 // of these; it chips the tile it hits. Each hit leaves a crater of grey bedding concrete and cracks that stop at the
 // tile's joints; the fourth hit on a tile breaks the whole tile off and leaves its concrete bed. The flying pieces are
@@ -524,7 +524,8 @@ export class TileDamage {
 
   private column(chunk: number): Box | null {
     const c = this.world.chunks[chunk];
-    if (!c || c.part !== 'column') return null;
+    // Columns, and the travertine-clad walls (one box per wall: its tiles run on across the chunks).
+    if (!c || !(c.part === 'column' || (c.wall && c.mat === 'travertine'))) return null;
     let box = this.columnBox.get(chunk);
     if (box) return box;
     // Flood over the column's chunks for the whole column's extent.
@@ -534,7 +535,7 @@ export class TileDamage {
     for (let k = 0; k < list.length; k++)
       for (const j of this.world.chunks[list[k]].nb) {
         const o = this.world.chunks[j];
-        if (seen.has(j) || o.part !== 'column') continue;
+        if (seen.has(j) || o.part !== c.part) continue;
         seen.add(j);
         list.push(j);
         box.min.x = Math.min(box.min.x, o.min.x);

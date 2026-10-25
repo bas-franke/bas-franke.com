@@ -23,6 +23,8 @@ import { bentGeometry, ChunkParts, clumpGeometry, cushionGeometry, leafGeometry,
 import { faceAB, faceNormal, facePoint, STONE_TINT, type Stone, type Tile, TILE_HITS, TileDamage, tilePieceGeometry, tilePieceMaterial } from './tiles';
 
 const GRAVITY = 14;
+/** Thickness of a broken-off piece of tile (a 3 cm stone tile). */
+const TILE_T = 0.03;
 
 // ---- small helpers --------------------------------------------------------------------------------------------------
 
@@ -1544,7 +1546,7 @@ class Effects implements Fx {
       this.tilePieces[stone] = [4, 5, 7].map((sides, k) => {
         const big = new FragmentPool(own(tilePieceGeometry(seed + 20 + k * 5, sides, 0.2)), mat, 40, world, this.piles, 0.14, 0.55, 5);
         big.restStep = Math.PI;
-        big.onImpact = (_i, x, y, z, speed, size) => this.tileShatter(stone, x, y, z, speed, size);
+        big.onImpact = (_i, x, y, z, speed, size) => this.tileLand(stone, x, y, z, speed, size);
         this.root.add(big.mesh);
         return big;
       });
@@ -1933,24 +1935,33 @@ class Effects implements Fx {
     return pools[Math.floor(Math.random() * pools.length)];
   }
 
-  /** A falling piece of tile hit the floor hard: it breaks into smaller pieces, which stay. */
-  private tileShatter(stone: Stone, x: number, y: number, z: number, speed: number, size: number): boolean {
-    if (speed < 4 || size < 0.12) return false;
-    const pieces = 3 + Math.round(size * 8);
-    for (let i = 0; i < pieces; i++) {
-      const th = rand(0, 6.28);
-      const s = rand(0.5, 2) * Math.min(1.5, speed / 6);
-      const w = size * (i < 3 ? rand(0.3, 0.45) : rand(0.08, 0.18));
-      _c.set(STONE_TINT[stone]).multiplyScalar(rand(0.85, 1.15));
-      this.tileChip(stone).spawn(x + Math.cos(th) * size * 0.2, y + 0.02, z + Math.sin(th) * size * 0.2, Math.cos(th) * s, rand(0.4, 1.6), Math.sin(th) * s, w, rand(0.012, 0.016), w * rand(0.6, 1.1), _c, 1e9, 0, 10);
-    }
+  /**
+   * A piece of tile hit the ground: a puff of stone dust off the impact; a hard landing breaks it into a few big
+   * pieces and some small ones, which stay.
+   */
+  private tileLand(stone: Stone, x: number, y: number, z: number, speed: number, size: number): boolean {
+    const k = Math.min(1, speed / 6);
     _c.set(stone === 'marble' ? 0x8a8884 : 0xcabd9f);
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4 + Math.round(k * 6); i++) {
       const th = rand(0, 6.28);
-      this.grit.spawn(x, y + 0.03, z, Math.cos(th) * rand(0.6, 2.2), rand(0.3, 1.4), Math.sin(th) * rand(0.6, 2.2), rand(0.008, 0.02), rand(1, 2), _c);
+      this.grit.spawn(x, y + 0.03, z, Math.cos(th) * rand(0.6, 2.2) * k, rand(0.3, 1.4) * k, Math.sin(th) * rand(0.6, 2.2) * k, rand(0.008, 0.02), rand(1, 2), _c);
     }
     _c.set(0xb8b4ac);
-    this.smoke.spawn(x, y + 0.1, z, rand(-0.3, 0.3), 0.08, rand(-0.3, 0.3), 0.2, 0.6, rand(1.5, 2.5), 0.3, _c);
+    for (let i = 0; i < 2; i++) {
+      const th = rand(0, 6.28);
+      this.smoke.spawn(x + Math.cos(th) * size * 0.3, y + 0.06, z + Math.sin(th) * size * 0.3, Math.cos(th) * 0.5, 0.1, Math.sin(th) * 0.5, 0.1 + size * 0.25, 0.5 + k * 0.4, rand(1.4, 2.4), 0.35, _c);
+    }
+    if (speed < 4 || size < 0.12) return false;
+    const pieces = 2 + Math.round(size * 5);
+    for (let i = 0; i < pieces; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.4, 1.6) * Math.min(1.5, speed / 6);
+      const big = i < 2;
+      const w = size * (big ? rand(0.4, 0.6) : rand(0.12, 0.25));
+      _c.set(STONE_TINT[stone]).multiplyScalar(rand(0.85, 1.15));
+      this.tileChip(stone).spawn(x + Math.cos(th) * size * 0.2, y + TILE_T, z + Math.sin(th) * size * 0.2, Math.cos(th) * s, rand(0.4, 1.4), Math.sin(th) * s, w, TILE_T * rand(big ? 0.85 : 0.5, 1), w * rand(0.6, 1.1), _c, 1e9, 0, 8);
+    }
+    this.puff({ x, y: y + 0.12, z }, 0.25 + size * 0.3, 0.45, 2.2, 0.5);
     return true;
   }
 
@@ -1970,29 +1981,33 @@ class Effects implements Fx {
     const tint = STONE_TINT[t.stone];
     const chips = hits >= TILE_HITS ? 3 : Math.round(rand(3, 5));
     for (let i = 0; i < chips; i++) {
-      const w = rand(0.018, 0.05);
+      const w = rand(0.022, 0.06);
+      const th = rand(0.008, 0.014);
       _c.set(tint).multiplyScalar(rand(0.85, 1.2));
       // Off the floor chips skip low and far; off a column they spit out of the face and drop.
       if (floor) {
-        const th = rand(0, 6.28);
+        const a = rand(0, 6.28);
         const s = rand(0.8, 3.2);
-        this.tileChip(t.stone).spawn(ox, oy, oz, Math.cos(th) * s, rand(0.6, 2.4), Math.sin(th) * s, w, rand(0.005, 0.009), w * rand(0.6, 1.1), _c, 1e9, 0, 22);
+        this.tileChip(t.stone).spawn(ox, oy, oz, Math.cos(a) * s, rand(0.6, 2.4), Math.sin(a) * s, w, th, w * rand(0.6, 1.1), _c, 1e9, 0, 22);
       } else {
         const s = rand(1.2, 3.5);
-        this.tileChip(t.stone).spawn(ox, oy, oz, (n.x + rand(-0.6, 0.6)) * s, rand(0, 1.6), (n.z + rand(-0.6, 0.6)) * s, w, rand(0.005, 0.009), w * rand(0.6, 1.1), _c, 1e9, 0, 22);
+        this.tileChip(t.stone).spawn(ox, oy, oz, (n.x + rand(-0.6, 0.6)) * s, rand(0, 1.6), (n.z + rand(-0.6, 0.6)) * s, w, th, w * rand(0.6, 1.1), _c, 1e9, 0, 22);
       }
     }
-    // Stone dust: pale grit and a small puff.
+    // Stone dust: pale grit, a jet of powder out of the chip and a cloud that hangs.
     _c.set(t.stone === 'marble' ? 0x9a9792 : 0xd2c6aa);
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 10; i++) {
       const s = rand(1.2, 3.5);
       this.grit.spawn(ox, oy, oz, (n.x + rand(-0.7, 0.7)) * s, (n.y + rand(-0.2, 0.9)) * s, (n.z + rand(-0.7, 0.7)) * s, rand(0.008, 0.022), rand(0.8, 2), _c);
     }
     _c.setRGB(0.72, 0.7, 0.66);
-    this.smoke.spawn(ox + n.x * 0.05, oy + n.y * 0.05, oz + n.z * 0.05, n.x * 0.8, n.y * 0.8 + 0.12, n.z * 0.8, 0.08, 0.5, rand(0.8, 1.4), 0.45, _c);
-    if (this.time - this.lastPuff > 0.035) {
+    for (let i = 0; i < 3; i++) {
+      const s = rand(0.6, 1.6);
+      this.smoke.spawn(ox + n.x * 0.05, oy + n.y * 0.05, oz + n.z * 0.05, (n.x + rand(-0.4, 0.4)) * s, (n.y + rand(-0.1, 0.4)) * s + 0.12, (n.z + rand(-0.4, 0.4)) * s, 0.08, 0.7, rand(1, 1.8), 0.5, _c);
+    }
+    if (this.time - this.lastPuff > 0.02) {
       this.lastPuff = this.time;
-      this.puff({ x: ox + n.x * 0.12, y: oy + n.y * 0.12, z: oz + n.z * 0.12 }, 0.14, 0.3, 1.4, 0.4);
+      this.puff({ x: ox + n.x * 0.15, y: oy + n.y * 0.15, z: oz + n.z * 0.15 }, 0.22, 0.4, 1.8, 0.5);
     }
     if (hits < TILE_HITS) return;
 
@@ -2000,8 +2015,9 @@ class Effects implements Fx {
     const [pa, pb] = faceAB(t.axis, p);
     const w = t.a1 - t.a0;
     const h = t.b1 - t.b0;
-    const na = Math.max(1, Math.round(w / 0.4));
-    const nb = Math.max(1, Math.round(h / 0.32));
+    // Big pieces: a floor tile breaks in about four, a wall or column slab in two.
+    const na = Math.max(1, Math.round(w / 0.6));
+    const nb = Math.max(1, Math.round(h / 0.6));
     const pools = this.tilePieces[t.stone];
     for (let i = 0; i < na; i++)
       for (let j = 0; j < nb; j++) {
@@ -2010,7 +2026,7 @@ class Effects implements Fx {
         const pool = pools[Math.floor(Math.random() * pools.length)];
         const sa = (w / na) * rand(0.8, 1.25);
         const sb = (h / nb) * rand(0.8, 1.25);
-        const c = facePoint(t, ca, cb, 0.012);
+        const c = facePoint(t, ca, cb, TILE_T / 2);
         const da = ca - pa;
         const db = cb - pb;
         const d = Math.hypot(da, db);
@@ -2023,7 +2039,7 @@ class Effects implements Fx {
           const th = rand(-0.5, 0.5);
           const vx = ((da * Math.cos(th) - db * Math.sin(th)) / l) * out;
           const vz = ((da * Math.sin(th) + db * Math.cos(th)) / l) * out;
-          const k = pool.spawn(c.x, c.y, c.z, vx, rand(0.9, 2.4) * (0.5 + near), vz, sa, 0.016, sb, _c, 1e9, d * 0.06, 7);
+          const k = pool.spawn(c.x, c.y, c.z, vx, rand(0.9, 2.4) * (0.5 + near), vz, sa, TILE_T, sb, _c, 1e9, d * 0.06, 7);
           pool.setRot(k, rand(-0.08, 0.08), rand(0, 6.28), rand(-0.08, 0.08));
           continue;
         }
@@ -2033,10 +2049,10 @@ class Effects implements Fx {
         const delay = rand(0, 0.12) + d * 0.1;
         // The thin axis (local y) turns to the face normal: about z for faces across x, about x for faces across z.
         if (t.axis === 0) {
-          const k = pool.spawn(c.x, c.y, c.z, n.x * out, rand(-0.2, 0.8), along, sb, 0.016, sa, _c, 1e9, delay, 3);
+          const k = pool.spawn(c.x, c.y, c.z, n.x * out, rand(-0.2, 0.8), along, sb, TILE_T, sa, _c, 1e9, delay, 3);
           pool.setRot(k, rand(0, 6.28), rand(-0.05, 0.05), Math.PI / 2 + rand(-0.05, 0.05));
         } else {
-          const k = pool.spawn(c.x, c.y, c.z, along, rand(-0.2, 0.8), n.z * out, sa, 0.016, sb, _c, 1e9, delay, 3);
+          const k = pool.spawn(c.x, c.y, c.z, along, rand(-0.2, 0.8), n.z * out, sa, TILE_T, sb, _c, 1e9, delay, 3);
           pool.setRot(k, Math.PI / 2 + rand(-0.05, 0.05), rand(0, 6.28), rand(-0.05, 0.05));
         }
       }
