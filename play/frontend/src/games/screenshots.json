@@ -45,7 +45,24 @@
       "caption": "Grand Meridian Hotel"
     }
   ],
-  "garden": [],
+  "garden": [
+    {
+      "file": "garden-greenhouse.jpg",
+      "caption": "Defend the greenhouse together"
+    },
+    {
+      "file": "garden-lily-moat.jpg",
+      "caption": "Lily Moat"
+    },
+    {
+      "file": "garden-versus.jpg",
+      "caption": "Last garden standing wins"
+    },
+    {
+      "file": "garden-masterwork.jpg",
+      "caption": "Upgrade to masterworks"
+    }
+  ],
   "dustrunners": [
     {
       "file": "dustrunners-falls.jpg",
