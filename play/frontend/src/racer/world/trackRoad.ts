@@ -78,8 +78,8 @@ export function buildRoad(track: Track, quality: Quality, anisotropy: number) {
   const group = new THREE.Group();
   group.name = 'road';
   const tmp = new THREE.Vector3();
-  for (let i0 = 0; i0 < n; i0 += CHUNK_FRAMES) {
-    const i1 = Math.min(n, i0 + CHUNK_FRAMES);
+  for (let i0 = 0; i0 < n - 1; i0 += CHUNK_FRAMES) {
+    const i1 = Math.min(n - 1, i0 + CHUNK_FRAMES);
     const rows = i1 - i0 + 1;
     const pos = new Float32Array(rows * cols * 3);
     const nrm = new Float32Array(rows * cols * 3);
@@ -87,8 +87,8 @@ export function buildRoad(track: Track, quality: Quality, anisotropy: number) {
     const col = new Float32Array(rows * cols * 3);
     for (let j = 0; j < rows; j++) {
       const i = i0 + j;
-      const f = frames[i % n];
-      const s = i === n ? track.length : f.s;
+      const f = frames[i];
+      const s = f.s;
       const hw = f.width / 2;
       // Racing line: pulled towards the inside of the corner (kappa > 0 turns left = negative x).
       const line = THREE.MathUtils.clamp(-f.kappa * 160, -0.42, 0.42);

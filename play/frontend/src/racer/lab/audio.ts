@@ -15,9 +15,9 @@ import { RaceAudio } from '../audio/sound';
 const CHASE_BACK = 13;
 const CHASE_UP = 4;
 
-function makeRace(trackId: string, events: ConstructorParameters<typeof Race>[3] = {}) {
+function makeRace(trackId: string, events: ConstructorParameters<typeof Race>[2] = {}) {
   const racers = quickRaceRacers(playerRacer(newCareer()));
-  const race = new Race(trackById(trackId), racers, 3, events);
+  const race = new Race(trackById(trackId), racers, events);
   race.autopilot = true;
   return race;
 }

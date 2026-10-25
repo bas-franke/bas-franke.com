@@ -62,7 +62,6 @@ function RaceScreen(props: { req: RaceRequest; onFinish(r: RaceResult): void; on
   useEffect(() => {
     const v = new RaceView(host.current!, {
       trackId: props.req.trackId,
-      laps: props.req.laps,
       racers: props.req.racers,
       onFinish: (r) => cb.current.onFinish(r),
     });

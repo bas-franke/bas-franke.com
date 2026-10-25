@@ -1,22 +1,21 @@
-// The race HUD widgets: lap / position panels, timer, speedometer with boost bar, minimap and the centre-screen
-// messages (countdown, lap flash, wrong way, finish). Each widget subscribes to its own slice of the HUD store so the
+// The race HUD widgets: distance-to-go / position panels, timer, speedometer with boost bar, minimap and the centre-screen
+// messages (countdown, wrong way, finish). Each widget subscribes to its own slice of the HUD store so the
 // per-frame updates only touch the few DOM nodes that changed; the gauge is an SVG dash and the minimap a canvas.
 
 import { memo, useEffect, useRef, useState } from 'react';
-import type { HudState, RaceView } from '../RaceView';
+import type { RaceView } from '../RaceView';
 import { fmtTime, ordinal, useHud } from './hudStore';
 
 type P = { view: RaceView };
 
-export const LapPanel = memo(function LapPanel({ view }: P) {
-  const lap = useHud(view, (s) => s.lap);
-  const laps = useHud(view, (s) => s.laps);
+export const ToGoPanel = memo(function ToGoPanel({ view }: P) {
+  const km = useHud(view, (s) => (s.toGo / 1000).toFixed(1));
   return (
     <div className="hud-lap hud-slant">
-      <span className="hud-label">LAP</span>
+      <span className="hud-label">TO GO</span>
       <span className="hud-big">
-        {lap}
-        <small>/{laps}</small>
+        {km}
+        <small>km</small>
       </span>
     </div>
   );
@@ -49,16 +48,11 @@ export const PosPanel = memo(function PosPanel({ view }: P) {
 
 export const TimePanel = memo(function TimePanel({ view }: P) {
   const time = useHud(view, (s) => fmtTime(s.time));
-  const best = useHud(view, (s) => fmtTime(s.bestLap));
   return (
     <div className="hud-time">
       <div className="hud-time-row">
         <span className="hud-time-label">TIME</span>
         <span className="hud-time-val">{time}</span>
-      </div>
-      <div className="hud-time-row best">
-        <span className="hud-time-label">BEST</span>
-        <span className="hud-time-val">{best}</span>
       </div>
     </div>
   );
@@ -174,7 +168,6 @@ export const Minimap = memo(function Minimap({ view }: P) {
       if (i) g.lineTo(x, y);
       else g.moveTo(x, y);
     });
-    g.closePath();
     g.strokeStyle = 'rgba(0,0,0,0.45)';
     g.lineWidth = road + 6 * dpr;
     g.stroke();
@@ -190,10 +183,11 @@ export const Minimap = memo(function Minimap({ view }: P) {
     g.stroke();
     g.setLineDash([]);
 
-    // Checkered start line across the road at point 0.
-    if (outline.length > 2) {
-      const [ax, ay] = map(outline[0]);
-      const [bx, by] = map(outline[1]);
+    // Checkered lines across the road at the start and the finish.
+    const n = outline.length;
+    for (const [i0, i1] of n > 2 ? [[0, 1], [n - 2, n - 1]] : []) {
+      const [ax, ay] = map(outline[i0]);
+      const [bx, by] = map(outline[i1]);
       const ang = Math.atan2(by - ay, bx - ax);
       const cs = road * 0.36;
       g.save();
@@ -276,29 +270,6 @@ export const Countdown = memo(function Countdown({ view }: P) {
   );
 });
 
-function lapFlashLines(f: NonNullable<HudState['lapFlash']>, laps: number) {
-  const next = f.lap + 1;
-  const title = next === laps ? 'FINAL LAP' : `LAP ${next}`;
-  const sub = `${f.best ? 'BEST LAP' : 'LAP TIME'} ${fmtTime(f.time, true)}`;
-  return { title, sub };
-}
-
-export const LapFlash = memo(function LapFlash({ view }: P) {
-  const flash = useHud(view, (s) => s.lapFlash);
-  const laps = useHud(view, (s) => s.laps);
-  const phase = useHud(view, (s) => s.phase);
-  if (!flash || phase === 'finished' || flash.lap >= laps) return null;
-  const { title, sub } = lapFlashLines(flash, laps);
-  return (
-    <div className="hud-flash-wrap">
-      <div key={flash.lap} className={`hud-flash${title === 'FINAL LAP' ? ' final' : ''}`}>
-        <div className="hud-flash-title">{title}</div>
-        <div className={`hud-flash-sub${flash.best ? ' best' : ''}`}>{sub}</div>
-      </div>
-    </div>
-  );
-});
-
 export const WrongWay = memo(function WrongWay({ view }: P) {
   const ww = useHud(view, (s) => s.wrongWay && s.phase === 'racing');
   if (!ww) return null;
@@ -344,6 +315,7 @@ export const IntroHint = memo(function IntroHint({ view, touch }: P & { touch: b
           <span><kbd>W</kbd><kbd>↑</kbd> thrust</span>
           <span><kbd>S</kbd><kbd>↓</kbd> brake</span>
           <span><kbd>A</kbd><kbd>D</kbd> steer</span>
+          <span><kbd>Q</kbd><kbd>E</kbd> on its side</span>
           <span><kbd>Space</kbd><kbd>Shift</kbd> boost</span>
           <span className="pad">gamepad works</span>
         </div>

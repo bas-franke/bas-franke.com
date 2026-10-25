@@ -1,5 +1,5 @@
-// Race setup screens: the pre-race card (track, starting grid, Race button), quick race setup (track, laps,
-// opponents, difficulty) and time trial setup (track, laps, records).
+// Race setup screens: the pre-race card (track, starting grid, Race button), quick race setup (track,
+// opponents, difficulty) and time trial setup (track, records).
 
 import { useState } from 'react';
 import { cupById, type CareerSave } from '../core/career';
@@ -14,16 +14,16 @@ export function timeOfDay(def: TrackDef) {
   return e >= 0.5 ? 'High noon' : e >= 0.33 ? 'Morning' : e >= 0.15 ? 'Golden hour' : 'Sunset';
 }
 
-function TrackFacts({ def, laps }: { def: TrackDef; laps: number }) {
+function TrackFacts({ def }: { def: TrackDef }) {
   const km = trackOutline(def.id).km;
   return (
     <dl className="dr-facts">
       <div>
-        <dt>Laps</dt>
-        <dd>{laps}</dd>
+        <dt>Jumps</dt>
+        <dd>{def.jumps.length}</dd>
       </div>
       <div>
-        <dt>Lap</dt>
+        <dt>Length</dt>
         <dd>
           {km.toFixed(1)}
           <small>km</small>
@@ -47,7 +47,6 @@ function TrackFacts({ def, laps }: { def: TrackDef; laps: number }) {
 export function PreRace(props: { req: RaceRequest; save: CareerSave | null; onBack(): void; onRace(): void; onGarage?(): void }) {
   const { req, save } = props;
   const def = trackById(req.trackId);
-  const laps = req.laps ?? def.laps;
   const cup = req.kind === 'career' && save?.active ? cupById(save.active.cupId) : null;
   const points = save?.active?.points ?? {};
   const title = cup ? cup.name : req.kind === 'trial' ? 'Time trial' : 'Quick race';
@@ -68,7 +67,7 @@ export function PreRace(props: { req: RaceRequest; save: CareerSave | null; onBa
             <div className="dr-kicker">{timeOfDay(def)}</div>
             <h2>{def.name}</h2>
             <p className="dr-dim">{def.blurb}</p>
-            <TrackFacts def={def} laps={laps} />
+            <TrackFacts def={def} />
             {cup && (
               <div className="dr-prize-line">
                 Win pays <b>{fmtCredits(cup.prize[0])}</b> CR · 10 pts
@@ -166,7 +165,6 @@ export function QuickSetup(props: { save: CareerSave | null; onBack(): void; onP
           <div className="dr-kicker">{timeOfDay(def)}</div>
           <h2>{def.name}</h2>
           <p className="dr-dim">{def.blurb}</p>
-          <Stepper label="Laps" value={q.laps} min={1} max={5} set={(v) => set({ laps: v })} />
           <Stepper label="Opponents" value={q.opponents} min={1} max={7} set={(v) => set({ opponents: v })} />
           <div className="dr-opt dr-opt-col">
             <span className="dr-opt-label">Difficulty</span>
@@ -191,9 +189,8 @@ export function QuickSetup(props: { save: CareerSave | null; onBack(): void; onP
   );
 }
 
-export function TrialSetup(props: { save: CareerSave | null; onBack(): void; onPreview(id: string): void; onRace(trackId: string, laps: number): void }) {
+export function TrialSetup(props: { save: CareerSave | null; onBack(): void; onPreview(id: string): void; onRace(trackId: string): void }) {
   const [q, setQ] = useState(loadQuick);
-  const [laps, setLaps] = useState(3);
   const records = loadTrials();
   const def = trackById(q.trackId);
   const rec = records[def.id];
@@ -211,32 +208,27 @@ export function TrialSetup(props: { save: CareerSave | null; onBack(): void; onP
         <TrackGrid
           selected={q.trackId}
           onPick={pick}
-          extra={(t) => (records[t.id]?.lap ? <em className="dr-tile-rec">Best lap {fmtTime(records[t.id].lap)}</em> : <em className="dr-tile-rec dim">No record</em>)}
+          extra={(t) => (records[t.id]?.lap ? <em className="dr-tile-rec">Best {fmtTime(records[t.id].lap)}</em> : <em className="dr-tile-rec dim">No record</em>)}
         />
         <section className="dr-panel dr-options">
           <div className="dr-kicker">{timeOfDay(def)}</div>
           <h2>{def.name}</h2>
           <div className="dr-records">
             <div>
-              <span>Best lap</span>
+              <span>Best time</span>
               <b>{fmtTime(rec?.lap)}</b>
-            </div>
-            <div>
-              <span>Best run{rec?.runLaps ? ` (${rec.runLaps} laps)` : ''}</span>
-              <b>{fmtTime(rec?.run)}</b>
             </div>
             {props.save?.bestLaps[def.id] !== undefined && (
               <div>
-                <span>Career best lap</span>
+                <span>Career best</span>
                 <b>{fmtTime(props.save.bestLaps[def.id])}</b>
               </div>
             )}
           </div>
-          <Stepper label="Laps" value={laps} min={1} max={5} set={setLaps} />
           <div className="dr-yourpod">
             <PodSwatch pod={pod} /> Your pod <b>{pod.name}</b>
           </div>
-          <Btn kind="primary" className="dr-race-btn" onClick={() => props.onRace(def.id, laps)}>
+          <Btn kind="primary" className="dr-race-btn" onClick={() => props.onRace(def.id)}>
             Start
           </Btn>
         </section>

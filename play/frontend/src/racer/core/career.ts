@@ -37,7 +37,7 @@ export const CUPS: Cup[] = [
     blurb: 'Your first season on the circuit. Learn the lines.',
     tracks: ['redrock', 'dustbowl', 'falls'],
     field: 6,
-    aiSkill: [0.25, 0.55],
+    aiSkill: [0.12, 0.4],
     aiUpgrades: 0,
     prize: [900, 600, 400, 250, 150, 100],
     cupBonus: 800,
@@ -49,7 +49,7 @@ export const CUPS: Cup[] = [
     blurb: 'Golden hour and longer straights. The field gets hungry.',
     tracks: ['mesa', 'spires', 'redrock', 'archway'],
     field: 7,
-    aiSkill: [0.45, 0.72],
+    aiSkill: [0.35, 0.62],
     aiUpgrades: 1,
     prize: [1400, 950, 650, 400, 250, 150, 100],
     cupBonus: 1500,
@@ -133,8 +133,10 @@ export interface CareerSave {
   cups: Record<string, CupProgress>;
   active: ActiveCup | null;
   stats: { races: number; wins: number; podiums: number; earnings: number };
-  /** Best lap per track id (seconds). */
+  /** Best run time per track id (seconds). */
   bestLaps: Record<string, number>;
+  /** 2 = best times are point-to-point runs (older saves held circuit laps). */
+  courses?: number;
 }
 
 const KEY = 'racer.career.v1';
@@ -151,6 +153,7 @@ export function newCareer(pilot = 'You'): CareerSave {
     active: null,
     stats: { races: 0, wins: 0, podiums: 0, earnings: 0 },
     bestLaps: {},
+    courses: 2,
   };
 }
 
@@ -159,7 +162,10 @@ export function loadCareer(): CareerSave | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as CareerSave;
-    return s.version === 1 ? s : null;
+    if (s.version !== 1) return null;
+    // Best times from the old lapped circuits do not compare with the point-to-point courses.
+    if (s.courses !== 2) return { ...s, bestLaps: {}, courses: 2 };
+    return s;
   } catch {
     return null;
   }

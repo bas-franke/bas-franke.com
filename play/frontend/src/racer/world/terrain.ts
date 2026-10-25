@@ -87,7 +87,7 @@ function buildTrackChunks(field: TerrainField, strata: Strata, S: Settings, leng
   const n = field.n;
   const cols: number[] = [];
   for (let c = 0; c < n; c += S.stride) cols.push(c);
-  cols.push(n); // closes the loop: same frame as 0
+  if (cols[cols.length - 1] !== n - 1) cols.push(n - 1); // the open end of the course
   const step = length / n;
   const edgeOf = (i: number): Gorge | undefined => field.gorges.find((g) => g.edge0 === i || g.edge1 === i);
   const N = S.ribbon;
@@ -133,7 +133,7 @@ function buildTrackChunks(field: TerrainField, strata: Strata, S: Settings, leng
       let wall: CliffColumn[] = [];
       const flushWall = () => {
         if (wall.length >= 2)
-          addCliff(b, wall, strata, { lean: 0.06, buttress: 10, cleft: 7, flutes: S.flutes, period: 30, lift: 0.4, seed: si * 17 + 3, wrapLen: length });
+          addCliff(b, wall, strata, { lean: 0.06, buttress: 10, cleft: 7, flutes: S.flutes, period: 30, lift: 0.4, seed: si * 17 + 3 });
         wall = [];
       };
       for (const cc of chunk) {

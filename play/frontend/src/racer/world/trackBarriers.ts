@@ -1,7 +1,7 @@
 // The barriers at +-width/2 (the physics walls): a continuous low wall of 3.6 m panels. On corners the outside wall
 // carries the yellow-on-black chevrons (pointing along the direction of travel, i.e. into the turn) and in tight
 // corners the inside gets red/white kerb panels plus a flat kerb strip on the road; straights mix chevron, steel and
-// stone runs. Gorge bridges get railings instead (trackBridge.ts). Also the checkered start/finish line on the road.
+// stone runs. Gorge bridges get railings instead (trackBridge.ts). Also the checkered start and finish lines.
 // All of it uses the barrier atlas, merged into ~200 m chunks.
 
 import * as THREE from 'three';
@@ -19,8 +19,7 @@ type Kind = 'chevron' | 'steel' | 'stone' | 'kerb';
 /** True when s lies in one of the gorge bridge stretches (plus `margin` metres either side). */
 export function onBridge(track: Track, zones: Zones, s: number, margin = 4) {
   for (const g of zones.gorges) {
-    const a = g.s0 - margin;
-    if (track.wrap(s - a) <= g.s1 - g.s0 + margin * 2) return true;
+    if (s >= g.s0 - margin && s <= g.s1 + margin) return true;
   }
   return false;
 }
@@ -132,12 +131,12 @@ export function buildBarriers(track: Track, zones: Zones, wallMat: THREE.Materia
     }
   }
 
-  // Checkered start/finish line across the road at s = 0, 3.2 m deep, squares of 0.8 m.
-  {
-    const { decal } = chunk(0);
+  // Checkered start and finish lines across the road, 3.2 m deep, squares of 0.8 m.
+  for (const line of [track.startS, track.finishS]) {
+    const { decal } = chunk(line);
     const segs = 8;
-    const s0 = -1.6;
-    const s1 = 1.6;
+    const s0 = line - 1.6;
+    const s1 = line + 1.6;
     track.frameAt(s0, fa);
     track.frameAt(s1, fb);
     const p = Array.from({ length: 4 }, v);

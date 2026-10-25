@@ -1,6 +1,6 @@
-// Player controls: keyboard (WASD / arrows, Space or Shift to boost, S/Down for the air brakes, C to look back),
-// gamepad (right trigger throttle, left trigger air brakes, left stick or d-pad to steer, A or RB to boost, Y or the
-// right stick pushed down to look back) and touch (on-screen pads set `touch`). Digital steering ramps in and out so a
+// Player controls: keyboard (WASD / arrows, Space or Shift to boost, S/Down for the air brakes, Q/E to roll onto the
+// left/right side, C to look back), gamepad (right trigger throttle, left trigger air brakes, left stick or d-pad to
+// steer, right stick sideways to roll, A or RB to boost, Y or the right stick pushed down to look back) and touch (on-screen pads set `touch`). Digital steering ramps in and out so a
 // key tap is a small correction and a hold a full turn; an analog stick gets a soft centre and only light smoothing.
 // Owned by the feel agent.
 
@@ -36,6 +36,7 @@ export class Controls {
     let steerTarget = (k('KeyD', 'ArrowRight') ? 1 : 0) - (k('KeyA', 'ArrowLeft') ? 1 : 0);
     let boost = k('Space', 'ShiftLeft', 'ShiftRight');
     let back = k('KeyC');
+    let roll = (k('KeyE') ? 1 : 0) - (k('KeyQ') ? 1 : 0);
     let analog = false;
 
     const pad = navigator.getGamepads?.().find((g) => g && g.connected);
@@ -51,6 +52,8 @@ export class Controls {
         steerTarget = Math.sign(ax) * Math.pow(m, 1.4);
         analog = true;
       }
+      const rx = pad.axes[2] ?? 0;
+      if (Math.abs(rx) > 0.5) roll = Math.sign(rx);
       if (pressed(14)) steerTarget = -1;
       if (pressed(15)) steerTarget = 1;
       boost = boost || pressed(0) || pressed(5);
@@ -75,7 +78,7 @@ export class Controls {
       const rate = reversing ? 10 : steerTarget === 0 ? 7 : 4.5;
       this.steer += Math.max(-rate * dt, Math.min(rate * dt, steerTarget - this.steer));
     }
-    return { throttle, brake, steer: this.steer, boost };
+    return { throttle, brake, steer: this.steer, boost, roll };
   }
 
   pressed(code: string) {

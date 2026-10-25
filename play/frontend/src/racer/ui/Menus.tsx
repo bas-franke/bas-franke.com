@@ -3,7 +3,7 @@
 // file is the screen state machine and the title screen; the screens live in Career*.tsx, Garage.tsx,
 // menuRace.tsx and Results.tsx. Keyboard and gamepad navigation come from menuNav.ts.
 //
-// Dev URL params: ?menu=career|garage|quick|trial opens a screen, ?laps=1 shortens every race, ?nobackdrop.
+// Dev URL params: ?menu=career|garage|quick|trial opens a screen, ?nobackdrop.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cupById, cupRacers, loadCareer, newCareer, playerRacer, quickRaceRacers, RIVALS, saveCareer, type CareerSave } from '../core/career';
@@ -25,7 +25,6 @@ import './menus.css';
 export interface RaceRequest {
   kind: 'career' | 'quick' | 'trial';
   trackId: string;
-  laps?: number;
   racers: RacerSetup[];
   /** Career races: the cup and round this race is for (the award checks it still matches the save). */
   cupId?: string;
@@ -43,24 +42,22 @@ export type View =
   | { k: 'results' };
 
 const params = new URLSearchParams(location.search);
-/** ?laps=N shortens every race started from the menus (testing). */
-const DEV_LAPS = Number(params.get('laps')) || undefined;
 
 /** The race request for the next round of the active cup. */
 export function careerRequest(s: CareerSave): RaceRequest {
   const a = s.active!;
   const cup = cupById(a.cupId);
-  return { kind: 'career', trackId: cup.tracks[a.round], racers: cupRacers(s), cupId: a.cupId, round: a.round, laps: DEV_LAPS };
+  return { kind: 'career', trackId: cup.tracks[a.round], racers: cupRacers(s), cupId: a.cupId, round: a.round };
 }
 
 export function quickRequest(s: CareerSave | null, q: QuickSettings): RaceRequest {
   const d = DIFFICULTIES[q.difficulty] ?? DIFFICULTIES[1];
   const player = playerRacer(s ?? newCareer());
-  return { kind: 'quick', trackId: q.trackId, laps: DEV_LAPS ?? q.laps, racers: quickRaceRacers(player, q.opponents + 1, d.skill, d.upgrades) };
+  return { kind: 'quick', trackId: q.trackId, racers: quickRaceRacers(player, q.opponents + 1, d.skill, d.upgrades) };
 }
 
-export function trialRequest(s: CareerSave | null, trackId: string, laps: number): RaceRequest {
-  return { kind: 'trial', trackId, laps: DEV_LAPS ?? laps, racers: [playerRacer(s ?? newCareer())] };
+export function trialRequest(s: CareerSave | null, trackId: string): RaceRequest {
+  return { kind: 'trial', trackId, racers: [playerRacer(s ?? newCareer())] };
 }
 
 /** Loads Exo 2, the HUD's bold italic sans (upright weights too, for body text), and runs the menu ambience. */
@@ -226,7 +223,7 @@ export function Menus(props: { finished: { req: RaceRequest; result: RaceResult 
       body = <QuickSetup save={save} onBack={back} onPreview={setPreviewTrack} onRace={(q) => race(quickRequest(save, q))} />;
       break;
     case 'trial':
-      body = <TrialSetup save={save} onBack={back} onPreview={setPreviewTrack} onRace={(id, laps) => race(trialRequest(save, id, laps))} />;
+      body = <TrialSetup save={save} onBack={back} onPreview={setPreviewTrack} onRace={(id) => race(trialRequest(save, id))} />;
       break;
     case 'prerace':
       body = <PreRace req={view.req} save={save} onBack={back} onRace={() => race(view.req)} onGarage={view.req.kind === 'career' ? () => go({ k: 'garage' }) : undefined} />;

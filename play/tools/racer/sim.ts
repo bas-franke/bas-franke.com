@@ -1,14 +1,15 @@
-// Headless race simulation: runs full races (no rendering) with the career fields and reports lap times, wall hits,
-// pod contacts, overtakes, stuck/backwards pods and the finishing spread. The player's pod is flown by the AI at a
+// Headless race simulation: runs full races (no rendering) with the career fields and reports finishing times, wall hits,
+// rock hits, pod contacts, airtime, overtakes, stuck/backwards pods and the finishing spread. The player's pod is flown by the AI at a
 // chosen skill, standing in for a beginner or a good player.
 //
 //   tsx tools/racer/sim.ts [--tracks redrock,falls] [--cup dust|mesa|canyon|sun|quick|all] [--player 0.3] [--runs 1]
-//                          [--solo] [-v]
+//                          [--solo] [--difficulty 0-3 (quick races: Rookie, Racer, Ace, Legend)] [-v]
 // (tsx lives in play/backend/node_modules/.bin; needs Node 22+.)
 
 import { CUPS, cupRacers, newCareer, playerRacer, quickRaceRacers, startCup } from '../../frontend/src/racer/core/career';
 import { Race, type Racer, type RacerSetup } from '../../frontend/src/racer/core/race';
 import { TRACKS, trackById } from '../../frontend/src/racer/core/tracks';
+import { DIFFICULTIES } from '../../frontend/src/racer/ui/menuStore';
 
 const args = process.argv.slice(2);
 const opt = (name: string, def: string) => {
@@ -28,7 +29,10 @@ function field(cup: string): RacerSetup[] {
   let s = newCareer('Player');
   const [podId, up] = playerPod[cup];
   s = { ...s, pod: podId, ownedPods: [podId], upgrades: { [podId]: { thrust: up, topSpeed: up, handling: up, boost: up } } };
-  if (cup === 'quick') return quickRaceRacers(playerRacer(s));
+  if (cup === 'quick') {
+    const d = DIFFICULTIES[Number(opt('difficulty', '2'))];
+    return quickRaceRacers(playerRacer(s), 8, d.skill, d.upgrades);
+  }
   s = startCup(s, cup);
   return cupRacers(s);
 }
@@ -48,24 +52,24 @@ for (const cup of cups) {
       let rearEnds = 0;
       const wall = new Map<Racer, number>();
       const contact = new Map<Racer, number>();
+      const rocks = new Map<Racer, number>();
+      const air = new Map<Racer, number>();
       const lastImpact = new Map<Racer, number>();
       let race!: Race;
-      race = new Race(def, setups, def.laps, {
+      race = new Race(def, setups, {
         onImpact: (r, k) => {
           if (k < 0.12) return;
           const prev = lastImpact.get(r) ?? -1;
           if (race.time - prev > 0.3) {
-            const m = r.state.scrape > 0 && r.state.scrape < 0.02 ? wall : contact;
+            const nearRock = race.track.obstacles.some((o) => Math.abs(o.s - r.state.s) < o.r + 4 && Math.abs(o.x - r.state.x) < o.r + 5);
+            const m = nearRock ? rocks : r.state.scrape > 0 && r.state.scrape < 0.02 ? wall : contact;
             if (m === contact) {
               // Nose-to-tail or side by side?
-              const L = race.track.length;
               let near = Infinity;
               let lat = 0;
               for (const o of race.racers) {
                 if (o === r) continue;
-                let d = o.state.s - r.state.s;
-                if (d > L / 2) d -= L;
-                if (d < -L / 2) d += L;
+                const d = o.state.s - r.state.s;
                 if (Math.abs(d) < Math.abs(near)) {
                   near = d;
                   lat = o.state.x - r.state.x;
@@ -94,6 +98,7 @@ for (const cup of cups) {
         for (const r of race.racers) {
           if (r.finish !== null) continue;
           if (race.time > 6 && r.state.v < 25) stuck.set(r, (stuck.get(r) ?? 0) + dt);
+          if (r.state.h > 0.5) air.set(r, (air.get(r) ?? 0) + dt);
           if (Math.abs(r.state.psi) > 1.0) backwards.set(r, (backwards.get(r) ?? 0) + dt);
           if (r.position < prevPos.get(r)! && race.time > 3) overtakes.set(r, (overtakes.get(r) ?? 0) + 1);
           prevPos.set(r, r.position);
@@ -108,13 +113,13 @@ for (const cup of cups) {
       const p = race.player;
       const total = (m: Map<Racer, number>) => [...m.values()].reduce((a, b) => a + b, 0);
       console.log(
-        `${id.padEnd(9)} L=${Math.round(race.track.length)} player P${order.indexOf(p) + 1}/${order.length} ${fmt(p.finish ?? NaN)}s laps ${p.lapTimes.map(fmt).join('/')} avg ${Math.round(speedSum / speedN)}m/s | ` +
-          `win ${fmt(first)} spread ${fmt(last - first)}s | walls ${total(wall)} contacts ${total(contact)} (${rearEnds} nose-to-tail) passes ${total(overtakes)} stuck ${fmt(total(stuck))}s back ${fmt(total(backwards))}s`,
+        `${id.padEnd(9)} L=${Math.round(race.track.raceLength)} player P${order.indexOf(p) + 1}/${order.length} ${fmt(p.finish ?? NaN)}s avg ${Math.round(speedSum / speedN)}m/s | ` +
+          `win ${fmt(first)} spread ${fmt(last - first)}s | walls ${total(wall)} rocks ${total(rocks)} air ${fmt(total(air) / race.racers.length)}s contacts ${total(contact)} (${rearEnds} nose-to-tail) passes ${total(overtakes)} stuck ${fmt(total(stuck))}s back ${fmt(total(backwards))}s`,
       );
       if (verbose) {
         for (const r of order) {
           console.log(
-            `   ${(r.ai ? `${r.name} (${r.ai.skill.toFixed(2)})` : `PLAYER (${playerSkill})`).padEnd(24)} ${r.pod.id.padEnd(8)} ${fmt(r.finish ?? NaN).padStart(6)} best ${fmt(r.bestLap)} walls ${wall.get(r) ?? 0} contacts ${contact.get(r) ?? 0} passes ${overtakes.get(r) ?? 0} stuck ${fmt(stuck.get(r) ?? 0)}`,
+            `   ${(r.ai ? `${r.name} (${r.ai.skill.toFixed(2)})` : `PLAYER (${playerSkill})`).padEnd(24)} ${r.pod.id.padEnd(8)} ${fmt(r.finish ?? NaN).padStart(6)} walls ${wall.get(r) ?? 0} rocks ${rocks.get(r) ?? 0} contacts ${contact.get(r) ?? 0} passes ${overtakes.get(r) ?? 0} stuck ${fmt(stuck.get(r) ?? 0)}`,
           );
         }
       }

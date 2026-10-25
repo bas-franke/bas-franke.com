@@ -127,8 +127,7 @@ export class TerrainField {
         let H = zones.wallHeight(f.s, side);
         if (arch) {
           // Keep the canyon low around the arch so it stands against the sky.
-          let d = Math.abs(f.s - arch.s);
-          d = Math.min(d, track.length - d);
+          const d = Math.abs(f.s - arch.s);
           const k = 1 - smoothstep(50, 160, d);
           H = lerp(H, Math.min(H, arch.height * 0.45), k);
         }
@@ -183,7 +182,7 @@ export class TerrainField {
     let best = i0;
     let bd = Infinity;
     for (let k = -r; k <= r; k++) {
-      const i = (((i0 + k) % n) + n) % n;
+      const i = Math.max(0, Math.min(n - 1, i0 + k));
       const dx = this.posX[i] - x;
       const dz = this.posZ[i] - z;
       const d = dx * dx + dz * dz;
@@ -209,18 +208,18 @@ export class TerrainField {
     const n = this.n;
     for (const g of zones.gorges) {
       const inG = (i: number) => {
-        const s = track.frames[((i % n) + n) % n].s;
-        return track.wrap(s - g.s0) < g.s1 - g.s0;
+        const s = track.frames[Math.min(n - 1, i)].s;
+        return s >= g.s0 && s < g.s1;
       };
       let edge0 = -1;
       let edge1 = -1;
       for (let c = 0; c < n; c += stride) {
-        const next = c + stride >= n ? n : c + stride;
+        const next = Math.min(n - 1, c + stride);
         if (!inG(c) && inG(next)) edge0 = c;
-        if (inG(c) && !inG(next)) edge1 = next % n;
+        if (inG(c) && !inG(next)) edge1 = next;
       }
       if (edge0 < 0 || edge1 < 0) continue;
-      const midS = track.wrap(g.s0 + (g.s1 - g.s0) / 2);
+      const midS = (g.s0 + g.s1) / 2;
       const mf = track.frameAt(midS);
       const tl = Math.hypot(mf.tangent.x, mf.tangent.z);
       const ax = mf.tangent.x / tl;
@@ -264,9 +263,7 @@ export class TerrainField {
     for (const g of this.gorges) {
       const s0 = this.track.frames[g.edge0].s;
       const s1 = this.track.frames[g.edge1].s;
-      const len = this.track.wrap(s1 - s0);
-      const d = this.track.wrap(s - s0);
-      if (d > 0 && d < len) return g;
+      if (s > s0 && s < s1) return g;
     }
     return null;
   }

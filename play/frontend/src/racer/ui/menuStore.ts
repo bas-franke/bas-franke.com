@@ -7,27 +7,27 @@ import type { RaceRequest } from './Menus';
 
 export interface QuickSettings {
   trackId: string;
-  laps: number;
   opponents: number;
   difficulty: number;
 }
 
 export const DIFFICULTIES = [
-  { name: 'Rookie', skill: 0.3, upgrades: 0 },
-  { name: 'Racer', skill: 0.55, upgrades: 1 },
+  { name: 'Rookie', skill: 0.15, upgrades: 0 },
+  { name: 'Racer', skill: 0.42, upgrades: 0 },
   { name: 'Ace', skill: 0.75, upgrades: 3 },
   { name: 'Legend', skill: 0.95, upgrades: 5 },
 ];
 
 export interface TrialRecord {
-  /** Best lap and best full run (seconds), and the laps of that run. */
+  /** Best time for the run (seconds); `run` and `runLaps` are left over from lapped circuits. */
   lap: number | null;
   run: number | null;
   runLaps: number;
 }
 
 const QUICK_KEY = 'racer.quick.v1';
-const TRIAL_KEY = 'racer.trials.v1';
+// v2: courses are point-to-point now, circuit lap records do not compare.
+const TRIAL_KEY = 'racer.trials.v2';
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -47,7 +47,7 @@ function write(key: string, v: unknown) {
 }
 
 export function loadQuick(): QuickSettings {
-  return read<QuickSettings>(QUICK_KEY, { trackId: 'redrock', laps: 3, opponents: 7, difficulty: 1 });
+  return read<QuickSettings>(QUICK_KEY, { trackId: 'redrock', opponents: 7, difficulty: 1 });
 }
 export function saveQuick(q: QuickSettings) {
   write(QUICK_KEY, q);
@@ -92,11 +92,10 @@ export function applyFinished(req: RaceRequest, result: RaceResult): Applied {
   } else if (req.kind === 'trial') {
     const all = loadTrials();
     const prev = all[result.trackId] ?? { lap: null, run: null, runLaps: 0 };
-    const laps = req.laps ?? 0;
+    const laps = 1;
     const lap = Number.isFinite(result.playerBestLap) ? result.playerBestLap : null;
     const run = Number.isFinite(result.playerTime) ? result.playerTime : null;
     const newLapRecord = lap !== null && (prev.lap === null || lap < prev.lap);
-    // Runs only compare at the same lap count.
     const newRunRecord = run !== null && (prev.run === null || prev.runLaps !== laps || run < prev.run);
     all[result.trackId] = {
       lap: newLapRecord ? lap : prev.lap,

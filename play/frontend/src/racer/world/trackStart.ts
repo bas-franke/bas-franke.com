@@ -1,4 +1,4 @@
-// The start/finish gantry over s = 0: two hazard-striped pylons behind the barriers, a deep beam with the race banner
+// A gantry over the start or the finish line: two hazard-striped pylons behind the barriers, a deep beam with the race banner
 // on both faces, and a row of start lamps on each side that run a red countdown, flash green, then go dark (looping).
 // The structure uses the barrier atlas; the lamps get a tiny per-lamp emissive DataTexture updated on state changes.
 
@@ -10,8 +10,8 @@ import { ROW, rowV } from './trackTextures';
 const LAMPS = 5;
 const CYCLE = 8;
 
-export function buildStartGantry(track: Track, atlasGeo: GeoBuilder) {
-  const f = track.frameAt(0);
+export function buildStartGantry(track: Track, atlasGeo: GeoBuilder, at: number) {
+  const f = track.frameAt(at);
   const hw = f.width / 2;
   const right = new THREE.Vector3(f.right.x, 0, f.right.z).normalize();
   const fwd = new THREE.Vector3(f.tangent.x, 0, f.tangent.z).normalize();

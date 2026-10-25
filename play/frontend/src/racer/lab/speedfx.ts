@@ -154,7 +154,7 @@ export function mount(el: HTMLElement): () => void {
       playerForward: pf,
       speed01: pl.speed01,
       boosting: pl.boosting,
-      playerS: track.wrap(playerS),
+      playerS: track.clamp(playerS),
       pods,
     };
     world.update(view);

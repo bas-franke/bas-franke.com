@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { rng, type Track } from '../core/track';
 
 export interface Span {
-  /** Start and end distance along the track (s0 < s1, may exceed the track length: wrap with track.wrap). */
+  /** Start and end distance along the track (s0 < s1). */
   s0: number;
   s1: number;
 }
@@ -44,20 +44,13 @@ export function zonesFor(track: Track): Zones {
   return z;
 }
 
-function inSpan(track: Track, s: number, sp: Span) {
-  const w = track.wrap(s);
-  const a = track.wrap(sp.s0);
-  const len = sp.s1 - sp.s0;
-  const d = track.wrap(w - a);
-  return d <= len;
+function inSpan(s: number, sp: Span) {
+  return s >= sp.s0 && s <= sp.s1;
 }
 
 /** 0..1 ramp that is 1 inside the span and fades over `edge` metres outside it. */
-function spanWeight(track: Track, s: number, sp: Span, edge: number) {
-  const w = track.wrap(s);
-  const mid = track.wrap(sp.s0 + (sp.s1 - sp.s0) / 2);
-  let d = Math.abs(w - mid);
-  d = Math.min(d, track.length - d);
+function spanWeight(s: number, sp: Span, edge: number) {
+  const d = Math.abs(s - (sp.s0 + sp.s1) / 2);
   const half = (sp.s1 - sp.s0) / 2;
   return THREE.MathUtils.clamp(1 - (d - half) / edge, 0, 1);
 }
@@ -77,18 +70,21 @@ function build(track: Track): Zones {
   const hl = wave([2, 5, 11]);
   const hr = wave([3, 6, 10]);
 
-  // Start straight: stands on both sides just before and after the line.
+  // Stands on both sides of the grid and the start line, and along the finish straight.
+  const { startS, finishS } = track;
   const stands: Zones['stands'] = [
-    { s0: L - 160, s1: L + 40, side: -1 },
-    { s0: L - 120, s1: L + 10, side: 1 },
+    { s0: Math.max(10, startS - 130), s1: startS + 40, side: -1 },
+    { s0: Math.max(10, startS - 100), s1: startS + 10, side: 1 },
+    { s0: finishS - 150, s1: finishS + 30, side: 1 },
+    { s0: finishS - 110, s1: finishS + 10, side: -1 },
   ];
   const extraStand = 0.3 + r() * 0.35;
-  stands.push({ s0: L * extraStand, s1: L * extraStand + 120, side: r() < 0.5 ? -1 : 1 });
+  stands.push({ s0: track.raceS(extraStand), s1: track.raceS(extraStand) + 120, side: r() < 0.5 ? -1 : 1 });
 
   const gorges: Zones['gorges'] = [];
   const waterfalls: Zones['waterfalls'] = [];
-  if (theme.waterfalls) {
-    const at = L * (0.55 + r() * 0.15);
+  if (track.gorgeS !== null) {
+    const at = track.gorgeS;
     const g = { s0: at - 110, s1: at + 110, depth: 90 };
     gorges.push(g);
     // Falls pour into the gorge from cliffs up- and downstream of the bridge, facing the bridge.
@@ -129,20 +125,20 @@ function build(track: Track): Zones {
   }
 
   const wallOffset = (s: number, side: -1 | 1) => {
-    for (const g of gorges) if (spanWeight(track, s, g, 0) > 0) return Infinity;
-    for (const v of vistas) if (v.side === side && inSpan(track, s, v)) return Infinity;
+    for (const g of gorges) if (spanWeight(s, g, 0) > 0) return Infinity;
+    for (const v of vistas) if (v.side === side && inSpan(s, v)) return Infinity;
     const f = track.frameAt(s);
     const n = side < 0 ? nl(s) : nr(s);
     let off = f.width / 2 + 16 + (n + 1) * 22;
     // Stands sit on a terrace: push the wall back a little there.
-    for (const st of stands) if (st.side === side) off += spanWeight(track, s, st, 40) * 10;
+    for (const st of stands) if (st.side === side) off += spanWeight(s, st, 40) * 10;
     return off;
   };
   const wallHeight = (s: number, side: -1 | 1) => {
     if (!Number.isFinite(wallOffset(s, side))) return 0;
     let fade = 1;
-    for (const g of gorges) fade = Math.min(fade, 1 - spanWeight(track, s, g, 80) * 0.6);
-    for (const v of vistas) if (v.side === side) fade = Math.min(fade, 1 - spanWeight(track, s, v, 60));
+    for (const g of gorges) fade = Math.min(fade, 1 - spanWeight(s, g, 80) * 0.6);
+    for (const v of vistas) if (v.side === side) fade = Math.min(fade, 1 - spanWeight(s, v, 60));
     const n = side < 0 ? hl(s) : hr(s);
     return (45 + (n + 1) * 40) * fade;
   };

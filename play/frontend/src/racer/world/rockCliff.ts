@@ -37,8 +37,6 @@ export interface CliffOpts {
   /** Height of the lip above `top` (negative tucks it under the ground ribbon). */
   lift: number;
   seed: number;
-  /** Length of a closed loop whose `along` wraps (track walls), so the noise joins up at the start line. */
-  wrapLen?: number;
 }
 
 /** Horizontal setback of layer k (hardness h) at `a` along the strip: pillars, clefts, wobble and flutes. */
@@ -92,8 +90,6 @@ export function addCliff(geo: GeoBuilder, cols: CliffColumn[], strata: Strata, o
         ob = ot = crestOt;
       } else {
         let lat = lateral(c.along, k, h, o);
-        // Closed loops: blend into the start of the strip over the last stretch so the start line has no seam.
-        if (o.wrapLen && c.along > o.wrapLen - 120) lat = THREE.MathUtils.lerp(lat, lateral(c.along - o.wrapLen, k, h, o), smoothstep(o.wrapLen - 120, o.wrapLen, c.along));
         const base = o.lean * Math.max(0, yA - c.bottom) + lat;
         if (h > 0.75) {
           ob = ot = base - 0.5;

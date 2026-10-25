@@ -254,7 +254,7 @@ export class Backdrop {
 
     if (scene.kind === 'showcase') {
       // Garage turntable: the pod hovers just past the start line and slowly turns.
-      leadS = tr.wrap(tr.length * 0.985);
+      leadS = tr.startS + 20;
       const bob = Math.sin(t * 1.6) * 0.12;
       this.podPose(lead, leadS, 0, HOVER + 0.4 + bob, t * 0.35);
       lead.fx.speed = 0;
@@ -268,7 +268,8 @@ export class Backdrop {
       cam.up.set(0, 1, 0);
       cam.lookAt(this.look);
     } else {
-      leadS = tr.wrap(t * FLY_SPEED);
+      // From the start line to the finish, then round again from the start.
+      leadS = tr.startS + ((t * FLY_SPEED) % tr.raceLength);
       const width = tr.frameAt(leadS, this.f2).width;
       for (const p of this.pods) {
         const s = leadS - p.gap;

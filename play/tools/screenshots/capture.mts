@@ -240,11 +240,11 @@ async function shootRuckus(context: BrowserContext): Promise<Shot[]> {
   return MINIGAME_IDS.filter((id) => got.has(id)).map((id) => got.get(id)!);
 }
 
-/** Dustrunners tracks shown, each a little way into the lap so the scenery and the pack are in view. */
+/** Dustrunners tracks shown, each a little way into the run so the scenery and the pack are in view. */
 const RACER_SHOTS = [
   { track: 'falls', at: 0.3, caption: 'Thunder Falls' },
   { track: 'redrock', at: 0.12, caption: 'Redrock Run' },
-  { track: 'mesa', at: 0.2, caption: 'Mesa Loop' },
+  { track: 'mesa', at: 0.2, caption: 'Mesa Run' },
   { track: 'spires', at: 0.2, caption: 'Needle Spires' },
 ];
 

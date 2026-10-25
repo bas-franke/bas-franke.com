@@ -15,12 +15,9 @@ import { zonesFor, type Span } from './zones';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-/** Distance from s to a span along the lap (0 inside it). */
-function spanDist(track: Track, s: number, sp: Span) {
-  const len = sp.s1 - sp.s0;
-  const d = track.wrap(s - sp.s0);
-  if (d <= len) return 0;
-  return Math.min(d - len, track.length - d);
+/** Distance from s to a span along the track (0 inside it). */
+function spanDist(s: number, sp: Span) {
+  return s < sp.s0 ? sp.s0 - s : s > sp.s1 ? s - sp.s1 : 0;
 }
 
 /** Horizontal frame at s: position on the centreline, flat forward and flat right. */
@@ -291,9 +288,9 @@ export const buildStands: WorldBuilder = (ctx) => {
   }
 
   // ---------------------------------------------------------------- track-side banners
-  const nearStart = (s: number) => Math.min(track.wrap(s), track.length - track.wrap(s)) < 280;
-  const nearStand = (s: number) => zones.stands.some((st) => spanDist(track, s, st) < 60);
-  const onGorge = (s: number) => zones.gorges.some((g) => spanDist(track, s, g) < 25);
+  const nearStart = (s: number) => Math.min(Math.abs(s - track.startS), Math.abs(s - track.finishS)) < 280;
+  const nearStand = (s: number) => zones.stands.some((st) => spanDist(s, st) < 60);
+  const onGorge = (s: number) => zones.gorges.some((g) => spanDist(s, g) < 25);
   for (const side of [-1, 1] as const) {
     let s = r() * 40 + (side > 0 ? 18 : 0);
     let k = side > 0 ? 1 : 0;

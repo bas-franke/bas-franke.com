@@ -3,7 +3,7 @@
 //
 // Debug URL parameters (handy for screenshots and the art labs):
 //   ?autopilot   the AI flies the player's pod      ?skipintro   start at the green light
-//   ?at=0.4      start the player at 40% of the lap  ?freeze      simulation paused (camera still renders)
+//   ?at=0.4      start the player at 40% of the run  ?freeze      simulation paused (camera still renders)
 //   ?quality=low|medium|high
 // `window.__racer` exposes { race, view } in dev builds.
 
@@ -23,6 +23,7 @@ import type { FxPod, FxView, PodVisual, PostFx, Quality, SpeedFx, WorldContext }
 
 /** Hover height of a pod's centre above the road. */
 export const HOVER = 1.5;
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 export interface MinimapPod {
   x: number;
@@ -36,15 +37,12 @@ export interface HudState {
   trackName: string;
   /** Countdown number (3, 2, 1) during the countdown, 0 = GO shown briefly, -1 otherwise. */
   countdown: number;
-  lap: number;
-  laps: number;
+  /** Metres left to the finish line. */
+  toGo: number;
   position: number;
   racers: number;
   /** Race time in seconds (0 before the start). */
   time: number;
-  bestLap: number | null;
-  /** Shown for a few seconds after a lap: its time and whether it was a best. */
-  lapFlash: { lap: number; time: number; best: boolean } | null;
   speedKmh: number;
   /** 0..1 of the top speed (boost goes above 1). */
   speed01: number;
@@ -70,7 +68,6 @@ export interface RaceResult {
 
 export interface RaceViewOptions {
   trackId: string;
-  laps?: number;
   racers: RacerSetup[];
   quality?: Quality;
   onFinish?(result: RaceResult): void;
@@ -98,7 +95,8 @@ export class RaceView {
   private hudAt = 0;
   private paused = false;
   private finished = false;
-  private lapFlashUntil = 0;
+  /** Camera up for the player, without the knife-edge roll (the horizon must not tip with it). */
+  private readonly camUp = new THREE.Vector3(0, 1, 0);
   private readonly observer: ResizeObserver;
   private readonly params = new URLSearchParams(location.search);
   private readonly frozen = this.params.has('freeze');
@@ -106,16 +104,10 @@ export class RaceView {
   constructor(private readonly container: HTMLElement, private readonly opts: RaceViewOptions) {
     const def = trackById(opts.trackId);
     const quality = (this.params.get('quality') as Quality | null) ?? opts.quality ?? defaultQuality();
-    this.race = new Race(def, opts.racers, opts.laps ?? def.laps, {
+    this.race = new Race(def, opts.racers, {
       onCountdown: (n) => this.audio.countdown(n),
       onImpact: (r, k) => this.audio.impact(k, r === this.race.player),
       onPad: (r) => this.audio.pad(r === this.race.player),
-      onLap: (r, t, best) => {
-        if (r !== this.race.player) return;
-        this.audio.lap(best);
-        this.hud.set({ lapFlash: { lap: r.lap, time: t, best } });
-        this.lapFlashUntil = this.time + 3.5;
-      },
       onFinish: (r) => {
         if (r === this.race.player) this.audio.finish(r.position);
       },
@@ -127,7 +119,7 @@ export class RaceView {
       this.race.time = 0.01;
       this.race.phase = 'racing';
       const p = this.race.player;
-      p.state.s = this.race.track.wrap(at * this.race.track.length);
+      p.state.s = this.race.track.raceS(Math.min(1, at));
       p.lap = 0;
       p.state.v = p.stats.topSpeed * 0.8;
     }
@@ -176,13 +168,10 @@ export class RaceView {
       phase: this.race.phase,
       trackName: def.name,
       countdown: -1,
-      lap: 0,
-      laps: this.race.laps,
+      toGo: this.race.track.raceLength,
       position: player.position,
       racers: this.race.racers.length,
       time: 0,
-      bestLap: null,
-      lapFlash: null,
       speedKmh: 0,
       speed01: 0,
       boost: 0,
@@ -246,18 +235,17 @@ export class RaceView {
     const pv = this.visuals[race.racers.indexOf(player)];
     const pos = pv.object.position;
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(pv.object.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(pv.object.quaternion);
     const speed01 = player.state.v / player.stats.topSpeed;
 
     if (race.phase === 'intro') {
       const u = 1 - (-race.time - 3) / INTRO;
-      const f = race.track.frameAt(race.track.length - 30);
+      const f = race.track.frameAt(race.track.startS - 30);
       this.chase.intro(Math.max(0, Math.min(1, u)), f.pos.clone().add(new THREE.Vector3(0, 2, 0)), f.tangent);
       if (u >= 0.98) this.chase.reset();
     } else {
       // Use the track up for the camera rather than the pod's roll so the horizon only follows the banking.
       const f = race.track.frameAt(player.state.s);
-      this.chase.update(dt, { pos, forward, up: f.up.clone().lerp(up, 0.25).normalize(), speed01, boosting: player.state.boosting, surge: player.state.surge, impact: this.fxPods[race.racers.indexOf(player)].impact, finished: race.phase === 'finished' }, this.time);
+      this.chase.update(dt, { pos, forward, up: f.up.clone().lerp(this.camUp, 0.25).normalize(), speed01, boosting: player.state.boosting, surge: player.state.surge, impact: this.fxPods[race.racers.indexOf(player)].impact, finished: race.phase === 'finished' }, this.time);
     }
 
     const view: FxView = {
@@ -292,16 +280,24 @@ export class RaceView {
       const v = this.visuals[i];
       const f = track.frameAt(st.s);
       const bob = Math.sin(this.time * 2.3 + i * 1.7) * 0.12 + Math.sin(this.time * 17 + i) * 0.03 * Math.min(1, st.v / 60);
-      const pos = f.pos.clone().addScaledVector(f.right, st.x).addScaledVector(f.up, HOVER + bob);
+      // On its side the lower engine would scrape the road: ride higher.
+      const lift = Math.abs(st.roll) * 1.9;
+      const pos = f.pos.clone().addScaledVector(f.right, st.x).addScaledVector(f.up, HOVER + bob + lift);
+      pos.y += st.h;
       const forward = f.tangent.clone().multiplyScalar(Math.cos(st.psi)).addScaledVector(f.right, -Math.sin(st.psi)).normalize();
       const right = forward.clone().cross(f.up).normalize();
       const up = right.clone().cross(forward).normalize();
       const m = new THREE.Matrix4().makeBasis(right, up, forward.clone().negate());
       v.object.quaternion.setFromRotationMatrix(m);
       // Lean into turns, nose up a touch under thrust.
+      // Lean into turns, nose up a touch under thrust; in the air the nose follows the flight path.
       const roll = THREE.MathUtils.clamp(-st.yawRate * 0.45 + (st.phi - st.psi) * 0.6, -0.6, 0.6);
-      const pitch = (r.input.throttle - r.input.brake) * 0.03 + (st.boosting ? 0.03 : 0);
+      let pitch = (r.input.throttle - r.input.brake) * 0.03 + (st.boosting ? 0.03 : 0);
+      if (st.air) pitch += THREE.MathUtils.clamp(Math.atan2(st.vy, Math.max(10, st.v)) - Math.asin(THREE.MathUtils.clamp(f.tangent.y, -1, 1)), -0.5, 0.5);
       v.object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, roll, 'ZXY')));
+      if (r === race.player) this.camUp.set(0, 1, 0).applyQuaternion(v.object.quaternion);
+      // Knife edge: Q rolls onto the left side, E onto the right.
+      if (st.roll) v.object.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, (-st.roll * Math.PI) / 2));
       v.object.position.copy(pos);
 
       const fp = this.fxPods[i];
@@ -329,20 +325,15 @@ export class RaceView {
       phase: race.phase,
       countdown: race.phase === 'countdown' ? Math.ceil(-race.time) : race.time >= 0 && race.time < 0.9 ? 0 : -1,
       time: p.finish ?? Math.max(0, race.time),
-      lap: Math.max(1, Math.min(race.laps, p.lap + 1)),
+      toGo: Math.max(0, race.track.finishS - p.state.s),
       position: p.position,
       speedKmh: Math.round(p.state.v * DISPLAY_KMH),
       speed01: p.state.v / p.stats.topSpeed,
       boost: p.state.boost,
       boosting: p.state.boosting,
       drafting: p.state.draft > 0,
-      bestLap: Number.isFinite(p.bestLap) ? p.bestLap : null,
       wrongWay: Math.abs(p.state.psi) > 1.25 && p.state.v > 5,
     };
-    if (this.lapFlashUntil && this.time > this.lapFlashUntil) {
-      patch.lapFlash = null;
-      this.lapFlashUntil = 0;
-    }
     if (this.hudAt <= 0) {
       this.hudAt = 1 / 12;
       const proj = race.track.minimap.project;

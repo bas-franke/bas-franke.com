@@ -1,6 +1,7 @@
 // The race surface and everything on it, from -(width/2 + 2) to +(width/2 + 2) around the centreline: the packed-dirt
 // road (trackRoad), the chevron barriers on the physics walls and the start line (trackBarriers), gorge bridges with
-// trestles (trackBridge), the start/finish gantry (trackStart) and the glowing boost pads (trackPads). Few materials:
+// trestles (trackBridge), the start and finish gantries (trackStart), the glowing boost pads (trackPads), and the
+// rocks and jump ramp markings (trackObstacles). Few materials:
 // road, barrier atlas, atlas decals, vertex-coloured steel, pads, pad halo, start lamps.
 
 import * as THREE from 'three';
@@ -9,6 +10,7 @@ import { buildBridges } from './trackBridge';
 import { GeoBuilder } from './trackGeo';
 import { buildPads } from './trackPads';
 import { buildRoad } from './trackRoad';
+import { buildObstacles } from './trackObstacles';
 import { buildStartGantry } from './trackStart';
 import { barrierAtlas } from './trackTextures';
 import type { WorldBuilder } from './types';
@@ -45,8 +47,11 @@ export const buildTrackSurface: WorldBuilder = (ctx) => {
   // Static structure with the barrier atlas (gantry) and vertex-coloured steel (bridges, pad frames).
   const atlasGeo = new GeoBuilder(true, false);
   const steelGeo = new GeoBuilder(false, true);
-  const gantry = buildStartGantry(track, atlasGeo);
-  group.add(gantry.object);
+  const gantry = buildStartGantry(track, atlasGeo, track.startS);
+  const finish = buildStartGantry(track, atlasGeo, track.finishS);
+  group.add(gantry.object, finish.object);
+  const obstacles = buildObstacles(track, theme, atlasGeo);
+  group.add(obstacles.object);
   buildBridges(track, zones, quality, steelGeo);
   const pads = buildPads(track, steelGeo, aniso);
   group.add(pads.object);
@@ -63,11 +68,14 @@ export const buildTrackSurface: WorldBuilder = (ctx) => {
     update(view) {
       pads.update(view.time);
       gantry.update(view.time);
+      finish.update(view.time);
     },
     dispose() {
       road.dispose();
       pads.dispose();
       gantry.dispose();
+      finish.dispose();
+      obstacles.dispose();
       // Geometry dispose is idempotent, so sweeping everything (including what the parts disposed) is safe.
       group.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
       wallMat.dispose();

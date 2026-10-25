@@ -32,7 +32,6 @@ export function Results(props: {
   const trial = req.kind === 'trial';
   const cup = career && req.cupId ? cupById(req.cupId) : null;
   const winner = result.order[0]?.time ?? 0;
-  const fastest = Math.min(...result.order.map((o) => (Number.isFinite(o.bestLap) ? o.bestLap : Infinity)));
   const cupDone = award?.cupDone ?? null;
 
   useEffect(() => {
@@ -62,8 +61,8 @@ export function Results(props: {
           </div>
           <h1>{trial ? 'Run complete' : pos === 1 ? 'Victory!' : pos <= 3 ? 'Podium finish' : `Finished ${ordinal(pos)}`}</h1>
           <div className="dr-res-sub">
-            Time <b>{fmtTime(result.playerTime)}</b> · Best lap <b>{fmtTime(result.playerBestLap)}</b>
-            {(award?.newBestLap || props.applied.newLapRecord) && <span className="dr-badge dr-badge-cyan">New best lap</span>}
+            Time <b>{fmtTime(result.playerTime)}</b>
+            {(award?.newBestLap || props.applied.newLapRecord) && <span className="dr-badge dr-badge-cyan">New record</span>}
           </div>
         </div>
         {save && <Credits n={save.credits} />}
@@ -78,7 +77,6 @@ export function Results(props: {
                   <th>Pos</th>
                   <th>Pilot</th>
                   <th className="num">Time</th>
-                  <th className="num hide-xs">Best lap</th>
                   {career && <th className="num">Pts</th>}
                 </tr>
               </thead>
@@ -94,7 +92,6 @@ export function Results(props: {
                       {i === 0 ? fmtTime(o.time) : `+${(o.time - winner).toFixed(3)}`}
                       {o.projected && <small className="proj" title="Still racing: projected time">est.</small>}
                     </td>
-                    <td className={`num hide-xs${o.bestLap === fastest ? ' fastest' : ''}`}>{fmtTime(o.bestLap)}</td>
                     {career && <td className="num">{POINTS[i] ? `+${POINTS[i]}` : ''}</td>}
                   </tr>
                 ))}
@@ -145,14 +142,9 @@ export function Results(props: {
           {trial && (
             <section className="dr-panel dr-records">
               <div>
-                <span>Best lap</span>
-                <b>{fmtTime(result.playerBestLap)}</b>
-                {props.applied.newLapRecord ? <em className="dr-badge dr-badge-cyan">Record</em> : <small>record {fmtTime(props.applied.trialBefore?.lap)}</small>}
-              </div>
-              <div>
-                <span>Run ({req.laps ?? def.laps} laps)</span>
+                <span>Time</span>
                 <b>{fmtTime(result.playerTime)}</b>
-                {props.applied.newRunRecord ? <em className="dr-badge dr-badge-cyan">Record</em> : <small>record {fmtTime(props.applied.trialBefore?.run)}</small>}
+                {props.applied.newLapRecord ? <em className="dr-badge dr-badge-cyan">Record</em> : <small>record {fmtTime(props.applied.trialBefore?.lap)}</small>}
               </div>
             </section>
           )}

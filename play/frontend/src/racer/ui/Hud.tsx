@@ -1,10 +1,10 @@
 // Race HUD, styled after the concept art: LAP / POS top left, TIME / BEST top right, speed arc and boost bar bottom
-// left, minimap bottom right, centre messages (countdown, lap flash, wrong way, finish), the pause menu and touch
+// left, minimap bottom right, centre messages (countdown, wrong way, finish), the pause menu and touch
 // controls on phones. Widgets live in hudParts.tsx and subscribe to their own slices of the per-frame store.
 
 import { memo, useEffect, useState } from 'react';
 import type { RaceView } from '../RaceView';
-import { Countdown, FinishBanner, IntroHint, LapFlash, LapPanel, Minimap, PosPanel, Speedo, Standings, TimePanel, WrongWay } from './hudParts';
+import { Countdown, FinishBanner, IntroHint, Minimap, PosPanel, Speedo, Standings, TimePanel, ToGoPanel, WrongWay } from './hudParts';
 import { useHud, wantsTouch } from './hudStore';
 import { TouchControls } from './TouchControls';
 import './hud.css';
@@ -35,7 +35,7 @@ export function Hud({ view, onQuit, onRestart }: { view: RaceView; onQuit(): voi
   return (
     <div className={`hud${touch ? ' touch' : ''}`}>
       <div className="hud-tl">
-        <LapPanel view={view} />
+        <ToGoPanel view={view} />
         <PosPanel view={view} />
         <Standings view={view} />
       </div>
@@ -49,7 +49,6 @@ export function Hud({ view, onQuit, onRestart }: { view: RaceView; onQuit(): voi
         <Minimap view={view} />
       </div>
       <Countdown view={view} />
-      <LapFlash view={view} />
       <WrongWay view={view} />
       <FinishBanner view={view} />
       <IntroHint view={view} touch={touch} />

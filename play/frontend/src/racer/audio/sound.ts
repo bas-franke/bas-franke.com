@@ -306,16 +306,13 @@ export class RaceAudio {
       }
     }
 
-    // Crowd near the start line and the stands.
-    const Lt = track.length;
+    // Crowd near the start and finish lines and the stands.
     let crowdW = 0;
     let crowdSide = 0;
-    const dLine = Math.min(ps.s, Lt - ps.s);
+    const dLine = Math.min(Math.abs(ps.s - track.startS), Math.abs(ps.s - track.finishS));
     if (dLine < 350) crowdW = 1 - dLine / 350;
     for (const st of this.zones.stands) {
-      const mid = track.wrap((st.s0 + st.s1) / 2);
-      let d = Math.abs(ps.s - mid);
-      d = Math.min(d, Lt - d);
+      const d = Math.abs(ps.s - (st.s0 + st.s1) / 2);
       const half = (st.s1 - st.s0) / 2;
       const wgt = d < half ? 1 : Math.max(0, 1 - (d - half) / 200);
       if (wgt > crowdW) {

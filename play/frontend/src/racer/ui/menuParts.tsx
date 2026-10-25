@@ -9,16 +9,20 @@ import { menuAudio } from '../audio/menu';
 import { focusFirst } from './menuNav';
 import { fmtCredits } from './menuStore';
 
-const outlines = new Map<string, { d: string; start: [number, number]; km: number }>();
+const outlines = new Map<string, { d: string; start: [number, number]; finish: [number, number]; km: number }>();
 
-/** SVG path of a track's outline in a 0..100 box, plus the start point and lap length. Cached per track. */
+/** SVG path of a course's outline in a 0..100 box, its start and finish points and race length. Cached per track. */
 export function trackOutline(id: string) {
   let o = outlines.get(id);
   if (!o) {
     const t = new Track(trackById(id));
-    const pts = t.minimap.points.filter((_, i) => i % 3 === 0);
-    const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${(x * 100).toFixed(1)} ${(y * 100).toFixed(1)}`).join(' ') + ' Z';
-    o = { d, start: [pts[0][0] * 100, pts[0][1] * 100], km: t.length / 1000 };
+    const pts = t.minimap.points.filter((_, i, a) => i % 3 === 0 || i === a.length - 1);
+    const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${(x * 100).toFixed(1)} ${(y * 100).toFixed(1)}`).join(' ');
+    const at = (s: number): [number, number] => {
+      const [x, y] = t.minimap.project(t.frameAt(s).pos);
+      return [x * 100, y * 100];
+    };
+    o = { d, start: at(t.startS), finish: at(t.finishS), km: t.raceLength / 1000 };
     outlines.set(id, o);
   }
   return o;
@@ -31,6 +35,7 @@ export function TrackOutline({ id, className }: { id: string; className?: string
       <path d={o.d} className="dr-outline-under" />
       <path d={o.d} className="dr-outline-line" />
       <rect x={o.start[0] - 4} y={o.start[1] - 4} width="8" height="8" className="dr-outline-start" />
+      <circle cx={o.finish[0]} cy={o.finish[1]} r="4.5" className="dr-outline-start" />
     </svg>
   );
 }
@@ -90,6 +95,7 @@ function TrackOutlineInline({ id }: { id: string }) {
       <path d={o.d} className="dr-outline-under" />
       <path d={o.d} className="dr-outline-line" />
       <rect x={o.start[0] - 4} y={o.start[1] - 4} width="8" height="8" className="dr-outline-start" />
+      <circle cx={o.finish[0]} cy={o.finish[1]} r="4.5" className="dr-outline-start" />
     </>
   );
 }

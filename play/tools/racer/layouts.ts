@@ -1,5 +1,5 @@
-// Track layout check: lap length, tightest bends, elevation, and the closest approach between separate parts of the
-// lap (the scenery needs ~150 m between them; less than the road width means the track crosses itself). Also writes
+// Track layout check: course length, tightest bends, elevation, and the closest approach between separate parts of
+// the course (the scenery needs ~150 m between them; less than the road width means the track crosses itself). Also writes
 // an HTML page with every layout drawn to scale, for a screenshot.
 //
 //   tsx tools/racer/layouts.ts [out.html]
@@ -20,7 +20,7 @@ for (const def of TRACKS) {
   for (const f of t.frames) minR = Math.min(minR, 1 / Math.max(1e-6, Math.abs(f.kappa)));
   for (let i = 0; i < n; i += 3) {
     for (let j = i + 3; j < n; j += 3) {
-      const along = Math.min(j - i, n - (j - i)) * (t.length / n);
+      const along = (j - i) * (t.length / n);
       if (along < 450) continue;
       const a = t.frames[i].pos;
       const b = t.frames[j].pos;
@@ -37,7 +37,7 @@ for (const def of TRACKS) {
   let turn = 0;
   let r = Infinity;
   for (let k = 0; k <= n; k++) {
-    const f = t.frames[k % n];
+    const f = t.frames[Math.min(k, n - 1)];
     const on = Math.abs(f.kappa) > 1 / 330 && k < n;
     if (on) {
       if (i0 < 0) {
@@ -53,16 +53,17 @@ for (const def of TRACKS) {
     }
   }
   console.log(
-    `${def.id.padEnd(9)} L=${Math.round(t.length)}m w=${def.width} minR=${Math.round(minR)}m elev=${Math.round(Math.min(...ys))}..${Math.round(Math.max(...ys))} minSep=${Math.round(minSep)}m @${sepAt.map(Math.round).join('/')}`,
+    `${def.id.padEnd(9)} L=${Math.round(t.length)}m race=${Math.round(t.raceLength)}m rocks=${t.obstacles.length} w=${def.width} minR=${Math.round(minR)}m elev=${Math.round(Math.min(...ys))}..${Math.round(Math.max(...ys))} minSep=${Math.round(minSep)}m @${sepAt.map(Math.round).join('/')}`,
   );
   console.log(`          ${corners.join('  ')}`);
   const padInfo = def.boostPads.map(([fr, lat]) => {
     let k = 0;
-    for (let d = -60; d <= 120; d += 10) k = Math.max(k, Math.abs(t.frameAt(fr * t.length + d).kappa));
-    return `${Math.round(fr * t.length)}${lat ? `(${lat})` : ''}:R${k > 1e-4 ? Math.round(1 / k) : 'inf'}`;
+    for (let d = -60; d <= 120; d += 10) k = Math.max(k, Math.abs(t.frameAt(t.raceS(fr) + d).kappa));
+    return `${Math.round(t.raceS(fr))}${lat ? `(${lat})` : ''}:R${k > 1e-4 ? Math.round(1 / k) : 'inf'}`;
   });
   console.log(`          pads ${padInfo.join('  ')}`);
-  // Straights (|kappa| < 1/500 for 120 m or more): good places for boost pads, as fractions of the lap.
+  console.log(`          jumps ${t.jumps.map((j) => `${Math.round(j.lip)}:R${Math.round(1 / Math.max(1e-4, t.maxCurvature(j.s0 - 40, 200)))}`).join('  ')}  gorge ${t.gorgeS === null ? '-' : Math.round(t.gorgeS)}`);
+  // Straights (|kappa| < 1/500 for 120 m or more): good places for boost pads, as fractions of the course.
   const straights: string[] = [];
   let st0 = -1;
   for (let k = 0; k <= n; k++) {
@@ -79,18 +80,21 @@ for (const def of TRACKS) {
 
   const b = t.bounds;
   const span = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) + 200;
-  const path = t.frames.map((f, k) => `${k ? 'L' : 'M'}${(f.pos.x - b.min.x + 100).toFixed(0)},${(f.pos.z - b.min.z + 100).toFixed(0)}`).join('') + 'Z';
+  const path = t.frames.map((f, k) => `${k ? 'L' : 'M'}${(f.pos.x - b.min.x + 100).toFixed(0)},${(f.pos.z - b.min.z + 100).toFixed(0)}`).join('');
   const pads = def.boostPads
     .map(([fr, lat]) => {
-      const p = t.toWorld(fr * t.length, lat * (t.frameAt(fr * t.length).width / 2 - 6));
+      const p = t.toWorld(t.raceS(fr), lat * (t.frameAt(t.raceS(fr)).width / 2 - 6));
       return `<circle cx="${p.x - b.min.x + 100}" cy="${p.z - b.min.z + 100}" r="30" fill="orange"/>`;
     })
     .join('');
-  const s0 = t.frames[0].pos;
-  const s1 = t.frames[10].pos;
+  const marks =
+    t.jumps.map((j) => t.toWorld(j.lip, 0)).map((p) => `<rect x="${p.x - b.min.x + 70}" y="${p.z - b.min.z + 70}" width="60" height="60" fill="deepskyblue"/>`).join('') +
+    t.obstacles.map((o) => t.toWorld(o.s, o.x)).map((p) => `<circle cx="${p.x - b.min.x + 100}" cy="${p.z - b.min.z + 100}" r="10" fill="brown"/>`).join('');
+  const s0 = t.frameAt(t.startS).pos;
+  const s1 = t.frameAt(t.finishS).pos;
   svgs.push(
     `<div><b>${def.id}</b> ${Math.round(t.length)} m<br><svg viewBox="0 0 ${span} ${span}" width="380" height="380" style="background:#222">` +
-      `<path d="${path}" stroke="#ddd" stroke-width="${def.width}" fill="none"/>${pads}` +
+      `<path d="${path}" stroke="#ddd" stroke-width="${def.width}" fill="none"/>${pads}${marks}` +
       `<circle cx="${s0.x - b.min.x + 100}" cy="${s0.z - b.min.z + 100}" r="40" fill="red"/>` +
       `<circle cx="${s1.x - b.min.x + 100}" cy="${s1.z - b.min.z + 100}" r="25" fill="lime"/>` +
       `<text x="20" y="${span - 30}" fill="#aaa" font-size="${span / 25}">1 km = ${(1000 / span) * 380 | 0}px</text></svg></div>`,
