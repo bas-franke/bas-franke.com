@@ -22,8 +22,8 @@ function foundry(): MapData {
   // The furnace blocks the views across the dais; its top and health pack are a rocket jump away.
   b.block('platform', 0, 0, 8, 8, platH).block('stair', 0, 0, 2.5, 2.5, 8).pack(0, 8, 0);
   b.pair((p) => p.stairs('z', -1, 0, 8 + B.run(0, platH), 5, 0, platH).pack(5, platH, 5));
-  // Chimneys straddle the wall ledges: walk under the arch, but nobody sees along the whole ring.
-  marks(['tower', 'pillar', 'crate', 'ledge'], (p) => p.box('tower', 25, 0, -1.5, 27, 15, 1.5).box('tower', 27, ring + 2.4, -1.5, half, 15, 1.5));
+  // Chimneys (pink and teal by quarter) straddle the wall ledges: walk under the arch, but nobody sees along the whole ring.
+  marks(['tower', 'crate', 'tower', 'crate'], (p) => p.box('tower', 25, 0, -1.5, 27, 15, 1.5).box('tower', 27, ring + 2.4, -1.5, half, 15, 1.5));
   b.quad((p) => {
     const steps = B.run(ring, gantry);
     p.box('platform', half - 5, 0, -10 - steps, half, ring, 10 + steps).stairs('x', 1, half - 5 - B.run(0, ring), 6, 3, 0, ring);
@@ -31,12 +31,21 @@ function foundry(): MapData {
     p.stairs('z', -1, half - 2.5, -10, 5, ring, gantry).box('platform', half - 5, 0, -22, half, gantry, -10 - steps);
     p.box('platform', 22, 0, 22, half, gantry, half).padTo(v3(18, 0, 11), v3(26, gantry, 26));
     // Floor cover: pillars and a block on the gantry-to-gantry diagonal, a low wall in front of each dais staircase.
-    p.block('stair', 11.5, 11.5, 1.2, 1.2, 9).block('stair', 16.2, 16.2, 1.4, 1.4, 2.2);
-    p.block('stair', 0, 21, 3, 0.6, 2.2).pack(0, 0, 23.5);
-    p.block('stair', 19, -6, 1, 1, 1.4);
+    p.block('pillar', 11.5, 11.5, 1.2, 1.2, 9).block('crate', 16.2, 16.2, 1.4, 1.4, 2.2);
+    p.block('tower', 0, 21, 3, 0.6, 2.2).pack(0, 0, 23.5);
+    p.block('crate', 19, -6, 1, 1, 1.4);
     p.spawn(13.5, 0, 17.5).spawn(28, gantry, 28).spawn(29.5, ring, -6);
   });
-  return b.build({ id: 'foundry', accent: 0x2ed8a0, name: 'Foundry', half, skyColor: 0x3f9be8, fogColor: 0x5aa0e0, tint: { stair: 0x56607a, wall: 0xa04a32 } });
+  // Neon dusk: magenta blocks, yellow steelwork and the furnace core, teal crates, steel decks under a violet sky.
+  return b.build({
+    id: 'foundry',
+    accent: 0x3ee8f0,
+    name: 'Foundry',
+    half,
+    skyColor: 0x22308e,
+    fogColor: 0xc06c9e,
+    tint: { floor: 0x8e94aa, wall: 0xc23c8c, platform: 0xe2489e, stair: 0xf2c232, pillar: 0xf2c232, tower: 0xd8409a, crate: 0x2fbccc, ledge: 0xf2c232 },
+  });
 }
 
 /** Floating islands over the void, joined by bridges and pads; curbs line the edges, but fall off and you are gone. */

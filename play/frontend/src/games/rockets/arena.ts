@@ -9,7 +9,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { MapBox, MapData } from '@shared/rockets/map';
 import { INK, hullGeometry, inkLineMaterial, inkMaterial, toonRamp } from '../../engine/toon';
 import { BASE_SURFACES, Bucket, type Surface, type Visible, at, buildProps, edgeHazards, themeOf } from './arenaDecor';
-import { SUN_DIR, buildSky } from './arenaSky';
+import { buildSky, sunDirOf } from './arenaSky';
 import { TEX_SIZE, type TexKey, arenaTexture, mulberry } from './arenaTextures';
 
 /** Comic defaults; maps override per kind through `tint`. */
@@ -358,8 +358,11 @@ export function addArenaLights(scene: THREE.Scene, map: MapData) {
   scene.background = new THREE.Color(map.fogColor);
   // Light haze only: comic art keeps the far side readable.
   scene.fog = new THREE.Fog(map.fogColor, map.half * 1.6, Math.max(120, map.half * 5.5));
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a6a, 1.6));
-  const sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
+  const theme = themeOf(map);
+  const SUN_DIR = sunDirOf(theme);
+  const light = theme.light ?? { sky: 0xffffff, ground: 0x8a7a6a, hemi: 1.6, sun: 0xfff4e0, sunI: 2.4 };
+  scene.add(new THREE.HemisphereLight(light.sky, light.ground, light.hemi));
+  const sun = new THREE.DirectionalLight(light.sun, light.sunI);
   sun.position.copy(SUN_DIR).multiplyScalar(Math.hypot(18, 30, 12));
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);

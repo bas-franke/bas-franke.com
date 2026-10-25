@@ -23,6 +23,8 @@ import { type ArenaView, addArenaLights, buildArena } from './arena';
 import { buildFlag, buildFlagStand, buildReturnRing, updateFlagTime } from './flags';
 import { type CharacterPiece, type CharacterState, animateCharacter, buildCharacter, buildCharacterPieces, characterKey, updateCharacterPieces, warmupCharacters } from './character';
 import { loadLook } from './look';
+import { type Bloom, createBloom } from './bloom';
+import { themeOf } from './arenaDecor';
 import { WARHEAD_REST_Z, buildLauncher, buildPickup, buildRocket, warmupModels } from './models';
 import { QUALITY, type Quality, applyInput, applyQuality, settings, verticalFov } from './settings';
 
@@ -311,6 +313,7 @@ export class RocketsClient implements GameClient {
   private unsubSettings?: () => void;
   private effects?: Effects;
   private arena?: ArenaView;
+  private bloom?: Bloom;
   private map?: MapData;
   private readonly snaps = new SnapshotTimeline<RocketsSnapshot>();
   private readonly remotes = new Map<string, Remote>();
@@ -469,6 +472,7 @@ export class RocketsClient implements GameClient {
     this.unsubSettings?.();
     this.effects?.dispose();
     this.arena?.dispose();
+    this.bloom?.dispose();
     this.engine?.dispose();
     if (import.meta.env.DEV) delete (window as unknown as { __rockets?: RocketsClient }).__rockets;
   }
@@ -919,6 +923,11 @@ export class RocketsClient implements GameClient {
     addArenaLights(engine.scene, map);
     this.arena = buildArena(map);
     engine.scene.add(this.arena.group);
+    // Neon maps glow: bloom on the bright strips, signs and the sun.
+    if (themeOf(map).neon) {
+      const bloom = (this.bloom = createBloom(engine.renderer));
+      engine.renderHook = () => bloom.render(engine.scene, engine.camera);
+    }
     for (const pos of map.packs) {
       const pack = buildPickup('health');
       pack.position.set(pos.x, pos.y + 0.55, pos.z);

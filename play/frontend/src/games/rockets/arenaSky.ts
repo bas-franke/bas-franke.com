@@ -10,8 +10,10 @@ import { hullGeometry, inkMaterial, toonRamp } from '../../engine/toon';
 import { mulberry } from './arenaTextures';
 import { Bucket, type Theme, at } from './arenaDecor';
 
-/** Direction of the sun light set up in addArenaLights. */
+/** Default direction of the sun light set up in addArenaLights; themes may set their own. */
 export const SUN_DIR = new THREE.Vector3(18, 30, 12).normalize();
+
+export const sunDirOf = (theme: Theme) => (theme.sun ? new THREE.Vector3(...theme.sun).normalize() : SUN_DIR);
 
 type Disposable = { dispose(): void };
 
@@ -20,6 +22,8 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
   const zenith = new THREE.Color(map.skyColor);
   const horizon = new THREE.Color(map.fogColor);
   const space = !!theme.planet;
+  const dusk = !!theme.dusk;
+  const sunDir = sunDirOf(theme);
 
   // ---- dome ----
   const radius = 230;
@@ -34,9 +38,12 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       haze: { value: horizon.clone().lerp(new THREE.Color(0xffffff), 0.22) },
       deep: { value: zenith.clone().multiplyScalar(0.45).lerp(horizon, 0.25) },
       hazeAmount: { value: space ? 0.3 : 0.7 },
-      sunDir: { value: SUN_DIR },
-      sunColor: { value: new THREE.Color(map.id === 'canyon' ? 0xffe27a : 0xfff8dc) },
-      sunSize: { value: Math.cos(map.id === 'canyon' ? 0.11 : space ? 0.035 : 0.07) },
+      sunDir: { value: sunDir },
+      sunColor: { value: new THREE.Color(map.id === 'canyon' || dusk ? 0xffd86a : 0xfff8dc) },
+      sunSize: { value: Math.cos(map.id === 'canyon' ? 0.11 : dusk ? 0.09 : space ? 0.035 : 0.07) },
+      // Dusk: a warm glow round the low sun, spreading along the horizon.
+      glowColor: { value: new THREE.Color(0xff9a4a) },
+      glowAmount: { value: dusk ? 1 : 0 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -54,6 +61,8 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       uniform vec3 sunDir;
       uniform vec3 sunColor;
       uniform float sunSize;
+      uniform vec3 glowColor;
+      uniform float glowAmount;
       void main() {
         vec3 d = normalize(vDir);
         float h = d.y;
@@ -75,8 +84,17 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
           col = mix(horizon, deep, t);
         }
         float s = dot(d, sunDir);
+        if (glowAmount > 0.0) {
+          vec3 dirFlat = normalize(vec3(d.x, 0.0, d.z));
+          vec3 sunFlat = normalize(vec3(sunDir.x, 0.0, sunDir.z));
+          float side = max(dot(dirFlat, sunFlat), 0.0);
+          float low = 1.0 - smoothstep(-0.05, 0.45, h);
+          float g = pow(max(s, 0.0), 10.0) * 0.9 + pow(side, 3.0) * low * 0.75;
+          col = mix(col, glowColor, clamp(g, 0.0, 1.0) * glowAmount);
+          col += glowColor * pow(max(s, 0.0), 60.0) * 0.6 * glowAmount;
+        }
         float ring = sunSize - (1.0 - sunSize) * 0.35;
-        if (s > ring) col = s > sunSize ? sunColor : vec3(0.086, 0.07, 0.11);
+        if (s > ring) col = s > sunSize ? sunColor : (glowAmount > 0.0 ? mix(sunColor, glowColor, 0.5) : vec3(0.086, 0.07, 0.11));
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -119,11 +137,11 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     // Kept below ~18 degrees of elevation so at a level gaze they stay clear of the top HUD panels.
     const cy = 20 + rand() * 28;
     const blobs = 3 + Math.floor(rand() * 3);
-    const tint = new THREE.Color(0xffffff).lerp(horizon, 0.18);
+    const tint = dusk ? new THREE.Color(0xd88ab0).lerp(zenith, 0.35) : new THREE.Color(0xffffff).lerp(horizon, 0.18);
     for (let i = 0; i < blobs; i++) {
       const r = 7 + rand() * 6;
       const g = new THREE.IcosahedronGeometry(r, 1);
-      g.scale(1, 0.6, 1);
+      g.scale(dusk ? 1.6 : 1, dusk ? 0.22 : 0.6, 1);
       g.translate(cx + (i - blobs / 2) * r * 0.9, cy + rand() * 3, cz + (rand() - 0.5) * 6);
       lit.add(inked(g), tint);
     }
@@ -141,6 +159,12 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     ];
     // Floating islands get extra depth: a hazy far scatter and a closer, crisper ring.
     if (theme.skyline === 'islands') layers.unshift({ r: 222, n: 30, scale: 0.45, color: tone(0.86) }), layers.push({ r: 118, n: 9, scale: 0.75, color: tone(0.22) });
+    // A neon city: a dense far skyline and a closer ring of towers, dark blue-violet so their lights stand out.
+    if (theme.skyline === 'neon') {
+      const night = new THREE.Color(0x1a1840);
+      const city = (k: number) => night.clone().lerp(horizon, k);
+      layers.splice(0, 2, { r: 205, n: 44, scale: 0.8, color: city(0.4) }, { r: 165, n: 30, scale: 0.6, color: city(0.2) }, { r: 120, n: 16, scale: 0.7, color: city(0.06) });
+    }
     for (const layer of layers) {
       for (let i = 0; i < layer.n; i++) {
         const a = ((i + rand() * 0.6) / layer.n) * Math.PI * 2;
@@ -288,6 +312,35 @@ function silhouette(kind: Theme['skyline'], rand: () => number, k: number): Piec
   const boxy = (w: number, h: number, d: number, dx = 0, dz = 0) => column(new THREE.BoxGeometry(w, h - base, d), h, dx, dz);
   const cone = (r: number, h: number, seg: number, dx = 0, dz = 0, top = 0) => column(new THREE.CylinderGeometry(top, r, h - base, seg), h, dx, dz);
   switch (kind) {
+    case 'neon': {
+      // Skyscrapers with lit window bands and neon edge strips, sometimes a spire with a red light on top.
+      const out: Piece[] = [];
+      const towers = 2 + Math.floor(rand() * 2);
+      for (let i = 0; i < towers; i++) {
+        const h = (40 + rand() * 80) * k;
+        const w = (6 + rand() * 7) * k;
+        const dx = (i - (towers - 1) / 2) * 10 * k;
+        const dz = rand() * 8;
+        out.push(boxy(w, h, w, dx, dz));
+        if (rand() < 0.5) out.push(boxy(w * 0.6, h + 10 * k, w * 0.6, dx, dz));
+        const lit = [0x6af0ff, 0xff5ac8, 0xffc86a, 0x9a7aff][Math.floor(rand() * 4)];
+        // Window bands on the face toward the arena (local -x faces inward once placed).
+        for (let y = 4 * k; y < h - 3 * k; y += (2.2 + rand() * 1.5) * k) {
+          if (rand() < 0.35) continue;
+          const band = new THREE.BoxGeometry(0.3, 0.7 * k, w * (0.5 + rand() * 0.4));
+          out.push({ g: band.translate(-w / 2 - 0.2, y, 0), dx, dz, glow: lit, mix: 0.35 + rand() * 0.3 });
+        }
+        if (rand() < 0.6) {
+          const strip = new THREE.BoxGeometry(0.3, h * 0.7, 0.6 * k);
+          out.push({ g: strip.translate(-w / 2 - 0.25, h * 0.5, (rand() < 0.5 ? -1 : 1) * (w / 2 - 0.3 * k)), dx, dz, glow: rand() < 0.5 ? 0xff4ab8 : 0x4ae8ff, mix: 0.1 });
+        }
+        if (rand() < 0.35) {
+          out.push({ g: new THREE.CylinderGeometry(0.3, 0.3, 12 * k).translate(0, h + 6 * k, 0), dx, dz });
+          out.push({ g: new THREE.BoxGeometry(1.2, 1.2, 1.2).translate(0, h + 12 * k, 0), dx, dz, glow: 0xff3a3a, mix: 0 });
+        }
+      }
+      return out;
+    }
     case 'city': {
       const out: Piece[] = [];
       for (let i = 0; i < 3; i++) {

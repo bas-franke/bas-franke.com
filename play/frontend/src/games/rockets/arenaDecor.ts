@@ -11,7 +11,7 @@ import { TEX_SIZE, type TexKey, mulberry } from './arenaTextures';
 
 export type Visible = Exclude<BoxKind, 'clip'>;
 type Prop = 'lamps' | 'pipes' | 'banners' | 'crenels' | 'antennas' | 'chimneys' | 'billboards';
-export type Skyline = 'industry' | 'islands' | 'mesas' | 'pyramids' | 'spires' | 'castles' | 'volcanoes' | 'hills' | 'city' | 'none';
+export type Skyline = 'neon' | 'industry' | 'islands' | 'mesas' | 'pyramids' | 'spires' | 'castles' | 'volcanoes' | 'hills' | 'city' | 'none';
 
 export interface Surface {
   top: TexKey;
@@ -27,6 +27,14 @@ export interface Theme {
   lava?: boolean;
   stars?: number;
   planet?: boolean;
+  /** Dusk: a low warm sun over a violet sky, pink-lit clouds. */
+  dusk?: boolean;
+  /** Glowing light bars down the sides of the big blocks, and a lit core in the tallest central block. */
+  neon?: boolean;
+  /** Direction toward the sun (default: high afternoon). */
+  sun?: [number, number, number];
+  /** Hemisphere sky and ground colours and the sun's colour and strength. */
+  light?: { sky: number; ground: number; hemi: number; sun: number; sunI: number };
 }
 
 const s = (top: TexKey, side: TexKey = top): Surface => ({ top, side });
@@ -44,7 +52,16 @@ export const BASE_SURFACES: Record<Visible, Surface> = {
 };
 
 const THEMES: Record<string, Theme> = {
-  foundry: { surfaces: {}, props: ['pipes', 'lamps', 'banners', 'antennas', 'chimneys'], skyline: 'industry' },
+  foundry: {
+    surfaces: { wall: s('metal', 'panels'), floor: s('metal', 'strata') },
+    props: ['pipes', 'lamps', 'antennas', 'billboards'],
+    skyline: 'neon',
+    stars: 60,
+    dusk: true,
+    neon: true,
+    sun: [0.62, 0.2, -0.76],
+    light: { sky: 0xb4a2ff, ground: 0x6a3a68, hemi: 1.7, sun: 0xffa874, sunI: 2.5 },
+  },
   skyway: { surfaces: { floor: s('turf', 'strata'), platform: s('planks'), stair: s('planks') }, props: [], skyline: 'islands', under: 'rocks' },
   canyon: {
     surfaces: { floor: s('turf', 'strata'), ledge: s('stone', 'strata'), wall: s('stone', 'strata'), tower: s('stone', 'strata'), platform: s('planks'), stair: s('stone') },
@@ -388,6 +405,8 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
     }
   }
 
+  if (theme.neon) neonTrim(map, solid, glow, rand);
+
   if (theme.lava) {
     // A lava lake far down the pit: falling in is what kills you, so make it look like it.
     const y = map.killY + 5;
@@ -398,6 +417,82 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
       const crust = new THREE.CircleGeometry(1 + rand() * 3.5, 7);
       crust.rotateX(-Math.PI / 2);
       glow.add(at(crust, (rand() - 0.5) * half * 1.9, y + 0.05, (rand() - 0.5) * half * 1.9), rand() < 0.5 ? 0xc8361a : 0xffc040);
+    }
+  }
+}
+
+/** True when the point is inside (or on) a box other than `self`: a face there is hidden behind a neighbour. */
+const blockedAt = (boxes: MapBox[], self: MapBox, x: number, y: number, z: number) =>
+  boxes.some((o) => o !== self && o.kind !== 'clip' && x >= o.min.x && x <= o.max.x && y >= o.min.y && y <= o.max.y && z >= o.min.z && z <= o.max.z);
+
+/**
+ * Neon light bars down the open sides of the big blocks (pink, some cyan), a short strip under each top edge, and a
+ * glowing furnace core in the tallest block at the centre: vertical slots in a dark frame on every face.
+ */
+function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number) {
+  const pink = 0xff5ac8;
+  const cyan = 0x56f2ff;
+  let core: MapBox | null = null;
+  for (const b of map.boxes) {
+    if (b.kind === 'clip' || b.kind === 'wall' || b.kind === 'floor') continue;
+    const cx = (b.min.x + b.max.x) / 2;
+    const cz = (b.min.z + b.max.z) / 2;
+    if (Math.abs(cx) < 1 && Math.abs(cz) < 1 && (!core || b.max.y > core.max.y)) core = b;
+  }
+  for (const b of map.boxes) {
+    if (b === core || (b.kind !== 'platform' && b.kind !== 'tower' && b.kind !== 'pillar' && b.kind !== 'ledge')) continue;
+    const h = b.max.y - b.min.y;
+    if (h < 1.8) continue;
+    const color = rand() < 0.22 ? cyan : pink;
+    const faces: [number, number, boolean][] = [
+      [b.max.x, 1, false],
+      [b.min.x, -1, false],
+      [b.max.z, 1, true],
+      [b.min.z, -1, true],
+    ];
+    for (const [fixed, out, alongX] of faces) {
+      const a0 = alongX ? b.min.x : b.min.z;
+      const a1 = alongX ? b.max.x : b.max.z;
+      const len = a1 - a0;
+      if (len < 2.5) continue;
+      const pt = (a: number, off: number): [number, number] => (alongX ? [a, fixed + out * off] : [fixed + out * off, a]);
+      const yaw = alongX ? 0 : Math.PI / 2;
+      const barH = Math.min(h * 0.55, 2.6);
+      const midY = b.min.y + h * 0.45;
+      const inset = Math.min(0.7, len * 0.15);
+      for (const a of [a0 + inset, a1 - inset]) {
+        const [x, z] = pt(a, 0.035);
+        const [ox, oz] = pt(a, 0.3);
+        if (blockedAt(map.boxes, b, ox, midY, oz)) continue;
+        solid.add(at(box(0.26, barH + 0.16, 0.05), x, midY, z, yaw), 0x2a2634);
+        glow.add(at(box(0.12, barH, 0.07), x, midY, z, yaw), color);
+      }
+      if (len >= 5) {
+        const mid = (a0 + a1) / 2;
+        const y = b.max.y - Math.min(0.45, h * 0.15);
+        const [ox, oz] = pt(mid, 0.3);
+        if (!blockedAt(map.boxes, b, ox, y, oz)) {
+          const [x, z] = pt(mid, 0.035);
+          glow.add(at(box(Math.min(len * 0.4, 3), 0.09, 0.07), x, y, z, yaw), color);
+        }
+      }
+    }
+  }
+  if (core) {
+    const h = core.max.y - core.min.y;
+    const sx = core.max.x - core.min.x;
+    const slotH = h - 1.6;
+    const cy = core.min.y + 0.6 + slotH / 2;
+    for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const half = (nx ? sx : core.max.z - core.min.z) / 2;
+      const x = (core.min.x + core.max.x) / 2 + nx * (half + 0.03);
+      const z = (core.min.z + core.max.z) / 2 + nz * (half + 0.03);
+      const yaw = Math.atan2(nx, nz);
+      const w = Math.min(half * 0.9, 1.6);
+      solid.add(at(box(w + 0.5, slotH + 0.5, 0.12), x, cy, z, yaw), 0x2a2634);
+      glow.add(at(box(w, slotH, 0.16), x, cy, z, yaw), 0xff7a1e);
+      glow.add(at(box(w * 0.35, slotH, 0.18), x, cy, z, yaw), 0xffe08a);
+      for (let y = cy - slotH / 2 + 0.8; y < cy + slotH / 2; y += 1.4) solid.add(at(box(w + 0.1, 0.1, 0.2), x, y, z, yaw), 0x2a2634);
     }
   }
 }
