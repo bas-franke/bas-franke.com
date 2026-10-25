@@ -19,6 +19,17 @@ export const DIFFICULTIES: { id: BotDifficulty; label: string; blurb: string }[]
   { id: 'hard', label: 'Hard', blurb: 'Sharp aim, fast reactions. Bring your best.' },
 ];
 
+/** Games whose bots are not shooters describe their difficulties in their own words. */
+const GAME_DIFFICULTY_BLURBS: Partial<Record<GameId, Record<BotDifficulty, string>>> = {
+  garden: {
+    easy: 'Relaxed gardeners: slow to build, rarely upgrade.',
+    normal: 'Solid builders who cover the paths and upgrade.',
+    hard: 'Sharp placement, quick upgrades, ruthless sends in versus.',
+  },
+};
+
+export const difficultyBlurb = (game: GameId, d: (typeof DIFFICULTIES)[number]) => GAME_DIFFICULTY_BLURBS[game]?.[d.id] ?? d.blurb;
+
 /** Bots a quick-play match fills in next to you, capped by the game's seats. */
 const QUICK_BOTS = 4;
 export const quickBots = (game: GameId) => Math.max(GAMES[game].minPlayers - 1, Math.min(QUICK_BOTS, GAMES[game].maxPlayers - 1));

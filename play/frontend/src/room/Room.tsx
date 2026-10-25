@@ -5,7 +5,7 @@ import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
 import { GMODES } from '@shared/garden/constants';
 import { drTrackById } from '@shared/dustrunners/tracks';
-import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
+import { DIFFICULTIES, type QuickStart, difficultyBlurb, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
 import { loadLook } from '../games/rockets/look';
@@ -490,7 +490,7 @@ function WaitingRoom({
                     onClick={() => (setBots(bots, d.id), saveDifficulty(d.id))}
                   >
                     <b>{d.label}</b>
-                    <span>{d.blurb}</span>
+                    <span>{difficultyBlurb(room.game, d)}</span>
                   </button>
                 ))}
               </div>

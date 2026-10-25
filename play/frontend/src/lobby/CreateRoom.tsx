@@ -130,7 +130,7 @@ function Settings({
       const nick = name.trim() || 'Player';
       saveName(nick);
       const { room } = await createRoom({
-        name: roomName.trim() || `${nick}'s ${meta.name.toLowerCase()} room`,
+        name: roomName.trim() || defaultRoomName(nick, meta.name),
         game,
         maxPlayers,
         bots: botCount,
@@ -230,4 +230,10 @@ function Settings({
       </div>
     </form>
   );
+}
+
+/** "Nick's rockets room", or just "Nick's room" when the game's name would push it past the room name limit. */
+function defaultRoomName(nick: string, game: string) {
+  const full = `${nick}'s ${game.toLowerCase()} room`;
+  return full.length <= LIMITS.roomNameMax ? full : `${nick}'s room`;
 }
