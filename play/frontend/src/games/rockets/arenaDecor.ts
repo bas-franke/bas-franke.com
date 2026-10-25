@@ -487,6 +487,33 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number,
           glow.add(at(box(Math.min(len * 0.4, 3), 0.09, 0.07), x, y, z, yaw), color);
         }
       }
+      // Yellow and black hazard stripes along the foot of each corner, and warm lamps under the top edge.
+      const footY = b.min.y + 0.22;
+      for (const [s0, dir] of [[a0, 1], [a1, -1]] as const) {
+        const [ox, oz] = pt(s0 + dir * 0.6, 0.3);
+        if (blockedAt(map.boxes, b, ox, footY, oz)) continue;
+        const run = Math.min(1.6, len * 0.3);
+        const [bx, bz] = pt(s0 + (dir * run) / 2, 0.03);
+        solid.add(at(box(run, 0.36, 0.04), bx, footY, bz, yaw), 0x1e1c26);
+        for (let d = 0.1; d < run - 0.15; d += 0.32) {
+          const g = new THREE.PlaneGeometry(0.15, 0.32);
+          g.applyMatrix4(new THREE.Matrix4().makeShear(0, 0, 0.6, 0, 0, 0));
+          const [x, z] = pt(s0 + dir * (d + 0.08), 0.055);
+          // The plane faces +Z; turn it to the face's outward normal.
+          solid.add(at(g, x, footY, z, Math.atan2(alongX ? 0 : out, alongX ? out : 0)), 0xf2c232);
+        }
+      }
+      if (len >= 3 && h >= 2) {
+        for (const a of len >= 7 ? [a0 + len * 0.3, a1 - len * 0.3] : [(a0 + a1) / 2]) {
+          const y = b.max.y - Math.min(0.9, h * 0.25);
+          const [ox, oz] = pt(a, 0.3);
+          if (blockedAt(map.boxes, b, ox, y, oz)) continue;
+          const [x, z] = pt(a, 0.06);
+          const [lx, lz] = pt(a, 0.11);
+          solid.add(at(box(0.5, 0.2, 0.12), x, y, z, yaw), 0x2a2634);
+          glow.add(at(box(0.38, 0.1, 0.04), lx, y - 0.02, lz, yaw), 0xffa640);
+        }
+      }
       // A vent grille right of centre, low down: a dark frame with slats.
       if (len >= 4 && h >= 2.5) {
         const a = (a0 + a1) / 2 + len * 0.18;
