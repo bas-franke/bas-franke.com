@@ -236,10 +236,10 @@ def tube(name, pts, radii, mat, segs=20, squash=1.0, up=Vector((0, 0, 1)), cap_e
 
 # Gloved adult male hand, metres: phalanx lengths (proximal, middle, distal) and radii.
 FINGERS = {
-    "index": ((0.046, 0.027, 0.022), 0.0106),
-    "middle": ((0.050, 0.031, 0.023), 0.0110),
-    "ring": ((0.047, 0.029, 0.022), 0.0104),
-    "little": ((0.037, 0.022, 0.019), 0.0094),
+    "index": ((0.046, 0.027, 0.022), 0.0118),
+    "middle": ((0.050, 0.031, 0.023), 0.0123),
+    "ring": ((0.047, 0.029, 0.022), 0.0116),
+    "little": ((0.037, 0.022, 0.019), 0.0105),
 }
 
 
@@ -355,9 +355,9 @@ def knuckle_guard(name, pts, out, mat):
     return o
 
 
-def handguard_curve(y, extra, R=0.030):
+def handguard_curve(y, extra, R=0.031):
     """Around a handguard along +Y whose axis is 4.2 cm above ARM_PALM_L (rig space). psi = 0 at the bottom, positive
-    towards +x (the right side)."""
+    towards +x (the right side), -90 degrees on the left (camera) side, +-180 on top."""
     C = ARM_PALM_L + Vector((0, 0, 0.042))
 
     def c(psi):
@@ -367,36 +367,39 @@ def handguard_curve(y, extra, R=0.030):
 
 
 def left_hand(mats):
-    """Left hand under a handguard (rig space): palm under it, fingers up the right side, thumb up the left."""
+    """Left hand clamping a handguard from the left (rig space): the palm against its left side, the back of the hand
+    turned out towards the camera, fingers curled over the top, the thumb along the underside pointing forward."""
     glove, palm_mat, armor = mats["glove"], mats["palm"], mats["armor"]
     C = ARM_PALM_L + Vector((0, 0, 0.042))
     parts = []
     joints = {}
-    for name, y in (("index", 0.034), ("middle", 0.012), ("ring", -0.011), ("little", -0.031)):
+    for name, y in (("index", 0.036), ("middle", 0.013), ("ring", -0.01), ("little", -0.031)):
         lengths, r = FINGERS[name]
-        curve = handguard_curve(y, r + 0.0012)
-        mcp = handguard_curve(y - 0.004, 0.027)(math.radians(18))
-        js = finger_around(curve, mcp, lengths, math.radians(30))
+        base = handguard_curve(y, r + 0.0012)
+        curve = lambda t, base=base: base(-t)  # t increasing = up the left side and over the top
+        mcp = handguard_curve(y - 0.003, 0.026)(math.radians(-118 + (0.036 - y) * 160))
+        js = finger_around(curve, mcp, lengths, math.radians(122 - (0.036 - y) * 160))
         joints[name] = (js, r)
-    # Thumb: up the left side, pointing forward along the handguard.
-    th = [handguard_curve(-0.03, 0.030)(math.radians(-62)), handguard_curve(-0.012, 0.016)(math.radians(-88)), handguard_curve(0.012, 0.0125)(math.radians(-104)),
-          handguard_curve(0.036, 0.0115)(math.radians(-112)), handguard_curve(0.056, 0.0108)(math.radians(-116))]
+    # Thumb: from the heel of the hand under the handguard, pointing forward along its underside.
+    th = [handguard_curve(-0.034, 0.03)(math.radians(-48)), handguard_curve(-0.014, 0.017)(math.radians(-30)), handguard_curve(0.01, 0.0128)(math.radians(-12)),
+          handguard_curve(0.034, 0.0118)(math.radians(2)), handguard_curve(0.054, 0.011)(math.radians(8))]
     pv = Volume("PalmL")
-    pc = handguard_curve(0.0, 0.017)(math.radians(-14))
-    pv.ball(pc, 1.0, scale=(0.044, 0.046, 0.016), rot=Quaternion(Vector((0, 1, 0)), math.radians(-14)))
-    pv.ball(handguard_curve(-0.03, 0.02)(math.radians(-40)), 1.0, scale=(0.022, 0.02, 0.017))
-    pv.ball(handguard_curve(0.03, 0.02)(math.radians(-6)), 1.0, scale=(0.02, 0.018, 0.016))
-    wrist = C + Vector((-0.068, -0.052, -0.05))
+    psi_p = -78
+    pc = handguard_curve(0.0, 0.018)(math.radians(psi_p))
+    pv.ball(pc, 1.0, scale=(0.048, 0.05, 0.021), rot=Quaternion(Vector((0, 1, 0)), math.radians(-(180 + psi_p))))
+    pv.ball(handguard_curve(-0.03, 0.021)(math.radians(-50)), 1.0, scale=(0.022, 0.021, 0.018))
+    pv.ball(handguard_curve(0.03, 0.02)(math.radians(-96)), 1.0, scale=(0.02, 0.018, 0.016))
+    wrist = C + Vector((-0.066, -0.06, -0.044))
     for name in ("index", "middle", "ring", "little"):
         js, r = joints[name]
-        pv.capsule(pc.lerp(wrist, 0.25) + Vector((0, js[0].y - C.y, 0)) * 0.6, js[0], r * 0.92)
-    pv.ball(wrist + Vector((0.01, 0.012, 0.006)), 1.0, scale=(0.026, 0.022, 0.021))
+        pv.capsule(pc.lerp(wrist, 0.25) + Vector((0, js[0].y - C.y, 0)) * 0.6, js[0], r * 0.95)
+    pv.ball(wrist + Vector((0.01, 0.012, 0.006)), 1.0, scale=(0.027, 0.023, 0.022))
     pv.capsule(th[0], th[1], 0.0135)
     parts.append(pv.mesh("palmL", glove, 0.14))
     for name in ("index", "middle", "ring", "little"):
         js, r = joints[name]
-        parts.append(skin_chain(name + "L", js, [r * 1.08, r, r * 0.94, r * 0.86], glove))
-    parts.append(skin_chain("thumbL", th[1:], [0.0135, 0.0123, 0.0113, 0.0101], glove))
+        parts.append(skin_chain(name + "L", js, [r * 1.1, r * 1.02, r * 0.95, r * 0.86], glove))
+    parts.append(skin_chain("thumbL", th[1:], [0.0138, 0.0125, 0.0115, 0.0102], glove))
     for o in parts:
         o.data.materials.append(palm_mat)
         for poly in o.data.polygons:
@@ -415,20 +418,26 @@ def left_hand(mats):
 
 # ---- cuff, strap, sleeve ----------------------------------------------------------------------------------------------
 
-def gauntlet(name, wrist, d, up, mats, length=0.05):
+def gauntlet(name, wrist, d, up, mats, length=0.064):
     """Glove cuff up the wrist, a wrist strap with a velcro tab across the back."""
     glove, strap, velcro = mats["glove"], mats["strap"], mats["velcro"]
     a = wrist + d * 0.006
     b = wrist - d * length
-    cuff = tube(name + "Cuff", [a + d * 0.004, a, a.lerp(b, 0.5), b], [0.0255, 0.0272, 0.0292, 0.0312], glove, segs=22, squash=0.78, up=up)
-    s0 = wrist - d * 0.018
-    s1 = wrist - d * 0.040
-    band = tube(name + "Strap", [s0, s0.lerp(s1, 0.5), s1], [0.0312, 0.0318, 0.0326], strap, segs=22, squash=0.78, up=up)
-    # Velcro tab on the back of the wrist.
+    cuff = tube(name + "Cuff", [a + d * 0.004, a, a.lerp(b, 0.5), b], [0.028, 0.0302, 0.0328, 0.035], glove, segs=24, squash=0.8, up=up)
+    # A wide wrist strap with stitched keeper loops around it and a velcro tab across the back.
+    s0 = wrist + d * 0.002
+    s1 = wrist - d * 0.034
+    band = tube(name + "Strap", [s0 + d * 0.002, s0, s0.lerp(s1, 0.5), s1, s1 - d * 0.002], [0.032, 0.0345, 0.0352, 0.036, 0.0335], strap, segs=28, squash=0.8, up=up)
     x, y, _ = frame_for(d, up)
-    centre = wrist.lerp(wrist - d * 0.029, 1.0) + y * 0.0262
-    tab = tube(name + "Tab", [centre + x * 0.018, centre - x * 0.018], [0.0105, 0.0105], velcro, segs=8, squash=0.3, up=d)
-    return [cuff, band, tab]
+    mid = s0.lerp(s1, 0.5)
+    keepers = []
+    for k in range(7):
+        ang = k / 7 * math.tau + 0.3
+        rad = x * math.cos(ang) * 0.0362 + y * math.sin(ang) * 0.0362 * 0.8
+        keepers.append(tube(name + "Keeper%d" % k, [mid + rad - d * 0.017, mid + rad + d * 0.017], [0.0042, 0.0042], strap, segs=6, squash=0.45, up=rad.normalized()))
+    centre = mid + y * 0.0298
+    tab = tube(name + "Tab", [centre + x * 0.021, centre - x * 0.021], [0.0135, 0.0135], velcro, segs=8, squash=0.28, up=d)
+    return [cuff, band, tab] + keepers
 
 
 def arm_collider(name, pts, radii):
@@ -444,7 +453,7 @@ def sleeve(name, wrist, elbow, shoulder, d, up, mat, collider):
     end ring while the top is pinned; the extra length piles up in folds at the wrist."""
     segs = 28
     path_len = 0.30
-    start = wrist - d * 0.035  # final cuff position (just above the glove cuff)
+    start = wrist - d * 0.05  # final cuff position (just above the glove cuff and its strap)
     push = 0.06  # extra length at rest, pushed back during the sim
     axis_pts = []
     n_rings = 34
@@ -536,7 +545,7 @@ def sleeve(name, wrist, elbow, shoulder, d, up, mat, collider):
 
 # Per material: (bump strength, distance, layers[(kind, scale, detail, weight)], roughness base, roughness spread)
 DETAIL = {
-    "Glove": (0.25, 0.0008, [("noise", 420, 6, 0.6), ("voronoi", 260, 0, 0.4), ("waveb", 90, 0, 0.12)], 0.5, 0.14),
+    "Glove": (0.55, 0.0009, [("noise", 420, 6, 0.6), ("voronoi", 260, 0, 0.4), ("waveb", 90, 0, 0.12)], 0.7, 0.12),
     "GlovePalm": (0.9, 0.0012, [("voronoi", 380, 0, 1.0), ("noise", 120, 4, 0.4)], 0.82, 0.08),
     "GloveArmor": (0.35, 0.001, [("noise", 60, 3, 0.6), ("wave", 140, 0, 0.3)], 0.3, 0.1),
     "Strap": (0.7, 0.0014, [("wave", 600, 0, 1.0), ("noise", 200, 2, 0.2)], 0.7, 0.08),
@@ -695,7 +704,7 @@ def bake_maps(meshes):
 def build_arms():
     clear_scene()
     mats = {
-        "glove": material("Glove", (0.022, 0.022, 0.024), rough=0.48, spec=0.5),
+        "glove": material("Glove", (0.016, 0.016, 0.017), rough=0.62, spec=0.38),
         "palm": material("GlovePalm", (0.03, 0.03, 0.031), rough=0.82, spec=0.3),
         "armor": material("GloveArmor", (0.028, 0.029, 0.031), rough=0.3, spec=0.55),
         "strap": material("Strap", (0.02, 0.02, 0.021), rough=0.7, spec=0.35),

@@ -292,8 +292,9 @@ class NB:
 _mats = {}
 
 
-def pmat(name, base, rough, metal=0.0, wear=None, wear_rough=None, grain=None, bump=0.0, bump_scale=900.0, bump_kind="noise", grime=0.55, emission=None, vary=0.25):
-    """A procedural Principled material. `wear` is the colour of worn edges; `grain` = (dark, light) for wood."""
+def pmat(name, base, rough, metal=0.0, wear=None, wear_rough=None, grain=None, bump=0.0, bump_scale=900.0, bump_kind="noise", grime=0.55, emission=None, vary=0.25, scratches=0.0, rough_var=0.18):
+    """A procedural Principled material. `wear` is the colour of worn edges; `grain` = (dark, light) for wood;
+    `scratches` (0..1) adds fine scuffs along the gun in the wear colour; `rough_var` is the smudge roughness spread."""
     if name in _mats:
         return _mats[name]
     mat = bpy.data.materials.new(name)
@@ -339,6 +340,19 @@ def pmat(name, base, rough, metal=0.0, wear=None, wear_rough=None, grain=None, b
         col = nb.mix(1.0, base, comb.outputs[0], "MULTIPLY")
     if wear:
         col = nb.mix(edge, col, wear)
+    scr = None
+    if scratches and wear:
+        # Thin contour lines of a noise stretched along the barrel axis, clustered by a second, sparse noise.
+        st = nb.node("ShaderNodeMapping")
+        st.inputs["Scale"].default_value = (1.0, 0.06, 1.0)
+        st.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(4))
+        nb.link(obj_co, st.inputs["Vector"])
+        line = nb.noise(st.outputs["Vector"], 220.0, 2.0, 0.5)
+        d = nb.math("ABSOLUTE", nb.math("SUBTRACT", line.outputs["Fac"], 0.5))
+        scr = nb.mapr(d, 0.0, 0.006, 1.0, 0.0)
+        patch = nb.noise(obj_co, 22.0, 2.0)
+        scr = nb.math("MULTIPLY", scr, nb.mapr(patch.outputs["Fac"], 0.48, 0.62, 0.0, scratches), clamp=True)
+        col = nb.mix(scr, col, wear)
     # Grime in the crevices.
     ao = nb.node("ShaderNodeAmbientOcclusion", samples=8, inside=False)
     ao.inputs["Distance"].default_value = 0.012
@@ -350,9 +364,11 @@ def pmat(name, base, rough, metal=0.0, wear=None, wear_rough=None, grain=None, b
     nb.link(col, bsdf.inputs["Base Color"])
     # Roughness: base, smudges, polished edges.
     smudge = nb.noise(obj_co, 45.0, 4.0)
-    r = nb.mapr(smudge.outputs["Fac"], 0.3, 0.7, rough * 0.82, min(1.0, rough * 1.18))
+    r = nb.mapr(smudge.outputs["Fac"], 0.3, 0.7, rough * (1 - rough_var), min(1.0, rough * (1 + rough_var)))
     if wear_rough is not None:
         r = nb.math("ADD", nb.math("MULTIPLY", r, nb.math("SUBTRACT", 1.0, edge)), nb.math("MULTIPLY", edge, wear_rough))
+        if scr is not None:
+            r = nb.math("ADD", nb.math("MULTIPLY", r, nb.math("SUBTRACT", 1.0, scr)), nb.math("MULTIPLY", scr, wear_rough))
     nb.link(r, bsdf.inputs["Roughness"])
     bsdf.inputs["Metallic"].default_value = metal
     # Normal: rounded edges plus surface texture.
@@ -532,6 +548,8 @@ def bake_set(name, objs, size):
     for o in objs:
         for i, slot in enumerate(o.material_slots):
             m = slot.material
+            if m and m.get("glass"):
+                continue  # clear, tinted optics glass stays its own (blended) material
             if m and m.get("emissive"):
                 o.material_slots[i].material = glow_material(m)
             else:
@@ -765,17 +783,20 @@ def scope(g, M, y0, y1, z, r=0.0127, obj=0.024, oc=0.0195, mount_z=None, mat=Non
 
 
 def reddot(g, M, y, z, base_z):
-    """Aimpoint-style tube on a riser mount; returns the eye point."""
-    g.c(0.0175, y - 0.035, y + 0.035, z, M.alu, verts=28)
-    g.c(0.0195, y + 0.028, y + 0.04, z, M.alu, verts=28)
-    g.c(0.0195, y - 0.04, y - 0.028, z, M.alu, verts=28)
-    g.c(0.0155, y + 0.0385, y + 0.041, z, M.lens, verts=24)
+    """Aimpoint-style tube on a riser mount, bored open with tinted glass front and rear; returns the eye point."""
+    hollow(g.c(0.0175, y - 0.035, y + 0.035, z, M.alu, verts=28), 0.0145, y - 0.05, y + 0.05, z)
+    hollow(g.c(0.0195, y + 0.028, y + 0.04, z, M.alu, verts=28), 0.0145, y - 0.05, y + 0.05, z)
+    hollow(g.c(0.0195, y - 0.04, y - 0.028, z, M.alu, verts=28), 0.0145, y - 0.05, y + 0.05, z)
+    glass = mp5_glass()
+    g.c(0.0145, y + 0.033, y + 0.034, z, glass, verts=28, bev=0.0)
+    g.c(0.0145, y - 0.034, y - 0.033, z, glass, verts=28, bev=0.0)
     g.cz(0.006, 0.0, y + 0.005, z + 0.015, z + 0.023, M.alu)
     g.cx(0.006, 0.015, 0.023, y + 0.005, z, M.alu)
     g.b((0.022, 0.05, z - base_z - 0.012), (0, y, (z - 0.012 + base_z) / 2), M.alu, bev=0.002)
     g.cx(0.0035, -0.016, 0.016, y, base_z + 0.006, M.steel, verts=10)
     g.s(0.0016, (0, y + 0.02, z), M.reticle)
-    return (0, y - 0.06, z)
+    # The viewmodel holds the eye 6 mm above the sight point; this puts the eye on the optical axis.
+    return (0, y - 0.06, z - 0.006)
 
 
 def holo(g, M, y, base_z):
@@ -785,13 +806,14 @@ def holo(g, M, y, base_z):
     for sx in (-1, 1):
         g.b((0.0045, 0.05, 0.04), (sx * 0.0175, y + 0.018, base_z + 0.034), M.alu, bev=0.0015)
     g.b((0.039, 0.052, 0.0045), (0, y + 0.018, base_z + 0.054), M.alu, bev=0.0015)
-    g.b((0.029, 0.0015, 0.032), (0, y + 0.04, wz), M.lens, bev=0)
-    g.b((0.029, 0.0015, 0.032), (0, y - 0.006, wz), M.lens, bev=0)
+    glass = mp5_glass()
+    g.b((0.029, 0.0015, 0.032), (0, y + 0.04, wz), glass, bev=0)
+    g.b((0.029, 0.0015, 0.032), (0, y - 0.006, wz), glass, bev=0)
     g.add(ring_y(0.0042, 0.00045, y + 0.03, wz, M.reticle, segs=20))
     g.s(0.0007, (0, y + 0.03, wz), M.reticle)
     for k in range(3):
         g.b((0.006, 0.004, 0.006), (-0.008 + k * 0.008, y - 0.048, base_z + 0.012), M.rubber)
-    return (0, y - 0.06, wz)
+    return (0, y - 0.06, wz - 0.006)
 
 
 def aperture(g, M, y, z, r=0.0045, base=0.012, ears=True, mat=None):
@@ -1102,62 +1124,268 @@ def g_garand(M):
     return g.done()
 
 
+def sweep_y(sec, y0, y1, mat, bev=0.0012, segs=2, angle=35):
+    """Cross-section (x, z points around) extruded along +Y from y0 to y1 (receivers, rails, housings)."""
+    bm = bmesh.new()
+    vs = [bm.verts.new((x, y0, z)) for (x, z) in sec]
+    f = bm.faces.new(vs)
+    res = bmesh.ops.extrude_face_region(bm, geom=[f])
+    moved = [e for e in res["geom"] if isinstance(e, bmesh.types.BMVert)]
+    bmesh.ops.translate(bm, vec=(0, y1 - y0, 0), verts=moved)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    obj = mesh_obj("sweep", bm, mat)
+    return hard_surface(obj, bev, segs, angle)
+
+
+def rrect(w, h, r, cx=0.0, cz=0.0, n=4):
+    """Rounded rectangle (x, z) points, counter-clockwise."""
+    pts = []
+    for (sx, sz, a0) in ((1, 1, 0), (-1, 1, 90), (-1, -1, 180), (1, -1, 270)):
+        ccx, ccz = cx + sx * (w / 2 - r), cz + sz * (h / 2 - r)
+        for k in range(n + 1):
+            a = math.radians(a0 + 90 * k / n)
+            pts.append((ccx + math.cos(a) * r, ccz + math.sin(a) * r))
+    return pts
+
+
+def stamp_text(text, size, loc, side, mat, depth=0.00035):
+    """Raised stamped lettering on a receiver side (side -1: left, read with the muzzle on the viewer's left)."""
+    cu = bpy.data.curves.new("txt", "FONT")
+    cu.body = text
+    cu.size = size
+    cu.extrude = depth
+    cu.align_x = "CENTER"
+    cu.align_y = "CENTER"
+    cu.resolution_u = 3
+    o = link(bpy.data.objects.new("txt", cu))
+    o.data.materials.append(mat)
+    # Text x -> along the gun (towards the rear on the left side), text y -> up, text normal -> out of the side.
+    if side < 0:
+        m = Matrix(((0, 0, -1), (-1, 0, 0), (0, 1, 0))).to_4x4()
+    else:
+        m = Matrix(((0, 0, 1), (1, 0, 0), (0, 1, 0))).to_4x4()
+    o.matrix_world = Matrix.Translation(loc) @ m
+    o = to_mesh(o)
+    smooth_all(o)
+    return o
+
+
+def hollow(o, r, y0, y1, z):
+    """Bores a hole along +Y through `o` (optic housings)."""
+    cut = cyl_between((0, y0, z), (0, y1, z), r, o.data.materials[0], 32, bev=0.0)
+    for m in list(cut.modifiers):
+        cut.modifiers.remove(m)
+    b = o.modifiers.new("Bore", "BOOLEAN")
+    b.operation = "DIFFERENCE"
+    b.solver = "EXACT"
+    b.object = cut
+    o = to_mesh(o)
+    bpy.data.objects.remove(cut, do_unlink=True)
+    return o
+
+
+def hollow_x(o, r, x, y, z):
+    """Drills a hole across x through `o` at (y, z) (lightening holes in sight ears)."""
+    cut = cyl_between((x - 0.01, y, z), (x + 0.01, y, z), r, o.data.materials[0], 16, bev=0.0)
+    for m in list(cut.modifiers):
+        cut.modifiers.remove(m)
+    b = o.modifiers.new("Hole", "BOOLEAN")
+    b.operation = "DIFFERENCE"
+    b.solver = "EXACT"
+    b.object = cut
+    o = to_mesh(o)
+    bpy.data.objects.remove(cut, do_unlink=True)
+    return o
+
+
+def mp5_glass():
+    mat = bpy.data.materials.get("SightGlass")
+    if mat:
+        return mat
+    mat = bpy.data.materials.new("SightGlass")
+    mat.use_nodes = True
+    mat["glass"] = True
+    mat["metal"] = 0.0
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf.inputs["Base Color"].default_value = (0.55, 0.45, 0.32, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.04
+    bsdf.inputs["Metallic"].default_value = 0.0
+    bsdf.inputs["Alpha"].default_value = 0.16
+    try:
+        mat.surface_render_method = "BLENDED"
+    except AttributeError:
+        mat.blend_method = "BLEND"
+    return mat
+
+
+def mp5_optic(g, M, body, y, base_z):
+    """Boxy micro red dot (T2 style) on a Picatinny clamp: square-shouldered housing, lens tubes front and rear,
+    turrets, a cross-bolt; tinted glass with the dot inside. Returns the eye point."""
+    oz = base_z + 0.024  # optical axis
+    L = 0.05
+    # Clamp base on the rail, cross bolt and recoil lug.
+    g.add(sweep_y(rrect(0.03, 0.009, 0.0015, 0, base_z + 0.0045), y - 0.024, y + 0.024, body, bev=0.0008))
+    for sx in (-1, 1):
+        g.add(sweep_y(P((sx * 0.0135, base_z + 0.008), (sx * 0.0175, base_z + 0.002), (sx * 0.0175, base_z - 0.004), (sx * 0.0135, base_z - 0.004)), y - 0.02, y + 0.02, body, bev=0.0005))
+    g.cx(0.0034, -0.019, 0.019, y + 0.006, base_z + 0.002, M.steel, verts=12)
+    g.cx(0.0048, 0.017, 0.021, y + 0.006, base_z + 0.002, body, verts=6)
+    # Riser between clamp and housing.
+    g.add(sweep_y(rrect(0.022, 0.012, 0.002, 0, base_z + 0.013), y - 0.02, y + 0.018, body, bev=0.001))
+    # Housing: a squared body with big chamfers, square-shouldered lens frames front and rear (open, so the scene
+    # shows through the glass), a short sunshade over the front.
+    hollow(g.add(sweep_y(rrect(0.031, 0.031, 0.007, 0, oz, n=3), y - L / 2 + 0.006, y + L / 2 - 0.004, body, bev=0.0012)), 0.0128, y - L, y + L, oz)
+    hollow(g.add(sweep_y(rrect(0.036, 0.036, 0.0085, 0, oz + 0.001, n=4), y + L / 2 - 0.008, y + L / 2 + 0.01, body, bev=0.0015)), 0.0142, y - L, y + L, oz)
+    hollow(g.add(sweep_y(rrect(0.036, 0.036, 0.0085, 0, oz + 0.001, n=4), y - L / 2 - 0.006, y - L / 2 + 0.008, body, bev=0.0015)), 0.0142, y - L, y + L, oz)
+    g.ring(0.0142, 0.0012, y - L / 2 - 0.006, oz, body, segs=32)
+    g.ring(0.0142, 0.0012, y + L / 2 + 0.01, oz, body, segs=32)
+    # Turrets: elevation on top, windage on the right, the battery/brightness knob on the left.
+    g.cz(0.0075, 0, y + 0.002, oz + 0.013, oz + 0.022, body, verts=20)
+    g.cz(0.0062, 0, y + 0.002, oz + 0.021, oz + 0.0235, body, verts=20)
+    g.cx(0.0075, 0.012, 0.022, y + 0.002, oz, body, verts=20)
+    g.cx(0.0062, 0.021, 0.0235, y + 0.002, oz, body, verts=20)
+    g.cx(0.0085, -0.023, -0.012, y - 0.004, oz - 0.002, body, verts=24)
+    for k in range(10):  # grip ribs on the knob
+        a = k / 10 * math.tau
+        g.b((0.009, 0.0016, 0.0016), (-0.0175, y - 0.004 + math.cos(a) * 0.0086, oz - 0.002 + math.sin(a) * 0.0086), body, rot=(a, 0, 0), bev=0.0002)
+    # Glass (front and rear, tinted, see-through) and the dot.
+    glass = mp5_glass()
+    g.c(0.0142, y + L / 2 + 0.0035, y + L / 2 + 0.0045, oz, glass, verts=28, bev=0.0)
+    g.c(0.0142, y - L / 2 + 0.002, y - L / 2 + 0.003, oz, glass, verts=28, bev=0.0)
+    g.s(0.0011, (0, y + 0.01, oz), M.reticle)
+    return (0, y - L / 2 - 0.03, oz)
+
+
 def g_mp7(M):
-    """MP5SD (the `mp7` id): integrally suppressed, red dot on a claw mount, A3 collapsing stock."""
-    g = Gun("mp7", 768)
-    bz = 0.075
-    # Stamped receiver: a tall tube with a rounded top, pressed ribs and the rear sight drum.
-    g.p(P((-0.17, 0.042), (0.15, 0.042), (0.158, 0.05), (0.158, 0.098), (0.15, 0.106), (-0.165, 0.106), (-0.172, 0.098), (-0.172, 0.05)), 0.042, M.park, bev=0.006, segs=4)
+    """MP5SD (the `mp7` id): stamped receiver, integral suppressor with the slim SD handguard, cocking tube, boxy red
+    dot on a rail, Navy trigger group, curved 30-round magazine, collapsed A3 stock; worn black finish."""
+    g = Gun("mp7", 2048)
+    finish = pmat("MP5Black", (0.055, 0.054, 0.054), 0.4, 0.5, wear=(0.46, 0.44, 0.4), wear_rough=0.2, bump=0.35, bump_scale=1700, grime=0.45, vary=0.35, scratches=0.4, rough_var=0.4)
+    coat = pmat("MP5Coat", (0.028, 0.028, 0.029), 0.7, 0.25, wear=(0.2, 0.2, 0.2), wear_rough=0.4, bump=0.9, bump_scale=650, bump_kind="voronoi", grime=0.55, vary=0.35)
+    poly = pmat("MP5Polymer", (0.02, 0.02, 0.021), 0.6, 0.0, wear=(0.09, 0.09, 0.095), wear_rough=0.4, bump=0.2, bump_scale=2400, vary=0.2)
+    stip = pmat("MP5Stipple", (0.018, 0.018, 0.019), 0.78, 0.0, wear=(0.075, 0.075, 0.08), bump=0.85, bump_scale=1100, bump_kind="voronoi")
+    hgm = pmat("MP5Handguard", (0.021, 0.021, 0.022), 0.74, 0.0, wear=(0.09, 0.09, 0.095), wear_rough=0.5, bump=0.6, bump_scale=900, bump_kind="voronoi", vary=0.25)
+    red = pmat("MP5Red", (0.55, 0.035, 0.03), 0.55, 0.0, grime=0.8, vary=0.1)
+    white = pmat("MP5White", (0.7, 0.68, 0.62), 0.55, 0.0, grime=0.8, vary=0.1)
+    optic = pmat("OpticAlu", (0.03, 0.03, 0.032), 0.45, 0.5, wear=(0.5, 0.5, 0.52), wear_rough=0.25, bump=0.12, bump_scale=1800)
+    bz = 0.085  # bore / suppressor axis
+    ry0, ry1 = -0.178, 0.112  # receiver ends
+    # Stamped receiver: square-sided tube with a round top, rear end cap.
+    rec = [(0.0215, 0.046)] + [(math.cos(math.radians(a)) * 0.0215, 0.091 + math.sin(math.radians(a)) * 0.0215) for a in range(0, 181, 15)] + [(-0.0215, 0.046)]
+    g.add(sweep_y(rec, ry0, ry1, finish, bev=0.0016, segs=3))
+    g.add(sweep_y(rrect(0.046, 0.074, 0.008, 0, 0.081), ry0 - 0.008, ry0 + 0.002, finish, bev=0.0015))
     for sx in (-1, 1):
-        g.b((0.0024, 0.25, 0.006), (sx * 0.0214, -0.02, 0.072), M.park, bev=0.0008)
-        g.b((0.0024, 0.09, 0.004), (sx * 0.0214, 0.1, 0.06), M.park, bev=0.0008)
-        screw(g, M, sx * 0.0215, -0.15, 0.06, r=0.0032, mat=M.park)
-        screw(g, M, sx * 0.0215, 0.02, 0.05, r=0.0032, mat=M.park)
-    g.b((0.0022, 0.05, 0.016), (0.0213, 0.03, 0.084), M.black, bev=0.0004)
-    # Cocking tube over the suppressor, front sight hood at its end.
-    g.c(0.0095, 0.15, 0.31, 0.112, M.park, verts=20)
-    g.p(P((0.29, 0.1), (0.322, 0.1), (0.322, 0.13), (0.29, 0.124)), 0.026, M.park, bev=0.003)
-    g.ring(0.0105, 0.0016, 0.312, 0.137, M.park, segs=20)
-    post(g, M, 0.312, 0.142, h=0.012, ears=False, mat=M.park)
-    # Rear drum sight.
-    g.cx(0.011, -0.016, 0.016, -0.14, 0.118, M.park, verts=20)
-    g.b((0.03, 0.02, 0.012), (0, -0.14, 0.107), M.park, bev=0.002)
-    # Claw mount with a rail and the red dot.
-    g.b((0.034, 0.1, 0.012), (0, -0.03, 0.111), M.alu, bev=0.002)
-    rail(g, M.alu, -0.08, 0.02, 0.121)
-    eye = reddot(g, M, -0.03, 0.158, 0.121)
-    g.sight = eye
-    # Cocking handle (left, folded forward): the part that racks.
+        x = sx * 0.0222
+        # Pressed stiffening ribs along the sides, the stock rail groove up top, spot welds at the front.
+        g.b((0.0018, ry1 - ry0 - 0.03, 0.0042), (x, (ry0 + ry1) / 2 - 0.005, 0.098), finish, bev=0.0008)
+        g.b((0.0016, 0.13, 0.0034), (x, -0.075, 0.064), finish, bev=0.0007)
+        g.b((0.0014, 0.075, 0.012), (x, 0.065, 0.06), finish, bev=0.0012)
+        for k in range(4):
+            g.cx(0.0017, x - sx * 0.0004, x + sx * 0.001, 0.02 + k * 0.022, 0.081, finish, verts=10)
+        # Trigger-housing push pins and the front pin.
+        for (py, pz) in ((-0.162, 0.058), (-0.04, 0.052), (0.09, 0.052)):
+            g.cx(0.0034, x - sx * 0.0005, x + sx * 0.0016, py, pz, M.steel, verts=14)
+            g.cx(0.0019, x + sx * 0.0012, x + sx * 0.0021, py, pz, M.black, verts=10)
+    # Stamped markings: model and serial line on the left (camera side), on the right for the third-person view.
+    letter = pmat("MP5Letter", (0.3, 0.29, 0.27), 0.4, 0.8, grime=0.7, vary=0.2)
+    g.add(stamp_text("MP5", 0.014, Vector((-0.0229, 0.068, 0.061)), -1, letter))
+    g.add(stamp_text("S  E  F", 0.0058, Vector((-0.0182, -0.004, 0.037)), -1, red, depth=0.0002))
+    g.add(stamp_text("Kal. 9mm x19  SD3", 0.0042, Vector((-0.0217, -0.04, 0.084)), -1, finish, depth=0.0002))
+    g.add(stamp_text("MP5 SD3", 0.008, Vector((0.0217, 0.03, 0.084)), 1, finish))
+    # Cocking tube over the suppressor, tied in at the receiver; slot for the handle; front sight base and hooded post.
+    tz = bz + 0.031
+    g.c(0.0105, ry1 - 0.01, 0.335, tz, finish, verts=24)
+    g.c(0.0112, ry1 - 0.012, ry1 + 0.012, tz, finish, verts=24)
+    g.b((0.0024, 0.15, 0.003), (-0.0098, 0.24, tz + 0.001), M.black, bev=0.0002)
+    g.add(sweep_y(P((-0.0105, tz), (0.0105, tz), (0.012, bz + 0.01), (-0.012, bz + 0.01)), ry1 - 0.004, ry1 + 0.04, finish, bev=0.002))
+    g.add(sweep_y(P((-0.012, tz + 0.004), (0.012, tz + 0.004), (0.016, bz + 0.012), (0.016, bz - 0.004), (-0.016, bz - 0.004), (-0.016, bz + 0.012)), 0.3, 0.338, finish, bev=0.002))
+    g.c(0.0285, 0.302, 0.336, bz, finish, verts=36)
+    fz = tz + 0.026
+    g.ring(0.0108, 0.0022, 0.322, fz - 0.002, finish, segs=24)
+    g.p(P((0.31, tz + 0.006), (0.334, tz + 0.006), (0.33, fz - 0.008), (0.314, fz - 0.008)), 0.014, finish, bev=0.002)
+    post(g, M, 0.322, fz - 0.003, h=0.012, ears=False, mat=finish)
+    # Rear drum sight with protective ears.
+    dy, dz = -0.152, 0.124
+    g.cx(0.0105, -0.0105, 0.0105, dy, dz, finish, verts=28)
+    for k in range(18):  # knurled drum rim
+        a = k / 18 * math.tau
+        g.b((0.0024, 0.0016, 0.0016), (-0.0095, dy + math.cos(a) * 0.0104, dz + math.sin(a) * 0.0104), finish, rot=(a, 0, 0), bev=0.0002)
+    for k in range(4):  # the four apertures, the one in use on top
+        a = k * math.pi / 2 + math.pi / 2
+        g.cx(0.0019, -0.0108, -0.0085, dy + math.cos(a) * 0.0062, dz + math.sin(a) * 0.0062, M.black, verts=10)
+    g.c(0.0022, dy - 0.009, dy + 0.009, dz + 0.0105, M.black, verts=12)
+    g.add(sweep_y(rrect(0.028, 0.012, 0.003, 0, 0.113), dy - 0.016, dy + 0.016, finish, bev=0.0012))
+    g.cx(0.0028, -0.0155, 0.0155, dy + 0.009, 0.111, M.steel, verts=10)
+    # Protective ears: chamfered plates either side of the drum with a lightening hole, joined low at the front.
+    for sx in (-1, 1):
+        ear = g.p(P((dy - 0.017, 0.108), (dy + 0.017, 0.108), (dy + 0.013, 0.131), (dy + 0.006, 0.137), (dy - 0.008, 0.137), (dy - 0.015, 0.128)), 0.0034, finish, x=sx * 0.0128, bev=0.0009)
+        hollow_x(ear, 0.0032, sx * 0.0128, dy + 0.004, 0.118)
+    g.b((0.029, 0.006, 0.006), (0, dy + 0.014, 0.112), finish, bev=0.0012)
+    # Claw mount / Picatinny rail on the receiver top, clamp knobs on the right.
+    rz = 0.127
+    g.add(sweep_y(P((-0.0125, 0.108), (0.0125, 0.108), (0.0125, rz - 0.006), (-0.0125, rz - 0.006)), -0.03, 0.09, finish, bev=0.0012))
+    for yy in (-0.018, 0.078):
+        g.b((0.05, 0.016, 0.009), (0, yy, 0.108), finish, bev=0.0015)
+        g.cx(0.0055, 0.024, 0.031, yy, 0.108, finish, verts=18)
+    rail(g, finish, -0.03, 0.09, rz)
+    for k in range(11):  # rail slot numbers as small white ticks
+        g.b((0.0011, 0.0012, 0.0006), (-0.0108, -0.024 + k * 0.01, rz - 0.0012), white, bev=0.0)
+    g.sight = mp5_optic(g, M, optic, 0.03, rz)
+    # Cocking handle (left, folded forward at the front of the tube): the part that racks.
     g.part = "bolt"
-    g.add(cyl_between((-0.012, 0.27, 0.112), (-0.03, 0.262, 0.118), 0.0035, M.park, 12))
-    g.b((0.008, 0.016, 0.01), (-0.034, 0.262, 0.12), M.poly, bev=0.002)
+    g.add(cyl_between((-0.009, 0.292, tz + 0.002), (-0.026, 0.286, tz + 0.008), 0.0034, finish, 12))
+    g.b((0.01, 0.022, 0.011), (-0.03, 0.29, tz + 0.009), poly, rot=(0, math.radians(-10), 0), bev=0.0025)
     g.part = None
-    # Integral suppressor with the slim SD handguard over its rear half.
-    g.c(0.0245, 0.158, 0.47, bz, M.park, verts=32)
-    g.c(0.0255, 0.465, 0.478, bz, M.park, verts=32)
-    g.c(0.006, 0.476, 0.4785, bz, M.black, verts=16)
-    g.c(0.031, 0.165, 0.31, bz - 0.004, M.poly, verts=28)
-    for k in range(6):
-        g.ring(0.0312, 0.0018, 0.19 + k * 0.022, bz - 0.004, M.stipple, segs=24)
-    g.c(0.032, 0.16, 0.168, bz - 0.004, M.poly, verts=28)
-    # Lower: polymer trigger group with a ribbed grip, guard, selector.
-    g.p(P((-0.05, 0.044), (0.05, 0.044), (0.045, 0.026), (-0.04, 0.022), (-0.06, 0.03)), 0.034, M.poly, bev=0.003)
-    grip(g, M.stipple, d=0.044, w=0.031, zt=0.03, zb=-0.078, rake=20, grooves=3)
-    guard(g, M.poly, 0.012, 0.062, 0.026, 0.0, r=0.0035)
+    # Integral suppressor: textured coating, front cap with a chamfer and the bore.
+    g.c(0.0262, 0.13, 0.535, bz, coat, verts=40)
+    g.c(0.0266, 0.53, 0.548, bz, finish, r2=0.0245, verts=40, bev=0.001)
+    g.c(0.0078, 0.546, 0.5486, bz, M.black, verts=16)
+    for yy in (0.338, 0.5):
+        g.ring(0.0264, 0.0011, yy, bz, finish, segs=40)
+    # Slim SD handguard over the rear of the suppressor: tapered polymer sleeve with grip ribs underneath.
+    g.c(0.0335, 0.118, 0.13, bz, poly, r2=0.0332, verts=40)
+    g.c(0.0332, 0.13, 0.29, bz, hgm, r2=0.0315, verts=40)
+    g.c(0.0315, 0.29, 0.3, bz, poly, r2=0.0302, verts=40)
+    for k in range(9):
+        a = math.radians(-90 + (k - 4) * 14)
+        g.add(cyl_between((math.cos(a) * 0.0326, 0.155, bz + math.sin(a) * 0.0326), (math.cos(a) * 0.031, 0.272, bz + math.sin(a) * 0.031), 0.0016, poly, 8))
+    # Lower: polymer Navy trigger group, ribbed grip, wide guard, ambidextrous selector with painted pictograms.
+    g.p(P((-0.165, 0.047), (0.062, 0.047), (0.062, 0.03), (0.04, 0.022), (-0.045, 0.02), (-0.075, 0.03), (-0.12, 0.04), (-0.165, 0.044)), 0.036, poly, bev=0.003, segs=3)
+    grip(g, stip, d=0.046, w=0.032, zt=0.03, zb=-0.082, rake=20, grooves=3)
+    guard(g, poly, 0.008, 0.066, 0.026, -0.003, r=0.0042)
     trigger(g, M.steel, 0.032, 0.026)
-    g.p(P((-0.045, 0.036), (-0.028, 0.036), (-0.026, 0.044), (-0.045, 0.046)), 0.003, M.park, x=-0.0186, bev=0.0006)
-    g.cx(0.004, -0.019, 0.019, -0.036, 0.036, M.steel, verts=10)
-    # Magazine well and the curved 30-round 9 mm magazine.
-    g.b((0.03, 0.034, 0.022), (0, 0.095, 0.036), M.park, bev=0.002)
-    curved_mag(g, M.park, 0.112, 0.078, 0.03, 0.17, 0.06, 0.024, ribs=4)
-    g.b((0.005, 0.01, 0.008), (0.0, 0.07, 0.03), M.park, bev=0.001)
-    # A3 stock, collapsed (it would poke into the first-person view extended): short struts and a rubber butt cap.
     for sx in (-1, 1):
-        g.add(cyl_between((sx * 0.017, -0.168, 0.088), (sx * 0.017, -0.215, 0.086), 0.0045, M.park, 12))
-        g.add(cyl_between((sx * 0.017, -0.168, 0.058), (sx * 0.017, -0.215, 0.05), 0.0045, M.park, 12))
-    g.p(P((-0.21, 0.098), (-0.225, 0.1), (-0.233, 0.09), (-0.233, -0.02), (-0.225, -0.03), (-0.21, -0.028)), 0.04, M.rubber, bev=0.004, segs=3)
-    sling_loop(g, M, -0.12, 0.04, x=0.022)
-    g.muzzle = (0, 0.479, bz)
+        x = sx * 0.0186
+        g.cx(0.006, x, x + sx * 0.003, -0.034, 0.037, poly, verts=16)
+        g.p(P((-0.036, 0.034), (-0.018, 0.04), (-0.016, 0.046), (-0.034, 0.043)), 0.0028, poly, x=x + sx * 0.003, bev=0.0006)
+        for k, mat in enumerate((white, red, red, red)):
+            a = math.radians(140 - k * 30)
+            g.cx(0.0024, x, x + sx * 0.0006, -0.034 + math.cos(a) * 0.011, 0.037 + math.sin(a) * 0.011, mat, verts=10)
+        g.b((0.0006, 0.007, 0.0024), (x + sx * 0.0004, -0.05, 0.03), red, bev=0.0)
+    # Magazine well, paddle release and the curved 30-round magazine with witness holes.
+    g.add(sweep_y(rrect(0.031, 0.03, 0.003, 0, 0.034), 0.066, 0.118, finish, bev=0.0012))
+    g.p(P((0.058, 0.022), (0.068, 0.022), (0.066, 0.006), (0.054, 0.004)), 0.016, poly, bev=0.0015)
+    g.cx(0.0045, 0.0145, 0.0185, 0.108, 0.03, M.steel, verts=14)
+    curved_mag(g, finish, 0.113, 0.077, 0.03, 0.195, 0.065, 0.0235, ribs=0)
+    for k in range(4):
+        t = 0.3 + k * 0.17
+        z = 0.03 - 0.195 * t
+        yy = 0.095 + 0.065 * t * t
+        for sx in (-1, 1):
+            g.add(cyl_between((sx * 0.0112, yy, z), (sx * 0.0124, yy, z), 0.0026, M.black, 10), mag=True)
+        g.add(cyl_between((-0.0124, yy, z), (-0.0126, yy, z), 0.0015, white, 8), mag=True)
+    # A3 stock, collapsed: struts along the receiver sides, a curved butt plate with a rubber pad, the latch.
+    for sx in (-1, 1):
+        x = sx * 0.0245
+        g.add(cyl_between((x, -0.236, 0.1), (x, -0.05, 0.1), 0.0042, finish, 14))
+        g.add(cyl_between((x, -0.236, 0.055), (x, -0.13, 0.055), 0.0042, finish, 14))
+        g.cx(0.0048, x - sx * 0.002, x + sx * 0.002, -0.05, 0.1, finish, verts=14)
+    g.p(P((-0.226, 0.118), (-0.238, 0.122), (-0.248, 0.112), (-0.25, 0.05), (-0.246, -0.015), (-0.238, -0.03), (-0.226, -0.028), (-0.232, 0.04)), 0.054, finish, bev=0.004, segs=3)
+    g.p(P((-0.248, 0.112), (-0.258, 0.11), (-0.262, 0.04), (-0.258, -0.026), (-0.246, -0.015), (-0.25, 0.05)), 0.05, M.rubber, bev=0.004, segs=3)
+    g.b((0.016, 0.02, 0.012), (0, -0.205, 0.128), finish, bev=0.003)
+    sling_loop(g, M, -0.19, 0.046, x=0.0)
+    for sx in (-1, 1):
+        g.t([(sx * 0.024, 0.32, bz - 0.004), (sx * 0.034, 0.318, bz - 0.006), (sx * 0.034, 0.306, bz - 0.006), (sx * 0.024, 0.305, bz - 0.004)], 0.0016, M.steel)
+    g.muzzle = (0, 0.549, bz)
     return g.done()
 
 
