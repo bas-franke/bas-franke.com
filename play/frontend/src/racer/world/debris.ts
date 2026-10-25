@@ -30,6 +30,19 @@ const FRICTION_GROUND = 0.55;
 const FRICTION_WALL = 0.3;
 /** Below this approach speed contacts do not bounce at all, which is what lets a piece come to rest. */
 const BOUNCE_MIN = 2.5;
+/** A pod's body for knocking debris: half extents round its centre (which hovers ~1.5 m up), model axes. */
+const POD_HALF = new THREE.Vector3(3.4, 1.2, 5);
+/** On the ground the footprint reaches this far below the centre, down to the sand (and plates lying flat on it). */
+const POD_REACH_DOWN = 3;
+/** Quick distance reject: farther than this (plus the piece's radius) from a pod's centre cannot touch it. */
+const POD_REACH = Math.hypot(3.4, 3, 5);
+const POD_RESTITUTION = 0.3;
+/** Caps on what one knock can give a piece: speed change, final speed (m/s) and spin (rad/s). */
+const POD_DV_MAX = 70;
+const POD_V_MAX = 90;
+const POD_SPIN_MAX = 22;
+/** Spin cap for any piece, rad/s. */
+const SPIN_MAX = 30;
 /** Points this close above the ground already count as touching it (keeps a resting piece's contacts steady). */
 const SKIN = 0.004;
 
@@ -119,12 +132,22 @@ interface Piece {
   smokeLife: number;
   burnLife: number;
   sparkCool: number;
+  /** Seconds until a pod can knock it again (one knock per pass, not one per frame of overlap). */
+  knockCool: number;
   src: SmokeSource;
   /** The piece's own glow material (pod lights), faded out over glowLife seconds, and the meshes that use it. */
   glow: THREE.ShaderMaterial | null;
   glowMeshes: THREE.Mesh[];
   glowLife: number;
   glowOut: boolean;
+}
+
+/** A pod as the debris sees it (see DebrisSystem.setPod). */
+export interface DebrisPod {
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  quat: THREE.Quaternion;
+  airborne: boolean;
 }
 
 export interface DebrisImpact {
@@ -143,6 +166,13 @@ export class DebrisSystem {
    * are reused, do not keep them.
    */
   onImpact: ((hit: DebrisImpact) => void) | null = null;
+  /**
+   * Called when a pod knocks a piece: the contact point (reused, do not keep) and a strength 0..1, for a metal clank.
+   */
+  onClank: ((point: THREE.Vector3, strength: number) => void) | null = null;
+  /** The pods this frame (setPod / setPodCount), as copies: no allocation once every slot exists. */
+  private readonly pods: DebrisPod[] = [];
+  private podCount = 0;
 
   private readonly track: Track;
   private readonly frames: Frame[];
@@ -307,6 +337,7 @@ export class DebrisSystem {
     p.smokeLife = smoke > 0 ? 4 + smoke * 4 : 0;
     p.burnLife = opts?.burning ? p.smokeLife * (0.5 + 0.3 * Math.random()) : 0;
     p.sparkCool = 0;
+    p.knockCool = 0;
     // Its lights die over a couple of seconds, sputtering.
     const glow = (piece.userData.glowMaterial as THREE.ShaderMaterial | null | undefined) ?? null;
     p.glow = glow?.uniforms?.uPower ? glow : null;
@@ -383,6 +414,8 @@ export class DebrisSystem {
     this.sparkMat.uniforms.uTime.value = this.time;
 
     // Rigid pieces in fixed substeps (carried over between frames), so a slow frame does not change the physics.
+    // Pods plough through what lies on the course before the pieces step, so a knocked piece flies off this frame.
+    if (this.podCount > 0) this.knock();
     this.acc = Math.min(this.acc + dt, STEP * 12);
     while (this.acc >= STEP) {
       this.acc -= STEP;
@@ -397,6 +430,7 @@ export class DebrisSystem {
       const p = this.pieces[r];
       p.age += dt;
       p.sparkCool -= dt;
+      p.knockCool -= dt;
       if (p.glow && !p.glowOut) this.fadeGlow(p);
       if (p.asleep) {
         p.rest += dt;
@@ -429,6 +463,24 @@ export class DebrisSystem {
     this.updateShards(dt);
     this.sparkRing.flush();
     return sources;
+  }
+
+  /**
+   * A pod this frame: centre (world), world velocity, orientation (model frame: nose -Z, up +Y) and whether it is in
+   * the air (then it only touches what its body actually reaches; on the ground its footprint sweeps down to the sand).
+   * The values are copied. Call for 0..n-1, then setPodCount(n).
+   */
+  setPod(i: number, pos: THREE.Vector3, vel: THREE.Vector3, quat: THREE.Quaternion, airborne: boolean) {
+    while (this.pods.length <= i) this.pods.push({ pos: new THREE.Vector3(), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), airborne: false });
+    const d = this.pods[i];
+    d.pos.copy(pos);
+    d.vel.copy(vel);
+    d.quat.copy(quat);
+    d.airborne = airborne;
+  }
+
+  setPodCount(n: number) {
+    this.podCount = Math.min(n, this.pods.length);
   }
 
   /** Pieces near a world point (for future pod-vs-debris knocks): returns approximate centres and radii. */
@@ -472,6 +524,93 @@ export class DebrisSystem {
     this.object.removeFromParent();
   }
 
+  // --- Pods knocking debris ---
+
+  /**
+   * Every pod against every lying or flying piece and shard. The pod is a box (POD_HALF) round its centre; a piece is
+   * a sphere of 60% of its radius. A touching piece whose approach speed is positive takes an impulse at its near side
+   * (so it tumbles), capped so a pod at full speed sends it flying hard but not into orbit. Sleeping pieces stay
+   * untouched unless a pod actually reaches them, so nothing jitters at rest.
+   */
+  private knock() {
+    for (let k = 0; k < this.podCount; k++) {
+      const pod = this.pods[k];
+      _qp.copy(pod.quat).invert();
+      const low = pod.airborne ? -POD_HALF.y : -POD_REACH_DOWN;
+      for (const p of this.pieces) {
+        if (p.sink >= 0 || p.knockCool > 0) continue;
+        const reach = POD_REACH + p.radius;
+        if (p.c.distanceToSquared(pod.pos) > reach * reach) continue;
+        _loc.copy(p.c).sub(pod.pos).applyQuaternion(_qp);
+        _cl.set(
+          THREE.MathUtils.clamp(_loc.x, -POD_HALF.x, POD_HALF.x),
+          THREE.MathUtils.clamp(_loc.y, low, POD_HALF.y),
+          THREE.MathUtils.clamp(_loc.z, -POD_HALF.z, POD_HALF.z),
+        );
+        const d = _loc.distanceTo(_cl);
+        if (d > Math.max(0.15, p.radius * 0.6)) continue;
+        // Out of the side or front of the box: pushed straight away from it. Deep inside (a fast pod covers metres per
+        // frame): shoved ahead and out to its side, the way a bow throws spray.
+        if (d > 1e-3) _n.copy(_loc).sub(_cl).divideScalar(d);
+        else _n.set(_loc.x >= 0 ? 0.6 : -0.6, 0.15, -0.75).normalize();
+        _n.applyQuaternion(pod.quat);
+        const vrel = _vp.copy(pod.vel).sub(p.v).dot(_n);
+        if (vrel <= 0.5) continue;
+        const dv = Math.min(POD_DV_MAX, vrel * (1 + POD_RESTITUTION));
+        // Velocity change, with a lift so it tumbles up and over rather than skating along the sand.
+        _t2.copy(_n).multiplyScalar(dv);
+        _t2.y += dv * 0.08 + 1.5;
+        // Applied at the near side, a little off centre: the torque is what makes it tumble.
+        _v3.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(p.radius * 0.4);
+        _r.copy(_n).multiplyScalar(-p.radius * 0.5).add(_v3);
+        p.v.add(_t2);
+        _rn.copy(_r).cross(_t2).divideScalar(p.invMass);
+        this.invInertia(p, p.obj.quaternion, _rn, _t1);
+        p.w.add(_t1);
+        if (p.w.lengthSq() > POD_SPIN_MAX * POD_SPIN_MAX) p.w.setLength(POD_SPIN_MAX);
+        if (p.v.lengthSq() > POD_V_MAX * POD_V_MAX) p.v.setLength(POD_V_MAX);
+        p.asleep = false;
+        p.still = 0;
+        p.rest = 0;
+        p.knockCool = 0.15;
+        _pt.copy(p.c).add(_r);
+        const sparks = Math.min(16, Math.round(dv / 4));
+        for (let i = 0; i < sparks; i++) {
+          randomUnit(_sv).multiplyScalar(dv * 0.3).addScaledVector(_n, dv * 0.4).addScaledVector(pod.vel, 0.4);
+          this.spark(_pt, _sv, 0.2 + Math.random() * 0.35, 0.03);
+        }
+        if (this.onClank) this.onClank(_pt, Math.min(1, dv / 50));
+      }
+      if (this.shardsLive > 0) this.scatterShards(pod, low);
+    }
+  }
+
+  /** Shards under or against a pod (inverse orientation in _qp) are kicked up and along with it. */
+  private scatterShards(pod: DebrisPod, low: number) {
+    const r2 = POD_REACH * POD_REACH;
+    for (let i = 0; i < this.shardCap; i++) {
+      if (this.sState[i] === 0) continue;
+      const i3 = i * 3;
+      _loc.set(this.sP[i3] - pod.pos.x, this.sP[i3 + 1] - pod.pos.y, this.sP[i3 + 2] - pod.pos.z);
+      if (_loc.lengthSq() > r2) continue;
+      _loc.applyQuaternion(_qp);
+      if (Math.abs(_loc.x) > POD_HALF.x || Math.abs(_loc.z) > POD_HALF.z || _loc.y < low || _loc.y > POD_HALF.y) continue;
+      // Only shards the pod is overtaking; ones already flying along with it are left alone.
+      const dx = pod.vel.x - this.sV[i3];
+      const dy = pod.vel.y - this.sV[i3 + 1];
+      const dz = pod.vel.z - this.sV[i3 + 2];
+      if (dx * dx + dy * dy + dz * dz < 9) continue;
+      const k = 0.3 + Math.random() * 0.5;
+      randomUnit(_sv).multiplyScalar(3 + pod.vel.length() * 0.08);
+      this.sV[i3] = pod.vel.x * k + _sv.x;
+      this.sV[i3 + 1] = Math.max(0, pod.vel.y * k) + 2 + Math.random() * 6;
+      this.sV[i3 + 2] = pod.vel.z * k + _sv.z;
+      this.sP[i3 + 1] += 0.05;
+      this.sA[i * 5 + 1] = 10 + Math.random() * 30;
+      this.sState[i] = 1;
+    }
+  }
+
   // --- Rigid pieces ---
 
   private stepPiece(p: Piece, dt: number) {
@@ -480,6 +619,8 @@ export class DebrisSystem {
     p.v.y -= GRAVITY * dt;
     p.v.multiplyScalar(1 / (1 + p.drag * p.v.length() * dt));
     p.w.multiplyScalar(1 - 0.15 * dt);
+    // Hard landings can spin a light piece up absurdly through the corner impulses: past ~5 rev/s it just blurs.
+    if (p.w.lengthSq() > SPIN_MAX * SPIN_MAX) p.w.setLength(SPIN_MAX);
     p.c.addScaledVector(p.v, dt);
     const wl = p.w.length();
     if (wl > 1e-5) {
@@ -858,7 +999,7 @@ function newPiece(): Piece {
     c: new THREE.Vector3(), glow: null, glowMeshes: [], glowLife: 0, glowOut: false,
     v: new THREE.Vector3(), w: new THREE.Vector3(), invMass: 1, invI: new THREE.Vector3(), drag: 0, idx: 0, age: 0,
     still: 0, asleep: false, rest: 0, sink: -1, restUp: new THREE.Vector3(0, 1, 0), smoke: 0, smokeLife: 0, burnLife: 0,
-    sparkCool: 0, src: { pos: new THREE.Vector3(), amount: 0, burning: false },
+    sparkCool: 0, knockCool: 0, src: { pos: new THREE.Vector3(), amount: 0, burning: false },
   };
 }
 
@@ -979,6 +1120,9 @@ const _s = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _qi = new THREE.Quaternion();
+const _qp = new THREE.Quaternion();
+const _loc = new THREE.Vector3();
+const _cl = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _col = new THREE.Color();
 const _grey = new THREE.Color(0.35, 0.34, 0.33);

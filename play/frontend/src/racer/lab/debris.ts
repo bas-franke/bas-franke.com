@@ -1,9 +1,12 @@
 // Lab: the debris system on a real stretch of course. Every `every` seconds it fires `count` pod-part-shaped pieces
 // (engine nacelles, fins, flaps, nozzles, plates) down the track at `speed` m/s with random spin, plus a shrapnel burst.
 // Smoking pieces show as grey (smoke) or orange (burning) markers sized by their smoke amount.
-//   /race/lab/debris?track=redrock&at=0.3&count=3&speed=80&every=1&cam=side|chase|top|back
+//   /race/lab/debris?track=redrock&at=0.3&count=3&speed=80&every=1&cam=side|chase|top|back|pod
 // Extra: &warm=<s> pre-simulates that long before the first frame, &freeze stops time after it (for screenshots),
 // &seed=<n> makes the randomness repeatable, &wall fires the pieces at the corridor wall, &nopost, &quality=.
+// Pods through the debris: &drive fires for &shots=<s> (4) seconds, then from &podstart=<s> (8) `pods` (1) pod-sized
+// boxes run through the lying field at &podspeed=<m/s> (60), every few seconds, &podh=<m> above hover height (over 2 m
+// they count as airborne and should pass over). The label shows the average debris.update() time.
 // Drag to orbit. `window.__lab` exposes { scene, camera, controls, renderer, track, debris }.
 
 import * as THREE from 'three';
@@ -148,19 +151,66 @@ export function mount(el: HTMLElement): () => void {
   fit();
   window.addEventListener('resize', fit);
 
+  // Pod-sized boxes (6.8 x 2.4 x 10 m, the debris system's footprint) driving down the course through the debris.
+  const drive = p.has('drive');
+  const shots = Number(p.get('shots') ?? 4);
+  const podStart = Number(p.get('podstart') ?? 8);
+  const podSpeed = Number(p.get('podspeed') ?? 60);
+  const podH = Number(p.get('podh') ?? 0);
+  const podN = drive ? Number(p.get('pods') ?? 1) : 0;
+  const podRun = 300 / podSpeed + 1.5;
+  const podGeo = new THREE.BoxGeometry(6.8, 2.4, 10);
+  const podMat = new THREE.MeshStandardMaterial({ color: '#3a7bd5', transparent: true, opacity: 0.55, roughness: 0.5 });
+  const podObjs: THREE.Mesh[] = [];
+  for (let i = 0; i < podN; i++) {
+    const m = new THREE.Mesh(podGeo, podMat);
+    m.castShadow = true;
+    m.visible = false;
+    scene.add(m);
+    podObjs.push(m);
+  }
+  const podVel = new THREE.Vector3();
+  const podSide = new THREE.Vector3();
+  const podBasis = new THREE.Matrix4();
+  const movePods = () => {
+    const u = time - podStart;
+    let n = 0;
+    if (u >= 0) {
+      const t = u % podRun;
+      for (let i = 0; i < podN; i++) {
+        // Spread across the field, a little staggered, so each lane meets different pieces.
+        const s = s0 - 20 + (t - i * 0.15) * podSpeed;
+        const x = podN === 1 ? -2 : -9 + (18 * i) / (podN - 1);
+        const f = track.frameAt(s);
+        const m = podObjs[i];
+        m.visible = true;
+        track.toWorld(s, x, 1.5 + podH, m.position);
+        m.quaternion.setFromRotationMatrix(podBasis.makeBasis(f.right, f.up, tmp.copy(f.tangent).negate()));
+        podVel.copy(f.tangent).multiplyScalar(podSpeed);
+        debris.setPod(i, m.position, podVel, m.quaternion, podH > 2);
+        n++;
+      }
+    }
+    debris.setPodCount(n);
+  };
+
   let time = 0;
   let nextFire = 0;
+  let updMs = 0;
   let smokeCount = 0;
   const view: FxView = { dt: 0, time: 0, camera, playerPos: target, playerForward: f0.tangent, speed01: 0, boosting: false, playerS: s0, pods: [] };
   const step = (dt: number) => {
     time += dt;
-    if (time >= nextFire) {
+    if (time >= nextFire && (!drive || time < shots)) {
       fire();
       nextFire += every;
     }
     view.dt = dt;
     view.time = time;
+    movePods();
+    const t0 = performance.now();
     const sources = debris.update(view);
+    updMs += (performance.now() - t0 - updMs) * 0.05;
     smokeCount = sources.length;
     view.smokeSources = sources;
     for (let i = 0; i < markers.length; i++) {
@@ -185,6 +235,15 @@ export function mount(el: HTMLElement): () => void {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (!freeze) step(dt);
+    if (cam === 'pod' && podObjs[0]?.visible) {
+      // Behind and beside the first pod box, looking past it at what it ploughs into.
+      const m = podObjs[0];
+      tmp.set(0, 0, -1).applyQuaternion(m.quaternion);
+      controls.target.copy(m.position).addScaledVector(tmp, 14);
+      camera.position.copy(m.position).addScaledVector(tmp, -16).add(podSide.set(1, 0, 0).applyQuaternion(m.quaternion).multiplyScalar(7));
+      camera.position.y += 6;
+      controls.update();
+    }
     if (cam === 'chase' && newest) {
       // Behind the newest piece along the course where it is now (not where it was fired), so bends do not put the
       // camera inside a wall.
@@ -198,7 +257,7 @@ export function mount(el: HTMLElement): () => void {
       controls.update();
       first = false;
     }
-    label.textContent = `t ${time.toFixed(1)} s · smoke sources ${smokeCount} · count ${count} · speed ${speed}`;
+    label.textContent = `t ${time.toFixed(1)} s · smoke sources ${smokeCount} · count ${count} · speed ${speed} · update ${updMs.toFixed(2)} ms`;
     world.update(view);
     if (post) post.render(view);
     else renderer.render(scene, camera);
@@ -211,6 +270,8 @@ export function mount(el: HTMLElement): () => void {
     Math.random = realRandom;
     debris.dispose();
     for (const g of geos) g.dispose();
+    podGeo.dispose();
+    podMat.dispose();
     for (const m of [metal, paint, dark, smokeMat, fireMat]) m.dispose();
     markerGeo.dispose();
     label.remove();

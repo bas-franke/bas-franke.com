@@ -90,6 +90,8 @@ export interface RaceViewOptions {
   racers: RacerSetup[];
   quality?: Quality;
   onFinish?(result: RaceResult): void;
+  /** Called every frame before the race steps (networked races write the remote pods and the clock here). */
+  onFrame?(dt: number): void;
 }
 
 export class RaceView {
@@ -209,7 +211,7 @@ export class RaceView {
       const tag = document.createElement('div');
       tag.className = 'racer-tag';
       tag.textContent = r.name;
-      tag.style.setProperty('--tag-color', podColor(r.pod));
+      tag.style.setProperty('--tag-color', r.color ?? podColor(r.pod));
       this.tagLayer.appendChild(tag);
       this.tags.push(tag);
     }
@@ -289,6 +291,7 @@ export class RaceView {
     this.time += dt;
     const race = this.race;
     race.playerInput = this.controls.read(dt);
+    this.opts.onFrame?.(dt);
     if (!this.frozen) race.update(dt);
     this.placePods(dt);
 
@@ -321,11 +324,17 @@ export class RaceView {
       playerS: player.state.s,
       pods: this.fxPods,
     };
+    // Pods (and wrecks) knock the debris lying on the course; ones in the air pass over it.
+    for (let i = 0; i < race.racers.length; i++) {
+      const o = this.visuals[i].object;
+      this.debris.setPod(i, o.position, this.fxPods[i].velocity, o.quaternion, race.racers[i].state.air);
+    }
+    this.debris.setPodCount(race.racers.length);
     view.smokeSources = this.debris.update(view);
     this.world.update(view);
     this.fx.update(view);
     const h = player.parts.health;
-    this.audio.setEngineHealth(Math.min(h.intakeL, h.nozzleL, h.nacelleL), Math.min(h.intakeR, h.nozzleR, h.nacelleR));
+    this.audio.setEngineHealth(Math.min(h.intakeL, h.fanL, h.nozzleL, h.nacelleL), Math.min(h.intakeR, h.fanR, h.nozzleR, h.nacelleR));
     this.audio.update(dt, this.camera.position);
     this.post.render(view);
     this.placeTags();
@@ -386,9 +395,11 @@ export class RaceView {
       if (st.roll && !wrecked) v.object.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, (-st.roll * Math.PI) / 2));
       v.object.position.copy(pos);
       // A ghost after the respawn blinks.
-      v.object.visible = r.ghost <= 0 || Math.floor(r.ghost * 9) % 2 === 0;
+      v.object.visible = !r.gone && (r.ghost <= 0 || Math.floor(r.ghost * 9) % 2 === 0);
 
       const fp = this.fxPods[i];
+      // A spectator's camera moves from pod to pod.
+      fp.isPlayer = r === race.player;
       if (dt > 0) fp.velocity.copy(pos).sub(this.prevPos[i]).divideScalar(dt);
       this.prevPos[i].copy(pos);
       fp.speed = st.v;
@@ -528,13 +539,15 @@ export class RaceView {
     if (this.hudAt <= 0) {
       this.hudAt = 1 / 12;
       const proj = race.track.minimap.project;
-      patch.pods = race.racers.map((r, i) => {
+      patch.pods = race.racers.flatMap((r, i) => {
+        if (r.gone) return [];
         const [x, y] = proj(this.visuals[i].object.position);
-        return { x, y, color: podColor(r.pod), player: r === p };
+        return [{ x, y, color: r.color ?? podColor(r.pod), player: r === p }];
       });
-      patch.standings = [...race.racers]
+      patch.standings = race.racers
+        .filter((r) => !r.gone)
         .sort((a, b) => a.position - b.position)
-        .map((r) => ({ name: r.name, color: podColor(r.pod), player: r === p, finished: r.finish !== null }));
+        .map((r) => ({ name: r.name, color: r.color ?? podColor(r.pod), player: r === p, finished: r.finish !== null }));
     }
     this.hud.set(patch);
   }

@@ -5,6 +5,12 @@
 // lowest at each bounce. Damaged parts change the handling (handlingOf). Once a critical part breaks the pod is thrown
 // up tumbling, bounces and skids to a stop (see stepWreck), then is put back in the middle of the corridor as a ghost
 // that blinks and cannot be hit for a few seconds.
+//
+// Networked races (racer/net): a `remote` racer is flown on another screen. Its state is written from outside every
+// frame (snapshots); the race never steps, hurts, wrecks, respawns or classifies it (its finish comes from the
+// server), but it still pushes the local pods about in contacts(), gives slipstream and takes its place in the order.
+// `hold` keeps the race on the grid until the server says go, setClock() keeps the race time on the server's clock,
+// and a race without a local pod (`me` null: a spectator) follows `focus` instead.
 
 import { aiInput, type AiProfile } from './ai';
 import {
@@ -23,6 +29,10 @@ export interface RacerSetup {
   stats: PodStats;
   /** Omitted for the player. */
   ai?: AiProfile;
+  /** Networked: flown on another screen, its state written from snapshots (see the header). */
+  remote?: boolean;
+  /** Networked: name tag / minimap colour (CSS), instead of the pod's paint. */
+  color?: string;
 }
 
 export interface Racer extends RacerSetup {
@@ -58,6 +68,8 @@ export interface Racer extends RacerSetup {
   lastHit: { point: [number, number, number]; energy: number } | null;
   /** The tumble of a wreck (meaningful while `wrecked` > 0). */
   wreck: Wreck;
+  /** Networked: left the race. Not drawn, not solid, last in the order; never updated again. */
+  gone?: boolean;
 }
 
 /**
@@ -116,13 +128,18 @@ export interface Handling {
 export function handlingOf(stats: PodStats, parts: PodDamage, seed = 0): Handling {
   const h = parts.health;
   const lost = (id: PartId) => 1 - h[id];
-  const eL = (0.6 + 0.4 * h.intakeL) * (0.85 + 0.15 * h.nacelleL);
-  const eR = (0.6 + 0.4 * h.intakeR) * (0.85 + 0.15 * h.nacelleR);
+  // An engine breathes through its intake and the fan behind it: a jammed fan chokes it like a crushed intake.
+  const eL = (0.6 + 0.4 * Math.min(h.intakeL, h.fanL)) * (0.85 + 0.15 * h.nacelleL);
+  const eR = (0.6 + 0.4 * Math.min(h.intakeR, h.fanR)) * (0.85 + 0.15 * h.nacelleR);
   const flaps = lost('flapL') - lost('flapR');
-  let wobble = 0;
-  for (const id of ['binderL', 'binderR', 'binderMid'] as const) wobble += (parts.broken.has(id) ? 0.1 : 0) + lost(id) * 0.04;
+  // A binder wobbles once it snaps, or once the mount it hangs from on the cockpit gives way.
+  const tether = (binder: PartId, mount?: PartId) =>
+    (parts.broken.has(binder) || (mount && parts.broken.has(mount)) ? 0.1 : 0) + Math.max(lost(binder), mount ? lost(mount) : 0) * 0.04;
+  const wobble = tether('binderL', 'mountL') + tether('binderR', 'mountR') + tether('binderMid');
+  // The nozzle shapes the exhaust; the petals round it trim it a little more.
+  const exhaust = 0.045 * (lost('nozzleL') + lost('nozzleR')) + 0.015 * (lost('petalsL') + lost('petalsR'));
   return {
-    stats: { ...stats, thrust: (stats.thrust * (eL + eR)) / 2, topSpeed: stats.topSpeed * (1 - 0.045 * (lost('nozzleL') + lost('nozzleR'))) },
+    stats: { ...stats, thrust: (stats.thrust * (eL + eR)) / 2, topSpeed: stats.topSpeed * (1 - exhaust) },
     turnL: 1 - 0.3 * lost('finL'),
     turnR: 1 - 0.3 * lost('finR'),
     brake: 1 - 0.2 * (lost('flapL') + lost('flapR')),
@@ -157,13 +174,18 @@ const STEP = 1 / 120;
 export class Race {
   readonly track: Track;
   readonly racers: Racer[];
-  readonly player: Racer;
+  /** The pod this screen's controls fly: the first racer with neither `ai` nor `remote`; null for a spectator. */
+  readonly me: Racer | null;
+  /** The racer the camera, the HUD and the audio are about: `me`, or whoever a spectator watches. */
+  focus: Racer;
   phase: Phase = 'intro';
   /** Seconds since the start lights went green (negative during intro/countdown). */
   time = -(INTRO + COUNTDOWN);
   playerInput: PodInput = { ...NO_INPUT };
   /** When true the player's pod is flown by the AI (attract mode, screenshots, after the finish). */
   autopilot = false;
+  /** Networked: while true the race waits on the grid (time does not run) until the server's go. */
+  hold = false;
   private acc = 0;
   private lastCount = 99;
   private readonly playerAi: AiProfile = { skill: 0.9, bias: 0, aggression: 0.6 };
@@ -189,12 +211,22 @@ export class Race {
       };
     });
     this.ctrls = this.racers.map(() => ({ ...NO_INPUT }));
-    this.player = this.racers.find((r) => !r.ai) ?? this.racers[0];
+    this.me = this.racers.find((r) => !r.ai && !r.remote) ?? null;
+    this.focus = this.me ?? this.racers[0];
     this.updateOrder();
+  }
+
+  /** The racer the screen is about (see `focus`); in a solo race always the player's own pod. */
+  get player(): Racer {
+    return this.focus;
   }
 
   /** Advances the race by dt seconds of real time (fixed 120 Hz substeps). */
   update(dt: number) {
+    if (this.hold) {
+      this.acc = 0;
+      return;
+    }
     this.acc = Math.min(this.acc + dt, 0.25);
     while (this.acc >= STEP) {
       this.acc -= STEP;
@@ -221,11 +253,15 @@ export class Race {
     const others = this.racers.map((r) => ({ s: r.state.s, x: r.state.x, v: r.state.v }));
     for (let i = 0; i < this.racers.length; i++) {
       const r = this.racers[i];
+      if (r.remote) {
+        this.stepRemote(r, dt);
+        continue;
+      }
       let input: PodInput;
       if (!live) {
         // Engines revving on the grid: hold position.
         input = { ...NO_INPUT, throttle: 0 };
-      } else if (r === this.player && !this.autopilot && r.finish === null) {
+      } else if (r === this.me && !this.autopilot && r.finish === null) {
         input = this.playerInput;
       } else {
         const profile = r.ai ?? this.playerAi;
@@ -233,7 +269,7 @@ export class Race {
           state: r.state,
           stats: r.stats,
           profile,
-          gapToPlayer: r === this.player ? 0 : r.progress - this.player.progress,
+          gapToPlayer: r === this.me ? 0 : r.progress - (this.me ?? this.focus).progress,
           others: others.filter((_, j) => j !== i),
           wear: Math.max(...r.damage),
         }, this.time);
@@ -287,7 +323,7 @@ export class Race {
     if (r.lap >= this.laps && r.finish === null) {
       r.finish = this.time;
       this.events.onFinish?.(r);
-      if (r === this.player) this.phase = 'finished';
+      if (r === this.me) this.phase = 'finished';
     }
   }
 
@@ -362,7 +398,7 @@ export class Race {
   }
 
   private solid(r: Racer) {
-    return r.wrecked <= 0 && r.ghost <= 0;
+    return r.wrecked <= 0 && r.ghost <= 0 && !r.gone;
   }
 
   /**
@@ -371,7 +407,8 @@ export class Race {
    * pod. `cooled` false (a wreck's bounces, a landing) always counts. Ghosts and finished pods take nothing.
    */
   private hurt(r: Racer, hit: Hit, cooled = true) {
-    if (r.ghost > 0 || r.finish !== null) return;
+    // A remote pod's damage is worked out on its owner's screen.
+    if (r.remote || r.ghost > 0 || r.finish !== null) return;
     if (cooled) {
       const last = r.lastHit;
       const p = hit.point;
@@ -555,7 +592,7 @@ export class Race {
   private slipstream() {
     for (const r of this.racers) {
       for (const o of this.racers) {
-        if (o === r) continue;
+        if (o === r || o.gone) continue;
         const d = o.state.s - r.state.s;
         if (d > 10 && d < 45 && Math.abs(o.state.x - r.state.x) < 4.5 && r.state.v > 40) {
           r.state.draft = 0.4;
@@ -569,12 +606,139 @@ export class Race {
     // On the grid s is just short of the start line, so progress is slightly negative.
     for (const r of this.racers) r.progress = r.state.s - this.track.startS;
     const order = [...this.racers].sort((a, b) => {
+      if (a.gone || b.gone) return (a.gone ? 1 : 0) - (b.gone ? 1 : 0);
       if (a.finish !== null && b.finish !== null) return a.finish - b.finish;
       if (a.finish !== null) return -1;
       if (b.finish !== null) return 1;
       return b.progress - a.progress;
     });
     order.forEach((r, i) => (r.position = i + 1));
+  }
+
+  // --- Networked races (racer/net). Nothing here runs in a solo race. ---
+
+  /** A remote pod between snapshots: not flown here; its cues reset like physics resets them, wreck/ghost run down. */
+  private stepRemote(r: Racer, dt: number) {
+    const st = r.state;
+    st.impact = 0;
+    st.padHit = false;
+    st.hit = null;
+    st.headOn = false;
+    // They stay above zero while the snapshots say so (remoteFlags), counting down only for the ghost's blink.
+    if (r.ghost > 0) r.ghost = Math.max(0.02, r.ghost - dt);
+    if (r.wrecked > 0) r.wrecked = Math.max(0.02, r.wrecked - dt);
+    r.lap = r.finish !== null ? 1 : st.s >= this.track.startS ? 0 : -1;
+  }
+
+  /** Listens to the race's events next to the ones given to the constructor (the view's), which still run first. */
+  addEvents(more: RaceEvents) {
+    const a = this.events;
+    const merged: Record<string, (...args: never[]) => void> = {};
+    for (const k of new Set([...Object.keys(a), ...Object.keys(more)]) as Set<keyof RaceEvents>) {
+      merged[k] = (...args: never[]) => {
+        (a[k] as ((...x: never[]) => void) | undefined)?.(...args);
+        (more[k] as ((...x: never[]) => void) | undefined)?.(...args);
+      };
+    }
+    this.events = merged as RaceEvents;
+  }
+
+  /**
+   * Puts the race on the server's clock (`t` = seconds since green, negative before). Before the green light (or when
+   * far off) it jumps there: a late go shortens the intro, one after the green goes straight into the race. Once racing
+   * it only eases towards it, a few milliseconds per call, so the physics never sees a jump.
+   */
+  setClock(t: number) {
+    const err = t - this.time;
+    const grid = this.phase === 'intro' || this.phase === 'countdown';
+    if ((grid && Math.abs(err) > 0.1) || Math.abs(err) > 1) {
+      this.time = t;
+      if (grid && t >= 0) {
+        this.phase = 'racing';
+        this.lastCount = 0;
+        if (t < 1) this.events.onCountdown?.(0);
+      }
+      return;
+    }
+    this.time += Math.max(-0.004, Math.min(0.004, err * 0.1));
+  }
+
+  /**
+   * Moves a bot between remote (drawn from snapshots) and flown here by its AI, which carries on from the state the
+   * snapshots left it in. Only for racers with an `ai` profile; `me` never changes.
+   */
+  setRemote(r: Racer, remote: boolean) {
+    if (!!r.remote === remote) return;
+    r.remote = remote;
+    if (remote) return;
+    r.lap = r.finish !== null ? 1 : r.state.s >= this.track.startS ? 0 : -1;
+    r.lapStart = 0;
+    r.handling = handlingOf(r.stats, r.parts, r.handling.seed);
+    r.steerOut = 0;
+    r.hurtCool = 0;
+    r.lastHit = null;
+    if (r.wrecked > 0) {
+      r.wrecked = Math.min(r.wrecked, WRECK_TIME);
+      r.wreck.rest = false;
+    }
+  }
+
+  /** Changes a racer's pod design (the grid is built before everyone has picked): fires onRespawn for a new model. */
+  setPod(r: Racer, pod: PodDesign, stats: PodStats) {
+    r.pod = pod;
+    r.stats = stats;
+    r.anchors = partAnchors(pod.shape);
+    r.parts = newPodDamage();
+    r.damage = damageSummary(r.parts);
+    r.handling = handlingOf(stats, r.parts, r.handling.seed);
+    this.events.onRespawn?.(r);
+  }
+
+  /**
+   * A remote pod's broken parts as its owner reports them. Newly broken ones break here too (onParts with a hit on
+   * the first of them, so the view breaks them off and throws them); a list that lost parts means the owner respawned
+   * the pod (onRespawn, fresh parts).
+   */
+  remoteParts(r: Racer, broken: readonly string[]) {
+    const now = new Set(broken as PartId[]);
+    for (const id of r.parts.broken) {
+      if (!now.has(id)) {
+        r.parts = newPodDamage();
+        this.events.onRespawn?.(r);
+        break;
+      }
+    }
+    const hits: PartHit[] = [];
+    for (const id of now) {
+      if (r.parts.broken.has(id) || !(id in r.parts.health)) continue;
+      hits.push({ part: id, amount: r.parts.health[id], health: 0, broke: true });
+      r.parts.health[id] = 0;
+      r.parts.broken.add(id);
+    }
+    if (!hits.length) return;
+    const p = r.anchors[hits[0].part].pos;
+    const n = Math.hypot(p[0], p[1], p[2]) || 1;
+    this.events.onParts?.(r, hits, { point: [...p], dir: [-p[0] / n, -p[1] / n, -p[2] / n], energy: 0.9, kind: 'pod' });
+  }
+
+  /** A remote pod's wrecked / ghost flags: going down fires onWreck; both run down only for the view (stepRemote). */
+  remoteFlags(r: Racer, wrecked: boolean, ghost: boolean) {
+    if (wrecked && r.wrecked <= 0) {
+      r.wrecked = WRECK_TIME;
+      this.events.onWreck?.(r);
+    } else if (!wrecked) r.wrecked = 0;
+    if (ghost && r.ghost <= 0) r.ghost = GHOST_TIME;
+    else if (!ghost) r.ghost = 0;
+  }
+
+  /** A pod's finish as the server classified it (remote pods never cross the line here). */
+  setFinish(r: Racer, time: number) {
+    if (r.finish !== null) return;
+    r.finish = time;
+    r.lap = 1;
+    r.lapTimes.push(time);
+    r.bestLap = Math.min(r.bestLap, time);
+    this.updateOrder();
   }
 
   /**

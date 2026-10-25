@@ -311,6 +311,8 @@ interface Piece {
   part: PartId;
   d: string;
   line?: boolean;
+  /** Extra class: 'mark' (a small piece, thin outline) or 'fine' (a thin solid line). */
+  cls?: string;
 }
 
 const f1 = (n: number) => n.toFixed(2);
@@ -345,25 +347,46 @@ function podSchematic(shape: PodShape) {
     pieces.push({ part: `binder${k}`, line: true, d: `M${f1(s * cw)} ${f1(zC - C * 0.05)}L${f1(x - s * w)} ${f1(zE + 0.12 * L)}` });
     pieces.push({ part: `cable${k}`, line: true, d: `M${f1(s * 0.25)} ${f1(noseZ - 0.2)}L${f1(x - s * w * 0.3)} ${f1(zE - L / 4)}` });
   }
+  // Armour lies over the nacelle from 28 % to 49 % of its length (see core/damage.ts partAnchors).
+  const a0 = front + 0.28 * L;
+  const a1 = front + 0.49 * L;
   for (const [s, k] of [[-1, 'L'], [1, 'R']] as const) {
     const x = s * xE;
     pieces.push({ part: `flap${k}`, d: poly([[x + s * w * 0.9, zE - 0.08 * L], [x + s * (w + 0.95), zE + 0.02 * L], [x + s * (w + 0.95), zE + 0.3 * L], [x + s * w * 0.9, zE + 0.34 * L]]) });
     pieces.push({ part: `nacelle${k}`, d: capsule(x, front + 0.13 * L, back - 0.15 * L, w, w * 0.5) });
+    // Armour as small marks on the nacelle: strips down its outboard and inboard edges, a plate on top ahead of the fin
+    // and a bar across it for the belly plate (seen through the engine).
+    pieces.push({ part: `armOut${k}`, cls: 'mark', d: capsule(x + s * (w + 0.06), a0, a1, 0.13, 0.08) });
+    pieces.push({ part: `armIn${k}`, cls: 'mark', d: capsule(x - s * (w + 0.04), a0, a1, 0.1, 0.06) });
+    pieces.push({ part: `armTop${k}`, cls: 'mark', d: capsule(x, a0, front + 0.4 * L, w * 0.45, 0.1) });
+    pieces.push({ part: `armBelly${k}`, line: true, cls: 'fine', d: `M${f1(x - w * 0.6)} ${f1(a1 - 0.08)}L${f1(x + w * 0.6)} ${f1(a1 - 0.08)}` });
     pieces.push({ part: `intake${k}`, d: capsule(x, front + 0.01 * L, front + 0.15 * L, w * 1.08, w * 0.3) });
+    // The fan: a disc in the intake.
+    const fr = Math.min(0.06 * L, 0.4 * w);
+    const fz = front + 0.08 * L;
+    pieces.push({ part: `fan${k}`, cls: 'mark', d: `M${f1(x - fr)} ${f1(fz)}a${f1(fr)} ${f1(fr)} 0 1 0 ${f1(2 * fr)} 0a${f1(fr)} ${f1(fr)} 0 1 0 ${f1(-2 * fr)} 0Z` });
     // Three claws: spikes ahead of the intake ring.
     const cz = front + 0.02 * L;
     const tip = front - 0.13 * L;
     const claw = (cx: number, lean: number): [number, number][] => [[cx - 0.2, cz], [cx + lean, tip], [cx + 0.2, cz]];
     pieces.push({ part: `claws${k}`, d: [claw(x - w * 0.7, -0.2), claw(x, 0), claw(x + w * 0.7, 0.2)].map(poly).join('') });
     pieces.push({ part: `nozzle${k}`, d: poly([[x - w * 0.85, back - 0.16 * L], [x + w * 0.85, back - 0.16 * L], [x + w * 0.6, back], [x - w * 0.6, back]]) });
+    // The petals: a lip just past the nozzle's end.
+    pieces.push({ part: `petals${k}`, line: true, cls: 'fine', d: `M${f1(x - w * 0.5)} ${f1(back + 0.12)}L${f1(x + w * 0.5)} ${f1(back + 0.12)}` });
     pieces.push({ part: `fin${k}`, d: poly([[x - 0.17, zE - 0.12 * L], [x + 0.17, zE - 0.12 * L], [x + 0.26, zE + 0.32 * L], [x - 0.26, zE + 0.32 * L]]) });
+    // The cockpit's side mount the binder clamps onto, under the binder's end.
+    pieces.push({ part: `mount${k}`, cls: 'mark', d: capsule(s * (cw + 0.12), zC - C * 0.05 - 0.28, zC - C * 0.05 + 0.28, 0.16, 0.06) });
   }
   pieces.push({ part: 'hull', d: capsule(0, hullZ0, zC + C / 2 - 0.15, cw, cw * 0.6) });
   pieces.push({ part: 'cockpitNose', d: `M${f1(-cw)} ${f1(hullZ0 + 0.3)}Q${f1(-cw)} ${f1(noseZ)} 0 ${f1(noseZ - 0.35)}Q${f1(cw)} ${f1(noseZ)} ${f1(cw)} ${f1(hullZ0 + 0.3)}Z` });
   pieces.push({ part: 'canopy', d: capsule(0, zC - C * 0.3, zC + C * 0.12, cw * 0.55, cw * 0.5) });
+  // The canopy frame: a ring round the glass.
+  pieces.push({ part: 'canopyFrame', line: true, cls: 'fine', d: capsule(0, zC - C * 0.3 - 0.07, zC + C * 0.12 + 0.07, cw * 0.55 + 0.07, cw * 0.5 + 0.07) });
   for (const [s, k] of [[-1, 'L'], [1, 'R']] as const) {
     pieces.push({ part: `stab${k}`, d: poly([[s * cw * 0.8, zC + C * 0.2], [s * (cw + 0.55), zC + C * 0.4], [s * (cw + 0.55), zC + C * 0.5], [s * cw * 0.8, zC + C * 0.42]]) });
   }
+  // The antenna behind the canopy, off to the left, leaning back.
+  pieces.push({ part: 'antenna', line: true, cls: 'fine', d: `M${f1(-cw * 0.3)} ${f1(zC + C * 0.3)}L${f1(-cw * 0.3)} ${f1(zC + C * 0.3 + 0.5)}` });
   pieces.push({ part: 'tail', d: capsule(0, zC + C / 2 - 0.3, zC + C / 2 + 0.25, cw * 0.6, 0.12) });
   // An X over each critical part for when it is gone, so a lost engine or cockpit reads at a glance.
   const cross = (x: number, z: number, hw: number, hh: number) =>
@@ -432,11 +455,12 @@ const DamageDiagram = memo(function DamageDiagram({ view }: P) {
   return (
     <div className="hud-pod">
       <svg className="hud-pod-svg" viewBox={SCHEMATIC.viewBox} aria-hidden>
-        {SCHEMATIC.pieces.map(({ part, d, line }, i) => {
+        {SCHEMATIC.pieces.map(({ part, d, line, cls: extra }, i) => {
           const h = Math.max(0, Math.min(1, parts[part] ?? 1));
           const n = hits.current[part] ?? 0;
           const state = h <= 0 ? ' broken' : h < 0.35 ? ' low' : '';
-          const cls = `hud-pod-part${line ? (part.startsWith('cable') ? ' line thin' : ' line') : ''}${PARTS[part].critical ? ' crit' : ''}${state}${n ? ' hit' : ''}`;
+          const kind = `${line ? (part.startsWith('cable') ? ' line thin' : ' line') : ''}${extra ? ` ${extra}` : ''}`;
+          const cls = `hud-pod-part${kind}${PARTS[part].critical ? ' crit' : ''}${state}${n ? ' hit' : ''}`;
           const c = healthColor(h);
           return <path key={`${i}.${n}`} className={cls} d={d} style={h <= 0 ? undefined : line ? { stroke: c } : { fill: c }} />;
         })}

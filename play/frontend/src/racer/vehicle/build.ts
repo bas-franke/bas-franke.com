@@ -159,6 +159,149 @@ export function surface(
   return g;
 }
 
+/** Where a shell panel is: its section, angles a0..a1 (round the section), z0..z1 (along it) and radius r. */
+export interface PanelSpan {
+  a0: number;
+  a1: number;
+  z0: number;
+  z1: number;
+  r: number;
+}
+
+/**
+ * A curved plate lying on a lathe skin (armour): the patch of the section outline over `span`, `thick` metres thick
+ * (growing outwards), closed on every edge, subdivided na x nz so it dents and buckles smoothly. Painted per face by
+ * where it is on the plate (u across a0..a1, v along z0..z1, both 0..1), already in the surface layout. With `bulge`
+ * it gets a relative morph target: every vertex pushed out along the skin's normal by bulge(u, v) metres (the plate
+ * buckling), so a dent in the base geometry and the buckle add up. `out` receives each vertex's (u, v) when given.
+ */
+export function shellPanel(
+  s: Section,
+  span: PanelSpan,
+  thick: number,
+  na: number,
+  nz: number,
+  p: (u: number, v: number) => Paint,
+  bulge?: (u: number, v: number) => number,
+): THREE.BufferGeometry {
+  const { a0, a1, z0, z1, r } = span;
+  const pos: number[] = [];
+  const nrm: number[] = [];
+  const uvs: number[] = [];
+  const col: number[] = [];
+  const mat: number[] = [];
+  const del: number[] = [];
+  const at = (u: number, layer: number) => {
+    const [x, y] = sectionPoint(a0 + (a1 - a0) * u, r + layer * thick, s);
+    return [x, y];
+  };
+  /** Outward skin normal at u: the outline's tangent turned a quarter (outline runs anticlockwise seen from +z). */
+  const skinN = (u: number): [number, number] => {
+    const e = 0.002;
+    const [x0, y0] = at(u - e, 0);
+    const [x1, y1] = at(u + e, 0);
+    const l = Math.hypot(x1 - x0, y1 - y0) || 1;
+    return [(y1 - y0) / l, -(x1 - x0) / l];
+  };
+  const width = Math.abs(a1 - a0) * r;
+  // One vertex: (u, v) on the plate, layer 0 inside / 1 outside, its normal, and the face's paint.
+  const vert = (u: number, v: number, layer: number, n: [number, number, number], pt: Paint) => {
+    const [x, y] = at(u, layer);
+    pos.push(x, y, z0 + (z1 - z0) * v);
+    nrm.push(...n);
+    uvs.push(u * width, v * (z1 - z0));
+    col.push(pt.c.r, pt.c.g, pt.c.b);
+    mat.push(pt.metal, pt.rough);
+    if (bulge) {
+      const [nx, ny] = skinN(u);
+      const b = bulge(u, v);
+      del.push(nx * b, ny * b, 0);
+    }
+  };
+  type V = [number, number, number, [number, number, number]];
+  /** A quad (corners in order round it), wound so its face points along `face`. */
+  const quad = (q: V[], face: [number, number, number], pt: Paint) => {
+    const pts = q.map(([u, v, l]) => {
+      const [x, y] = at(u, l);
+      return new THREE.Vector3(x, y, z0 + (z1 - z0) * v);
+    });
+    const n = _b.copy(pts[1]).sub(pts[0]).cross(_c.copy(pts[2]).sub(pts[0]));
+    const flip = n.x * face[0] + n.y * face[1] + n.z * face[2] < 0;
+    const order = flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
+    for (const k of order) vert(q[k][0], q[k][1], q[k][2], q[k][3], pt);
+  };
+  const smooth = (u: number, sign: number): [number, number, number] => {
+    const [x, y] = skinN(u);
+    return [x * sign, y * sign, 0];
+  };
+  for (let i = 0; i < na; i++) {
+    for (let j = 0; j < nz; j++) {
+      const [u0, u1, v0, v1] = [i / na, (i + 1) / na, j / nz, (j + 1) / nz];
+      const pt = p((u0 + u1) / 2, (v0 + v1) / 2);
+      const mid = smooth((u0 + u1) / 2, 1);
+      quad([[u0, v0, 1, smooth(u0, 1)], [u1, v0, 1, smooth(u1, 1)], [u1, v1, 1, smooth(u1, 1)], [u0, v1, 1, smooth(u0, 1)]], mid, pt);
+      quad([[u0, v0, 0, smooth(u0, -1)], [u1, v0, 0, smooth(u1, -1)], [u1, v1, 0, smooth(u1, -1)], [u0, v1, 0, smooth(u0, -1)]], [-mid[0], -mid[1], 0], pt);
+    }
+  }
+  // The rims: front and back edges (normal along z), and the two side edges (normal along the outline).
+  for (let i = 0; i < na; i++) {
+    const [u0, u1] = [i / na, (i + 1) / na];
+    for (const [v, sz] of [[0, -1], [1, 1]] as const) {
+      const n: [number, number, number] = [0, 0, sz];
+      quad([[u0, v, 0, n], [u1, v, 0, n], [u1, v, 1, n], [u0, v, 1, n]], n, p((u0 + u1) / 2, v));
+    }
+  }
+  for (let j = 0; j < nz; j++) {
+    const [v0, v1] = [j / nz, (j + 1) / nz];
+    for (const [u, su] of [[0, -1], [1, 1]] as const) {
+      const [x0, y0] = at(u - 0.002 * su, 0);
+      const [x1, y1] = at(u, 0);
+      const l = Math.hypot(x1 - x0, y1 - y0) || 1;
+      const n: [number, number, number] = [(x1 - x0) / l, (y1 - y0) / l, 0];
+      quad([[u, v0, 0, n], [u, v1, 0, n], [u, v1, 1, n], [u, v0, 1, n]], n, p(u, (v0 + v1) / 2));
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('aMat', new THREE.Float32BufferAttribute(mat, 2));
+  if (bulge) {
+    g.morphAttributes.position = [new THREE.Float32BufferAttribute(del, 3)];
+    g.morphTargetsRelative = true;
+  }
+  return g;
+}
+
+/**
+ * Gives a merged geometry made of equal pieces of `per` vertices after a `lead` of other vertices (a fan's hub, then its
+ * blades) a relative morph target: `delta(position, piece)` is the offset of each vertex (piece -1 for the lead).
+ */
+export function morphBy(g: THREE.BufferGeometry, lead: number, per: number, delta: (p: THREE.Vector3, piece: number) => THREE.Vector3) {
+  const pos = g.attributes.position;
+  const out = new Float32Array(pos.count * 3);
+  const p = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    p.fromBufferAttribute(pos, i);
+    const d = delta(p, i < lead ? -1 : Math.floor((i - lead) / per));
+    out[i * 3] = d.x;
+    out[i * 3 + 1] = d.y;
+    out[i * 3 + 2] = d.z;
+  }
+  g.morphAttributes.position = [new THREE.Float32BufferAttribute(out, 3)];
+  g.morphTargetsRelative = true;
+  return g;
+}
+
+/** A copy without morph targets (to merge with geometry that has none). */
+export function unmorphed(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const c = g.clone();
+  c.morphAttributes = {};
+  c.morphTargetsRelative = false;
+  return c;
+}
+
 /** Glow layout: colour (linear, can be > 1 for HDR) and a kind the glow shader switches on. */
 export function glow(geo: THREE.BufferGeometry, color: THREE.Color, kind: number, m?: THREE.Matrix4): THREE.BufferGeometry {
   const g = geo.index ? geo.toNonIndexed() : geo.clone();

@@ -72,7 +72,13 @@ export function mount(el: HTMLElement) {
       else {
         const id = PART_IDS[Math.floor(Math.random() * PART_IDS.length)];
         next[id] = Math.max(0, next[id] - 0.3 - Math.random() * 0.4);
-        if (next[id] <= 0) for (const c of PARTS[id].carries ?? []) next[c] = 0;
+        // What it carries goes with it, and what those carry (a nacelle takes its intake, and the intake its fan).
+        const gone = next[id] <= 0 ? [...(PARTS[id].carries ?? [])] : [];
+        while (gone.length) {
+          const c = gone.pop()!;
+          next[c] = 0;
+          gone.push(...(PARTS[c].carries ?? []));
+        }
       }
       patch.parts = next;
     }

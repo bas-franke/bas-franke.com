@@ -157,6 +157,24 @@ export function gripRate(stats: PodStats, v: number, brake = 0): number {
 export const knifeAngle = (st: PodState) => (-st.roll * Math.PI) / 2;
 
 /**
+ * Where a contact from the direction (nx, ny) across the pod (pod space, x right, y up) lands on its outline, `z`
+ * along it. Flat (or rolled less than halfway) that is the flank. Rolled onto its side the face towards the contact is
+ * the belly or the back, and between the engines there is nothing to touch: it lands on the lower engine (the one
+ * nearer the ground, where walls, rocks and other pods all reach), on its underside or its fin.
+ */
+function outlinePoint(st: PodState, nx: number, ny: number, z: number): [number, number, number] {
+  if (Math.abs(ny) > Math.abs(nx)) {
+    // The engine's body is a capsule about a metre round; past its ends (the intake lip, the nozzle) it narrows in,
+    // and its fin stands up only over the middle.
+    const end = z - Math.max(-2.2, Math.min(1.6, z));
+    const body = Math.sqrt(Math.max(0.04, 1.21 - end * end));
+    const up = Math.abs(z) < 0.9 ? POD_HALF_HEIGHT : body;
+    return [(Math.sign(st.roll) || Math.sign(nx) || 1) * ENGINE_X, ny > 0 ? up : -body, z];
+  }
+  return [nx * POD_HALF_WIDTH, ny * POD_HALF_HEIGHT, z];
+}
+
+/**
  * A contact on the pod's side facing `side` (-1 left, 1 right, across the course): on the flank `along` metres back
  * from the centre (pod space z, nose -3), on the belly or the back instead when the pod is rolled onto its side.
  * The push is away from that side, turned into the pod's heading.
@@ -165,12 +183,14 @@ export function sideHit(st: PodState, side: number, along: number, energy: numbe
   const knife = knifeAngle(st);
   const [nx, ny] = toPodSpace(side, 0, 0, 0, 0, knife);
   const z = Math.max(-POD_HALF_LENGTH, Math.min(POD_HALF_LENGTH, along));
-  return { point: [nx * POD_HALF_WIDTH, ny * POD_HALF_HEIGHT, z], dir: toPodSpace(-side, 0, 0, st.psi, 0, knife), energy: Math.min(2, energy), kind };
+  return { point: outlinePoint(st, nx, ny, z), dir: toPodSpace(-side, 0, 0, st.psi, 0, knife), energy: Math.min(2, energy), kind };
 }
 
 /** Keeps the stronger of the step's contacts. */
 function touch(st: PodState, hit: Hit) {
-  if (!st.hit || hit.energy > st.hit.energy) st.hit = hit;
+  // Between equal contacts (brushing two rocks of a formation at once) the one most beside the pod is where it rubs.
+  const same = st.hit && Math.abs(hit.energy - st.hit.energy) < 1e-9;
+  if (!st.hit || hit.energy > st.hit.energy + 1e-9 || (same && Math.abs(hit.point[2]) < Math.abs(st.hit.point[2]))) st.hit = hit;
 }
 
 export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodStats, dt: number) {
@@ -340,16 +360,23 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
     // The rock's centre in pod space, and where its circle meets the pod's outline (the nearest point of the box).
     const [cx, cy, cz] = toPodSpace(-dx, 0, ds, st.psi, 0, knifeAngle(st));
     const clampTo = (v: number, m: number) => Math.max(-m, Math.min(m, v));
-    let px = clampTo(cx, POD_HALF_WIDTH);
-    const py = clampTo(cy, POD_HALF_HEIGHT);
     const pz = clampTo(cz, POD_HALF_LENGTH);
+    // Across the pod: the flank, or rolled onto its side the lower engine's underside or fin (outlinePoint).
+    const ch = Math.hypot(cx, cy) || 1;
+    let [px, py] = outlinePoint(st, cx / ch, cy / ch, pz);
+    if (Math.abs(cy) <= Math.abs(cx)) {
+      px = clampTo(cx, POD_HALF_WIDTH);
+      py = clampTo(cy, POD_HALF_HEIGHT);
+    }
     const cl = Math.hypot(cx, cy, cz) || 1;
     const away: [number, number, number] = [-cx / cl, -cy / cl, -cz / cl];
     const vIn = st.v;
     if (ds < 0 && reachS + ds < reachX - Math.abs(dx)) {
       const fresh = !wasOnRock;
-      // Nose-on, the engines stick out in front: the one on the rock's side takes it on its intake and claws.
-      if (Math.abs(px) < ENGINE_X) px = (cx < 0 || (cx === 0 && side > 0) ? -1 : 1) * ENGINE_X;
+      // Nose-on, the engines stick out in front: the one on the rock's side takes it on its intake and claws (rolled
+      // onto its side, the engines are stacked and the lower one meets the rock first, on its intake's rim).
+      if (Math.abs(cy) > Math.abs(cx)) py = clampTo(cy, 0.9);
+      else if (Math.abs(px) < ENGINE_X) px = (cx < 0 || (cx === 0 && side > 0) ? -1 : 1) * ENGINE_X;
       const square = 1 - Math.abs(dx) / reachX;
       touch(st, { point: [px, py, pz], dir: away, energy: fresh ? Math.min(2, (vIn / 100) * (0.5 + 1.2 * square)) : 0.05, kind: 'rock' });
       st.onRock = true;

@@ -55,10 +55,17 @@ function playBreak(ctx: BaseAudioContext, dest: AudioNode, part: PartId, k: numb
     engineTearOff(ctx, dest, k * 0.8);
     metalTear(ctx, dest, k, 1);
   } else if (part === 'canopy') glassShatter(ctx, dest, k);
-  else if (part.startsWith('binder')) binderZap(ctx, dest, k);
-  else if (part.startsWith('cable')) cableTwang(ctx, dest, k);
+  else if (part === 'canopyFrame') {
+    // The frame takes its glass with it (whose own cue is dropped as a carried part): both in one.
+    glassShatter(ctx, dest, k);
+    metalTear(ctx, dest, k * 0.7, 0.3);
+  } else if (part.startsWith('binder')) binderZap(ctx, dest, k);
+  // A snapping whip antenna twangs like a cable; a fan shredding itself grinds.
+  else if (part.startsWith('cable') || part === 'antenna') cableTwang(ctx, dest, part === 'antenna' ? k * 0.7 : k);
+  else if (part.startsWith('fan')) crunch(ctx, dest, k * 0.6);
   else {
-    const size = part === 'cockpitNose' ? 0.85 : part.startsWith('intake') || part.startsWith('nozzle') ? 0.7 : part === 'tail' ? 0.6 : part.startsWith('flap') ? 0.4 : 0.2;
+    const size = part === 'cockpitNose' ? 0.85 : part.startsWith('mount') ? 0.75 : part.startsWith('intake') || part.startsWith('nozzle') ? 0.7
+      : part === 'tail' ? 0.6 : part.startsWith('arm') ? 0.5 : part.startsWith('flap') ? 0.4 : part.startsWith('petals') ? 0.3 : 0.2;
     metalTear(ctx, dest, k, size);
   }
 }

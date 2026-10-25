@@ -6,21 +6,29 @@
 // Every destructible part (core/damage.ts PartId) is its own object so it can be damaged, dented and broken off on
 // its own: scorched plates appear near the parts that took damage, fins bend, flaps hang, intake rings and the tail
 // light flicker, binders thin and flicker, cables droop, the canopy cracks, a hurt engine sags and its exhaust
-// sputters. Broken parts are hidden, or handed to the debris system by breakOff. Under a part that can come off there
-// is a dark filler (a gutted intake socket, a nozzle back plate, a nose bulkhead) so the pod stays closed.
+// sputters. The nacelles' armour plates buckle outwards and then peel up from their leading edge, the intake fans
+// lose and bend blades and spin down (a broken fan jams), the nozzle petals flare and drop out, the antenna bends back
+// and the canopy frame skews. Broken parts are hidden, or handed to the debris system by breakOff. Under a part that
+// can come off there is a dark filler (a gutted intake socket, a nozzle back plate, a nose bulkhead) so the pod stays
+// closed.
 //
-// Draw calls per pod: 'high'/'medium' ~36 (per engine: nacelle, intake + ring, claws, fin, flap, nozzle + glow; the
-// cockpit's shell, visor, nose, canopy, two stabilisers, tail + light; three binders of clamps and beams; two cables;
-// the plumes). 'low' ~8: each engine and the cockpit are one merged mesh + one glow mesh, so only the nacelles, the
-// centre binder and the hull are separate parts; the other parts only show through scars and sputter there. Geometry is cached per
-// design + quality and shared by every pod of that design (a dent clones the part's geometry for that pod only); the
-// painted surface material is shared by all pods; glow and plume materials are per pod because their uniforms animate.
+// Draw calls per pod: 'high'/'medium' ~52 (per engine: nacelle, intake + ring, fan, claws, fin, flap, nozzle + glow,
+// petals, four armour plates; the cockpit's shell, visor, nose, canopy frame, canopy, antenna + tip light, two mounts,
+// two stabilisers, tail + light; three binders of clamps and beams; two cables; the plumes). The fans, petals and
+// antenna cast no shadow (they are small, or inside the engine). 'low' ~8: each engine and the cockpit are one merged
+// mesh + one glow mesh, so only the nacelles, the centre binder and the hull are separate parts; the other parts only
+// show through scars and sputter there. Geometry is cached per design + quality and shared by every pod of that design
+// (a dent, or a fan or petal ring losing pieces, clones the part's geometry for that pod only); the painted surface
+// material is shared by all pods; glow and plume materials are per pod because their uniforms animate.
 
 import * as THREE from 'three';
 import { PART_IDS, PARTS, partAnchors, type PartId } from '../core/damage';
 import type { PodDesign } from '../core/pods';
 import type { PodAnim, PodVisual, Quality } from '../world/types';
-import { along, blade, glow, lathe, merge, paint, sectionPoint, surface, trs, type Band, type Paint, type Section } from './build';
+import {
+  along, blade, glow, lathe, merge, morphBy, paint, sectionPoint, shellPanel, surface, trs, unmorphed,
+  type Band, type Paint, type PanelSpan, type Section,
+} from './build';
 import { acquireShared, createGlowMaterial, createPlumeMaterial, releaseShared } from './materials';
 
 /** Layout of a design in pod space (metres), shared by the geometry builder and the animation. */
@@ -39,6 +47,25 @@ interface Layout {
   /** Top fin and side flap hinges in engine-local space. */
   fin: { pos: THREE.Vector3; angle: number };
   flap: { pos: THREE.Vector3; angle: number };
+  /**
+   * Armour plates (engine-local): where each lies, its hinge (the middle of its trailing edge, where it stays bolted on
+   * longest) and the axis it peels up about.
+   */
+  arm: Record<ArmKind, { span: PanelSpan; pos: THREE.Vector3; axis: THREE.Vector3 }>;
+  /** The fan's hub (engine-local); the canopy frame's and the antenna's pivots (pod space). */
+  fan: THREE.Vector3;
+  frame: THREE.Vector3;
+  antenna: THREE.Vector3;
+}
+
+type ArmKind = 'Top' | 'Out' | 'In' | 'Belly';
+const ARM_KINDS: ArmKind[] = ['Top', 'Out', 'In', 'Belly'];
+
+/** A part made of equal pieces that drop out one by one (fan blades, nozzle petals): `lead` vertices, then `n` x `per`. */
+interface Spokes {
+  lead: number;
+  per: number;
+  n: number;
 }
 
 /** A binder beam: unit cylinder glow (`thin` = the centre binder's) placed by `m`. */
@@ -66,6 +93,8 @@ interface PodGeometry {
   thinBeam?: THREE.BufferGeometry;
   links?: Record<BinderId, Link[]>;
   plume: THREE.BufferGeometry;
+  /** How the fan and petal geometry is laid out (high/medium). */
+  spokes: Partial<Record<'fan' | 'petals', Spokes>>;
   users: number;
 }
 
@@ -94,7 +123,21 @@ function layoutOf(design: PodDesign): Layout {
     cb: ca * 0.84,
     fin: { pos: new THREE.Vector3(), angle: Math.PI * 0.42 },
     flap: { pos: new THREE.Vector3(), angle: -0.12 },
+    arm: {} as Layout['arm'],
+    fan: new THREE.Vector3(),
+    frame: new THREE.Vector3(),
+    antenna: new THREE.Vector3(),
   };
+}
+
+/**
+ * How far (m) a buckled armour plate bows out at (u across, v along it, 0..1): a crumpled bulge over the middle and the
+ * leading edge lifting into the airflow. The plate's morph target holds this; its scars ride out with it.
+ */
+function plateBulge(u: number, v: number): number {
+  const bow = Math.sin(Math.PI * u) * Math.sin(Math.PI * Math.min(1, v * 1.15));
+  const crumple = 0.7 + 0.3 * Math.sin(u * 9.7 + v * 5.3) * Math.sin(v * 7.1 - u * 3.3);
+  return 0.1 * bow * crumple + 0.07 * (1 - v) * (1 - v);
 }
 
 /** Colours of a design as paints. */
@@ -142,8 +185,9 @@ function panels(base: Paint, under: Paint, seed: number) {
 
 /**
  * Right engine in engine-local space (nose at -z, outboard +x), split into its breakable parts: nacelle (the body,
- * mounts, pipes, plates, rear spikes and the fillers left behind when the intake or nozzle comes off), intake
- * (throat, lip, fan), claws (the teeth round the lip), nozzle, and the hinged fin and flap.
+ * mounts, pipes, rear spikes and the fillers left behind when the intake or nozzle comes off), intake (throat and lip),
+ * fan (hub and blades, relative to its hub), claws (the teeth round the lip), nozzle, petals (the ring round the
+ * exhaust), four armour plates (each relative to its hinge) and the hinged fin and flap.
  */
 function buildEngine(design: PodDesign, lay: Layout, segs: number, pal: ReturnType<typeof palette>, glowCol: THREE.Color) {
   const { L, R } = lay;
@@ -194,23 +238,37 @@ function buildEngine(design: PodDesign, lay: Layout, segs: number, pal: ReturnTy
   };
   const back = new THREE.Vector3(0, 0, 1);
 
-  // Fan: a spinner and swept blades deep in the intake (they go with it); the dark disk behind them stays.
+  // Fan: a spinner and swept blades deep in the intake, about its hub (the part spins); the dark disk behind them
+  // stays with the nacelle. The blades are stored in a scrambled order so dropping the last few from the draw range
+  // knocks out blades all round the fan, and a morph target bends them back and round.
+  lay.fan.set(0, 0, Z(0.12));
+  const fanParts: THREE.BufferGeometry[] = [];
   const hub = new THREE.ConeGeometry(0.27 * R, 0.16 * L, Math.max(8, segs / 2), 1);
-  intake.push(surface(hub, M, trs(0, 0, Z(0.11), -Math.PI / 2, 0, 0)));
+  fanParts.push(surface(hub, M, trs(0, 0, -0.01 * L, -Math.PI / 2, 0, 0)));
   hub.dispose();
   const disk = new THREE.CircleGeometry(0.5 * R, Math.max(8, segs / 2));
   nacelle.push(surface(disk, Dk, trs(0, 0, Z(0.135), 0, Math.PI, 0)));
   disk.dispose();
   const bladeBox = new THREE.BoxGeometry(0.12 * R, 0.42 * R, 0.02 * L);
   const blades = segs >= 28 ? 14 : 8;
-  for (let i = 0; i < blades; i++) {
+  const fanLead = fanParts[0].attributes.position.count;
+  for (let n = 0; n < blades; n++) {
+    const i = (n * 5) % blades;
     const m = new THREE.Matrix4()
       .makeRotationZ((i / blades) * Math.PI * 2)
-      .multiply(trs(0, 0.47 * R, Z(0.12)))
+      .multiply(trs(0, 0.47 * R, 0))
       .multiply(new THREE.Matrix4().makeRotationY(0.6));
-    intake.push(surface(bladeBox, i % 2 ? M : D, m));
+    fanParts.push(surface(bladeBox, i % 2 ? M : D, m));
   }
+  const fanPer = fanParts[1].attributes.position.count;
   bladeBox.dispose();
+  const bendDir = new THREE.Vector3();
+  const fan = morphBy(merge(fanParts), fanLead, fanPer, (q, piece) => {
+    if (piece < 0) return bendDir.set(0, 0, 0);
+    const r = Math.hypot(q.x, q.y);
+    const k = Math.max(0, r - 0.26 * R) * (0.6 + 0.5 * Math.abs(Math.sin(piece * 2.9 + 0.7)));
+    return bendDir.set((-q.y / r) * k * 0.6, (q.x / r) * k * 0.6, k * 0.5);
+  });
 
   // Teeth around the intake lip, pointing forwards (the "claws" part).
   const teeth = design.shape.fins * 2 + 1;
@@ -257,13 +315,31 @@ function buildEngine(design: PodDesign, lay: Layout, segs: number, pal: ReturnTy
     nacelle.push(surface(pipe, M, trs(p.x, p.y, p.z, Math.PI / 2, 0, 0)));
   }
   pipe.dispose();
-  // Armour plates bolted on the top front and outboard side.
-  const plate = new THREE.BoxGeometry(0.55 * R, 0.08, 0.2 * L);
-  for (const a of [Math.PI * 0.5, Math.PI * 0.12]) {
-    const p = onSurface(a, 1.08 * R, Z(0.4));
-    nacelle.push(surface(plate, (c) => (Math.abs(c.x) > 0.18 * R ? S : P), trs(p.x, p.y, p.z, 0, 0, a - Math.PI / 2), 0.5));
+  // Armour: curved plates lying over the skin from 28 % to 49 % of its length (between the front livery band and the
+  // groove), on top, outboard, inboard (narrow, clear of the binder mount) and on the belly (between the pipes). Dark
+  // trim round a livery plate with a stripe down the middle. Each is built about its hinge (the middle of its trailing
+  // edge): the airflow gets under a loose plate's leading edge and folds it back about the skin's tangent there.
+  const armSpans: Record<ArmKind, [number, number]> = {
+    Top: [Math.PI * 0.5, Math.PI * 0.17],
+    Out: [0, Math.PI * 0.15],
+    In: [Math.PI, Math.PI * 0.072],
+    Belly: [-Math.PI * 0.5, Math.PI * 0.082],
+  };
+  const armour = {} as Record<ArmKind, THREE.BufferGeometry>;
+  const na = segs >= 40 ? 8 : 6;
+  const nz = segs >= 40 ? 6 : 4;
+  for (const kind of ARM_KINDS) {
+    const [mid, half] = armSpans[kind];
+    const span: PanelSpan = { a0: mid - half, a1: mid + half, z0: Z(0.28), z1: Z(0.49), r: 1.05 * R };
+    const plateP = (u: number, v: number) => (u < 0.12 || u > 0.88 || v < 0.1 || v > 0.9 ? D : Math.abs(u - 0.5) < 0.14 ? P : S);
+    const g = shellPanel(sec, span, 0.05 + 0.02 * R, kind === 'In' || kind === 'Belly' ? Math.max(3, na - 3) : na, nz, plateP, plateBulge);
+    const pos = onSurface(mid, span.r, span.z1);
+    const [x0, y0] = sectionPoint(mid - 0.01, 1, sec);
+    const [x1, y1] = sectionPoint(mid + 0.01, 1, sec);
+    g.translate(-pos.x, -pos.y, -pos.z);
+    armour[kind] = g;
+    lay.arm[kind] = { span, pos, axis: new THREE.Vector3(x1 - x0, y1 - y0, 0).normalize() };
   }
-  plate.dispose();
 
   // Hinges for the top fin and side flap (animated separately at high quality).
   lay.fin.pos.copy(onSurface(lay.fin.angle, 0.97 * R, Z(0.58)));
@@ -287,9 +363,41 @@ function buildEngine(design: PodDesign, lay: Layout, segs: number, pal: ReturnTy
   nozzleGlow.push(glow(rim, glowCol, 4, trs(0, 0, Z(0.998), 0, 0, 0, sec.sx, sec.sy, 1)));
   rim.dispose();
 
+  // Nozzle petals: a ring of overlapping leaves round the exhaust converging past the nozzle's end, in a scrambled order
+  // (like the fan's blades) so they drop out all round it; a morph target flares them open.
+  const petalParts: THREE.BufferGeometry[] = [];
+  const petals = segs >= 40 ? 14 : 10;
+  const pz0 = Z(0.985);
+  const pLen = Math.hypot(0.075 * L, 0.15 * R);
+  for (let n = 0; n < petals; n++) {
+    const a = (((n * 3) % petals) / petals) * Math.PI * 2;
+    const base = onSurface(a, 0.88 * R, pz0);
+    const tip = onSurface(a, 0.73 * R, Z(1.06));
+    const { geo, m } = blade(
+      [[0, -0.2 * R], [pLen, -0.13 * R], [pLen, 0.13 * R], [0, 0.2 * R]],
+      0.035,
+      tip.clone().sub(base),
+      new THREE.Vector3(-Math.sin(a), Math.cos(a), 0),
+      base,
+    );
+    petalParts.push(surface(geo, (c) => (c.distanceTo(tip) < 0.3 * pLen ? D : M), m));
+    geo.dispose();
+  }
+  const petalPer = petalParts[0].attributes.position.count;
+  const flare = new THREE.Vector3();
+  const petalGeo = morphBy(merge(petalParts), 0, petalPer, (q, piece) => {
+    const r = Math.hypot(q.x, q.y) || 1;
+    const k = Math.max(0, q.z - pz0) * (0.9 + 0.6 * Math.abs(Math.sin(piece * 1.7 + 0.4)));
+    return flare.set((q.x / r) * k * 0.7, (q.y / r) * k * 0.7, -k * 0.2);
+  });
+
   return {
-    surf: { nacelle: merge(nacelle), intake: merge(intake), claws: merge(claws), nozzle: lathe(nozzleBands, segs, sec), fin: finGeo, flap: flapGeo },
+    surf: {
+      nacelle: merge(nacelle), intake: merge(intake), fan, claws: merge(claws), nozzle: lathe(nozzleBands, segs, sec), petals: petalGeo,
+      fin: finGeo, flap: flapGeo, armTop: armour.Top, armOut: armour.Out, armIn: armour.In, armBelly: armour.Belly,
+    },
     glow: { intake: intakeGlow, nozzle: merge(nozzleGlow) },
+    spokes: { fan: { lead: fanLead, per: fanPer, n: blades }, petals: { lead: 0, per: petalPer, n: petals } } as PodGeometry['spokes'],
     sec,
   };
 }
@@ -329,7 +437,10 @@ function cockpitSection(design: PodDesign, lay: Layout): Section {
   return { n: 2.4 + 1.4 * design.shape.wedge, sx: lay.ca, sy: lay.cb };
 }
 
-/** Cockpit shell, nose, canopy, pilot, stabilisers, tail, binders and cables in pod space, as separate parts. */
+/**
+ * Cockpit shell, nose, canopy, pilot, stabilisers, tail, side mounts, binders and cables in pod space, as separate
+ * parts; the canopy frame and the antenna about their pivots (the canopy glass in pod space, it hangs in the frame).
+ */
 function buildCockpit(design: PodDesign, lay: Layout, segs: number, pal: ReturnType<typeof palette>, glowCol: THREE.Color, sec: Section) {
   const { P, S, M, D, Dk, helmet, suit } = pal;
   const C = design.shape.cockpitLength;
@@ -363,12 +474,18 @@ function buildCockpit(design: PodDesign, lay: Layout, segs: number, pal: ReturnT
   const nose = lathe([{ pts: [[Z(0), 0], [Z(0.015), 0.3], [Z(0.07), 0.6], [Z(0.18), 0.84]], paint: shell }], cseg, cs);
   nose.translate(0, yC, 0);
 
-  // Canopy rim, pilot (helmet + shoulders), keel, side mounts.
+  // Canopy frame (its rim and a spine over the top, the glass sits in it), pilot (helmet + shoulders), keel, side mounts.
   const canZ = Z(0.38);
   const canY = yC + 0.68 * b;
+  lay.frame.set(0, canY, canZ);
+  const frame: THREE.BufferGeometry[] = [];
   const rimG = new THREE.TorusGeometry(1, 0.07, 4, cseg);
-  parts.push(surface(rimG, M, trs(0, canY, canZ, Math.PI / 2, 0, 0, 0.5 * a, 0.3 * C, 1)));
+  frame.push(surface(rimG, M, trs(0, canY, canZ, Math.PI / 2, 0, 0, 0.5 * a, 0.3 * C, 1)));
   rimG.dispose();
+  const spineG = new THREE.TorusGeometry(1, 0.05, 4, Math.max(8, cseg / 2), Math.PI);
+  frame.push(surface(spineG, D, trs(0, canY, canZ, 0, Math.PI / 2, 0, 0.3 * C * 1.03, 0.62 * b * 1.05, 1)));
+  spineG.dispose();
+  const frameGeo = merge(frame).translate(0, -canY, -canZ);
   const head = new THREE.SphereGeometry(0.19, 12, 8);
   parts.push(surface(head, helmet, trs(0, canY + 0.26, canZ + 0.05)));
   head.dispose();
@@ -378,9 +495,29 @@ function buildCockpit(design: PodDesign, lay: Layout, segs: number, pal: ReturnT
   const keel = new THREE.BoxGeometry(0.55 * a, 0.3 * b, 0.5 * C);
   parts.push(surface(keel, Dk, trs(0, yC - 0.88 * b, Z(0.55)), 0.5));
   keel.dispose();
+  // The side mounts the binders clamp onto (each takes its binder's cockpit-end clamps, added below).
+  const mounts: THREE.BufferGeometry[][] = [[], []];
   const mount = new THREE.BoxGeometry(0.3, 0.5, 0.5);
-  for (const s of [-1, 1]) parts.push(surface(mount, D, trs(s * (a + 0.08), yC, Z(0.5)), 0.5));
+  for (const s of [-1, 1]) mounts[s < 0 ? 0 : 1].push(surface(mount, D, trs(s * (a + 0.08), yC, Z(0.5)), 0.5));
   mount.dispose();
+  // Antenna: a whip behind the canopy, off to the left, about its foot (the part leans back and bends), with a red
+  // tip light.
+  const rA = cockpitRadius(0.82);
+  let th = Math.PI / 2;
+  while (th > 0.3 && sectionPoint(th, rA, cs)[0] < 0.3 * a) th -= 0.01;
+  const [axA, ayA] = sectionPoint(th, rA, cs);
+  lay.antenna.set(-axA, yC + ayA, Z(0.82));
+  const antParts: THREE.BufferGeometry[] = [];
+  const foot = new THREE.BoxGeometry(0.14, 0.1, 0.22);
+  antParts.push(surface(foot, D, trs(0, 0.02, 0)));
+  foot.dispose();
+  const mast = new THREE.CylinderGeometry(0.012, 0.024, 1.05, 5);
+  antParts.push(surface(mast, M, trs(0, 0.55, 0)));
+  mast.dispose();
+  const antenna = merge(antParts);
+  const tipG = new THREE.SphereGeometry(0.045, 6, 4);
+  const antennaGlow = glow(tipG, new THREE.Color('#ff3020').multiplyScalar(2), 0, trs(0, 1.09, 0));
+  tipG.dispose();
   // Tail grille and two little stabilisers.
   const slat = new THREE.BoxGeometry(0.75 * a, 0.05, 0.1);
   const tailParts: THREE.BufferGeometry[] = [];
@@ -400,7 +537,7 @@ function buildCockpit(design: PodDesign, lay: Layout, segs: number, pal: ReturnT
   }
 
   // Binders: two per side from the cockpit mounts to the engines' inboard mounts, and one between the engines. The
-  // cockpit end's clamp stays on the hull when a binder snaps; the engine end's clamp goes with the binder.
+  // cockpit end's clamp stays on its mount when a binder snaps; the engine end's clamp goes with the binder.
   const binderCol = new THREE.Color('#4feaff').lerp(glowCol, 0.3);
   const L = lay.L;
   const R = lay.R;
@@ -417,7 +554,7 @@ function buildCockpit(design: PodDesign, lay: Layout, segs: number, pal: ReturnT
   const link = (id: BinderId, p: THREE.Vector3, q: THREE.Vector3) => {
     const d = q.clone().sub(p).normalize();
     links[id].push({ thin: id === 'binderMid', m: along(p.clone().addScaledVector(d, 0.12), q.clone().addScaledVector(d, -0.12)) });
-    (id === 'binderMid' ? clamps[id] : parts).push(surface(clamp, D, along(p.clone().addScaledVector(d, -0.05), p.clone().addScaledVector(d, 0.3))));
+    (id === 'binderMid' ? clamps[id] : mounts[id === 'binderL' ? 0 : 1]).push(surface(clamp, D, along(p.clone().addScaledVector(d, -0.05), p.clone().addScaledVector(d, 0.3))));
     clamps[id].push(surface(clamp, D, along(q.clone().addScaledVector(d, -0.3), q.clone().addScaledVector(d, 0.05))));
   };
   for (const [s, id] of [[-1, 'binderL'], [1, 'binderR']] as const) {
@@ -475,9 +612,13 @@ function buildCockpit(design: PodDesign, lay: Layout, segs: number, pal: ReturnT
     binderL: merge(clamps.binderL),
     binderR: merge(clamps.binderR),
     binderMid: merge(clamps.binderMid),
+    canopyFrame: frameGeo,
+    antenna,
+    mountL: merge(mounts[0]),
+    mountR: merge(mounts[1]),
   };
   if (cables.length) [surf.cableL, surf.cableR] = cables;
-  return { surf, glow: { hull: visorGlow, tail: tailGlow }, canopy, beam, thinBeam, links };
+  return { surf, glow: { hull: visorGlow, tail: tailGlow, antenna: antennaGlow }, canopy, beam, thinBeam, links };
 }
 
 /** Exhaust plumes (outer + hot core cones) and nozzle halos for both engines, in pod space. */
@@ -570,19 +711,37 @@ function getGeometry(design: PodDesign, quality: Quality): PodGeometry {
     // paint): only the nacelles, the centre binder and the hull are separate parts.
     const e = eng.surf;
     const at = (g: THREE.BufferGeometry, p: THREE.Vector3) => g.translate(p.x, p.y, p.z);
+    // Parts with a morph target (armour, fan, petals) lose it to merge with the rest.
+    const flat = (g: THREE.BufferGeometry, p?: THREE.Vector3) => {
+      const f = unmorphed(g);
+      g.dispose();
+      return p ? at(f, p) : f;
+    };
     const local = new THREE.Matrix4().makeTranslation(-lay.xE, 0, -lay.zE);
     const beams = ck.links.binderR.map((l) => ck.beam.clone().applyMatrix4(local.clone().multiply(l.m)));
     const mid = ck.links.binderMid.map((l) => ck.thinBeam.clone().applyMatrix4(l.m));
     const c = ck.surf;
+    const armour = ARM_KINDS.map((k) => flat(e[`arm${k}`], lay.arm[k].pos));
     pg = {
       layout: lay,
       surf: {
-        nacelle: merge([e.nacelle, e.intake, e.claws, e.nozzle, at(e.fin, lay.fin.pos), at(e.flap, lay.flap.pos), c.binderR.applyMatrix4(local)]),
-        hull: merge([c.hull, c.cockpitNose, c.stabL, c.stabR, c.tail, surface(ck.canopy, pal.glass)]),
+        nacelle: merge([
+          e.nacelle, e.intake, flat(e.fan, lay.fan), e.claws, e.nozzle, flat(e.petals), at(e.fin, lay.fin.pos), at(e.flap, lay.flap.pos),
+          ...armour, c.binderR.applyMatrix4(local),
+        ]),
+        hull: merge([
+          c.hull, c.cockpitNose, c.stabL, c.stabR, c.tail, surface(ck.canopy, pal.glass), at(c.canopyFrame, lay.frame),
+          at(c.antenna.rotateX(ANTENNA_LEAN), lay.antenna), c.mountL, c.mountR,
+        ]),
         binderMid: c.binderMid,
       },
-      glow: { engine: merge([eng.glow.intake, eng.glow.nozzle, ...beams]), hull: merge([ck.glow.hull, ck.glow.tail]), binderMid: merge(mid) },
+      glow: {
+        engine: merge([eng.glow.intake, eng.glow.nozzle, ...beams]),
+        hull: merge([ck.glow.hull, ck.glow.tail, at(ck.glow.antenna.rotateX(ANTENNA_LEAN), lay.antenna)]),
+        binderMid: merge(mid),
+      },
       plume,
+      spokes: {},
       users: 1,
     };
     for (const g of [ck.canopy, ck.beam, ck.thinBeam, c.binderL]) g.dispose();
@@ -596,6 +755,7 @@ function getGeometry(design: PodDesign, quality: Quality): PodGeometry {
       thinBeam: ck.thinBeam,
       links: ck.links,
       plume,
+      spokes: eng.spokes,
       users: 1,
     };
   }
@@ -642,6 +802,8 @@ interface Scar {
   at: number;
   /** The parts whose damage shows here, weighted by how close they are. */
   near: [PartId, number][];
+  /** On a buckling plate: the normal it lifts along, how far at full buckle, how far it is lifted now, the plate. */
+  lift?: { n: THREE.Vector3; k: number; done: number; part: PartId };
 }
 
 /**
@@ -692,6 +854,10 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
   const engines: THREE.Group[] = [];
   const fins: (THREE.Object3D | undefined)[] = [];
   const flaps: (THREE.Object3D | undefined)[] = [];
+  type Piece = { grp: THREE.Group; mesh: THREE.Mesh };
+  const fans: (Piece | undefined)[] = [];
+  const petalRings: (Piece | undefined)[] = [];
+  const plates: (Piece & { part: PartId; axis: THREE.Vector3; k: number })[] = [];
   for (const [i, s] of [[0, -1], [1, 1]] as const) {
     const k = SIDES[i];
     const g = new THREE.Group();
@@ -704,8 +870,26 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
     parts[`nacelle${k}`] = g;
     const intake = piece(`intake${k}`, g, 'intake', 'intake');
     if (intake?.light) flickers.push({ obj: intake.light, part: `intake${k}`, k: 1 + i * 3 });
+    // The fan sits in the intake and the petals on the nozzle, so they leave with them.
+    const fan = piece(`fan${k}`, intake?.grp ?? g, 'fan');
+    if (fan) {
+      fan.grp.position.copy(lay.fan);
+      fan.mesh.castShadow = false;
+      fans[i] = fan;
+    }
     piece(`claws${k}`, g, 'claws');
-    piece(`nozzle${k}`, g, 'nozzle', 'nozzle');
+    const nozzle = piece(`nozzle${k}`, g, 'nozzle', 'nozzle');
+    const ring = piece(`petals${k}`, nozzle?.grp ?? g, 'petals');
+    if (ring) {
+      ring.mesh.castShadow = false;
+      petalRings[i] = ring;
+    }
+    for (const kind of ARM_KINDS) {
+      const plate = piece(`arm${kind}${k}`, g, `arm${kind}`);
+      if (!plate) continue;
+      plate.grp.position.copy(lay.arm[kind].pos);
+      plates.push({ part: `arm${kind}${k}`, grp: plate.grp, mesh: plate.mesh, axis: lay.arm[kind].axis, k: plates.length });
+    }
     const fin = piece(`fin${k}`, g, 'fin');
     fin?.grp.position.copy(lay.fin.pos);
     fins.push(fin?.grp);
@@ -726,8 +910,19 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
   piece('cockpitNose', cockpit, 'cockpitNose');
   piece('stabL', cockpit, 'stabL');
   piece('stabR', cockpit, 'stabR');
+  piece('mountL', cockpit, 'mountL');
+  piece('mountR', cockpit, 'mountR');
   const tail = piece('tail', cockpit, 'tail', 'tail');
   if (tail?.light) flickers.push({ obj: tail.light, part: 'tail', k: 7 });
+  const antenna = piece('antenna', cockpit, 'antenna', 'antenna');
+  if (antenna) {
+    antenna.grp.position.copy(lay.antenna);
+    antenna.grp.rotation.x = ANTENNA_LEAN;
+    antenna.mesh.castShadow = false;
+  }
+  // The glass hangs in its frame (pod space under the frame's pivot), so it goes when the frame goes.
+  const frame = piece('canopyFrame', cockpit, 'canopyFrame');
+  frame?.grp.position.copy(lay.frame);
   let canopy: THREE.Mesh | null = null;
   if (pg.canopy) {
     const grp = new THREE.Group();
@@ -735,7 +930,8 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
     canopy = new THREE.Mesh(pg.canopy, shared.glass);
     canopy.renderOrder = 1;
     grp.add(canopy);
-    cockpit.add(grp);
+    if (frame) grp.position.copy(lay.frame).negate();
+    (frame?.grp ?? cockpit).add(grp);
     parts.canopy = grp;
   }
 
@@ -844,6 +1040,25 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
       nrm.set(Math.cos(a) / engSec.sx, Math.sin(a) / engSec.sy, 0);
       addScar(parts[own] ?? g, i, n, new THREE.Vector3(sx, sy, z), nrm, len, wid, own);
     }
+    // A few on each armour plate's outside, riding with it as it buckles out (lifted by its bulge) and peels.
+    for (const kind of ARM_KINDS) {
+      const id: PartId = `arm${kind}${k}`;
+      const plate = parts[id];
+      if (!plate) continue;
+      const { span, pos } = lay.arm[kind];
+      for (let n = 0; n < 3; n++) {
+        const u = 0.2 + Math.random() * 0.6;
+        const v = 0.2 + Math.random() * 0.6;
+        const a = span.a0 + (span.a1 - span.a0) * u;
+        const [sx, sy] = sectionPoint(a, span.r + 0.05 + 0.02 * lay.R, engSec);
+        const z = span.z0 + (span.z1 - span.z0) * v;
+        const [len, wid] = scarSize(lay.R * 0.6);
+        podPos.set(s * (sx + lay.xE), sy, z + lay.zE);
+        nrm.set(Math.cos(a) / engSec.sx, Math.sin(a) / engSec.sy, 0);
+        addScar(plate, i, n * 5 + 2, new THREE.Vector3(sx - pos.x, sy - pos.y, z - pos.z), nrm, Math.min(len, 0.5 * (span.z1 - span.z0)), wid, id);
+        scars[scars.length - 1].lift = { n: nrm.clone(), k: plateBulge(u, v), done: 0, part: id };
+      }
+    }
     const anchor = new THREE.Object3D();
     anchor.position.set(0, lay.R * 0.75, -lay.L * 0.1);
     g.add(anchor);
@@ -879,6 +1094,27 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
   let crackedGlass: THREE.MeshStandardMaterial | null = null;
   const hp = (id: PartId) => (partHealth ? (partBroken.has(id) ? 0 : partHealth[id]) : 1);
   const bendSign = Math.random() < 0.5 ? -1 : 1;
+  /** How far a plate has buckled (its morph influence), 0..1. */
+  const buckle = (id: PartId) => Math.min(1, (1 - hp(id)) * 1.25);
+  /** This pod's own copy of a mesh's shared geometry (for a dent, or for drawing a fan or petal ring short). */
+  const ownGeometry = (mesh: THREE.Mesh) => {
+    if (owned.has(mesh.geometry)) return mesh.geometry;
+    const g = mesh.geometry.clone();
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    DENT_CAP.set(g, Math.min(0.3, 0.28 * g.boundingSphere!.radius));
+    mesh.geometry = g;
+    owned.add(g);
+    return g;
+  };
+  /** A fan's or petal ring's pieces drop out below health `from` (down to `keep` at 0) and bend (its morph target). */
+  const spokes = (ring: Piece | undefined, part: PartId, sp: Spokes | undefined, from: number, keep: number) => {
+    if (!ring || !sp || detached.has(part)) return;
+    const h = hp(part);
+    if (ring.mesh.morphTargetInfluences) ring.mesh.morphTargetInfluences[0] = Math.min(1, (1 - h) * 1.2);
+    const lost = Math.round((sp.n - keep) * Math.max(0, (from - h) / from));
+    if (!lost && !owned.has(ring.mesh.geometry)) return;
+    ownGeometry(ring.mesh).setDrawRange(0, sp.lead + (sp.n - lost) * sp.per);
+  };
 
   // Smoothed animation state.
   let thr = 0;
@@ -903,7 +1139,8 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
         const o = parts[id];
         // The hull is the wreck itself: it stays (scarred all over) when it breaks.
         if (!o || id === 'hull') continue;
-        let show = !broken.has(id);
+        // A broken fan stays jammed in its intake.
+        let show = !broken.has(id) || id === 'fanL' || id === 'fanR';
         // Binders and cables have nothing to hold once the engine (or, for a cable, the nose) at their end is gone.
         if (id === 'binderL' || id === 'cableL') show &&= !broken.has('nacelleL');
         if (id === 'binderR' || id === 'cableR') show &&= !broken.has('nacelleR');
@@ -924,6 +1161,27 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
       for (const [id, m] of Object.entries(cables) as ['cableL' | 'cableR', THREE.Mesh][]) {
         if (m.morphTargetInfluences) m.morphTargetInfluences[0] = Math.min(1, (1 - hp(id)) * 1.4);
       }
+      // Armour buckles out as it weakens (its morph target); the scars on it ride out with it.
+      for (const pl of plates) {
+        if (pl.mesh.morphTargetInfluences) pl.mesh.morphTargetInfluences[0] = buckle(pl.part);
+      }
+      for (const sc of scars) {
+        const l = sc.lift;
+        if (!l) continue;
+        const to = l.k * buckle(l.part);
+        sc.mesh.position.addScaledVector(l.n, to - l.done);
+        l.done = to;
+      }
+      // Fans lose and bend blades, petal rings flare and drop petals (a broken fan keeps a couple of stubs).
+      for (let i = 0; i < 2; i++) {
+        spokes(fans[i], `fan${SIDES[i]}`, pg.spokes.fan, 0.85, 2);
+        spokes(petalRings[i], `petals${SIDES[i]}`, pg.spokes.petals, 0.75, 2);
+      }
+      // A battered canopy frame skews (the glass with it).
+      if (frame && !detached.has('canopyFrame')) {
+        const k = 1 - hp('canopyFrame');
+        frame.grp.rotation.set(-k * 0.1, 0, bendSign * k * 0.12);
+      }
       // A cracking canopy frosts over and turns milky (this pod's own copy of the glass).
       const hc = hp('canopy');
       if (canopy && !detached.has('canopy') && hc < 0.97) {
@@ -939,6 +1197,8 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
       }
     },
     breakOff(id) {
+      // A broken fan stays jammed in its intake.
+      if (id === 'fanL' || id === 'fanR') return null;
       const o = parts[id];
       if (!PARTS[id].detaches) {
         // Binders and cables snap: they just stop being drawn. The hull never goes: it is the wreck.
@@ -958,12 +1218,23 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
       o.visible = true;
       detached.add(id);
       delete parts[id];
-      // Carried parts that broke before this one were already gone (hidden); the rest come off with it.
+      // Carried parts (and what they carry) that broke before this one were already gone (hidden); the rest come off
+      // with it. A fan stays in its intake even if it broke first; a carried part that is not on this one (a mount's
+      // binder) just snaps.
       const ref = brokeAt.get(id) ?? Infinity;
-      for (const c of PARTS[id].carries ?? []) {
+      const stack = [...(PARTS[id].carries ?? [])];
+      while (stack.length) {
+        const c = stack.pop()!;
+        stack.push(...(PARTS[c].carries ?? []));
         const co = parts[c];
         if (!co) continue;
-        co.visible = !((brokeAt.get(c) ?? Infinity) < ref);
+        let q: THREE.Object3D | null = co.parent;
+        while (q && q !== o) q = q.parent;
+        if (!q) {
+          co.visible = false;
+          continue;
+        }
+        co.visible = c === 'fanL' || c === 'fanR' || !((brokeAt.get(c) ?? Infinity) < ref);
         detached.add(c);
         delete parts[c];
       }
@@ -999,13 +1270,7 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
         _p.copy(point).applyMatrix4(_inv);
         _d.copy(dir).transformDirection(_inv);
         // The first dent on a part gives this pod its own copy of the shared geometry.
-        if (!owned.has(geo)) {
-          const g = geo.clone();
-          DENT_CAP.set(g, Math.min(0.3, 0.28 * bs.radius));
-          mesh.geometry = g;
-          owned.add(g);
-        }
-        deform(mesh.geometry, _p, _d, d, r);
+        deform(ownGeometry(mesh), _p, _d, d, r);
       }
       // Scars ride in with the skin they sit on.
       for (const sc of scars) {
@@ -1037,14 +1302,18 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
       const flick = 1 + 0.05 * Math.sin(t * 41) + 0.03 * Math.sin(t * 67);
       const len = lay.L * (0.45 + 0.75 * thr + 0.3 * sp) * (1 + 0.85 * boost + 0.45 * surge) * flick * (1 - 0.95 * dead);
       // A badly hurt engine sputters: its flame drops out in short, irregular gaps. Per part, its health is the
-      // intake's, nozzle's and nacelle's; a lost nozzle leaves a ragged, coughing flame and a lost engine none.
+      // intake's, nozzle's and nacelle's; a lost nozzle leaves a ragged, coughing flame and a lost engine none
+      // (and its fan's and petals': a jammed fan or a ring with petals gone coughs harder).
       const out = (i: number) => {
         const s = SIDES[i];
         if (detached.has(`nacelle${s}`) || partBroken.has(`nacelle${s}`)) return 0;
         let d = dmg[i] ?? 0;
         if (partHealth) {
-          d = 1 - (0.3 * hp(`intake${s}`) + 0.4 * hp(`nozzle${s}`) + 0.3 * hp(`nacelle${s}`));
+          d = 1 - (0.25 * hp(`intake${s}`) + 0.35 * hp(`nozzle${s}`) + 0.25 * hp(`nacelle${s}`) + 0.15 * hp(`fan${s}`));
+          d = Math.min(1, d + 0.1 * (1 - hp(`petals${s}`)));
           if (partBroken.has(`nozzle${s}`) || detached.has(`nozzle${s}`)) d = Math.max(d, 0.75);
+          // A jammed fan chokes the engine: it coughs all the time.
+          else if (partBroken.has(`fan${s}`)) d = Math.max(d, 0.65);
         }
         const cough = d > 0.4 && Math.sin(t * 23 + i * 5) * Math.sin(t * 7.3 + i * 2) > 0.75 - d * 0.6 ? 0.35 : 1;
         return (1 - 0.3 * d) * cough;
@@ -1069,7 +1338,7 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
         if (detached.has(`nacelle${side}`)) return;
         const s = i ? 1 : -1;
         const d = partHealth
-          ? Math.max(1 - hp(`nacelle${side}`), 0.5 * (1 - hp(`intake${side}`)), 0.5 * (1 - hp(`nozzle${side}`)))
+          ? Math.max(1 - hp(`nacelle${side}`), 0.5 * (1 - hp(`intake${side}`)), 0.5 * (1 - hp(`nozzle${side}`)), 0.4 * (1 - hp(`fan${side}`)))
           : (dmg[i] ?? 0);
         const hang = partHealth ? (partBroken.has(`binder${side}`) ? 1 : 0.4 * (1 - hp(`binder${side}`))) + (partBroken.has('binderMid') ? 0.3 : 0) : 0;
         const a = amp * (1 + 3 * d + 4 * hang);
@@ -1102,6 +1371,33 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
           flap.rotation.z = rz * (1 - hang) + hang * (1.1 + Math.sin(t * 9 + i) * 0.12);
         }
       }
+      // Fans spin with the engine's power, slower and wobbling on a bent shaft as they are hurt; a broken one is jammed.
+      for (let i = 0; i < 2; i++) {
+        const f = fans[i];
+        const id: PartId = `fan${SIDES[i]}`;
+        if (!f || detached.has(id)) continue;
+        const h = hp(id);
+        const jam = h < 0.15;
+        if (!jam) f.grp.rotation.z = (f.grp.rotation.z + dt * (6 + 40 * power) * (0.3 + 0.7 * h)) % (Math.PI * 2);
+        const wob = jam ? 0 : (1 - h) * 0.07;
+        f.grp.rotation.x = Math.sin(t * 31 + i) * wob;
+        f.grp.rotation.y = Math.sin(t * 27 + i * 2) * wob + (jam ? 0.12 : 0);
+      }
+      // Badly hurt armour folds back from its leading edge into the airflow, and flutters there.
+      for (const pl of plates) {
+        if (detached.has(pl.part)) continue;
+        const h = hp(pl.part);
+        const peel = h >= 0.5 ? 0 : ((0.5 - h) / 0.5) ** 1.3;
+        pl.grp.quaternion.setFromAxisAngle(pl.axis, -peel * (0.4 + Math.sin(t * (19 + 3 * pl.k)) * 0.06 * (0.3 + sp)));
+      }
+      // The antenna leans back, whips in the airflow at speed and bends further back (and over) as it is hit; its tip
+      // light blinks.
+      if (antenna && !detached.has('antenna')) {
+        const bend = 1 - hp('antenna');
+        antenna.grp.rotation.x = ANTENNA_LEAN + bend * 0.9 + sp * 0.2 + Math.sin(t * 13) * 0.03 * (0.5 + sp) * (1 + 2 * bend);
+        antenna.grp.rotation.z = bendSign * bend * 0.45;
+        if (antenna.light) antenna.light.visible = t % 1.3 < 0.18 && glowing(hp('antenna'), t, 11);
+      }
       if (partHealth) {
         for (const f of flickers) if (!detached.has(f.part)) f.obj.visible = glowing(hp(f.part), t, f.k);
       } else for (const sc of scars) sc.mesh.visible = (dmg[sc.group] ?? 0) > sc.at;
@@ -1118,6 +1414,8 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
 }
 
 const SIDES = ['L', 'R'] as const;
+/** How far the antenna leans back at rest (radians). */
+const ANTENNA_LEAN = 0.22;
 const BINDERS: BinderId[] = ['binderL', 'binderR', 'binderMid'];
 const SCARS = 16;
 const COCKPIT_PART = 2;

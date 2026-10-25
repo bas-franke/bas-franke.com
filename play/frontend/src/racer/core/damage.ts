@@ -16,23 +16,34 @@ export type Side = 'L' | 'R';
 /** Every destructible part. Engine parts come in pairs (L = left engine, R = right engine). */
 export type PartId =
   | 'intakeL' | 'intakeR'     // the intake ring and lip at the front of each engine
+  | 'fanL' | 'fanR'           // the compressor fan spinning in the intake
   | 'clawsL' | 'clawsR'       // the claws/spikes round the intake
   | 'nacelleL' | 'nacelleR'   // the engine body (critical)
   | 'finL' | 'finR'           // the raked top fin
   | 'flapL' | 'flapR'         // the side flap (outboard)
   | 'nozzleL' | 'nozzleR'     // the ribbed nozzle at the back
+  | 'petalsL' | 'petalsR'     // the ring of nozzle petals round the exhaust
+  | 'armTopL' | 'armTopR'     // curved armour plates over the nacelle: top,
+  | 'armOutL' | 'armOutR'     //   outboard side,
+  | 'armInL' | 'armInR'       //   inboard side
+  | 'armBellyL' | 'armBellyR' //   and belly
   | 'binderL' | 'binderR'     // the energy binders from the cockpit to each engine
   | 'binderMid'               // the binder between the two engines
   | 'cableL' | 'cableR'       // the steering cables from the cockpit nose to the engine tops
   | 'cockpitNose'             // the cockpit's nose cone
   | 'canopy'                  // the glass canopy over the pilot
+  | 'canopyFrame'             // the canopy's rim and spine (the glass sits in it)
+  | 'antenna'                 // the aerial behind the canopy
+  | 'mountL' | 'mountR'       // the cockpit's side mounts the binders clamp onto
   | 'stabL' | 'stabR'         // the two little stabilisers on the cockpit's tail
   | 'tail'                    // tail grille and the orange tail light
   | 'hull';                   // the cockpit shell (critical)
 
 export const PART_IDS: PartId[] = [
-  'intakeL', 'intakeR', 'clawsL', 'clawsR', 'nacelleL', 'nacelleR', 'finL', 'finR', 'flapL', 'flapR', 'nozzleL', 'nozzleR',
-  'binderL', 'binderR', 'binderMid', 'cableL', 'cableR', 'cockpitNose', 'canopy', 'stabL', 'stabR', 'tail', 'hull',
+  'intakeL', 'intakeR', 'fanL', 'fanR', 'clawsL', 'clawsR', 'nacelleL', 'nacelleR', 'finL', 'finR', 'flapL', 'flapR',
+  'nozzleL', 'nozzleR', 'petalsL', 'petalsR', 'armTopL', 'armTopR', 'armOutL', 'armOutR', 'armInL', 'armInR',
+  'armBellyL', 'armBellyR', 'binderL', 'binderR', 'binderMid', 'cableL', 'cableR', 'cockpitNose', 'canopy',
+  'canopyFrame', 'antenna', 'mountL', 'mountR', 'stabL', 'stabR', 'tail', 'hull',
 ];
 
 export type PartGroup = 'engineL' | 'engineR' | 'cockpit' | 'binders';
@@ -47,23 +58,53 @@ export interface PartInfo {
   detaches: boolean;
   /** How much punishment it takes: damage is divided by this (1 = average). */
   toughness: number;
-  /** When this part breaks, these go with it (a broken-off nacelle takes its fin, flap, intake, claws and nozzle). */
+  /**
+   * When this part breaks, these go with it (a broken-off nacelle takes its fin, flap, intake, claws, nozzle and
+   * armour). Only the parts sitting directly on it: the intake carries its fan, so the nacelle takes the fan too.
+   */
   carries?: PartId[];
+  /**
+   * Parts lying over this one (a nacelle's armour plates): while they are on, a hit landing on them only reaches this
+   * part in part (applyHit).
+   */
+  shieldedBy?: PartId[];
 }
 
 export const PARTS: Record<PartId, PartInfo> = {
-  intakeL: { group: 'engineL', name: 'Left intake', critical: false, detaches: true, toughness: 0.9 },
-  intakeR: { group: 'engineR', name: 'Right intake', critical: false, detaches: true, toughness: 0.9 },
+  intakeL: { group: 'engineL', name: 'Left intake', critical: false, detaches: true, toughness: 0.9, carries: ['fanL'] },
+  intakeR: { group: 'engineR', name: 'Right intake', critical: false, detaches: true, toughness: 0.9, carries: ['fanR'] },
+  // A broken fan stays in its intake (a jammed hub and a couple of blade stubs): it does not come off on its own.
+  fanL: { group: 'engineL', name: 'Left fan', critical: false, detaches: false, toughness: 0.7, shieldedBy: ['intakeL'] },
+  fanR: { group: 'engineR', name: 'Right fan', critical: false, detaches: false, toughness: 0.7, shieldedBy: ['intakeR'] },
   clawsL: { group: 'engineL', name: 'Left claws', critical: false, detaches: true, toughness: 0.5 },
   clawsR: { group: 'engineR', name: 'Right claws', critical: false, detaches: true, toughness: 0.5 },
-  nacelleL: { group: 'engineL', name: 'Left engine', critical: true, detaches: true, toughness: 1.6, carries: ['intakeL', 'clawsL', 'finL', 'flapL', 'nozzleL'] },
-  nacelleR: { group: 'engineR', name: 'Right engine', critical: true, detaches: true, toughness: 1.6, carries: ['intakeR', 'clawsR', 'finR', 'flapR', 'nozzleR'] },
+  nacelleL: {
+    group: 'engineL', name: 'Left engine', critical: true, detaches: true, toughness: 1.6,
+    carries: ['intakeL', 'clawsL', 'finL', 'flapL', 'nozzleL', 'armTopL', 'armOutL', 'armInL', 'armBellyL'],
+    shieldedBy: ['armTopL', 'armOutL', 'armInL', 'armBellyL'],
+  },
+  nacelleR: {
+    group: 'engineR', name: 'Right engine', critical: true, detaches: true, toughness: 1.6,
+    carries: ['intakeR', 'clawsR', 'finR', 'flapR', 'nozzleR', 'armTopR', 'armOutR', 'armInR', 'armBellyR'],
+    shieldedBy: ['armTopR', 'armOutR', 'armInR', 'armBellyR'],
+  },
   finL: { group: 'engineL', name: 'Left fin', critical: false, detaches: true, toughness: 0.45 },
   finR: { group: 'engineR', name: 'Right fin', critical: false, detaches: true, toughness: 0.45 },
   flapL: { group: 'engineL', name: 'Left flap', critical: false, detaches: true, toughness: 0.5 },
   flapR: { group: 'engineR', name: 'Right flap', critical: false, detaches: true, toughness: 0.5 },
-  nozzleL: { group: 'engineL', name: 'Left nozzle', critical: false, detaches: true, toughness: 0.9 },
-  nozzleR: { group: 'engineR', name: 'Right nozzle', critical: false, detaches: true, toughness: 0.9 },
+  nozzleL: { group: 'engineL', name: 'Left nozzle', critical: false, detaches: true, toughness: 0.9, carries: ['petalsL'] },
+  nozzleR: { group: 'engineR', name: 'Right nozzle', critical: false, detaches: true, toughness: 0.9, carries: ['petalsR'] },
+  petalsL: { group: 'engineL', name: 'Left nozzle petals', critical: false, detaches: true, toughness: 0.4 },
+  petalsR: { group: 'engineR', name: 'Right nozzle petals', critical: false, detaches: true, toughness: 0.4 },
+  // Armour goes long before the engine under it (about a third of its toughness) and soaks up what lands on it.
+  armTopL: { group: 'engineL', name: 'Left top armour', critical: false, detaches: true, toughness: 0.55 },
+  armTopR: { group: 'engineR', name: 'Right top armour', critical: false, detaches: true, toughness: 0.55 },
+  armOutL: { group: 'engineL', name: 'Left side armour', critical: false, detaches: true, toughness: 0.55 },
+  armOutR: { group: 'engineR', name: 'Right side armour', critical: false, detaches: true, toughness: 0.55 },
+  armInL: { group: 'engineL', name: 'Left inner armour', critical: false, detaches: true, toughness: 0.55 },
+  armInR: { group: 'engineR', name: 'Right inner armour', critical: false, detaches: true, toughness: 0.55 },
+  armBellyL: { group: 'engineL', name: 'Left belly armour', critical: false, detaches: true, toughness: 0.6 },
+  armBellyR: { group: 'engineR', name: 'Right belly armour', critical: false, detaches: true, toughness: 0.6 },
   binderL: { group: 'binders', name: 'Left binder', critical: false, detaches: false, toughness: 0.7 },
   binderR: { group: 'binders', name: 'Right binder', critical: false, detaches: false, toughness: 0.7 },
   binderMid: { group: 'binders', name: 'Centre binder', critical: false, detaches: false, toughness: 0.7 },
@@ -71,10 +112,18 @@ export const PARTS: Record<PartId, PartInfo> = {
   cableR: { group: 'binders', name: 'Right cable', critical: false, detaches: false, toughness: 0.35 },
   cockpitNose: { group: 'cockpit', name: 'Cockpit nose', critical: false, detaches: true, toughness: 0.8 },
   canopy: { group: 'cockpit', name: 'Canopy', critical: false, detaches: true, toughness: 0.5 },
+  canopyFrame: { group: 'cockpit', name: 'Canopy frame', critical: false, detaches: true, toughness: 0.75, carries: ['canopy'] },
+  antenna: { group: 'cockpit', name: 'Antenna', critical: false, detaches: true, toughness: 0.3 },
+  // A mount that tears off takes its binder (nothing holds it on the cockpit side any more).
+  mountL: { group: 'cockpit', name: 'Left mount', critical: false, detaches: true, toughness: 1.0, carries: ['binderL'] },
+  mountR: { group: 'cockpit', name: 'Right mount', critical: false, detaches: true, toughness: 1.0, carries: ['binderR'] },
   stabL: { group: 'cockpit', name: 'Left stabiliser', critical: false, detaches: true, toughness: 0.4 },
   stabR: { group: 'cockpit', name: 'Right stabiliser', critical: false, detaches: true, toughness: 0.4 },
   tail: { group: 'cockpit', name: 'Tail', critical: false, detaches: true, toughness: 0.7 },
-  hull: { group: 'cockpit', name: 'Cockpit', critical: true, detaches: false, toughness: 1.8, carries: ['cockpitNose', 'canopy', 'stabL', 'stabR', 'tail'] },
+  hull: {
+    group: 'cockpit', name: 'Cockpit', critical: true, detaches: false, toughness: 1.8,
+    carries: ['cockpitNose', 'canopyFrame', 'antenna', 'mountL', 'mountR', 'stabL', 'stabR', 'tail'],
+  },
 };
 
 /** Where a part sits on a pod of a given shape: centre (pod space) and rough radius, metres. */
@@ -107,9 +156,20 @@ export function podLayout(shape: PodShape) {
 export function partAnchors(shape: PodShape): Record<PartId, PartAnchor> {
   const { L, R, C, xE, zE, yC, zC, ca, cb } = podLayout(shape);
   const out = {} as Record<PartId, PartAnchor>;
+  // The nacelle's section is squashed by the wedge (vehicle/pod.ts buildEngine); its armour lies over the skin from
+  // 28 % to 49 % of its length.
+  const sy = 1 - 0.28 * shape.wedge;
+  const zArm = zE - 0.115 * L;
   for (const [s, k] of [[-1, 'L'], [1, 'R']] as const) {
     const x = s * xE;
     out[`intake${k}`] = { pos: [x, 0, zE - L / 2 + 0.05 * L], r: R * 0.95 };
+    out[`fan${k}`] = { pos: [x, 0, zE - L / 2 + 0.12 * L], r: R * 0.5 };
+    out[`petals${k}`] = { pos: [x, 0, zE + L / 2 + 0.02 * L], r: R * 0.7 };
+    out[`armTop${k}`] = { pos: [x, R * 1.1 * sy, zArm], r: R * 0.4, len: 0.08 * L };
+    out[`armOut${k}`] = { pos: [x + s * R * 1.1, 0, zArm], r: R * 0.4, len: 0.08 * L };
+    out[`armIn${k}`] = { pos: [x - s * R * 1.1, 0, zArm], r: R * 0.32, len: 0.08 * L };
+    out[`armBelly${k}`] = { pos: [x, -R * 1.1 * sy, zArm], r: R * 0.32, len: 0.08 * L };
+    out[`mount${k}`] = { pos: [s * (ca + 0.12), yC, zC], r: 0.35 };
     out[`claws${k}`] = { pos: [x, -0.2 * R, zE - L / 2 - 0.05 * L], r: R * 0.8 };
     out[`nacelle${k}`] = { pos: [x, 0, zE], r: R * 1.05, len: L / 2 - R * 0.7 };
     out[`fin${k}`] = { pos: [x, R * 1.5, zE + 0.05 * L], r: R * 0.8 };
@@ -122,6 +182,8 @@ export function partAnchors(shape: PodShape): Record<PartId, PartAnchor> {
   out.binderMid = { pos: [0, 0, zE - L * 0.15], r: 0.6 };
   out.cockpitNose = { pos: [0, yC, zC - C / 2], r: ca * 0.8 };
   out.canopy = { pos: [0, yC + cb * 0.8, zC - C * 0.05], r: ca * 0.6 };
+  out.canopyFrame = { pos: [0, yC + cb * 0.68, zC - C * 0.12], r: ca * 0.62 };
+  out.antenna = { pos: [0, yC + cb + 0.45, zC + C * 0.32], r: 0.3 };
   out.tail = { pos: [0, yC, zC + C / 2], r: ca * 0.7 };
   out.hull = { pos: [0, yC, zC], r: ca * 1.1, len: Math.max(0, C / 2 - ca) };
   return out;
@@ -165,13 +227,18 @@ export interface PartHit {
 /** Damage scale and falloff distance (m) of a hit: a part takes K * energy² * exp(-gap / FALLOFF) / toughness. */
 const HIT_K = 1;
 const FALLOFF = 1.1;
+/** Most of a hit an intact plate keeps off the part under it, and how fast that fades as the hit lands off the plate. */
+const SHIELD = 0.45;
+const SHIELD_FALLOFF = 0.5;
 
 /**
  * Applies a hit: each part takes damage by the gap between the contact point and the part's surface (falling off over
  * about a metre, so a hit on one engine's flap barely reaches the other engine), divided by its toughness. Damage grows
  * with the square of the energy, so brushes and scrapes only chip the parts they touch while a hard crash breaks
- * them. Parts deeper along the push than the contact (shielded by what is in front of them) take a little less. A part
- * that reaches 0 breaks and takes the parts it carries with it. Returns what changed, most damaged first.
+ * them. Parts deeper along the push than the contact (shielded by what is in front of them) take a little less, and a
+ * part under armour (`shieldedBy`) takes up to 45 % less while the plate the hit landed on is still on, by how close to
+ * the plate it landed and how much of the plate is left. A part that reaches 0 breaks and takes the parts it carries
+ * with it. Returns what changed, most damaged first.
  *
  * Contract: deterministic given its inputs; never revives a broken part.
  */
@@ -180,6 +247,18 @@ export function applyHit(dmg: PodDamage, anchors: Record<PartId, PartAnchor>, hi
   const [px, py, pz] = hit.point;
   const [dx, dy, dz] = hit.dir;
   const e2 = hit.energy * hit.energy * HIT_K;
+  const gapOf = (a: PartAnchor) => {
+    const [cx, cy, cz] = coreNear(a, px, py, pz);
+    return Math.max(0, Math.hypot(cx - px, cy - py, cz - pz) - a.r);
+  };
+  // Shields as they were before this hit (a plate that breaks with it still took the blow for what is under it).
+  const shield = (id: PartId) => {
+    let k = 0;
+    for (const c of PARTS[id].shieldedBy ?? []) {
+      if (!dmg.broken.has(c)) k = Math.max(k, dmg.health[c] * Math.exp(-gapOf(anchors[c]) / SHIELD_FALLOFF));
+    }
+    return k;
+  };
   for (const id of PART_IDS) {
     if (dmg.broken.has(id)) continue;
     const a = anchors[id];
@@ -189,7 +268,8 @@ export function applyHit(dmg: PodDamage, anchors: Record<PartId, PartAnchor>, hi
     const oz = cz - pz;
     const gap = Math.max(0, Math.hypot(ox, oy, oz) - a.r);
     const depth = Math.max(0, ox * dx + oy * dy + oz * dz - a.r);
-    const amount = (e2 * Math.exp(-gap / FALLOFF) * (1 - 0.3 * Math.min(1, depth / 3))) / PARTS[id].toughness;
+    const covered = PARTS[id].shieldedBy ? 1 - SHIELD * shield(id) : 1;
+    const amount = (e2 * Math.exp(-gap / FALLOFF) * (1 - 0.3 * Math.min(1, depth / 3)) * covered) / PARTS[id].toughness;
     if (amount < 0.005) continue;
     const health = Math.max(0, dmg.health[id] - amount);
     dmg.health[id] = health;

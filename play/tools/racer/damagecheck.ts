@@ -71,14 +71,33 @@ function taken(r: Racer): [PartId, number][] {
 }
 
 let failures = 0;
+/**
+ * The smaller parts that sit on (or in) a bigger one count as it: the fan behind the intake, the armour plates on the
+ * nacelle, the petals round the nozzle, the mount by the binder, the antenna on the canopy.
+ */
+const KIN: Record<string, string[]> = {
+  intake: ['fan'], nacelle: ['armTop', 'armOut', 'armIn', 'armBelly'], nozzle: ['petals'], binder: ['mount'],
+  canopy: ['antenna', 'canopyFrame'], tail: ['antenna'],
+};
+function withKin(ids: PartId[]): string[] {
+  const out = new Set<string>(ids);
+  for (const id of ids) {
+    const m = /^(.*?)(L|R)?$/.exec(id)!;
+    for (const k of KIN[m[1]] ?? []) out.add(k + (m[2] ?? ''));
+  }
+  return [...out];
+}
+
 function expect(name: string, r: Racer, opts: { top: PartId[]; topN?: number; not?: PartId[]; wrecked?: boolean }) {
+  const allowed = withKin(opts.top);
+  const spared = withKin(opts.not ?? []);
   const t = taken(r);
   const n = opts.topN ?? 3;
   const top = t.slice(0, n).map(([id]) => id);
   const problems: string[] = [];
   if (!t.length) problems.push('no damage');
-  for (const id of top) if (!opts.top.includes(id)) problems.push(`${id} in the top ${n}`);
-  const worstNot = Math.max(0, ...t.filter(([id]) => opts.not?.includes(id)).map(([, d]) => d));
+  for (const id of top) if (!allowed.includes(id)) problems.push(`${id} in the top ${n}`);
+  const worstNot = Math.max(0, ...t.filter(([id]) => spared.includes(id)).map(([, d]) => d));
   // Parts that should be spared may take a little spill, never more than a fifth of the worst.
   if (t.length && worstNot > t[0][1] * 0.2) problems.push(`spared parts took ${worstNot.toFixed(2)}`);
   if (opts.wrecked !== undefined && isWrecked(r.parts) !== opts.wrecked) problems.push(opts.wrecked ? 'not wrecked' : 'wrecked');

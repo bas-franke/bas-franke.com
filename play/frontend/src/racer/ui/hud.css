@@ -135,6 +135,8 @@
 .hud-pod-part.crit { stroke: rgba(255, 255, 255, 0.85); stroke-width: 0.16; }
 .hud-pod-part.line { fill: none; stroke-width: 0.26; stroke-linecap: round; }
 .hud-pod-part.line.thin { stroke-width: 0.13; stroke-dasharray: 0.3 0.18; }
+.hud-pod-part.mark { stroke-width: 0.05; }
+.hud-pod-part.line.fine { stroke-width: 0.13; }
 .hud-pod-part.broken { fill: rgba(14, 10, 12, 0.78); stroke: rgba(255, 86, 60, 0.6); stroke-width: 0.1; stroke-dasharray: 0.22 0.16; }
 .hud-pod-part.line.broken { fill: none; stroke: rgba(255, 86, 60, 0.7); stroke-width: 0.14; stroke-dasharray: 0.16 0.3; }
 .hud-pod-part.crit.low { animation: hud-blink 0.45s steps(2) infinite; }

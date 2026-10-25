@@ -34,6 +34,9 @@ const SMOKE_W = new Float32Array(PART_IDS.map((id) => {
   if (id.startsWith('nacelle') || id === 'hull') return 1;
   if (id.startsWith('nozzle')) return 0.7;
   if (id.startsWith('intake')) return 0.6;
+  // A bent aerial or a loose armour plate is no fire: barely a wisp (the engine under the plate smokes for itself).
+  if (id === 'antenna') return 0;
+  if (id.startsWith('arm')) return 0.15;
   return id === 'cockpitNose' || id === 'tail' ? 0.5 : 0.35;
 }));
 /** Engine parts that catch fire once nearly gone (the cockpit only burns on a wreck). */
