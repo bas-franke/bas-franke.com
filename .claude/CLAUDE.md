@@ -34,3 +34,5 @@ Per-project setup lives in each project's own `README.md`.
 2. **One project = one port, one PM2 process, one Nginx site, one workflow, one database.**
 3. **Secrets never go in git.** Runtime secrets live on the server in `/srv/apps/<project>/.env`.
 4. A change to one project must not require redeploying another.
+5. **inck: bump `PROMPT_VERSION`** in `inck/backend/src/ai.ts` whenever you change the story-writing prompt
+   (writer instructions, `STORY_SCHEMA`, text cleanup in `text.ts`); the scheduler then rewrites older stories.

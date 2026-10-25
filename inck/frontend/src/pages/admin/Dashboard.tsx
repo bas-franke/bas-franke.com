@@ -258,6 +258,12 @@ function RunRow({ run }: { run: Run }) {
         )}
         {run.kind === 'plan' && <span>Curriculum: {run.topic_name ?? run.detail ?? '—'}</span>}
         {run.kind === 'radar' && <span title={run.detail ?? ''}>Trend radar</span>}
+        {run.kind === 'rewrite' && (
+          <span>
+            Rewrite: {run.topic_name ?? '—'}
+            {run.detail ? <span className="muted"> · {run.detail}</span> : ''}
+          </span>
+        )}
       </td>
       <td>
         {run.status === 'running' && (

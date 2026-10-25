@@ -55,6 +55,11 @@ instance. Vite + React frontend, Node.js + Express backend on port **3003**.
    stories (its neighbours on the topic path and stories elsewhere that share tags). Hot topics are shown prominently:
    a trending strip above the feed (the rail on wide screens), a "Trending now" section on the overview, a badge on
    their stories and a banner on their hub.
+7. **Rewrites keep old stories up to the current rules.** Every story stores the `PROMPT_VERSION` (in
+   `backend/src/ai.ts`) that wrote it. Every `rewrite_minutes` (default 10, 0 = off) the scheduler takes the published
+   story with an older version whose text is oldest and writes it again: same subject, slug, pictures and place in its
+   topic, new text with the newest facts. **Bump `PROMPT_VERSION` with every change to the writer instructions,
+   `STORY_SCHEMA` or the text cleanup in `text.ts`**, or old stories keep the old rules.
 
 ## Configuration: `/srv/apps/inck/.env` on the server
 

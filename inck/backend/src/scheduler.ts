@@ -1,7 +1,7 @@
 import { aiConfigured } from './ai.js';
 import { config } from './config.js';
 import { dbReady, one } from './db.js';
-import { generate, isGenerating } from './generator.js';
+import { generate, isGenerating, rewriteOldest } from './generator.js';
 import type { Settings } from './types.js';
 
 /** Hour of the day (0-23) right now in the given IANA timezone. */
@@ -56,11 +56,20 @@ async function tick() {
   const settings = await one<Settings>('SELECT * FROM settings WHERE id = 1');
   if (!settings.enabled || !withinActiveHours(settings)) return;
   const due = !settings.last_run_at || Date.now() - settings.last_run_at.getTime() >= settings.interval_minutes * 60_000;
-  if (!due) return;
-  if ((await publishedLast24h()) >= settings.max_per_day) return;
-  console.log('scheduler: generating story');
-  await generate('schedule');
+  if (due && (await publishedLast24h()) < settings.max_per_day) {
+    console.log('scheduler: generating story');
+    await generate('schedule');
+    return;
+  }
+  if (rewriteDue(settings)) {
+    const run = await rewriteOldest('schedule');
+    if (run) console.log(`scheduler: rewrote story ${run.story_id} (${run.status})`);
+  }
 }
+
+/** Stories written with an older prompt version are rewritten one at a time, every rewrite_minutes (0 = never). */
+const rewriteDue = (s: Settings) =>
+  s.rewrite_minutes > 0 && (!s.last_rewrite_at || Date.now() - s.last_rewrite_at.getTime() >= s.rewrite_minutes * 60_000);
 
 export function startScheduler() {
   const safeTick = () => tick().catch((err) => console.error('scheduler tick failed', err));

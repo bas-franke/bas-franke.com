@@ -6,6 +6,7 @@ import {
   emptyUsage,
   illustrate,
   picturePolicy,
+  PROMPT_VERSION,
   scanTrends,
   scoutTrends,
   writeStory,
@@ -23,6 +24,7 @@ import { tidyBody } from './text.js';
 import { createTopic, ensurePlan, extendPlan, nextPlanItem, pickHotTopic, pickTopic, resolveSection, uniqueSlug, type NextItem } from './topics.js';
 import type { Run, Settings, Story, StoryImage, StoryKind, Topic } from './types.js';
 
+/** The one generation or rewrite in flight; they share it so only one model run happens at a time. */
 let current: Promise<Run> | undefined;
 
 export const isGenerating = () => Boolean(current);
@@ -298,8 +300,8 @@ async function runGeneration(trigger: Run['trigger'], opts: { topicId?: number; 
     const body = tidyBody(draft.body_markdown);
     const story = await one<Story>(
       `INSERT INTO stories (slug, topic_id, title, hook, body_md, takeaway, kind, why_now, section_index, plan_index, section_name, plan_item,
-                            difficulty, tags, images, sources, model, usage, read_seconds)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
+                            difficulty, tags, images, sources, model, usage, read_seconds, prompt_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING *`,
       [
         await uniqueSlug('stories', draft.title),
         topic.id,
@@ -320,6 +322,7 @@ async function runGeneration(trigger: Run['trigger'], opts: { topicId?: number; 
         written.model,
         JSON.stringify(usage),
         readSeconds(body),
+        PROMPT_VERSION,
       ],
     );
     await query('UPDATE settings SET last_run_at = now() WHERE id = 1');
@@ -336,6 +339,92 @@ async function runGeneration(trigger: Run['trigger'], opts: { topicId?: number; 
       `UPDATE runs SET status = 'failed', error = $2, usage = $3, finished_at = now() WHERE id = $1 RETURNING *`,
       [run.id, message.slice(0, 2000), JSON.stringify(usage)],
     );
+  }
+}
+
+/* ------------------------------------------------------------------ rewrites */
+
+/** The published story whose text is oldest among those written with an older PROMPT_VERSION. */
+export const outdatedStory = () =>
+  one<Story>(
+    `SELECT * FROM stories WHERE status = 'published' AND prompt_version < $1 ORDER BY coalesce(rewritten_at, created_at), id LIMIT 1`,
+    [PROMPT_VERSION],
+  );
+
+/**
+ * Rewrites one story under the current writing rules: the oldest outdated one, or the given one. Slug, pictures and
+ * its place in the topic stay; title, hook, body, takeaway, tags and sources are new. Resolves to null when every
+ * story is up to date; while another generation runs it waits for that one instead.
+ */
+export async function rewriteOldest(trigger: Run['trigger'], storyId?: number): Promise<Run | null> {
+  if (current) return current;
+  const story = storyId ? await one<Story>('SELECT * FROM stories WHERE id = $1', [storyId]) : await outdatedStory();
+  if (!story) return null;
+  if (current) return current;
+  current = runRewrite(trigger, story).finally(() => (current = undefined));
+  return current;
+}
+
+async function runRewrite(trigger: Run['trigger'], story: Story): Promise<Run> {
+  const run = await one<Run>(
+    `INSERT INTO runs (trigger, kind, topic_id, story_id, detail, step) VALUES ($1, 'rewrite', $2, $3, $4, 'rewriting') RETURNING *`,
+    [trigger, story.topic_id, story.id, story.title],
+  );
+  try {
+    const settings = await one<Settings>('SELECT * FROM settings WHERE id = 1');
+    const ensured = await ensurePlan(settings, await one<Topic>('SELECT * FROM topics WHERE id = $1', [story.topic_id]));
+    const usage = addUsage(emptyUsage(), ensured.usage);
+    const topic = ensured.topic;
+    const plan = topic.plan!;
+    const { rows: others } = await query<{ title: string }>(
+      'SELECT title FROM stories WHERE topic_id = $1 AND id <> $2 ORDER BY published_at DESC LIMIT 40',
+      [topic.id, story.id],
+    );
+    const brief = plan.sections[story.section_index]?.items.find((i) => i.title === story.plan_item)?.brief;
+    const written = await writeStory({
+      settings,
+      topic,
+      plan,
+      item: story.kind === 'planned' ? { section: story.section_name, title: story.plan_item ?? story.title, brief: brief ?? story.hook } : undefined,
+      trend: story.kind === 'trending' ? { subject: story.title, angle: story.hook, why_now: story.why_now ?? '', topic_slug: topic.slug, new_topic: null } : undefined,
+      recentTitles: others.map((r) => r.title),
+      pictures: { min: 0, max: 0, accept: [] },
+      rewrite: { title: story.title, hook: story.hook, body: story.body_md, publishedAt: story.published_at },
+    });
+    addUsage(usage, written.usage);
+    const draft = written.draft;
+    const body = tidyBody(draft.body_markdown);
+    await query(
+      `UPDATE stories SET title = $2, hook = $3, body_md = $4, takeaway = $5, difficulty = $6, tags = $7, sources = $8, model = $9,
+                          read_seconds = $10, prompt_version = $11, rewritten_at = now()
+       WHERE id = $1`,
+      [
+        story.id,
+        draft.title.trim().slice(0, 90),
+        (draft.hook ?? '').trim().slice(0, 200),
+        body,
+        (draft.takeaway ?? '').trim().slice(0, 300),
+        Math.min(3, Math.max(1, Math.round(Number(draft.difficulty) || story.difficulty))),
+        (draft.tags ?? []).slice(0, 5).map((t) => t.toLowerCase().trim()).filter(Boolean),
+        JSON.stringify((draft.sources ?? []).filter((s) => s.url).slice(0, 4)),
+        written.model,
+        readSeconds(body),
+        PROMPT_VERSION,
+      ],
+    );
+    return await one<Run>(`UPDATE runs SET status = 'succeeded', step = 'done', usage = $2, finished_at = now() WHERE id = $1 RETURNING *`, [
+      run.id,
+      JSON.stringify(usage),
+    ]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`rewrite of story ${story.id} failed:`, message);
+    // To the back of the queue, so one story that keeps failing does not hold up the others.
+    await query('UPDATE stories SET rewritten_at = now() WHERE id = $1', [story.id]);
+    return await one<Run>(`UPDATE runs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1 RETURNING *`, [run.id, message.slice(0, 2000)]);
+  } finally {
+    // Failed rewrites count against the interval too, so one broken story does not retry every tick.
+    await query('UPDATE settings SET last_rewrite_at = now() WHERE id = 1');
   }
 }
 

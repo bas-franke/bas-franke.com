@@ -390,4 +390,17 @@ export const migrations: { name: string; sql?: string; run?: (client: pg.PoolCli
       UPDATE settings SET text_model = 'gpt-6-luna', updated_at = now();
     `,
   },
+  {
+    // Each story remembers which version of the writing prompt wrote it; a story written with an older one is
+    // rewritten in the background (oldest text first, one every rewrite_minutes). Stories before this were version 1.
+    name: '013_prompt_version',
+    sql: `
+      ALTER TABLE stories ADD COLUMN prompt_version int NOT NULL DEFAULT 1, ADD COLUMN rewritten_at timestamptz;
+      CREATE INDEX stories_rewrite_idx ON stories (prompt_version, (coalesce(rewritten_at, created_at)));
+      ALTER TABLE settings ADD COLUMN rewrite_minutes int NOT NULL DEFAULT 10 CHECK (rewrite_minutes >= 0),
+                           ADD COLUMN last_rewrite_at timestamptz;
+      ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_kind_check;
+      ALTER TABLE runs ADD CONSTRAINT runs_kind_check CHECK (kind IN ('planned','trending','plan','radar','rewrite'));
+    `,
+  },
 ];

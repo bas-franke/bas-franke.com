@@ -181,6 +181,8 @@ export interface Settings {
   site_name: string;
   tagline: string;
   last_run_at: string | null;
+  rewrite_minutes: number;
+  last_rewrite_at: string | null;
 }
 
 export interface AdminTopic {
@@ -208,7 +210,7 @@ export interface Run {
   trigger: 'schedule' | 'manual';
   status: 'running' | 'succeeded' | 'failed';
   step: string;
-  kind: StoryKind | 'plan' | 'radar';
+  kind: StoryKind | 'plan' | 'radar' | 'rewrite';
   detail: string | null;
   topic_name: string | null;
   story_title: string | null;

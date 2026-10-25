@@ -70,7 +70,7 @@ adminRouter.get('/overview', async (_req, res) => {
 
 /* Settings */
 const SETTINGS_FIELDS: (keyof Settings)[] = [
-  'enabled', 'interval_minutes', 'max_per_day', 'active_hours_start', 'active_hours_end', 'timezone',
+  'enabled', 'interval_minutes', 'max_per_day', 'rewrite_minutes', 'active_hours_start', 'active_hours_end', 'timezone',
   'text_model', 'image_model', 'image_quality', 'images_enabled', 'images_max', 'web_search_enabled',
   'language', 'tone', 'audience', 'target_words', 'extra_instructions', 'trending_share', 'trending_guidance', 'radar_hours', 'local_countries', 'site_name', 'tagline',
 ];

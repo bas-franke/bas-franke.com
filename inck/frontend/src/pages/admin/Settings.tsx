@@ -63,6 +63,10 @@ export default function Settings({ onLoggedOut }: { onLoggedOut: () => void }) {
               Max per 24 hours
               <input type="number" min={1} max={200} value={s.max_per_day} onChange={(e) => set('max_per_day', Number(e.target.value))} />
             </label>
+            <label title="Stories written with an older version of the writing rules are rewritten one at a time, oldest first. 0 switches this off.">
+              Rewrite outdated every (minutes)
+              <input type="number" min={0} max={10080} value={s.rewrite_minutes} onChange={(e) => set('rewrite_minutes', Number(e.target.value))} />
+            </label>
             <label>
               Active from
               <select value={s.active_hours_start ?? ''} onChange={(e) => set('active_hours_start', e.target.value === '' ? null : Number(e.target.value))}>

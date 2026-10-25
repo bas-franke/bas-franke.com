@@ -447,6 +447,13 @@ export function picturePolicy(settings: Settings, heat: number): PicturePolicy {
   return { min: 0, max: Math.min(1, cap), accept: ['essential'] };
 }
 
+/**
+ * Version of the writing rules (the writer instructions and STORY_SCHEMA in writeStory, and the text cleanup in
+ * text.ts). Bump it with every change to them: stories written with an older version are rewritten in the background,
+ * oldest text first (see rewriteOldest in generator.ts).
+ */
+export const PROMPT_VERSION = 2;
+
 export async function writeStory(opts: {
   settings: Settings;
   topic: Topic;
@@ -457,6 +464,8 @@ export async function writeStory(opts: {
   trend?: TrendPick;
   recentTitles: string[];
   pictures: PicturePolicy;
+  /** Rewrites of an existing story under the current rules: its text and when it was first published. */
+  rewrite?: { title: string; hook: string; body: string; publishedAt: Date };
 }): Promise<{ draft: StoryDraft; usage: Usage; model: string }> {
   const { settings, topic, plan, pictures } = opts;
   const sectionNames = plan.sections.map((s) => s.name);
@@ -485,6 +494,9 @@ export async function writeStory(opts: {
         'Use web search to get the current facts right. State what happened in one or two sentences, then spend most words on the explanation (history, mechanism, who and why) so the story still reads well next month. ' +
         `Choose the section from: ${sectionNames.join(' | ')} (use "${plan.sections.find((s) => s.live)?.name ?? 'Latest'}" for a day-to-day development).`
       : `THIS STORY is one item of the topic's curriculum. Section: ${opts.item!.section}. Idea to make click: ${opts.item!.title}. What it must explain: ${opts.item!.brief}. Return exactly this section name.`,
+    opts.rewrite
+      ? `REWRITE. This story was first published on ${longDate(opts.rewrite.publishedAt, settings.timezone || 'UTC')} and is given below; write it again under the rules above. Keep its subject, angle and events; keep what is true, fix what is wrong, and where facts have changed since then give the newest with their dates.`
+      : '',
     settings.extra_instructions,
   ]
     .filter(Boolean)
@@ -492,7 +504,8 @@ export async function writeStory(opts: {
 
   const input =
     `${topicBrief(topic)}\nTopic intro: ${plan.intro}\n\n` +
-    `ALREADY ON THE SITE (do not retell these)\n${opts.recentTitles.map((t) => `- ${t}`).join('\n') || '- (nothing yet)'}`;
+    `ALREADY ON THE SITE (do not retell these)\n${opts.recentTitles.map((t) => `- ${t}`).join('\n') || '- (nothing yet)'}` +
+    (opts.rewrite ? `\n\nTHE STORY TO REWRITE\nTitle: ${opts.rewrite.title}\nHook: ${opts.rewrite.hook}\n\n${opts.rewrite.body}` : '');
 
   const webSearch = settings.web_search_enabled && (Boolean(opts.trend) || topic.kind === 'event');
   const { data, usage, model } = await structured<StoryDraft>({ settings, name: 'story', schema: STORY_SCHEMA, instructions, input, webSearch, effort: 'medium' });

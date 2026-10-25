@@ -58,6 +58,9 @@ export interface Settings {
   site_name: string;
   tagline: string;
   last_run_at: Date | null;
+  /** Minutes between background rewrites of stories written with an older prompt version; 0 switches them off. */
+  rewrite_minutes: number;
+  last_rewrite_at: Date | null;
   updated_at: Date;
 }
 
@@ -127,9 +130,12 @@ export interface Story {
   status: 'published' | 'hidden';
   published_at: Date;
   created_at: Date;
+  /** The PROMPT_VERSION of the writing rules that wrote this text; older stories are rewritten in the background. */
+  prompt_version: number;
+  rewritten_at: Date | null;
 }
 
-export type RunKind = StoryKind | 'plan' | 'radar';
+export type RunKind = StoryKind | 'plan' | 'radar' | 'rewrite';
 
 export interface Run {
   id: number;
