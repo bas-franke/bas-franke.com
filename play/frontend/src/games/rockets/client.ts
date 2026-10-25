@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { clamp, fromTuple, hdist, lookDir, segmentBoxes, type Vec3, v3, vadd, vscale, vsub } from '@shared/math';
-import type { GameMode, GameServerMsg, PlayerInfo, RoomView, Team } from '@shared/protocol';
+import type { RocketsMode as GameMode, GameServerMsg, PlayerInfo, RoomView, Team } from '@shared/protocol';
 import { RK } from '@shared/rockets/constants';
 import type { ItemKind, ItemSpawn } from '@shared/rockets/items';
 import type { MapData } from '@shared/rockets/map';

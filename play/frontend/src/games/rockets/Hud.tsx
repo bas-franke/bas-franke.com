@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { GAMES, type GameMode, type Team, colorHex } from '@shared/protocol';
+import { GAMES, type RocketsMode as GameMode, type Team, colorHex } from '@shared/protocol';
 import { RK } from '@shared/rockets/constants';
 import { ELIM, MODES, TEAMS } from '@shared/rockets/modes';
 import type { FlagSnap, ScoreRow } from '@shared/rockets/protocol';
@@ -115,7 +115,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
     el.animate(frames, { duration: 360, easing: 'ease-out' });
   }, [s.hurtAt]);
 
-  const mode = s.mode ?? room.mode ?? 'ffa';
+  const mode = s.mode ?? (room.mode as GameMode | undefined) ?? 'ffa';
   const rules = MODES[mode];
   const teams = rules.teams;
   const myTeam = s.myTeam;

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Garden ambience lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #26331c; overflow: hidden; font: 12px ui-monospace, monospace; color: #f5e7d6; }
+      #app { position: absolute; inset: 0; }
+      #hud { position: absolute; left: 8px; top: 8px; background: rgba(20,30,15,.6); padding: 6px 8px; white-space: pre; pointer-events: none; border-radius: 4px; }
+      #bar { position: absolute; right: 8px; top: 8px; display: flex; gap: 6px; }
+      #bar button { font: inherit; background: #f5e7d6; color: #26331c; border: 0; border-radius: 4px; padding: 5px 9px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud"></div>
+    <div id="bar">
+      <button id="scare">Scare (X)</button>
+      <button id="ql">low (1)</button>
+      <button id="qm">medium (2)</button>
+      <button id="qh">high (3)</button>
+    </div>
+    <script type="module" src="/src/games/garden/lab/ambience.ts"></script>
+  </body>
+</html>

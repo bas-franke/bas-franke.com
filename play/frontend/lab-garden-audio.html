@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Garden Sentinels audio lab</title>
+    <style>
+      body { background: #12201a; color: #dfeee4; font: 14px system-ui, sans-serif; padding: 16px; }
+      button { margin: 3px; padding: 6px 10px; background: #1f3a2d; color: #eef; border: 1px solid #3c6b52; border-radius: 6px; cursor: pointer; }
+      button.big { background: #5a2d3a; border-color: #8a4a5a; }
+      label { display: inline-block; margin: 6px 14px 6px 0; }
+      table { border-collapse: collapse; margin-top: 12px; }
+      td, th { padding: 2px 10px; border-bottom: 1px solid #2c4a3a; text-align: right; }
+      td:first-child, th:first-child { text-align: left; }
+      .bad { color: #ff8a6a; }
+    </style>
+  </head>
+  <body>
+    <h1>Garden Sentinels audio lab</h1>
+    <p>Click any button to unlock. Music and ambience start on unlock. <code>?measure=1</code> renders everything offline and prints peak / RMS (also the Measure button).</p>
+    <div>
+      <label>intensity <input id="intensity" type="range" min="0" max="2" step="0.05" value="0" /> <span id="iv">0</span></label>
+      <label>beams <input id="beams" type="range" min="0" max="40" step="1" value="0" /> <span id="bv">0</span></label>
+      <label>zoom <input id="zoom" type="range" min="0" max="1" step="0.05" value="0.3" /> <span id="zv">0.3</span></label>
+    </div>
+    <div id="buttons"></div>
+    <table id="levels"><thead><tr><th>sound</th><th>peak dBFS</th><th>active RMS dBFS</th><th>length s</th></tr></thead><tbody></tbody></table>
+    <script type="module" src="/src/games/garden/lab/audio.ts"></script>
+  </body>
+</html>

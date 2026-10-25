@@ -26,7 +26,9 @@ import { mapById, RANDOM_MAP } from './shared/rockets/maps.js';
 import { MODES, TEAMS } from './shared/rockets/modes.js';
 import { randomLook, sanitizeLook } from './shared/rockets/cosmetics.js';
 import { zmapById } from './shared/zombies/maps.js';
-import type { GameMode, Team } from './shared/protocol.js';
+import { isGMode } from './shared/garden/constants.js';
+import { gmapById } from './shared/garden/maps.js';
+import type { GameMode, RocketsMode, Team } from './shared/protocol.js';
 
 export class RoomError extends Error {
   constructor(
@@ -205,7 +207,7 @@ export class Room implements GameHost {
   // ---- teams ----------------------------------------------------------------------------------------------------
 
   private teamMode() {
-    return this.settings.game === 'rockets' && MODES[this.settings.mode].teams;
+    return this.settings.game === 'rockets' && !!MODES[this.settings.mode as RocketsMode]?.teams;
   }
 
   private teamCount(team: Team, onlyBots = false) {
@@ -332,14 +334,16 @@ export class Room implements GameHost {
       }
       case 'setMap':
         this.requireHost(member);
-        if (msg.map === RANDOM_MAP || validMap(this.settings.game, String(msg.map))) this.settings.map = msg.map;
+        if (msg.map === RANDOM_MAP || validMap(this.settings.game, String(msg.map), this.settings.mode)) this.settings.map = msg.map;
         this.broadcastRoom();
         return;
       case 'setMode':
         this.requireHost(member);
         if (this.state === 'playing') throw new RoomError('Change the mode between matches.');
-        if (!(msg.mode in MODES)) return;
+        if (!validMode(this.settings.game, msg.mode)) return;
         this.settings.mode = msg.mode;
+        // Garden Sentinels maps belong to one mode; a map of the other mode falls back to random.
+        if (this.settings.game === 'garden' && this.settings.map !== RANDOM_MAP && !gmapById(this.settings.map)?.modes.includes(msg.mode as 'coop' | 'vs')) this.settings.map = RANDOM_MAP;
         this.assignTeams();
         this.broadcastRoom();
         return;
@@ -352,6 +356,9 @@ export class Room implements GameHost {
         return;
       case 'start':
         this.requireHost(member);
+        if (this.settings.game === 'garden' && this.settings.mode === 'vs' && this.members.size < 2) {
+          throw new RoomError('Versus needs at least two gardens: invite someone or add a bot.');
+        }
         this.startGame();
         this.systemChat(`${member.name} started ${GAMES[this.settings.game].name}`);
         return;
@@ -432,8 +439,19 @@ export class Room implements GameHost {
   }
 }
 
-/** Whether `id` is one of the maps of `game` (games without maps have none). */
-const validMap = (game: GameId, id: string) => (game === 'rockets' ? !!mapById(id) : game === 'zombies' ? !!zmapById(id) : false);
+/** Whether `id` is one of the maps of `game` (Garden Sentinels: of that mode; games without maps have none). */
+const validMap = (game: GameId, id: string, mode?: GameMode) =>
+  game === 'rockets'
+    ? !!mapById(id)
+    : game === 'zombies'
+      ? !!zmapById(id)
+      : game === 'garden'
+        ? !!gmapById(id)?.modes.includes(isGMode(mode) ? mode : 'coop')
+        : false;
+
+/** Modes per game: Rockets has its MODES, Garden Sentinels co-op / versus, the others ignore the mode. */
+const validMode = (game: GameId, mode: unknown) => (game === 'garden' ? isGMode(mode) : typeof mode === 'string' && mode in MODES);
+const defaultMode = (game: GameId): GameMode => (game === 'garden' ? 'coop' : 'ffa');
 
 export class RoomManager {
   readonly rooms = new Map<string, Room>();
@@ -452,8 +470,8 @@ export class RoomManager {
       maxPlayers,
       bots,
       botDifficulty,
-      map: typeof raw.map === 'string' && validMap(game, raw.map) ? raw.map : RANDOM_MAP,
-      mode: typeof raw.mode === 'string' && raw.mode in MODES ? (raw.mode as GameMode) : 'ffa',
+      mode: validMode(game, raw.mode) ? (raw.mode as GameMode) : defaultMode(game),
+      map: typeof raw.map === 'string' && validMap(game, raw.map, validMode(game, raw.mode) ? (raw.mode as GameMode) : defaultMode(game)) ? raw.map : RANDOM_MAP,
     };
     let code = randomCode();
     while (this.rooms.has(code)) code = randomCode();

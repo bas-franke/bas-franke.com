@@ -1,0 +1,281 @@
+/* Garden Sentinels coach marks. Cream cards, slate text, amber accents, mint highlights.
+   The layer itself never takes pointer events; only the cards do. Override --gsc-bar-h / --gsc-top from the HUD
+   if the build bar or the top bar change height. */
+
+.gsc-layer {
+  --gsc-cream: #f5e7d6;
+  --gsc-cream-d: #e8d4bd;
+  --gsc-slate: #2b3644;
+  --gsc-slate-l: #5a6676;
+  --gsc-amber: #ffa940;
+  --gsc-mint: #4ee6d9;
+  --gsc-bar-h: 150px;
+  --gsc-top: 96px;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  font-family: inherit;
+}
+
+.gsc-card {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 32px));
+  padding: 12px 14px 10px;
+  background: var(--gsc-cream);
+  color: var(--gsc-slate);
+  border-radius: 16px;
+  border: 2px solid #fff8ee;
+  box-shadow:
+    0 0 0 3px rgba(78, 230, 217, 0.45),
+    0 10px 28px rgba(18, 28, 20, 0.35);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow: hidden;
+  animation: gsc-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Just above the tower bar, centred, with a little arrow pointing down at it. */
+.gsc-at-bar {
+  left: 50%;
+  bottom: calc(var(--gsc-bar-h) + 18px);
+  transform: translateX(-50%);
+  overflow: visible;
+  animation-name: gsc-pop-centre;
+}
+.gsc-at-bar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -11px;
+  width: 18px;
+  height: 18px;
+  background: var(--gsc-cream);
+  border-right: 2px solid #fff8ee;
+  border-bottom: 2px solid #fff8ee;
+  transform: translateX(-50%) rotate(45deg);
+  border-bottom-right-radius: 4px;
+  animation: gsc-nudge 1.4s ease-in-out infinite;
+}
+.gsc-at-bar .gsc-timer {
+  border-radius: 0 0 16px 16px;
+}
+
+/* Bottom-left, above the bar: out of the centre of the view. */
+.gsc-at-side {
+  left: 16px;
+  bottom: calc(var(--gsc-bar-h) + 18px);
+}
+
+/* Leak: top centre, below the wave bar. */
+.gsc-at-top {
+  left: 50%;
+  top: var(--gsc-top);
+  transform: translateX(-50%);
+  animation-name: gsc-pop-centre;
+}
+
+.gsc-bad {
+  box-shadow:
+    0 0 0 3px rgba(255, 110, 90, 0.6),
+    0 10px 28px rgba(18, 28, 20, 0.35);
+}
+.gsc-bad .gsc-title {
+  color: #c2412f;
+}
+
+.gsc-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
+}
+.gsc-sprout svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  animation: gsc-sway 2.4s ease-in-out infinite;
+  transform-origin: 50% 90%;
+}
+
+.gsc-body {
+  margin: 0 0 8px;
+  color: var(--gsc-slate);
+}
+.gsc-body b {
+  color: #c97a12;
+}
+
+.gsc-kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 5px;
+  margin: 0 1px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1.5px solid var(--gsc-cream-d);
+  border-bottom-width: 3px;
+  font: 700 12px/1.45 ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  text-align: center;
+  color: var(--gsc-slate);
+}
+
+.gsc-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gsc-mute {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: var(--gsc-slate-l);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.gsc-mute:hover {
+  color: var(--gsc-slate);
+}
+.gsc-ok {
+  background: var(--gsc-amber);
+  color: #3a2508;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font: inherit;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 3px 0 #d9862a;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.gsc-ok:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 #d9862a;
+}
+.gsc-ok:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #d9862a;
+}
+.gsc-ok:focus-visible,
+.gsc-mute:focus-visible {
+  outline: 2px solid var(--gsc-mint);
+  outline-offset: 2px;
+}
+
+/* Thin mint bar that runs down on timed cards. */
+.gsc-timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--gsc-mint);
+  transform-origin: left;
+  animation: gsc-drain linear forwards;
+}
+
+/* Roster card */
+.gsc-roster-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.gsc-roster-head .gsc-title {
+  margin: 0 0 3px;
+  font-size: 17px;
+}
+.gsc-portrait {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: #ead8c2;
+  animation: gsc-bob 2.2s ease-in-out infinite;
+}
+.gsc-portrait-colossus {
+  background: linear-gradient(135deg, #e7dcff, #d4f7f3 55%, #ffe4c2);
+}
+.gsc-eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #18a69a;
+}
+.gsc-tag {
+  display: inline-block;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+}
+.gsc-tag-fast { background: #ff8a2a; }
+.gsc-tag-swarm { background: #22b5a8; }
+.gsc-tag-support { background: #a869ff; }
+.gsc-tag-armored { background: #2e8fc9; }
+.gsc-tag-boss { background: linear-gradient(90deg, #a869ff, #2eb3ff, #4ee6d9, #ffa940); }
+
+@keyframes gsc-pop {
+  0% { opacity: 0; transform: translateY(14px) scale(0.85); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes gsc-pop-centre {
+  0% { opacity: 0; transform: translate(-50%, 14px) scale(0.85); }
+  100% { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes gsc-nudge {
+  0%, 100% { margin-bottom: 0; }
+  50% { margin-bottom: -4px; }
+}
+@keyframes gsc-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes gsc-sway {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes gsc-drain {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@media (max-width: 600px) {
+  .gsc-layer {
+    --gsc-bar-h: 118px;
+    --gsc-top: 76px;
+  }
+  .gsc-card {
+    width: calc(100vw - 24px);
+    font-size: 13px;
+    padding: 10px 12px 8px;
+  }
+  .gsc-at-side {
+    left: 12px;
+  }
+  .gsc-portrait {
+    width: 52px;
+    height: 52px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gsc-card,
+  .gsc-at-bar::after,
+  .gsc-portrait,
+  .gsc-sprout svg {
+    animation: none;
+  }
+}

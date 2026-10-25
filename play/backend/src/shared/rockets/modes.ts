@@ -2,12 +2,12 @@
 // A match always has a goal and a clock, so it ends in about seven minutes whatever happens. Goals are set so a
 // full 8-player room usually reaches them near the end of the clock (bot matches measured 2-3.5 min at half these).
 
-import type { GameMode, Team } from '../protocol.js';
+import type { RocketsMode, Team } from '../protocol.js';
 import type { Vec3 } from '../math.js';
 import type { MapData } from './map.js';
 
 export interface ModeRules {
-  id: GameMode;
+  id: RocketsMode;
   name: string;
   /** One line for the room page. */
   blurb: string;
@@ -22,14 +22,14 @@ export interface ModeRules {
   overtime: number;
 }
 
-export const MODES: Record<GameMode, ModeRules> = {
+export const MODES: Record<RocketsMode, ModeRules> = {
   ffa: { id: 'ffa', name: 'Free for all', blurb: 'Everyone for themselves. First to 40 frags.', teams: false, goal: 'frags', limit: 40, seconds: 420, overtime: 60 },
   tdm: { id: 'tdm', name: 'Team deathmatch', blurb: 'Red against Blue. First team to 110 frags.', teams: true, goal: 'frags', limit: 110, seconds: 420, overtime: 60 },
   ctf: { id: 'ctf', name: 'Capture the flag', blurb: "Grab the enemy flag and bring it home while yours is safe. First to 5 captures.", teams: true, goal: 'captures', limit: 5, seconds: 420, overtime: 60 },
   elim: { id: 'elim', name: 'Elimination', blurb: 'Rounds with no respawns: last team standing takes the round. First to 7 rounds.', teams: true, goal: 'rounds', limit: 7, seconds: 480, overtime: 60 },
 };
 
-export const MODE_IDS = Object.keys(MODES) as GameMode[];
+export const MODE_IDS = Object.keys(MODES) as RocketsMode[];
 
 /** Elimination round rules. */
 export const ELIM = {

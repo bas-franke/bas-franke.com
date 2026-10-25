@@ -1,8 +1,9 @@
 import { type FormEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type GameServerMsg, type PlayerInfo, type RoomView, type Team, colorHex } from '@shared/protocol';
+import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type RocketsMode, type GameServerMsg, type PlayerInfo, type RoomView, type Team, colorHex } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
+import { GMODES } from '@shared/garden/constants';
 import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
@@ -13,6 +14,7 @@ import { RoomSocket } from '../net/socket';
 import { GameCover } from '../ui/GameCover';
 import { GameDetails } from '../ui/GameDetails';
 import { Header } from '../ui/Header';
+import { GardenPanels, gardenMapName, gardenMode } from './GardenPanels';
 import { MapPicker } from './MapPicker';
 
 /** The robot customiser brings three.js along, so it loads on first open. */
@@ -318,12 +320,15 @@ function WaitingRoom({
   const mapName = zombies ? 'Grand Meridian Hotel' : (MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map');
   const difficulty = DIFFICULTIES.find((d) => d.id === room.botDifficulty) ?? DIFFICULTIES[1];
   const botsLabel = `${bots} ${difficulty.label.toLowerCase()} ${bots === 1 ? 'bot' : 'bots'}`;
-  const rules = hasMaps ? MODES[room.mode ?? 'ffa'] : null;
+  const rules = hasMaps ? (MODES[room.mode as RocketsMode] ?? MODES.ffa) : null;
+  const garden = room.game === 'garden';
   const teamMode = !!rules?.teams;
   const onMap = zombies ? ` in the ${mapName}` : hasMaps ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : '';
   const lineup = teamMode
     ? `${rules!.name}: ${teamCount(room.players, 0)} vs ${teamCount(room.players, 1)}${onMap}, first to ${rules!.limit} ${GOAL_WORDS[rules!.goal]}`
-    : zombies
+    : garden
+      ? `${GMODES[gardenMode(room)].name}: ${humans} ${humans === 1 ? 'gardener' : 'gardeners'}${bots ? ` and ${botsLabel}` : ''} in ${gardenMapName(room)}`
+      : zombies
       ? `${humans} ${humans === 1 ? 'operator' : 'operators'}${bots ? ` and ${botsLabel}` : ''}${onMap}, endless waves`
       : `${rules ? `${rules.name}: ` : ''}${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${onMap}${rules ? `, first to ${rules.limit} frags` : ''}`;
   const myTeam = room.players.find((p) => p.id === you)?.team;
@@ -531,6 +536,8 @@ function WaitingRoom({
             </div>
           )}
 
+          {garden && <GardenPanels room={room} isHost={isHost} playing={playing} setMode={setMode} setMap={setMap} />}
+
           {zombies && (
             <div className="panel">
               <div className="section-head">
@@ -617,7 +624,7 @@ const HOTEL_WINGS = [
 const GOAL_WORDS = { frags: 'frags', captures: 'captures', rounds: 'rounds' } as const;
 const teamCount = (players: PlayerInfo[], team: Team) => players.filter((p) => p.team === team).length;
 /** A comic glyph per mode for the mode cards. */
-const MODE_ICONS: Record<GameMode, string> = { ffa: '✸', tdm: '⚔', ctf: '⚑', elim: '☠' };
+const MODE_ICONS: Record<RocketsMode, string> = { ffa: '✸', tdm: '⚔', ctf: '⚑', elim: '☠' };
 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
 

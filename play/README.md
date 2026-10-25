@@ -9,6 +9,7 @@ Node.js + Express + `ws` backend on port **3004**. No database; rooms live in me
 | **Rockets** | First-person rocket arena (Quake 3 "rockets only"): infinite rockets, splash damage, rocket jumps, jump pads, health packs. 5 minutes or 15 frags. |
 | **Ruckus**  | Party game in five rounds (Uther Party style). Each round is a minigame: Hot Potato, Floor is Lava, Coin Rush, Sweeper, Sumo. Points for placement; highest total wins. |
 | **Last Light** | Co-op zombie survival for 1 to 10 SWAT operators (bots fill in): endless waves in a fully destructible grand hotel lobby. Board up the doors, buy guns old and new, ammo, grenades and armor with points, revive each other. |
+| **Garden Sentinels** | Cozy sci-fi tower defense for 1 to 6 players: build and upgrade five kinds of towers along garden paths against crystal aliens. Co-op (one garden, 30 waves) or versus (everyone defends their own garden and sends enemies at the others). |
 | **Dustrunners** | Single-player podracing through red-rock canyons at `/race`: career (cups, prize money, garage), quick race, time trial against AI pilots. Not a room game: listed in the lobby from `SOLO_GAMES`. |
 
 Every room game supports bots (easy / normal / hard), chosen when the room is created or changed by the host in the room.
@@ -22,16 +23,19 @@ frontend/src/                          backend/src/
 ├── room/       waiting room, chat,    ├── rooms.ts     Room lifecycle, host, bots, auto-close
 │               mounts the game        ├── games/
 ├── ui/         header, dialogs,       │   ├── rockets/ server.ts (sim + rules), bots.ts, nav.ts
-│               screenshot gallery     │   └── ruckus/  server.ts (rounds), bots.ts, minigames/*
+│               screenshot gallery     │   ├── ruckus/  server.ts (rounds), bots.ts, minigames/*
+│                                      │   └── garden/  server.ts (loop, snapshots), sim.ts, bots.ts
 ├── engine/     three.js wrapper,      └── shared/      ← imported by the frontend as @shared/*
 │   input, interpolation, models,          ├── protocol.ts   lobby/room messages, game metadata
 │   effects, synthesized audio             ├── math.ts
 └── games/                                 ├── rockets/      constants, map(s), physics, protocol
-    ├── catalog.ts  screenshots per game   └── ruckus/       constants, world (layouts + pawn physics), protocol
-    ├── rockets/ client.ts, arena.ts,
+    ├── catalog.ts  screenshots per game   ├── ruckus/       constants, world (layouts + pawn physics), protocol
+    ├── rockets/ client.ts, arena.ts,      └── garden/       constants, towers, enemies, maps, board, protocol
     │            Hud.tsx
-    └── ruckus/  client.ts, arena.ts,
-                 Hud.tsx
+    ├── ruckus/  client.ts, arena.ts,
+    │            Hud.tsx
+    └── garden/  client.ts, Hud.tsx and one module
+                 per concern (api.ts)
 ```
 
 - **One source of truth for rules.** `backend/src/shared/` holds the protocol, the arena and all movement physics.
@@ -93,6 +97,84 @@ waves jogs, everyone downed at once ends the match. Players are SWAT operators.
   `tools/blender/build_zombies.py`, `npm run models:zombies`). Graphics quality (low / medium / high) is in the Esc menu.
 - Dev labs: `/lab-zombies.html?zones=atrium,lounge` (world + lighting), `/lab-zombies-fx.html`, `/lab-zombies-audio.html`.
 
+### Garden Sentinels
+
+Cozy sci-fi tower defense for 1 to 6 players (bots fill seats). Crystal aliens walk the garden paths from entry portals
+to the greenhouse; players build towers on the grass cells beside the paths. Top-down camera: `W A S D` or drag to pan,
+wheel to zoom, `Alt` + click pings the map. The host picks the mode in the room; each map belongs to one mode.
+
+- **Co-op**: one garden, 20 shared lives, everyone has their own gold. Survive 30 waves to win. Enemy health and count
+  grow with the number of defenders (`coopHp`, `coopCount` in `shared/garden/constants.ts`, read at each wave start).
+  A kill pays every defender a share of the bounty, so nobody steals kills. Anyone upgrades or retargets any tower;
+  only the builder sells.
+- **Versus** (needs two players or bots): everyone defends their own copy of the map against the same base waves and
+  spends gold on sends at the others. A board at 0 lives is out; the last garden standing wins.
+
+All numbers live in `shared/garden/` (`towers.ts`, `enemies.ts`, `constants.ts`). The rules the data leaves open are
+listed in the comment block at the top of `backend/src/games/garden/server.ts`.
+
+- **Towers** take one 2 m cell and have three levels (level 3 is the gold-trimmed "Masterwork"). Laser Turret:
+  continuous beam that ignores armour; level 3 chains to two more enemies. Bubble Shield: towers inside cannot be
+  disrupted, enemies inside get zapped; level 3 stuns the disruptor. Slow Flower: 30 / 40 / 50% slow field (the
+  strongest field applies, nothing stacks). Missile Pod: splash volleys of 1 / 2 / 3 missiles, weak against armour.
+  Energy Beacon: damage and fire-rate aura for nearby towers, plus range at level 3. Laser and missile target first,
+  last, strong or close. Selling returns 70% of the gold spent, or all of it in the build phase it was built in.
+- **Enemies**: Runner (fast), Skitter (comes in packs of five), Disruptor (bolts the nearest tower in range and
+  disables it for 3 s), Crystal Brute (50% armour), and the Prism Colossus boss every tenth wave, which sheds six
+  skitters at 75, 50 and 25% health. A leak costs 1 to 10 lives depending on the kind.
+- **Waves and economy**: 25 s to build before wave 1, 10 s between waves. `R` marks you ready; when every defender
+  is ready the wave starts early and everyone gets 2 gold per second skipped. Wave lists come from `waveSpawns` (the
+  HUD previews the next one). Health grows per wave (`waveHp`, plus `vsHpRamp` in versus) and bounties with it.
+  Clearing a wave pays a bonus.
+- **Sends** (versus): three runners, a skitter pack, a disruptor, a brute or a colossus, unlocked between wave 2 and
+  15. A send costs gold now and raises your income (paid at every wave start) for the rest of the match. It queues
+  into the target's next wave and enters 4 s in; the defender earns half the bounty. At most `sendCap(n)` sends per
+  player per wave. The next build phase starts when every board is clear, or 25 s after the wave's last base spawn.
+- **Maps** (`shared/garden/maps.ts`: ASCII grids of 2 m cells plus the routes enemies walk). Co-op: Greenhouse
+  Commons, Lily Moat, Terraced Rockery, Sunflower Terraces, Koi Crossing, Moonlit Orchard. Versus (smaller): Seedling
+  Plot, Sprout Spiral, Twin Beds, Pebble Loop. Versus boards sit side by side in rows of three (2 x 2 for four).
+  Random picks among the current mode's maps.
+- **Bots** (`games/garden/bots.ts`) are ordinary players with their own gold; the server applies their actions
+  through the same code as human messages (contract in `botapi.ts`). They value every purchase as damage per second
+  times metres of path covered, weighted towards the greenhouse and lowered where towers already reach (which spreads
+  bots over the entries in co-op), and buy the best value per gold. Easy picks loosely among the top few; normal and
+  hard save up for a clearly better purchase. In versus they put part of their gold into sends once their defence holds.
+- **Network**: `sim.ts` is the whole simulation with no networking; `server.ts` steps it at 20 Hz and sends a
+  snapshot every second tick (10 Hz). Enemies travel as route index, distance along the route and lateral offset.
+  Towers only change through events (build, upgrade, sell, targeting), batched per tick into one `ev` message;
+  refused actions go privately to that player. In versus each human gets their own snapshot with only their board and
+  the board their camera is on (client `view` message); every fourth snapshot carries every board. The client
+  interpolates enemies along their route.
+- **Client** (`frontend/src/games/garden/`, contracts in `api.ts`): `client.ts` (network, interpolation, camera,
+  input, placement), `world.ts` (boards built from the map grid: terrain, paths, water, bridges, foliage, portals,
+  greenhouse, sky), `units.ts` (tower and enemy views, health bars, range circles), `fx.ts` (beams, missiles,
+  explosions, fields, zaps, deaths, popups), `post.ts` (HDR, bloom, tilt-shift, grade), `ambience.ts` (instanced
+  critters and decor around the boards), `audio.ts` (synthesized sound and music), `models.ts` (GLB loading with
+  primitive stand-ins), `Hud.tsx` + `hudIcons.tsx` + `garden.css`, `Coach.tsx` (first-time tips, shown once per
+  player). Graphics quality (low / medium / high) is in the HUD menu.
+- **Models**: `tools/blender/build_garden_{towers,enemies,kit,decor}.py` build
+  `frontend/public/models/garden/{towers,enemies,kit,decor}.glb`; `render_garden_portraits.py` renders the HUD
+  portraits (`portraits/tower_<kind>_<lv>.webp`, `portraits/enemy_<kind>.webp`) from the tower and enemy GLBs.
+  `npm run models:garden` rebuilds everything; `npm run models:garden -- towers` (or `enemies`, `kit`, `decor`,
+  `portraits`) rebuilds one part. Missing models fall back to primitives.
+- **Dev labs** (no backend needed): `/lab-garden-world.html?map=<id>&boards=<n>`,
+  `/lab-garden-units.html?view=towers|enemies|all`, `/lab-garden-fx.html?stress=1`,
+  `/lab-garden-ambience.html?map=<id>`, `/lab-garden-hud.html?mode=vs`, `/lab-garden-coach.html?step=<n>`,
+  `/lab-garden-audio.html`, `/lab-garden-room.html` (waiting-room panels) and
+  `/lab-garden-client.html?map=<id>&mode=coop|vs` (the real client and HUD against a scripted fake server; `sim=real`
+  runs the real game server in the page). Each lab lists its options at the top of `frontend/src/games/garden/lab/*`.
+- **Tools** (run from `play/` with Node 22+):
+  `node backend/node_modules/tsx/dist/cli.mjs tools/garden/checkmaps.ts [-q] [<id> ...]` validates every map (grid,
+  portals, greenhouse, routes on path cells, buildable space, route lengths) and prints ASCII renders.
+  `node backend/node_modules/tsx/dist/cli.mjs tools/garden/sim.ts --mode coop --bots 3 --diff normal` plays whole
+  matches with bots at full speed and prints lives, gold, kills and leaks per wave (`--sweep` runs co-op with 1, 3, 6
+  bots and versus with 2, 4, 6; `--bytes` measures snapshot sizes).
+  `node backend/node_modules/tsx/dist/cli.mjs tools/garden/test.ts [filter]` runs the rule tests against the
+  simulation (no framework; exits 1 on a failure).
+  `node backend/node_modules/tsx/dist/cli.mjs tools/garden/soak.ts --url http://127.0.0.1:3004 [--rooms 6] [--minutes 5]`
+  connects fake WebSocket players (plus garbage and malicious messages) to a running backend and checks traffic,
+  snapshot timing, errors and that matches end; start that backend with `CREATE_RATE_LIMIT=1000`.
+
 ### Dustrunners (work in progress)
 
 A single-player podracer at `/race`, in the painted canyon style of a concept art piece: career mode (four cups, prize
@@ -110,6 +192,8 @@ Every model (droid, launcher, rocket, health pack, pawn, bomb, coin, crown) is b
 [tools/blender/build_models.py](tools/blender/build_models.py) and exported to `frontend/public/models/*.glb`.
 Rebuild them with `npm run models` (finds Blender automatically; set `BLENDER=/path/to/blender` otherwise). Materials
 named `Team` are recoloured per player at runtime. If a model fails to load the game falls back to a primitive.
+Garden Sentinels has its own scripts and output folder (`frontend/public/models/garden/`, `npm run models:garden`):
+see [Garden Sentinels](#garden-sentinels).
 
 ### Screenshots
 

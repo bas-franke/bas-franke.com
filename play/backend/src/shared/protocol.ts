@@ -5,12 +5,14 @@ import type { Look } from './rockets/cosmetics.js';
 import type { RocketsClientMsg, RocketsServerMsg } from './rockets/protocol.js';
 import type { RuckusClientMsg, RuckusServerMsg } from './ruckus/protocol.js';
 import type { ZombiesClientMsg, ZombiesServerMsg } from './zombies/protocol.js';
+import type { GardenClientMsg, GardenServerMsg } from './garden/protocol.js';
 
-export type GameId = 'rockets' | 'ruckus' | 'zombies';
+export type GameId = 'rockets' | 'ruckus' | 'zombies' | 'garden';
 export type BotDifficulty = 'easy' | 'normal' | 'hard';
 export type RoomState = 'waiting' | 'playing';
-/** Rockets game modes; rules live in shared/rockets/modes.ts. Other games ignore the mode. */
-export type GameMode = 'ffa' | 'tdm' | 'ctf' | 'elim';
+/** Game modes: Rockets' (rules in shared/rockets/modes.ts) and Garden Sentinels' co-op / versus. Other games ignore the mode. */
+export type RocketsMode = 'ffa' | 'tdm' | 'ctf' | 'elim';
+export type GameMode = RocketsMode | 'coop' | 'vs';
 /** 0 = Red, 1 = Blue (names and colours in shared/rockets/modes.ts TEAMS). */
 export type Team = 0 | 1;
 
@@ -84,6 +86,26 @@ export const GAMES: Record<GameId, GameMeta> = {
       { keys: 'F / Tab', does: 'Flashlight, scores' },
     ],
   },
+  garden: {
+    id: 'garden',
+    name: 'Garden Sentinels',
+    tagline: 'Cozy sci-fi tower defense. Together or against each other.',
+    description:
+      'Cute crystal aliens march on your greenhouse. Build laser turrets, bubble shields, slow flowers, missile pods and ' +
+      'energy beacons along the garden paths and upgrade them to masterworks. Defend one garden together in co-op, or ' +
+      'each defend your own in versus and send enemies at everyone else: the last garden standing wins.',
+    minPlayers: 1,
+    maxPlayers: 6,
+    accent: '#6baf4b',
+    controls: [
+      { keys: '1 - 5 / click', does: 'Pick a tower, click to build' },
+      { keys: 'Click tower', does: 'Select: U upgrade, X sell' },
+      { keys: 'R', does: 'Call the next wave early' },
+      { keys: 'W A S D / drag', does: 'Pan (wheel zooms)' },
+      { keys: 'Alt + click', does: 'Ping the map' },
+      { keys: 'Tab', does: 'Scores' },
+    ],
+  },
 };
 
 export const GAME_IDS = Object.keys(GAMES) as GameId[];
@@ -140,9 +162,9 @@ export interface RoomSettings {
   maxPlayers: number;
   bots: number;
   botDifficulty: BotDifficulty;
-  /** Map id of the room's game (Rockets, Last Light), or 'random' for a different one every match. Other games ignore it. */
+  /** Map id of the room's game (Rockets, Last Light, Garden Sentinels), or 'random' for a different one every match. Other games ignore it. */
   map: string;
-  /** Rockets game mode. Other games ignore it. */
+  /** Rockets game mode, or Garden Sentinels 'coop' / 'vs'. Other games ignore it. */
   mode: GameMode;
 }
 
@@ -185,8 +207,8 @@ export interface RoomView {
   players: PlayerInfo[];
 }
 
-export type GameClientMsg = RocketsClientMsg | RuckusClientMsg | ZombiesClientMsg;
-export type GameServerMsg = RocketsServerMsg | RuckusServerMsg | ZombiesServerMsg;
+export type GameClientMsg = RocketsClientMsg | RuckusClientMsg | ZombiesClientMsg | GardenClientMsg;
+export type GameServerMsg = RocketsServerMsg | RuckusServerMsg | ZombiesServerMsg | GardenServerMsg;
 
 export type ClientMsg =
   | { t: 'setBots'; count: number; difficulty?: BotDifficulty }

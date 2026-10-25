@@ -34,7 +34,7 @@ import type {
   RoundSnap,
   ScoreRow,
 } from '../../shared/rockets/protocol.js';
-import type { GameClientMsg, GameMode, Team } from '../../shared/protocol.js';
+import type { GameClientMsg, RocketsMode, Team } from '../../shared/protocol.js';
 import type { GameHost, GamePlayer, GameServer } from '../types.js';
 import { BOT_PARAMS, RocketsBot, type BotEnemy } from './bots.js';
 import { type NavGraph, navGraphFor } from './nav.js';
@@ -137,7 +137,7 @@ class RocketsGame implements GameServer {
   private ended = false;
   private timer?: NodeJS.Timeout;
   private readonly graph: NavGraph;
-  private readonly mode: GameMode;
+  private readonly mode: RocketsMode;
   private readonly rules: ModeRules;
   /** Team modes: [red, blue] base positions (CTF flags stand here). */
   private readonly bases?: [Vec3, Vec3];
@@ -151,7 +151,7 @@ class RocketsGame implements GameServer {
   constructor(private readonly host: GameHost) {
     this.map = pickMap(host, this.rng);
     lastMap.set(host, this.map.id);
-    this.mode = host.settings.mode in MODES ? host.settings.mode : 'ffa';
+    this.mode = host.settings.mode in MODES ? (host.settings.mode as RocketsMode) : 'ffa';
     this.round = { n: 1, state: 'play', endsAt: RocketsGame.COUNTDOWN + ELIM.roundSeconds, nextAt: 0 };
     this.rules = MODES[this.mode];
     // Elimination has no pickups at all: everyone starts each round with the same health and armor.

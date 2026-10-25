@@ -24,7 +24,7 @@ import {
   yawForward,
   yawRight,
 } from '../../shared/math.js';
-import type { BotDifficulty, GameMode, Team } from '../../shared/protocol.js';
+import type { BotDifficulty, RocketsMode as GameMode, Team } from '../../shared/protocol.js';
 import { RK } from '../../shared/rockets/constants.js';
 import type { MapData } from '../../shared/rockets/map.js';
 import { chestPosition, eyePosition, playerAABB, stepBody, type Body } from '../../shared/rockets/physics.js';

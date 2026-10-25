@@ -1,0 +1,137 @@
+/* Garden Sentinels waiting room: map cards with a painted mini-map on top. Builds on .mode-cards / .mode-card. */
+
+.mode-cards.gsr-maps {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.gsr-map {
+  padding: 8px 8px 10px;
+}
+.gsr-map > b,
+.gsr-map > span:not(.gsr-thumb),
+.gsr-map > em {
+  padding-inline: 4px;
+}
+.gsr-map > b {
+  margin-top: 4px;
+}
+
+.gsr-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #4e7d34;
+  box-shadow:
+    inset 0 0 0 1px rgba(11, 11, 18, 0.55),
+    0 6px 14px -8px rgba(0, 0, 0, 0.8);
+}
+.gsr-thumb > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.25s ease;
+}
+.gsr-map:hover:not(:disabled) .gsr-thumb > svg:not(.gsr-stack) {
+  transform: scale(1.04);
+}
+.gsr-map.active .gsr-thumb {
+  box-shadow:
+    inset 0 0 0 1px rgba(11, 11, 18, 0.55),
+    0 0 0 2px var(--accent, var(--brand));
+}
+
+/* Versus marker, pinned to the thumbnail's corner. */
+.gsr-chip {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 7px 3px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1.3;
+  border: 1.5px solid #0b0b12;
+}
+.gsr-chip-vs {
+  background: #ff6b8b;
+  color: #1c0d12;
+  box-shadow: 2px 2px 0 #0b0b12;
+}
+
+.gsr-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.gsr-stats > span {
+  white-space: nowrap;
+}
+.gsr-stats i {
+  font-style: normal;
+  color: var(--accent, var(--brand));
+}
+
+/* Random: the first few gardens fanned out like cards, under a big question mark. */
+.gsr-random {
+  background: radial-gradient(circle at 50% 45%, #5e8f3c, #2c4a22);
+}
+.gsr-random > svg.gsr-stack {
+  position: absolute;
+  inset: 14% 18%;
+  width: 64%;
+  height: 72%;
+  border-radius: 6px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  outline: 2px solid rgba(255, 244, 224, 0.75);
+  filter: saturate(0.8) brightness(0.8);
+  transition: transform 0.25s ease;
+}
+.gsr-random > .gsr-stack-0 {
+  transform: rotate(-9deg) translate(-16%, 2%);
+}
+.gsr-random > .gsr-stack-1 {
+  transform: rotate(8deg) translate(16%, 3%);
+}
+.gsr-random > .gsr-stack-2 {
+  transform: rotate(-1deg) translateY(-3%);
+}
+.gsr-map:hover:not(:disabled) .gsr-random > .gsr-stack-0 {
+  transform: rotate(-13deg) translate(-22%, 2%);
+}
+.gsr-map:hover:not(:disabled) .gsr-random > .gsr-stack-1 {
+  transform: rotate(12deg) translate(22%, 3%);
+}
+.gsr-q {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--display);
+  font-size: 46px;
+  font-weight: 700;
+  color: #fff6e0;
+  text-shadow:
+    0 3px 0 #0b0b12,
+    0 0 18px rgba(255, 209, 102, 0.8);
+  pointer-events: none;
+}
+
+@media (max-width: 420px) {
+  .mode-cards.gsr-maps {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .gsr-map > span:not(.gsr-thumb) {
+    display: none;
+  }
+  .gsr-map > b {
+    font-size: 17px;
+  }
+  .gsr-q {
+    font-size: 34px;
+  }
+}

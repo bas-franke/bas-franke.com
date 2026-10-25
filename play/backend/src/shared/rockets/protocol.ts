@@ -1,7 +1,7 @@
 // Rockets wire protocol. Field names are short because snapshots go out 30 times a second.
 
 import type { Vec3Tuple } from '../math.js';
-import type { GameMode, Team } from '../protocol.js';
+import type { RocketsMode as GameMode, Team } from '../protocol.js';
 import type { ItemKind, ItemSpawn } from './items.js';
 import type { MapData } from './map.js';
 
