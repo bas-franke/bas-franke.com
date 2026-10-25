@@ -190,6 +190,25 @@ export const skills = {
   ],
 };
 
+/**
+ * Full-width pictures between the sections, each with one quiet line over it.
+ * The image is src/art/interlude-<name>.webp (see ART.md); without it the band is left out.
+ */
+export const interludes = {
+  morning: {
+    line: 'Most good work starts quietly: a clear morning, a hot coffee, and a problem worth understanding.',
+    alt: 'A desk by a window in soft morning light, with a laptop, a notebook and a cup of coffee.',
+  },
+  evening: {
+    line: 'And the best software is the kind nobody has to think about at the end of the day.',
+    alt: 'A canal in the evening with warm light in the windows of old houses.',
+  },
+  fireside: {
+    line: 'Pull up a chair.',
+    alt: 'A reading chair by a lamp on a quiet evening, with a blanket and a cup of tea.',
+  },
+};
+
 export const contact = {
   heading: 'Let’s talk.',
   lead: 'A product to build, a platform to steady, or a team that could use a senior pair of hands? My inbox is open, and I read every message myself.',

@@ -1,21 +1,24 @@
 /* ---------------------------------------------------------------------------
    bas-franke.com: paper & ink
-   Warm paper, soft ink, one lake-blue accent, hairlines instead of boxes,
-   slow motion. Tokens first, then base, then each part of the page.
+   Warm paper, soft ink, one lake-blue accent and a little lamplight, hairlines
+   instead of boxes, soft corners on pictures, slow motion. Tokens first, then base, then each part of the page.
 --------------------------------------------------------------------------- */
 
 :root {
-  --paper: #f5f2ec;
-  --paper-2: #ece8e0;
-  --paper-3: #e3ded3;
-  --ink: #1b1d1c;
-  --ink-2: #4b4e4b;
-  --ink-3: #6e716d;
-  --line: #d9d4c9;
-  --line-2: #c4beb1;
+  --paper: #f4efe6;
+  --paper-2: #ebe4d8;
+  --paper-3: #e1d8c9;
+  --ink: #221e1a;
+  --ink-2: #514a42;
+  --ink-3: #766d62;
+  --line: #ddd4c5;
+  --line-2: #c7bba8;
   --accent: #4f6b7c;
   --accent-2: #3b5565;
   --accent-soft: rgba(79, 107, 124, 0.14);
+  /* lamplight: the warm second colour, used for glow and the odd detail */
+  --warm: #a8693c;
+  --warm-soft: rgba(214, 150, 88, 0.2);
   --ok: #4f7f5e;
   --bad: #b05a4c;
 
@@ -28,22 +31,25 @@
   --gutter: clamp(20px, 5vw, 72px);
   --max: 1240px;
   --nav-h: 72px;
+  --radius: 10px;
 
   color-scheme: light;
 }
 
 :root[data-theme='dark'] {
-  --paper: #141516;
-  --paper-2: #1b1d1f;
-  --paper-3: #232527;
-  --ink: #ebe7df;
-  --ink-2: #b7b3ab;
-  --ink-3: #8e8c86;
-  --line: #2b2d2f;
-  --line-2: #3d4043;
+  --paper: #16130f;
+  --paper-2: #1e1a15;
+  --paper-3: #27221b;
+  --ink: #eee5d6;
+  --ink-2: #bfb4a3;
+  --ink-3: #93897b;
+  --line: #2f2922;
+  --line-2: #453c31;
   --accent: #8fabbd;
   --accent-2: #aac2d1;
-  --accent-soft: rgba(143, 171, 189, 0.16);
+  --accent-soft: rgba(143, 171, 189, 0.14);
+  --warm: #e0a46e;
+  --warm-soft: rgba(224, 150, 80, 0.14);
   --ok: #7fb58f;
   --bad: #d6857a;
   color-scheme: dark;
@@ -192,7 +198,7 @@ h1 {
 h1 em {
   font-style: italic;
   font-weight: 300;
-  color: var(--ink-2);
+  color: var(--warm);
 }
 
 h2 {
@@ -420,7 +426,9 @@ h3 {
   right: -10%;
   width: 70vw;
   height: 80vh;
-  background: radial-gradient(closest-side, var(--accent-soft), transparent 75%);
+  background:
+    radial-gradient(closest-side at 40% 45%, var(--warm-soft), transparent 75%),
+    radial-gradient(closest-side at 70% 60%, var(--accent-soft), transparent 80%);
   filter: blur(40px);
   animation: drift 32s ease-in-out infinite alternate;
   pointer-events: none;
@@ -458,8 +466,10 @@ h3 {
   justify-self: end;
   width: 100%;
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--paper-2);
   overflow: hidden;
+  box-shadow: 0 30px 60px -40px rgba(80, 50, 20, 0.35);
 }
 
 .scroll-cue {
@@ -615,6 +625,7 @@ h3 {
   object-fit: cover;
   object-position: center 30%;
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   filter: saturate(0.82) contrast(1.02);
   transition: filter 0.5s var(--ease);
 }
@@ -624,6 +635,7 @@ h3 {
   position: absolute;
   inset: 0;
   border: 1px solid var(--line-2);
+  border-radius: var(--radius);
   transform: translate(14px, 14px);
   pointer-events: none;
   opacity: 0.6;
@@ -774,8 +786,9 @@ a.work__row:hover .arrow {
   font-family: var(--mono);
   font-size: 0.68rem;
   letter-spacing: 0.06em;
-  color: var(--ink-3);
+  color: var(--ink-2);
   padding: 5px 11px;
+  background: color-mix(in srgb, var(--paper-2) 70%, transparent);
   border: 1px solid var(--line);
   border-radius: 999px;
 }
@@ -784,6 +797,7 @@ a.work__row:hover .arrow {
   margin: 0;
   aspect-ratio: 4 / 3;
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--paper-2);
   overflow: hidden;
 }
@@ -794,6 +808,79 @@ a.work__row:hover .arrow {
 
 .work__row:hover .work__art .art {
   transform: scale(1.025);
+}
+
+/* ----------------------------------------------------------- interlude */
+
+/* A full-width picture between sections. It fades into the paper at the top and
+   bottom, so it reads as part of the page rather than a box on it. */
+.interlude {
+  position: relative;
+  isolation: isolate;
+  margin: clamp(96px, 12vw, 168px) 0 0;
+  height: clamp(420px, 78vh, 820px);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.interlude__img {
+  position: absolute;
+  inset: -8% 0;
+  z-index: -1;
+  width: 100%;
+  height: 116%;
+  object-fit: cover;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 70%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 70%, transparent);
+}
+
+/* a soft pool of paper behind the line, so it stays readable on any picture */
+.interlude::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 60%;
+  z-index: -1;
+  background: radial-gradient(ellipse 70% 80% at 18% 100%, color-mix(in srgb, var(--paper) 78%, transparent), transparent 70%);
+  pointer-events: none;
+}
+
+.interlude--dimmed .interlude__img {
+  filter: brightness(0.62) saturate(0.85);
+}
+
+.interlude__text {
+  padding-bottom: clamp(24px, 4vw, 48px);
+}
+
+.interlude__text p {
+  margin: 0;
+  max-width: 26ch;
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(1.6rem, 3.4vw, 2.7rem);
+  line-height: 1.2;
+  font-variation-settings: 'opsz' 48;
+  color: var(--ink);
+}
+
+/* a slow drift as the picture scrolls past, where the browser can tie it to scrolling */
+@supports (animation-timeline: view()) {
+  .interlude__img {
+    animation: interlude-drift linear both;
+    animation-timeline: view();
+  }
+
+  @keyframes interlude-drift {
+    from {
+      transform: translateY(-5%) scale(1.04);
+    }
+    to {
+      transform: translateY(5%) scale(1.04);
+    }
+  }
 }
 
 /* -------------------------------------------------------------- skills */
@@ -1167,6 +1254,15 @@ a.work__row:hover .arrow {
   .hero {
     padding-top: calc(var(--nav-h) + 32px);
     padding-bottom: 64px;
+  }
+
+  /* below the text on a phone the picture is just something to scroll past */
+  .hero__art {
+    display: none;
+  }
+
+  .interlude {
+    height: clamp(360px, 70svh, 560px);
   }
 
   .hero .lead {

@@ -1,6 +1,6 @@
 # Portfolio artwork
 
-The site has nine optional image slots. Each one shows a procedural line drawing in the site's own ink until the
+The site has optional image slots. The line-art ones show a procedural drawing in the site's own ink until the
 file exists, so the page is complete without any of them and you can add them one at a time.
 
 **Where files go:** `frontend/src/art/` (picked up at build time, hashed and cached forever), except the link
@@ -10,7 +10,57 @@ the rest and the drawings disappear by themselves.
 **Dark mode:** light artwork is automatically inverted in dark mode, which works well for ink-on-paper images.
 If you want full control, add a `<name>-dark.webp` next to any file and it is used instead.
 
-## One prompt for everything
+## The cozy set (hero, interludes, link preview)
+
+Since October 2026 the page is warmer: cream paper, lamplight, and three full-width pictures ("interludes") between
+the sections, each with one line of text over it (the lines live in `src/content.ts` under `interludes`). An interlude
+only appears once its file exists. In dark mode an interlude without a `-dark` file is dimmed, not inverted.
+
+Paste this into ChatGPT as one message; reply "next" if it stops after one image.
+
+```text
+I need a set of 6 illustrations for my personal portfolio website (I'm a software engineer in Amsterdam). Generate them one at a time, in the order below, each as a separate image, and keep the style identical across all of them, as if painted by the same illustrator for the same book. Do not add any text, letters, numbers, logos, watermarks, signatures, frames or borders.
+
+STYLE FOR ALL IMAGES
+Warm, painterly gouache and watercolour illustration, like a page from a beautifully illustrated book for grown-ups. Cozy, calm and inviting. Soft golden lamplight or low sun, a palette of warm cream (#f4efe6), honey, amber and soft terracotta, with dusty lake blue (#4f6b7c) in the shadows, the sky and the water. Visible paper grain, soft edges, gentle dry-brush texture, a little loose and hand-made, never glossy or photographic, no 3D render look. Dutch light and Dutch places. No people visible (a room may feel just left, with a warm drink still steaming). Lots of quiet space.
+
+IMAGE 1, "hero" (portrait, 1024x1536)
+Seen from inside a cozy room: a deep wooden windowsill in the lower third with a steaming mug of coffee, a small potted plant and a closed notebook on it. Through the old window with thin wooden frames, a wide still lake at dawn: a low horizon with one thin line of distant shore, faint mist on the water, and a small pale sun on the right. Soft golden morning light falls onto the sill. The upper half is mostly calm pale sky through the glass.
+
+IMAGE 2, "hero-dark" (portrait, 1024x1536)
+The same windowsill and window as image 1, but late in the evening: the room is dark and warm, a small candle or the glow of a lamp lights the sill, the mug, the plant and the notebook in amber. Outside, the lake lies under a deep blue night sky with a small moon on the right and its reflection on the water. Dark, rich and calm; the darkest tones close to #16130f.
+
+IMAGE 3, "interlude-morning" (wide landscape, 1536x1024)
+A wooden desk by a large window on a quiet morning: an open laptop seen from the side, a notebook with a pencil, reading glasses and a cup of coffee with a wisp of steam, in soft early sunlight with long gentle shadows. Through the window, the hint of Amsterdam rooftops and trees. Put the desk and window on the right two thirds of the image; keep the lower-left quarter calm, light and simple (a line of text will sit there). Keep the top and bottom edges quiet and pale, they fade into the page.
+
+IMAGE 4, "interlude-evening" (wide landscape, 1536x1024)
+An Amsterdam canal at blue hour: a row of narrow old canal houses on the right with warm yellow light in a few windows, a few bicycles leaning against a bridge railing, the lights reflected in the still water, one bare tree. The sky deep dusty blue fading to a last amber glow. Keep the lower-left quarter calm (still water, a line of text will sit there) and the top and bottom edges quiet, they fade into the page.
+
+IMAGE 5, "interlude-fireside" (wide landscape, 1536x1024)
+A cozy reading corner in the evening: a worn armchair with a knitted blanket, a floor lamp casting a warm pool of amber light, a small side table with a cup of tea and a stack of books, a bookshelf softly lost in the dark behind it, and a window with blue evening outside. Put the chair and lamp on the right half; keep the lower-left quarter calm and simple (a line of text will sit there) and the top and bottom edges quiet.
+
+IMAGE 6, "og" (wide landscape, 1536x1024)
+The view from image 1 as a wide scene: a still lake at dawn seen across a wooden windowsill with a steaming mug on the right, a small pale sun above the horizon, faint mist. The left two thirds is calm pale sky and water, so a name can be placed there later. No text.
+
+After each image, tell me its name from this list so I can save it with the right filename, then continue with the next one.
+```
+
+| File | Where it shows | Ratio | Export at | Target size |
+|------|----------------|-------|-----------|-------------|
+| `src/art/hero.webp` | Hero, right of the headline (hidden on phones) | 4:5, crop | 1200×1500 | < 250 KB |
+| `src/art/hero-dark.webp` | Hero in dark mode | 4:5, crop | 1200×1500 | < 250 KB |
+| `src/art/interlude-morning.webp` | Full width, between About and Experience | 3:2 as generated | 1920×1280 | < 300 KB |
+| `src/art/interlude-evening.webp` | Full width, between Experience and Skills | 3:2 | 1920×1280 | < 300 KB |
+| `src/art/interlude-fireside.webp` | Full width, between Skills and Contact | 3:2 | 1920×1280 | < 300 KB |
+| `public/og.jpg` | Link preview in chat apps and social media | 1.91:1, crop | 1200×630 JPEG | < 200 KB |
+
+Optional: `interlude-<name>-dark.webp` for a real night version of an interlude (otherwise it is dimmed). Save as WebP
+at quality 75–80 with <https://squoosh.app>; ChatGPT's 1536 px output upscaled to 1920 is fine for these soft images.
+
+The work covers below stay in the ink style: in dark mode they are inverted, which suits line art but would ruin a
+painting. A cozy set of work covers would need a `-dark` file for each, or a change to `Art.tsx` to dim instead.
+
+## The ink set (work covers)
 
 Paste this into ChatGPT as a single message. It asks for the six images one after another in the same style; after
 each one, download it and save it with the filename it names (see the table below for where it goes and how to resize).
