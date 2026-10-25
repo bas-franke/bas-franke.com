@@ -1,6 +1,6 @@
 /* ---------- Tokens ---------- */
 :root {
-  --page: #f8f8f9;
+  --page: #ffffff;
   --bg: #ffffff;
   --subtle: #fafafa;
   --ink: #0a0a0a;
@@ -49,57 +49,11 @@
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
   --gutter: 20px;
 
-  color-scheme: light;
+  /* White design only: no dark-mode override */
+  color-scheme: only light;
   font-family: var(--font);
   font-feature-settings: 'cv11', 'ss01';
   -webkit-font-smoothing: antialiased;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --page: #0c0c0d;
-    --bg: #151517;
-    --subtle: #1b1b1e;
-    --ink: #f0efec;
-    --ink-2: #d0cfca;
-    --muted: #a09f9a;
-    --faint: #75746f;
-    --line: #2a2a2d;
-    --line-2: #222225;
-    --line-strong: #3a3a3e;
-
-    --accent: #818cf8;
-    --accent-soft: #1e1b4b;
-
-    --ok: #22c55e;
-    --ok-soft: rgba(34, 197, 94, 0.12);
-    --warn: #f59e0b;
-    --warn-soft: rgba(245, 158, 11, 0.1);
-    --warn-line: rgba(245, 158, 11, 0.4);
-    --fail: #f87171;
-    --fail-soft: rgba(248, 113, 113, 0.12);
-    --skip: #75746f;
-    --skip-soft: #222225;
-
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-1-soft: #173254;
-    --bar-soft: #172a42;
-    --heat-0: #1f1f22;
-    --heat-1: #173254;
-    --heat-2: #184f95;
-    --heat-3: #256abf;
-    --heat-4: #3987e5;
-    --heat-5: #86b6ef;
-
-    --tooltip-bg: #f0efec;
-    --tooltip-ink: #0a0a0a;
-    --tooltip-muted: #6b6b6b;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-hover: 0 12px 28px -12px rgba(0, 0, 0, 0.6);
-
-    color-scheme: dark;
-  }
 }
 
 /* ---------- Base ---------- */
