@@ -69,7 +69,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
 };
 
 export const WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
-export const START_WEAPON: WeaponId = 'm1911';
+/** Everyone starts with the MP5SD (the `mp7` slot). */
+export const START_WEAPON: WeaponId = 'mp7';
 
 /** Lockers in every map, in the order they are placed around the walls (cheap first, near the spawn). */
 export const LOCKER_ORDER: WeaponId[] = ['glock', 'kar98k', 'trench', 'thompson', 'garand', 'mp7', 'benelli', 'm4a1', 'ak12', 'm249', 'barrett'];
@@ -78,6 +79,8 @@ export const NADE_PRICE = 400;
 export const ARMOR_PRICE = 2000;
 /** Ammo locker refills every gun you hold at this share of their own ammo prices. */
 export const AMMO_CACHE_SHARE = 1.25;
+/** The ammo crate in the middle of the lobby: a full reserve for every gun you hold, flat price. */
+export const AMMO_CRATE_PRICE = 100;
 
 export const fireInterval = (w: WeaponDef) => 60 / w.rpm;
 

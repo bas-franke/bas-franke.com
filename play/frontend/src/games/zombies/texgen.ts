@@ -561,7 +561,7 @@ function marbleBody(u: number, v: number, px: Px, seed: number) {
   px.b = 0.027 + cloud * 0.042 + cloud2 * 0.013;
   // Bold veins: cell edges of a coarse network, widths wandering along their length; not every edge is a vein.
   const e1 = veinNet(u, v, 3, 0.25, seed + 10);
-  const w1 = 0.007 + Math.pow(cfbm(u, v, 6, 3, seed + 20), 2) * 0.075;
+  const w1 = 0.005 + Math.pow(cfbm(u, v, 6, 3, seed + 20), 2) * 0.05;
   const keep1 = smooth(0.3, 0.45, cfbm(u, v, 3, 3, seed + 21));
   const big = smooth(w1, w1 * 0.25, e1) * keep1;
   const halo1 = smooth(w1 * 1.8, w1 * 0.7, e1) * keep1;
@@ -577,10 +577,11 @@ function marbleBody(u: number, v: number, px: Px, seed: number) {
   const halo = Math.max(halo1, halo2 * 0.8);
   const core = Math.max(big, mid * 0.85, hair);
   // Amber halo bleeding into the black, then the cream calcite core with a little speckle.
-  tint(px, 0.22, 0.14, 0.06, halo * 0.3);
-  tint(px, 0.46, 0.33, 0.16, smooth(0.4, 0.9, halo) * 0.3 * (0.4 + cloud2 * 0.9));
+  // Kept dark: under the lobby's warm light and bloom anything brighter glows like lava.
+  tint(px, 0.16, 0.1, 0.045, halo * 0.25);
+  tint(px, 0.3, 0.22, 0.11, smooth(0.4, 0.9, halo) * 0.2 * (0.4 + cloud2 * 0.9));
   const speck = hash(Math.floor(u * 300), Math.floor(v * 300), seed + 60);
-  tint(px, 0.7 + speck * 0.06, 0.67 + speck * 0.05, 0.6 + speck * 0.04, smooth(0.2, 0.8, core) * 0.92);
+  tint(px, 0.44 + speck * 0.05, 0.41 + speck * 0.04, 0.36 + speck * 0.03, smooth(0.2, 0.8, core) * 0.75);
   px.h = 0.5 + cloud * 0.02 - core * 0.01;
   px.rough = 0.05 + cloud2 * 0.05 + core * 0.06;
   px.metal = 0;

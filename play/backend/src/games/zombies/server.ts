@@ -26,7 +26,7 @@ import {
   type ZombiesClientMsg,
   type ZombiesServerMsg,
 } from '../../shared/zombies/protocol.js';
-import { AMMO_CACHE_SHARE, ARMOR_PRICE, NADE_PRICE, START_WEAPON, WEAPONS, type WeaponId, falloffAt, fireInterval, isWeaponId } from '../../shared/zombies/weapons.js';
+import { AMMO_CACHE_SHARE, AMMO_CRATE_PRICE, ARMOR_PRICE, NADE_PRICE, START_WEAPON, WEAPONS, type WeaponId, falloffAt, fireInterval, isWeaponId } from '../../shared/zombies/weapons.js';
 import { type World, buildWorld, chunksInSphere, collapse, damageChunk, firstBlock, inside, raycast } from '../../shared/zombies/world.js';
 import type { GameHost, GamePlayer, GameServer } from '../types.js';
 import { SurvivorBot, type BotView } from './bots.js';
@@ -474,6 +474,16 @@ class ZombiesGame implements GameServer {
         cost = Math.round((cost * AMMO_CACHE_SHARE) / 10) * 10;
         if (cost === 0) return this.deny(p, 'Ammo is full');
         if (!pay(cost, 'Ammo')) return;
+        for (let s = 0; s < 2; s++) {
+          const id = p.slots[s];
+          if (id) p.res[s] = WEAPONS[id].reserve;
+        }
+        return;
+      }
+      case 'crate': {
+        const full = p.slots.every((id, s) => !id || p.res[s] >= WEAPONS[id].reserve);
+        if (full) return this.deny(p, 'Ammo is full');
+        if (!pay(AMMO_CRATE_PRICE, 'Ammo pack')) return;
         for (let s = 0; s < 2; s++) {
           const id = p.slots[s];
           if (id) p.res[s] = WEAPONS[id].reserve;

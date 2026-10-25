@@ -11,7 +11,7 @@ import type { WeaponId } from './weapons.js';
 export type Side = 'n' | 's' | 'e' | 'w';
 export type Mat = 'brick' | 'plaster' | 'concrete' | 'wood' | 'metal' | 'marble' | 'travertine' | 'walnut' | 'glass';
 export type ZoneId = 'atrium' | 'lounge' | 'restaurant';
-export type StationKind = 'weapon' | 'ammo' | 'nades' | 'armor';
+export type StationKind = 'weapon' | 'ammo' | 'nades' | 'armor' | 'crate';
 
 export interface RectDef {
   minX: number;
@@ -160,6 +160,8 @@ export interface MapDef {
   props: PropDef[];
   furniture: FurnitureDef[];
   stations: StationSpot[];
+  /** Free-standing ammo crate (cheap full refill), on the floor in the open. */
+  ammoCrate?: { x: number; z: number };
   /** Weapon lockers that move into a wing when it is open (the rest stay in the atrium). */
   wingItems: Partial<Record<ZoneId, WeaponId[]>>;
   lamps: LampDef[];
@@ -315,6 +317,7 @@ export const HOTEL: MapDef = {
     { x: -21, z: 3, y: 4, kind: 'pendant', zone: 'restaurant' },
   ],
   spawns: ring(10, 2, 0, 3),
+  ammoCrate: { x: 0, z: -1.5 },
   moon: { yaw: 0.45, elev: 0.3 },
   lampColor: 0xffc27a,
 };

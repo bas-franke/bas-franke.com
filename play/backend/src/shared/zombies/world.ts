@@ -67,7 +67,8 @@ export type SolidKind =
   | 'shutter'
   | 'elevator'
   | 'mezzanine'
-  | 'furniture';
+  | 'furniture'
+  | 'bars';
 
 export interface Solid extends AABB {
   kind: SolidKind;
@@ -283,6 +284,7 @@ export function buildWorld(def: MapDef, openZones?: readonly ZoneId[]): World {
   }
 
   for (const [x0, x1, z0, z1, h] of def.posts) solids.push({ kind: 'post', min: v(x0, 0, z0), max: v(x1, h, z1) });
+  for (const b of barRuns(def)) solids.push({ kind: 'bars', ...b });
   for (const m of def.walls.filter((w) => w.id === def.mullions.wall)) {
     for (const at of def.mullions.at) {
       // Mullions stand a little proud of the glass on the inside.
@@ -503,7 +505,7 @@ function placeStations(def: MapDef, open: Set<ZoneId>): StationInfo[] {
   rest.forEach((item, k) => {
     if (atrium[k]) assigned.push({ spot: atrium[k], item });
   });
-  return assigned.map(({ spot, item }, i) => {
+  const stations: StationInfo[] = assigned.map(({ spot, item }, i) => {
     const f = FACING[spot.facing];
     // Box: 1.0 wide, 2.0 tall, 0.5 deep, back against the wall (the spot is 0.05 m in front of the box).
     const back = { x: spot.x - f.x * 0.55, z: spot.z - f.z * 0.55 };
@@ -515,6 +517,50 @@ function placeStations(def: MapDef, open: Set<ZoneId>): StationInfo[] {
     };
     return { i, kind: item.kind, item: item.item, zone: spot.zone, pos: v(spot.x, 0, spot.z), facing: f, box };
   });
+  // The ammo crate stands free in the lobby: a 1.0 x 0.7 x 0.6 m box you can walk up to from any side.
+  if (def.ammoCrate) {
+    const { x, z } = def.ammoCrate;
+    stations.push({ i: stations.length, kind: 'crate', zone: 'atrium', pos: v(x, 0, z), facing: v(0, 0, 1), box: { min: v(x - 0.5, 0, z - 0.3), max: v(x + 0.5, 0.7, z + 0.3) } });
+  }
+  return stations;
+}
+
+/** Height of the brass security bars outside every exterior wall on the ground floor. */
+export const BARS_H = 4;
+export const BARS_T = 0.12;
+
+/**
+ * Brass bars just outside every exterior wall on the ground floor, with gaps only at the entrances: whatever gets
+ * blasted out of a wall or a pane of the facade, nobody gets outside and zombies only come in through the entrances.
+ * A stretch of wall counts as exterior where the point just beyond its outer face is in no zone (open or closed).
+ */
+export function barRuns(def: MapDef): AABB[] {
+  const inZone = (x: number, z: number) => def.zones.some((zn) => x > zn.rect.minX && x < zn.rect.maxX && z > zn.rect.minZ && z < zn.rect.maxZ);
+  const out: AABB[] = [];
+  for (const w of def.walls) {
+    const gaps = def.entrances.filter((e) => e.wall === w.id).map((e) => [e.at - 0.9, e.at + 0.9] as const);
+    const f0 = w.fixed + w.out * w.thick;
+    const f1 = f0 + w.out * BARS_T;
+    let run0: number | null = null;
+    const flush = (end: number) => {
+      if (run0 !== null && end - run0 > 0.05) {
+        const lo = Math.min(f0, f1);
+        const hi = Math.max(f0, f1);
+        const h = Math.min(BARS_H, w.h);
+        out.push(w.along === 'x' ? { min: v(run0, 0, lo), max: v(end, h, hi) } : { min: v(lo, 0, run0), max: v(hi, h, end) });
+      }
+      run0 = null;
+    };
+    for (let a = w.a0; a < w.a1 - EPS; a += CHUNK) {
+      const mid = a + CHUNK / 2;
+      const p = wallPoint(w, mid, w.thick + 0.6);
+      const exterior = !inZone(p.x, p.z) && !gaps.some(([g0, g1]) => mid > g0 && mid < g1);
+      if (exterior) run0 ??= a;
+      else flush(a);
+    }
+    flush(w.a1);
+  }
+  return out;
 }
 
 // ---- grid ---------------------------------------------------------------------------------------------------------
@@ -623,6 +669,7 @@ const SOLID_MAT: Record<SolidKind, Mat> = {
   clip: 'concrete',
   sill: 'concrete',
   mullion: 'metal',
+  bars: 'metal',
   shutter: 'metal',
   elevator: 'metal',
   mezzanine: 'marble',
@@ -637,7 +684,8 @@ export function raycast(w: World, o: Vec3, d: Vec3, maxT: number): RayHit | null
   let bestMax: Vec3 | null = null;
   let bestMat: Mat = 'concrete';
   for (const s of w.solids) {
-    if (s.kind === 'clip') continue;
+    // Bullets fly through windows (clips) and between the bars.
+    if (s.kind === 'clip' || s.kind === 'bars') continue;
     const t = rayBox(o, d, s.min, s.max, best);
     if (t >= 0 && t < best) {
       best = t;

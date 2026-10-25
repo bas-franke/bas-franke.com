@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ZB } from '@shared/zombies/constants';
 import type { Mat } from '@shared/zombies/maps';
-import { WEAPONS } from '@shared/zombies/weapons';
+import { AMMO_CRATE_PRICE, WEAPONS } from '@shared/zombies/weapons';
 import { ARMOR_PRICE, NADE_PRICE } from '@shared/zombies/weapons';
 import { type StationInfo, type World, SILL_Y, WALL_T, WINDOW_TOP } from '@shared/zombies/world';
 import type { CreateWorldView, LampLight, Models, Quality, WorldView } from './api';
@@ -347,6 +347,8 @@ function stationText(st: StationInfo): [string, string, string] {
       return ['FRAG GRENADES', `${NADE_PRICE}`, '#ffbf80'];
     case 'armor':
       return ['BODY ARMOR', `${ARMOR_PRICE}`, '#d4c6ff'];
+    case 'crate':
+      return ['AMMO PACK', `${AMMO_CRATE_PRICE}`, '#b8ffaa'];
   }
 }
 
@@ -620,9 +622,83 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   const lockerGroups: THREE.Group[] = [];
   const lockerFallbacks: THREE.Object3D[] = [];
   const lockerBody = keep(new THREE.MeshStandardMaterial({ color: 0x23262a, roughness: 0.45, metalness: 0.7 }));
+  const crateMat = keep(new THREE.MeshStandardMaterial({ color: 0x4a5236, roughness: 0.7, metalness: 0.15 }));
+  const crateLidMat = keep(new THREE.MeshStandardMaterial({ color: 0x3a412a, roughness: 0.6, metalness: 0.3 }));
+
+  // ---- security bars -------------------------------------------------------------------------------------------
+  // Brass bars outside every exterior wall on the ground floor (world.ts barRuns): rods every 14 cm between a
+  // bottom, middle and top rail. One instanced mesh for all rods, one for all rails.
+  {
+    const runs = world.solids.filter((s) => s.kind === 'bars');
+    const brass = keep(new THREE.MeshStandardMaterial({ color: 0xc8a050, roughness: 0.28, metalness: 1 }));
+    const rodGeo = keep(new THREE.CylinderGeometry(0.016, 0.016, 1, 8));
+    const railGeo = keep(new THREE.BoxGeometry(1, 0.05, 0.05));
+    let rodsN = 0;
+    for (const r of runs) rodsN += Math.ceil(Math.max(r.max.x - r.min.x, r.max.z - r.min.z) / 0.14) + 1;
+    const rods = new THREE.InstancedMesh(rodGeo, brass, Math.max(1, rodsN));
+    const rails = new THREE.InstancedMesh(railGeo, brass, Math.max(1, runs.length * 3));
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    let ri = 0;
+    let li = 0;
+    for (const r of runs) {
+      const alongX = r.max.x - r.min.x > r.max.z - r.min.z;
+      const len = alongX ? r.max.x - r.min.x : r.max.z - r.min.z;
+      const cx = (r.min.x + r.max.x) / 2;
+      const cz = (r.min.z + r.max.z) / 2;
+      const h = r.max.y - r.min.y;
+      const n = Math.ceil(len / 0.14);
+      for (let k = 0; k <= n; k++) {
+        const a = (alongX ? r.min.x : r.min.z) + (len * k) / n;
+        m4.compose(new THREE.Vector3(alongX ? a : cx, h / 2, alongX ? cz : a), q.identity(), new THREE.Vector3(1, h, 1));
+        rods.setMatrixAt(ri++, m4);
+      }
+      q.setFromAxisAngle(yAxis, alongX ? 0 : Math.PI / 2);
+      for (const y of [0.08, h * 0.5, h - 0.04]) {
+        m4.compose(new THREE.Vector3(cx, y, cz), q, new THREE.Vector3(len, 1, 1));
+        rails.setMatrixAt(li++, m4);
+      }
+    }
+    rods.count = ri;
+    rails.count = li;
+    for (const im of [rods, rails]) {
+      im.castShadow = true;
+      im.receiveShadow = true;
+      im.userData.noMerge = true;
+      group.add(im);
+    }
+  }
   for (const st of world.stations) {
     const g = new THREE.Group();
     const f = st.facing;
+    if (st.kind === 'crate') {
+      // The ammo crate: an olive ammo box with a lid, rope handles and a lit plaque on top.
+      g.position.set(st.pos.x, 0, st.pos.z);
+      group.add(g);
+      lockerGroups.push(g);
+      lockerFallbacks.push(g);
+      const crate = new THREE.Mesh(keep(box(1, 0.6, 0.6)), crateMat);
+      crate.position.y = 0.3;
+      const lid = new THREE.Mesh(keep(box(1.04, 0.08, 0.64)), crateLidMat);
+      lid.position.y = 0.64;
+      for (const m of [crate, lid]) {
+        m.castShadow = m.receiveShadow = true;
+        g.add(m);
+      }
+      for (const sx of [-0.53, 0.53]) {
+        const handle = new THREE.Mesh(keep(box(0.04, 0.06, 0.26)), crateLidMat);
+        handle.position.set(sx, 0.45, 0);
+        g.add(handle);
+      }
+      const [title, price, accent] = stationText(st);
+      const p = plaque([title, price], accent);
+      p.position.set(0, 0.685, 0);
+      p.rotation.x = -Math.PI / 2;
+      g.add(p);
+      disposables.push(p.geometry, p.material as THREE.Material, (p.material as THREE.MeshStandardMaterial).map!);
+      continue;
+    }
     g.position.set(st.pos.x - f.x * 0.3, 0, st.pos.z - f.z * 0.3);
     g.rotation.y = Math.atan2(-f.x, -f.z);
     group.add(g);
@@ -1043,6 +1119,7 @@ void main() {
         g.add(m);
       }
       world.stations.forEach((st, i) => {
+        if (st.kind === 'crate') return;
         try {
           const locker = models.prop('locker');
           locker.traverse((o) => {

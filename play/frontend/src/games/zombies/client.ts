@@ -21,7 +21,7 @@ import {
   type ZombieSnap,
   type ZombiesServerMsg,
 } from '@shared/zombies/protocol';
-import { AMMO_CACHE_SHARE, ARMOR_PRICE, NADE_PRICE, START_WEAPON, WEAPONS, type WeaponId, fireInterval } from '@shared/zombies/weapons';
+import { AMMO_CACHE_SHARE, AMMO_CRATE_PRICE, ARMOR_PRICE, NADE_PRICE, START_WEAPON, WEAPONS, type WeaponId, fireInterval } from '@shared/zombies/weapons';
 import { type World, buildWorld, inside, raycast } from '@shared/zombies/world';
 import { Engine, colorHex, makeLabel } from '../../engine/engine';
 import { Input } from '../../engine/input';
@@ -1703,6 +1703,10 @@ export class ZombiesClient implements GameClient {
         }
         cost = Math.round((cost * AMMO_CACHE_SHARE) / 10) * 10;
         return cost ? `Press E to refill all ammo [${cost}]` : 'Ammo cache: you are full';
+      }
+      case 'crate': {
+        const full = this.slots.every((id, s) => !id || this.res[s] >= WEAPONS[id].reserve);
+        return full ? 'Ammo crate: you are full' : `Press E for a full ammo pack [${AMMO_CRATE_PRICE}]`;
       }
       case 'nades':
         return `Press E for frag grenades [${NADE_PRICE}]`;
