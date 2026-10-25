@@ -66,7 +66,9 @@ export type KitName =
   | 'portal'
   | 'greenhouse'
   | 'path_stone'
-  | 'pebble';
+  | 'pebble'
+  | 'hedge_strip'
+  | 'pad';
 
 export interface TowerModel {
   root: THREE.Object3D;
@@ -164,16 +166,16 @@ export interface Units {
   removeTower(id: number): void;
   /** Live state each snapshot: aim at a world point (null = idle scan), TFlag bits. */
   setTowerState(id: number, aim: P3 | null, flags: number): void;
-  /** World position of a tower's muzzle `i` (wraps), for beams and missiles. */
-  muzzle(id: number, i: number): P3 | null;
+  /** World position of a tower's muzzle `i` (wraps), for beams and missiles; written into `out` when given. */
+  muzzle(id: number, i: number, out?: P3): P3 | null;
   /** All enemies this frame; enemies missing from the list are removed (without a death; deaths come via kill()). */
   syncEnemies(list: EnemyFrame[]): void;
   /** Play the death (shatter / topple) and remove after. */
   kill(id: number): void;
   /** Hit flash. */
   hit(id: number): void;
-  /** Current world position of an enemy's centre (for beams / missile homing). */
-  enemyPos(id: number): P3 | null;
+  /** Current world position of an enemy's centre (for beams / missile homing); written into `out` when given. */
+  enemyPos(id: number, out?: P3): P3 | null;
   /** Disruptor cast animation. */
   cast(id: number): void;
   /** Selection ring + range circle on a tower (null clears). */
@@ -332,6 +334,9 @@ export interface GHudState {
   players: HudPlayer[];
   you: string;
   myBoard: number;
+  /** Versus: watching a running match you are not part of (myBoard -1); no building, ready or sends. Always set by
+   * client.ts (optional only so the lab mock states compile). */
+  spectator?: boolean;
   /** Board the camera is on (versus: you can look at others). */
   viewBoard: number;
   gold: number;
@@ -351,7 +356,7 @@ export interface GHudState {
 }
 
 export interface GardenActions {
-  /** Start placing a tower (null cancels). */
+  /** Start placing a tower (null cancels; the kind already being placed cancels too, so re-tapping a card toggles). */
   place(kind: TowerKind | null): void;
   upgrade(id: number): void;
   sell(id: number): void;

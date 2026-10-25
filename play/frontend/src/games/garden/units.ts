@@ -768,13 +768,17 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
         v.scanPhase = v.headYaw;
       }
     },
-    muzzle(id, i) {
+    muzzle(id, i, out) {
       const v = towers.get(id);
       if (!v || !v.model.muzzles.length) return null;
       const m = v.model.muzzles[((i % v.model.muzzles.length) + v.model.muzzles.length) % v.model.muzzles.length];
       m.updateWorldMatrix(true, false);
       tmpV.setFromMatrixPosition(m.matrixWorld);
-      return { x: tmpV.x, y: tmpV.y, z: tmpV.z };
+      if (!out) return { x: tmpV.x, y: tmpV.y, z: tmpV.z };
+      out.x = tmpV.x;
+      out.y = tmpV.y;
+      out.z = tmpV.z;
+      return out;
     },
     syncEnemies(list: EnemyFrame[]) {
       stamp++;
@@ -824,10 +828,14 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
       const v = enemies.get(id);
       if (v) v.flash = 1;
     },
-    enemyPos(id) {
+    enemyPos(id, out) {
       const v = enemies.get(id);
       if (!v) return null;
-      return { x: v.x, y: hOf(v.kind) * 0.5, z: v.z };
+      if (!out) return { x: v.x, y: hOf(v.kind) * 0.5, z: v.z };
+      out.x = v.x;
+      out.y = hOf(v.kind) * 0.5;
+      out.z = v.z;
+      return out;
     },
     cast(id) {
       const v = enemies.get(id);
