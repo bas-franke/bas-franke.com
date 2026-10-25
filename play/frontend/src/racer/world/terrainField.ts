@@ -59,7 +59,8 @@ export class TerrainField {
   readonly rz: Float32Array;
   /** Road height change per metre to the right (banking). */
   readonly slope: Float32Array;
-  /** Where the loose ground starts (just under the shoulder's outer edge), horizontal distance from the centre. */
+  /** Edge of the corridor pods race in (its rock walls), horizontal distance from the centre. Inside it the ground is
+   * the race surface itself (banked, smooth); outside it is loose, lumpy sand. */
   readonly x0: Float32Array;
   /** Per side (0 = left, 1 = right): wall foot distance (Infinity = open), crest height (world y), end of the ground
    * ribbon, plateau depth. */
@@ -68,6 +69,8 @@ export class TerrainField {
   readonly dEnd: [Float32Array, Float32Array];
   readonly plat: [Float32Array, Float32Array];
   readonly gorges: Gorge[] = [];
+  /** Baked light per frame: 1 in the open, darker inside caves. */
+  readonly caveShade: Float32Array;
   readonly baseY: number;
   /** Depth of the canyon-wall rock behind the wall foot (where the plateau starts). */
   readonly back = 30;
@@ -106,6 +109,7 @@ export class TerrainField {
     this.city = zones.city;
     let sumY = 0;
     const arch = zones.arch;
+    this.caveShade = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const f = fr[i];
       this.posX[i] = f.pos.x;
@@ -121,6 +125,13 @@ export class TerrainField {
       const rh = Math.hypot(f.right.x, f.right.z);
       this.slope[i] = f.right.y / rh;
       this.x0[i] = (f.width / 2 + 2) * rh - 0.8;
+      // Light inside the caves: dim a few metres in from each mouth.
+      let cs = 1;
+      for (const c of track.caves) {
+        const d = Math.min(f.s - c.s0, c.s1 - f.s);
+        if (d > -6) cs = Math.min(cs, 1 - 0.55 * smoothstep(-6, 30, d));
+      }
+      this.caveShade[i] = cs;
       for (const si of [0, 1] as const) {
         const side = si === 0 ? -1 : 1;
         let W = zones.wallOffset(f.s, side);
@@ -293,8 +304,8 @@ export class TerrainField {
     // Right beside the road the ground continues the banked road plane (under the shoulder, which sits at -0.12);
     // then it levels out, but never above the road edge on the low side of a banked corner, and only far from the
     // road does it come back up to the centreline's level.
-    const plane = pY + this.slope[i] * side * d - 0.3;
-    const edge = pY + this.slope[i] * side * x0 - 0.3;
+    const plane = pY + this.slope[i] * side * d - 0.08;
+    const edge = pY + this.slope[i] * side * x0 - 0.08;
     const lvl = pY - 0.35 + (noise2(x * 0.035, z * 0.035) - 0.5) * 1.4 * smoothstep(x0 + 8, x0 + 40, d);
     const near = lerp(plane, Math.min(lvl, edge - 0.2), smoothstep(x0 + 2, x0 + 22, d));
     let y = lerp(near, lvl, smoothstep(x0 + 30, x0 + 90, d));

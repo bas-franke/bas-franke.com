@@ -1,16 +1,13 @@
-// The race surface and everything on it, from -(width/2 + 2) to +(width/2 + 2) around the centreline: the packed-dirt
-// road (trackRoad), the chevron barriers on the physics walls and the start line (trackBarriers), gorge bridges with
-// trestles (trackBridge), the start and finish gantries (trackStart), the glowing boost pads (trackPads), and the
-// rocks and jump ramp markings (trackObstacles). Few materials:
-// road, barrier atlas, atlas decals, vertex-coloured steel, pads, pad halo, start lamps.
+// The man-made things on the course. The course itself is open sand between rock walls, part of the terrain
+// (terrain.ts, rockFormations.ts); on it go the checkered start and finish lines (trackBarriers), gorge bridges with
+// trestles (trackBridge), the start and finish gantries (trackStart) and the glowing boost pads (trackPads). Few
+// materials: barrier atlas, atlas decals, vertex-coloured steel, pads, pad halo, start lamps.
 
 import * as THREE from 'three';
-import { buildBarriers } from './trackBarriers';
+import { buildLines } from './trackBarriers';
 import { buildBridges } from './trackBridge';
 import { GeoBuilder } from './trackGeo';
 import { buildPads } from './trackPads';
-import { buildRoad } from './trackRoad';
-import { buildObstacles } from './trackObstacles';
 import { buildStartGantry } from './trackStart';
 import { barrierAtlas } from './trackTextures';
 import type { WorldBuilder } from './types';
@@ -22,9 +19,6 @@ export const buildTrackSurface: WorldBuilder = (ctx) => {
   const aniso = Math.min(quality === 'low' ? 2 : quality === 'medium' ? 4 : 8, renderer.capabilities.getMaxAnisotropy());
   const group = new THREE.Group();
   group.name = 'track';
-
-  const road = buildRoad(track, quality, aniso);
-  group.add(road.object);
 
   // Barrier atlas: slightly emissive so the yellow chevrons pop even in shadow.
   const atlas = barrierAtlas(theme, aniso);
@@ -42,7 +36,7 @@ export const buildTrackSurface: WorldBuilder = (ctx) => {
   decalMat.polygonOffsetUnits = -4;
   decalMat.emissiveIntensity = 0.25;
   decalMat.roughness = 0.85;
-  group.add(buildBarriers(track, zones, wallMat, decalMat));
+  group.add(buildLines(track, decalMat));
 
   // Static structure with the barrier atlas (gantry) and vertex-coloured steel (bridges, pad frames).
   const atlasGeo = new GeoBuilder(true, false);
@@ -50,8 +44,6 @@ export const buildTrackSurface: WorldBuilder = (ctx) => {
   const gantry = buildStartGantry(track, atlasGeo, track.startS);
   const finish = buildStartGantry(track, atlasGeo, track.finishS);
   group.add(gantry.object, finish.object);
-  const obstacles = buildObstacles(track, theme, atlasGeo);
-  group.add(obstacles.object);
   buildBridges(track, zones, quality, steelGeo);
   const pads = buildPads(track, steelGeo, aniso);
   group.add(pads.object);
@@ -71,11 +63,9 @@ export const buildTrackSurface: WorldBuilder = (ctx) => {
       finish.update(view.time);
     },
     dispose() {
-      road.dispose();
       pads.dispose();
       gantry.dispose();
       finish.dispose();
-      obstacles.dispose();
       // Geometry dispose is idempotent, so sweeping everything (including what the parts disposed) is safe.
       group.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
       wallMat.dispose();

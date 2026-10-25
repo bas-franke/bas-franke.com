@@ -3,7 +3,10 @@
 // centreline from its first point (0..length), `x` the lateral offset from it (positive = right of the direction of
 // travel), and the frame at `s` turns that back into a world position. Courses are point-to-point: the grid sits on a
 // run-up before the start line (startS), and a run-off after the finish line (finishS) gives pods room to stop.
-// The track also owns what is on the road: jump ramps (built into the road's height) and rock obstacles.
+// There is no road: the course is a corridor of open sand between rock walls, wide in the basins and narrow in the
+// passes, and `width` is the distance between those walls. The track also owns what is in the corridor: jump ramps
+// (sand ridges built into the ground's height), caves the course runs through, and the rock formations to steer round,
+// which grow out of the walls (spurs, gates, rockfalls) or stand in the open (buttes, hoodoos).
 
 import * as THREE from 'three';
 import type { TrackDef } from './tracks';
@@ -16,6 +19,8 @@ export const RUN_OFF = 320;
 export const RAMP_LEN = 30;
 export const RAMP_HEIGHT = 3.2;
 export const RAMP_DROP = 12;
+/** Corridor width inside a cave, metres. */
+export const CAVE_WIDTH = 38;
 
 export interface Frame {
   /** Distance from the start of the centreline, metres. */
@@ -35,12 +40,28 @@ export interface Frame {
   bank: number;
 }
 
-/** A rock on the road: centre in track space, radius and height above the road (pods in the air clear it). */
+/** What a rock formation looks like: a ridge of blocks out of a wall, a fallen boulder, a hoodoo pillar, a butte. */
+export type ObstacleKind = 'spur' | 'boulder' | 'pillar' | 'island';
+
+/**
+ * One collision circle of a rock formation: centre in track space, radius and height above the ground (pods in the
+ * air clear it). Formations are chains of circles; `group` ties the circles of one formation together, `side` says
+ * which wall it grows out of (0 = free-standing) and `t` how far along the chain from that wall it is (0..1).
+ */
 export interface Obstacle {
   s: number;
   x: number;
   r: number;
   h: number;
+  kind: ObstacleKind;
+  group: number;
+  side: -1 | 0 | 1;
+  t: number;
+}
+
+export interface Span {
+  s0: number;
+  s1: number;
 }
 
 export interface Jump {
@@ -59,6 +80,8 @@ export class Track {
   readonly finishS: number;
   readonly jumps: Jump[];
   readonly obstacles: Obstacle[];
+  /** Caves the course runs through: the corridor narrows and a rock roof closes over it. */
+  readonly caves: Span[];
   /** Middle of the gorge bridge (themes with waterfalls), or null. Kept clear of jumps and rocks. */
   readonly gorgeS: number | null;
   /** 2D outline for the minimap, normalised to a 0..1 square (x right, y down), one point per ~10 m. */
@@ -113,10 +136,13 @@ export class Track {
     });
     spaced.forEach((p, i) => (p.y += this.rampHeight(i * step)));
     const tangents = spaced.map((_, i) => spaced[Math.min(last, i + 1)].clone().sub(spaced[Math.max(0, i - 1)]).normalize());
+    // Openness along the course: a few slow waves with seeded phases, from narrow passes to wide sandy basins.
+    const wr = rng(def.seed * 5 + 1);
+    const ph = [wr(), wr(), wr()].map((v) => v * Math.PI * 2);
+    const amp = 0.45 + (def.widthVar ?? 0.1) * 1.5;
     const widthAt = (s: number) => {
-      const w = def.width;
-      if (!def.widthVar) return w;
-      return w * (1 + def.widthVar * Math.sin((s / approx) * Math.PI * 2 * 3 + 1.3));
+      const o = Math.sin(s / 300 + ph[0]) * 0.5 + Math.sin(s / 640 + ph[1]) * 0.35 + Math.sin(s / 150 + ph[2]) * 0.15;
+      return def.width * (1.4 + amp * o);
     };
 
     const worldUp = new THREE.Vector3(0, 1, 0);
@@ -135,6 +161,23 @@ export class Track {
     }
 
     this.gorgeS = def.theme.waterfalls ? this.pickGorge() : null;
+    this.caves = this.pickCaves();
+    // The grid and the finish under the stands, the gorge bridge and the caves get fixed widths; elsewhere the corridor
+    // breathes. Each blends over ~80 m.
+    const fixed: [number, number, number][] = [
+      [0, this.startS + 60, def.width * 1.1],
+      [this.finishS - 120, approx, def.width * 1.1],
+    ];
+    if (this.gorgeS !== null) fixed.push([this.gorgeS - 130, this.gorgeS + 130, def.width]);
+    for (const c of this.caves) fixed.push([c.s0 - 10, c.s1 + 10, CAVE_WIDTH]);
+    for (const f of this.frames) {
+      let w = f.width;
+      for (const [a, b, fw] of fixed) {
+        const d = f.s < a ? a - f.s : f.s > b ? f.s - b : 0;
+        w += (fw - w) * (1 - smoothstep01(d / 80));
+      }
+      f.width = w;
+    }
     this.obstacles = this.placeObstacles();
 
     const size = this.bounds.getSize(new THREE.Vector3());
@@ -240,44 +283,127 @@ export class Track {
     return best;
   }
 
+  /** Caves on gentle stretches clear of jumps, the gorge and the start and finish: one, or two on long courses. */
+  private pickCaves(): Span[] {
+    const r = rng(this.def.seed * 11 + 5);
+    const out: Span[] = [];
+    const windows = this.raceLength > 5200 ? [[0.26, 0.44], [0.62, 0.8]] : [[0.4, 0.62]];
+    for (const [a, b] of windows) {
+      const len = 170 + r() * 90;
+      let best: number | null = null;
+      let bestK = Infinity;
+      for (let f = a; f <= b; f += 0.01) {
+        const mid = this.raceS(f);
+        if (this.jumps.some((j) => j.lip > mid - len / 2 - 160 && j.s0 < mid + len / 2 + 140)) continue;
+        if (this.gorgeS !== null && Math.abs(this.gorgeS - mid) < len / 2 + 330) continue;
+        const k = this.maxCurvature(mid - len / 2 - 40, len + 80);
+        if (k < bestK) {
+          bestK = k;
+          best = mid;
+        }
+      }
+      if (best !== null) out.push({ s0: best - len / 2, s1: best + len / 2 });
+    }
+    return out;
+  }
+
+  /** True inside a cave, or within `margin` metres of one. */
+  inCave(s: number, margin = 0) {
+    return this.caves.some((c) => s > c.s0 - margin && s < c.s1 + margin);
+  }
+
   /**
-   * Rocks on the road every few hundred metres, in one of three patterns: a lone boulder, a "needle" (two rocks with
-   * a gap only a pod on its side fits through, and room to go round either side), or a slalom of three. Never near
-   * the start, the finish, a jump's kicker and landing, a boost pad or the gorge bridge.
+   * Rock formations every couple of hundred metres. Most grow out of the corridor walls: a spur (a ridge of blocks
+   * reaching a third to half way across), a gate (spurs from both walls with a gap between), a rockfall (boulders
+   * tumbled out from one wall). In wider stretches a butte stands in the middle with room round either side, and
+   * hoodoo pillars stand alone or in a pair with a gap only a pod on its side fits through. Never near the start, the
+   * finish, a jump's kicker and landing, a boost pad, the gorge bridge or inside a cave.
    */
   private placeObstacles(): Obstacle[] {
     const r = rng(this.def.seed * 31 + 7);
     const out: Obstacle[] = [];
     const pads = this.def.boostPads.map(([f]) => this.raceS(f));
     const blocked = (s: number) =>
-      this.jumps.some((j) => s > j.s0 - 50 && s < j.s1 + 110) ||
-      pads.some((p) => Math.abs(p - s) < 40) ||
-      (this.gorgeS !== null && Math.abs(this.gorgeS - s) < 150);
-    let s = this.startS + 300;
-    while (s < this.finishS - 200) {
-      if (blocked(s) || blocked(s + 150)) {
+      this.jumps.some((j) => s > j.s0 - 60 && s < j.s1 + 110) ||
+      pads.some((p) => Math.abs(p - s) < 45) ||
+      (this.gorgeS !== null && Math.abs(this.gorgeS - s) < 170) ||
+      this.inCave(s, 70);
+    let group = 0;
+    const rock = (s: number, x: number, rad: number, h: number, kind: ObstacleKind, side: -1 | 0 | 1, t: number) =>
+      out.push({ s, x, r: rad, h, kind, group, side, t });
+    /** A ridge out of the wall on `side`, reaching `reach` metres into the corridor and leaning a little along it. */
+    const spur = (s: number, side: -1 | 1, reach: number) => {
+      const hw = this.frameAt(s).width / 2;
+      const lean = (r() - 0.3) * 0.5;
+      const top = 11 + r() * 9;
+      // Circle centres step in from the wall until the next one would poke out past `reach`.
+      let d = 0;
+      for (let k = 0; k < 12; k++) {
+        const t = Math.min(1, d / reach);
+        const rad = Math.min(5.2 - 1.8 * t + r() * 0.8, reach * 0.6);
+        if (k > 0 && d + rad > reach) break;
+        rock(s + d * lean, side * (hw + 1 - d), rad, top * (1 - 0.45 * t), 'spur', side, t);
+        d += rad * 1.2;
+      }
+      group++;
+    };
+    let s = this.startS + 320;
+    while (s < this.finishS - 220) {
+      if (blocked(s) || blocked(s + 120)) {
         s += 30;
         continue;
       }
-      const hw = this.frameAt(s).width / 2;
+      const w = this.frameAt(s).width;
+      const hw = w / 2;
+      const side: -1 | 1 = r() < 0.5 ? -1 : 1;
       const kind = r();
-      const rock = (ss: number, x: number, rad: number) => out.push({ s: ss, x, r: rad, h: rad * (1.6 + r() * 1.2) });
-      if (kind < 0.3) {
-        rock(s, (r() * 2 - 1) * 0.55 * hw, 3.2 + r() * 1.6);
-      } else if (kind < 0.65) {
-        // Needle: rock edges 4.6 m apart, a pod is 6.8 m wide flat and about 3 m on its side.
+      if (w > 62 && kind < 0.22) {
+        // Butte in the middle: a few big blocks along the course, a lane of at least 15 m either side.
+        const x = (r() * 2 - 1) * Math.max(0, hw - 28) * 0.4;
+        const big = Math.min(6.5, (hw - 18 - Math.abs(x)) / 1.6);
+        for (let k = 0; k < 4; k++) rock(s + k * big * 1.3, x + (r() - 0.5) * 2, big * (1 - k * 0.15), (18 + r() * 12) * (1 - k * 0.12), 'island', 0, k / 3);
+        group++;
+      } else if (kind < 0.45) {
+        spur(s, side, w * (0.35 + r() * 0.17));
+      } else if (kind < 0.62) {
+        // Gate: spurs from both walls, a gap of 18-26 m somewhere across the middle.
+        const gap = 18 + r() * 8;
+        const c = (r() * 2 - 1) * hw * 0.3;
+        spur(s, -1, Math.max(4, hw + c - gap / 2));
+        spur(s + (r() - 0.5) * 8, 1, Math.max(4, hw - c - gap / 2));
+      } else if (kind < 0.8) {
+        // Rockfall: a heap of boulders tumbled out of one wall, smaller towards its toe.
+        const n = 4 + Math.floor(r() * 3);
+        const reach = w * (0.25 + r() * 0.12);
+        for (let k = 0; k < n; k++) {
+          const t = k / (n - 1);
+          const rad = 3.6 - 1.3 * t + r() * 0.5;
+          rock(s + t * 14 + (r() - 0.5) * 6, side * (hw + 1 - rad - t * reach), rad, rad * 1.4, 'boulder', side, t);
+        }
+        group++;
+      } else if (kind < 0.92 || w < 50) {
+        // A lone hoodoo.
+        const rad = 2.6 + r() * 0.8;
+        rock(s, (r() * 2 - 1) * 0.5 * hw, rad, 12 + r() * 6, 'pillar', 0, 0);
+        group++;
+      } else {
+        // Needle: two hoodoos, edges 4.6 m apart; a pod is 6.8 m wide flat and about 3 m on its side.
         const rad = 3 + r() * 0.6;
         const xc = (r() * 2 - 1) * 0.25 * hw;
-        rock(s, xc - 2.3 - rad, rad);
-        rock(s, xc + 2.3 + rad, rad);
-      } else {
-        const side = r() < 0.5 ? -1 : 1;
-        for (let k = 0; k < 3; k++) rock(s + k * 75, side * (k % 2 ? -1 : 1) * (0.25 + r() * 0.2) * hw, 2.6 + r() * 1.2);
+        for (const sd of [-1, 1]) {
+          rock(s, xc + sd * (2.3 + rad), rad, 13 + r() * 5, 'pillar', 0, 0);
+          group++;
+        }
       }
-      s += 170 + r() * 150;
+      s += 180 + r() * 150;
     }
     return out;
   }
+}
+
+function smoothstep01(t: number) {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
 }
 
 const scratch: Frame = { s: 0, pos: new THREE.Vector3(), tangent: new THREE.Vector3(), right: new THREE.Vector3(), up: new THREE.Vector3(), width: 0, kappa: 0, bank: 0 };

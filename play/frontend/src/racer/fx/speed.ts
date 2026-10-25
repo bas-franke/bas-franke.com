@@ -82,21 +82,21 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
     const pl = fp.isPlayer;
     // The player's own dust is pushed out to the sides so it frames the pod instead of hiding it from the camera.
     const sign = Math.random() < 0.5 ? -1 : 1;
-    const lat = pl ? sign * (wide ? 4 + Math.random() * 6 : 1.8 + Math.random() * 4.5) : (Math.random() * 2 - 1) * 4.5 * (wide ? 1.3 : 1);
+    const lat = pl ? sign * (wide ? 5 + Math.random() * 6 : 3 + Math.random() * 4) : (Math.random() * 2 - 1) * 4.5 * (wide ? 1.3 : 1);
     const along = pl ? -(2 + Math.random() * 8) : -(1 + Math.random() * 6);
     puff.pos.copy(s.prevGround).lerp(fp.ground, t).addScaledVector(fwd, along).addScaledVector(right, lat);
     puff.normal.copy(fp.groundNormal);
     const out = Math.sign(lat) * (wide ? 6 + Math.random() * 10 : 2 + Math.random() * 7) * (pl ? 1.4 : 1) * Math.min(1.2, intensity + 0.2);
-    // The player's dust is carried along almost at pod speed (a cheat: real dust would stop) so it stays on screen
-    // around the pod for a moment instead of flashing past the camera.
-    const carry = pl ? (wide ? 0.62 + Math.random() * 0.2 : 0.74 + Math.random() * 0.2) : wide ? 0.18 + Math.random() * 0.2 : 0.3 + Math.random() * 0.35;
+    // The player's dust is carried along with the pod for a moment (a cheat: real dust would stop) so it frames the
+    // pod instead of flashing past the camera, but it drops back soon enough not to hang in front of the view.
+    const carry = pl ? (wide ? 0.45 + Math.random() * 0.2 : 0.55 + Math.random() * 0.2) : wide ? 0.18 + Math.random() * 0.2 : 0.3 + Math.random() * 0.35;
     puff.vel.copy(fp.velocity).multiplyScalar(carry).addScaledVector(right, out);
     const big = far ? 1.4 : pl ? 1 : 1.15;
     const grow = 0.6 + 0.4 * Math.min(1.3, intensity);
     puff.size0 = (1.2 + Math.random() * 1.6) * big;
     puff.size1 = (wide ? 10 + Math.random() * 7 : 5 + Math.random() * 5) * grow * big * (pl && !wide ? 0.7 : 1);
     puff.life = (wide ? 2.2 + Math.random() * 1.3 : 1.1 + Math.random() * 1.1) * (pl ? 1 : 0.8);
-    puff.opacity = (wide ? 0.24 : 0.32 + Math.random() * 0.22) * (pl ? 1.15 : 0.85) * (far ? 1.3 : 1);
+    puff.opacity = (wide ? 0.2 : 0.26 + Math.random() * 0.18) * (pl ? 0.7 : 0.6) * (far ? 1.4 : 1);
     puff.rise = (wide ? 0.3 + Math.random() * 0.6 : 0.4 + Math.random() * 1.0) * (pl ? 0.6 : 1);
     puff.drag = 1.3 + Math.random() * 1.1;
     dust.emit(puff);
@@ -193,7 +193,7 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
         // Dust: rate grows with speed; far pods emit fewer, bigger puffs; nothing beyond the haze.
         if (dist < 900) {
           const far = dist > 260;
-          const rate = (fp.isPlayer ? 120 : 60) * (0.06 + intensity) * (1 + 0.35 * boost) * qs * (far ? 0.35 : 1);
+          const rate = (fp.isPlayer ? 70 : 45) * (0.06 + intensity) * (1 + 0.35 * boost) * qs * (far ? 0.35 : 1);
           s.acc += rate * dt;
           while (s.acc >= 1) {
             s.acc -= 1;

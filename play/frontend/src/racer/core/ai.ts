@@ -197,14 +197,18 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
   // the rocks later and keep less room.
   const seeRocks = 40 + st.v * (0.9 + 0.9 * skill);
   const clearance = POD_HALF_WIDTH + 2 + 1.5 * skill;
-  const groups: { d: number; spans: [number, number][] }[] = [];
+  const groups: { d: number; ids: number[]; spans: [number, number][] }[] = [];
   for (const o of track.obstacles) {
     const d = o.s - st.s;
     if (d < -o.r - 3 || d > seeRocks || st.h > o.h + 1) continue;
-    const g = groups.find((gg) => Math.abs(gg.d - d) < 15);
+    // One formation is one group even when it leans along the course.
+    const g = groups.find((gg) => gg.ids.includes(o.group) || Math.abs(gg.d - d) < 15);
     const span: [number, number] = [o.x - o.r - clearance, o.x + o.r + clearance];
-    if (g) g.spans.push(span);
-    else groups.push({ d, spans: [span] });
+    if (g) {
+      g.spans.push(span);
+      g.d = Math.min(g.d, d);
+      if (!g.ids.includes(o.group)) g.ids.push(o.group);
+    } else groups.push({ d, ids: [o.group], spans: [span] });
   }
   groups.sort((p, q) => p.d - q.d);
   let rockSlow = false;

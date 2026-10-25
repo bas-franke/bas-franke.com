@@ -270,14 +270,16 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
         st.v = Math.min(st.v, 14);
         st.impact = Math.max(st.impact, 0.05);
       }
-      // Slide off round the end of this rock's group (rocks side by side) that has room to pass the wall, the
-      // nearer end if both do.
+      // Slide off round the end of this rock's formation (plus rocks beside it with no gap a pod fits through) that
+      // has room to pass the wall, the nearer end if both do.
       let lo = o.x - o.r;
       let hi = o.x + o.r;
-      for (const o2 of track.obstacles) {
-        if (Math.abs(o2.s - o.s) > 10) continue;
-        lo = Math.min(lo, o2.x - o2.r);
-        hi = Math.max(hi, o2.x + o2.r);
+      for (let pass = 0; pass < 2; pass++) {
+        for (const o2 of track.obstacles) {
+          if (o2.group !== o.group && (Math.abs(o2.s - o.s) > 10 || o2.x - o2.r > hi + 2 * hw || o2.x + o2.r < lo - 2 * hw)) continue;
+          lo = Math.min(lo, o2.x - o2.r);
+          hi = Math.max(hi, o2.x + o2.r);
+        }
       }
       const leftOpen = lo - 2 * hw > -f.width / 2;
       const rightOpen = hi + 2 * hw < f.width / 2;

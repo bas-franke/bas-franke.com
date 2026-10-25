@@ -1,14 +1,16 @@
 // Ground and canyon around the track. Three kinds of geometry, all with the procedural sandstone/sand shader
 // (terrainMaterial.ts) and all sharing the height functions in terrainField.ts so they meet without seams:
-// - track chunks (one mesh per ~250 m of track): the loose ground ribbon from just under the shoulder's outer edge to
+// - track chunks (one mesh per ~250 m of track): the ground ribbon from the centreline (the race surface is sand) to
 //   the canyon wall (or ~110 m out where a side is open) and the stratified cliff walls at zones.wallOffset;
 // - one mesh per gorge: the chasm's stepped walls dropping `depth` metres under the bridge;
 // - a heightfield of ~1 km tiles out to ~1.7 km past the track: plateaus behind the walls, the chasm floor and the
 //   rock blocks the waterfalls pour from, open desert with distant buttes. Finer near the track, coarse far away.
-// Plus instanced boulders, pebbles and scrub (rockScatter.ts). Chunks are frustum-culled by three.
+// Plus instanced boulders, pebbles and scrub (rockScatter.ts), and the rocks that shape the course (rockFormations.ts):
+// the boulder walls along its edges, the formations to steer round and the caves. Chunks are frustum-culled by three.
 
 import * as THREE from 'three';
 import { addCliff, type CliffColumn } from './rockCliff';
+import { buildFormations } from './rockFormations';
 import { buildScatter } from './rockScatter';
 import { TerrainField, type Gorge } from './terrainField';
 import { GeoBuilder } from './terrainGeo';
@@ -32,9 +34,9 @@ interface Settings {
 }
 
 const SETTINGS: Record<Quality, Settings> = {
-  high: { stride: 2, ribbon: 12, chunk: 64, cells: [4, 10, 20, 40], tile: 240, margin: 1500, flutes: 1.1 },
-  medium: { stride: 3, ribbon: 9, chunk: 44, cells: [6, 12, 24, 48], tile: 240, margin: 1600, flutes: 0.8 },
-  low: { stride: 4, ribbon: 6, chunk: 32, cells: [8, 16, 30, 60], tile: 240, margin: 1300, flutes: 0 },
+  high: { stride: 2, ribbon: 18, chunk: 64, cells: [4, 10, 20, 40], tile: 240, margin: 1500, flutes: 1.1 },
+  medium: { stride: 3, ribbon: 14, chunk: 44, cells: [6, 12, 24, 48], tile: 240, margin: 1600, flutes: 0.8 },
+  low: { stride: 4, ribbon: 10, chunk: 32, cells: [8, 16, 30, 60], tile: 240, margin: 1300, flutes: 0 },
 };
 
 export const buildTerrain: WorldBuilder = (ctx) => {
@@ -65,6 +67,8 @@ export const buildTerrain: WorldBuilder = (ctx) => {
   buildHeightfield(field, S, addMesh);
   const scatter = buildScatter(track, field, theme, quality, mat, S.stride);
   for (const m of scatter.meshes) group.add(m);
+  const formations = buildFormations(track, field, quality, mat);
+  for (const m of formations.meshes) group.add(m);
 
   const ms = performance.now() - t0;
   group.userData.buildMs = ms;
@@ -75,6 +79,7 @@ export const buildTerrain: WorldBuilder = (ctx) => {
     dispose() {
       for (const g of geos) g.dispose();
       scatter.dispose();
+      formations.dispose();
       mat.dispose();
     },
   };
@@ -102,15 +107,17 @@ function buildTrackChunks(field: TerrainField, strata: Strata, S: Settings, leng
       const flushRibbon = () => {
         if (run.length >= 2) {
           const p = new Float32Array(run.length * N * 3);
+          const sh = new Float32Array(run.length * N);
           run.forEach((cc, k) => {
             const i = cc % n;
             const g = edgeOf(i);
             const rx = (g ? g.rx : field.rx[i]) * side;
             const rz = (g ? g.rz : field.rz[i]) * side;
-            const x0 = field.x0[i];
             const dEnd = field.dEnd[si][i];
             for (let j = 0; j < N; j++) {
-              const d = x0 + (dEnd - x0) * Math.pow(j / (N - 1), 1.5);
+              // From the centreline out: the race surface is part of the sand, there is no separate road.
+              const d = dEnd * Math.pow(j / (N - 1), 1.4);
+              sh[k * N + j] = field.caveShade[i];
               const x = field.posX[i] + rx * d;
               const z = field.posZ[i] + rz * d;
               const q = (k * N + j) * 3;
@@ -119,7 +126,7 @@ function buildTrackChunks(field: TerrainField, strata: Strata, S: Settings, leng
               p[q + 2] = z;
             }
           });
-          b.addGrid(p, run.length, N, side < 0 ? 1 : -1, 0, 1);
+          b.addGrid(p, run.length, N, side < 0 ? 1 : -1, 0, sh);
         }
         run = [];
       };

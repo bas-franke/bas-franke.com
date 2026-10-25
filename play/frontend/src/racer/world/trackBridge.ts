@@ -1,4 +1,4 @@
-// Gorge bridges (zones.gorges): over these spans the road is a bridge deck with plank fascia, a steel railing on the
+// Gorge bridges (zones.gorges): over these spans the course is a plank bridge deck with fascia, a steel railing on the
 // physics walls and a side truss, standing on steel trestle bents that go down ~90 m into the chasm with ties and
 // cross bracing, like the trestles in the concept art. Masonry piers at both ends. One merged vertex-coloured mesh.
 
@@ -48,9 +48,12 @@ export function buildBridges(track: Track, zones: Zones, quality: Quality, b: Ge
         b.quad(W(s0, k0, -0.1), W(s1, k1, -0.1), W(s1, k1, 0.55), W(s0, k0, 0.55), undefined, up.clone().negate());
         b.quad(W(s0, k0 + side * 0.1, -0.1), W(s1, k1 + side * 0.1, -0.1), W(s1, k1 + side * 0.1, 0.55), W(s0, k0 + side * 0.1, 0.55), undefined, up);
       }
-      b.setColor(steel.clone().multiplyScalar(0.8));
       const hw0 = f0.width / 2 + 2;
       const hw1 = f1.width / 2 + 2;
+      // Plank deck on top (the course is sand elsewhere, so the bridge carries its own surface).
+      b.setColor(wood.clone().lerp(new THREE.Color(theme.sand), 0.35).multiplyScalar(i % 2 ? 0.92 : 1.05));
+      b.quad(W(s0, -hw0, -0.02), W(s1, -hw1, -0.02), W(s1, hw1, -0.02), W(s0, hw0, -0.02), undefined, f0.up);
+      b.setColor(steel.clone().multiplyScalar(0.8));
       b.quad(W(s0, -hw0, -DECK), W(s0, hw0, -DECK), W(s1, hw1, -DECK), W(s1, -hw1, -DECK), undefined, f0.up.clone().negate());
     }
 

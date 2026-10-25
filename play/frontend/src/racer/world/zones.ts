@@ -108,7 +108,9 @@ function build(track: Track): Zones {
 
   let arch: Zones['arch'] = null;
   if (theme.arches) {
-    const s = L * (0.35 + r() * 0.12);
+    let s = L * (0.35 + r() * 0.12);
+    // Not in or right next to a cave: move it on past the cave.
+    for (const c of track.caves) if (s > c.s0 - 250 && s < c.s1 + 250) s = c.s1 + 300;
     arch = { s, span: track.frameAt(s).width + 50, height: 55 + r() * 20 };
   }
 
@@ -129,7 +131,9 @@ function build(track: Track): Zones {
     for (const v of vistas) if (v.side === side && inSpan(s, v)) return Infinity;
     const f = track.frameAt(s);
     const n = side < 0 ? nl(s) : nr(s);
-    let off = f.width / 2 + 16 + (n + 1) * 22;
+    // Just behind the boulders that line the corridor; around a cave, out past the rock it is cut through.
+    let off = f.width / 2 + 8 + (n + 1) * 10;
+    for (const c of track.caves) off = Math.max(off, f.width / 2 + 30 * spanWeight(s, c, 60));
     // Stands sit on a terrace: push the wall back a little there.
     for (const st of stands) if (st.side === side) off += spanWeight(s, st, 40) * 10;
     return off;
@@ -140,7 +144,9 @@ function build(track: Track): Zones {
     for (const g of gorges) fade = Math.min(fade, 1 - spanWeight(s, g, 80) * 0.6);
     for (const v of vistas) if (v.side === side) fade = Math.min(fade, 1 - spanWeight(s, v, 60));
     const n = side < 0 ? hl(s) : hr(s);
-    return (45 + (n + 1) * 40) * fade;
+    let h = (45 + (n + 1) * 40) * fade;
+    for (const c of track.caves) h = Math.max(h, 50 * spanWeight(s, c, 80));
+    return h;
   };
 
   return { wallOffset, wallHeight, gorges, stands, waterfalls, arch, city, vistas };

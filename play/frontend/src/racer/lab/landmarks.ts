@@ -1,6 +1,8 @@
 // Lab: the skyline and the great arch with sky and track only, from a free camera.
 //   /race/lab/landmarks?track=archway&at=0.3&yaw=0&h=6&back=14&pitch=0.05&fov=70&only=sky,landmarks,track
 //   /race/lab/landmarks?track=archway&arch=-120   (120 m before the great arch)
+//   /race/lab/landmarks?track=redrock&cave=-80&only=sky,terrain,track   (80 m before the first cave)
+//   /race/lab/landmarks?track=redrock&rock=3:-60&only=sky,terrain,track   (60 m before rock formation 3)
 // `at` = fraction of the lap to stand at, `yaw` turns the view (radians, 0 = down the track), `h` camera height,
 // `back` metres behind that point, `pitch` radians up. `top` gives a map view of the whole layout from above.
 
@@ -28,7 +30,17 @@ export function mount(el: HTMLElement): () => void {
   const world = buildWorld(ctx, (p.get('only') ?? 'sky,landmarks,track').split(','));
   // `arch=<metres>` stands that far along the track from the great arch instead (negative = before it).
   const arch = zonesFor(track).arch;
-  const at = p.has('arch') && arch ? arch.s + Number(p.get('arch')) : Number(p.get('at') ?? 0.3) * track.length;
+  // `cave=<metres>` from the first cave's mouth, `rock=<n>:<metres>` from the n-th rock formation.
+  const rock = p.get('rock')?.split(':').map(Number);
+  const formation = rock ? track.obstacles.find((o) => o.group === rock[0]) : undefined;
+  const at =
+    p.has('arch') && arch
+      ? arch.s + Number(p.get('arch'))
+      : p.has('cave') && track.caves.length
+        ? track.caves[0].s0 + Number(p.get('cave'))
+        : formation
+          ? formation.s + (rock?.[1] ?? -60)
+          : Number(p.get('at') ?? 0.3) * track.length;
   const f = track.frameAt(at);
   if (p.has('top')) {
     const c = track.bounds.getCenter(new THREE.Vector3());

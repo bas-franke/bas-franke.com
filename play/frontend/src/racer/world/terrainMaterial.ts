@@ -126,6 +126,13 @@ const MAIN_FRAGMENT = /* glsl */ `
     flatC = mix(flatC, uScrub, smoothstep(0.62, 0.8, tNoise(vTW.xz * 0.09)) * 0.45);
   }
   vec3 albedo = mix(flatC, rockC, r);
+  if (vRock > 1.5) {
+    // Loose rocks: aRock 2 = the boulders along the course's edges, dark with desert varnish; 3 = the formations on the
+    // course, warmer with pale weathered caps (vShade is ~1 at the top of a rock). Both stand out from the walls.
+    float n = tNoise(vTW.xz * 0.07 + vTW.y * 0.05);
+    if (vRock < 2.5) albedo *= mix(vec3(0.62, 0.55, 0.55), vec3(0.8, 0.7, 0.66), n);
+    else albedo = mix(albedo * vec3(1.15, 0.92, 0.74), uStrata * 1.08, smoothstep(0.9, 0.985, vShade) * 0.85);
+  }
   // Painterly light: faces turned from the sun shift to deep red-brown with a violet tint.
   float sunF = dot(wN, uSunDir);
   float lit = smoothstep(-0.25, 0.4, sunF);

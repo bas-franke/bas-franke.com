@@ -55,7 +55,8 @@ void main() {
   vSph = c;
   vDir = dir * flip;
   vec4 mvPosition = modelViewMatrix * vec4(wp, 1.0);
-  float near = smoothstep(1.5, 8.0, -mvPosition.z);
+  // Puffs right in front of the lens fade out early, so the pack's dust never hides the course.
+  float near = smoothstep(4.0, 22.0, -mvPosition.z);
   vAlpha = aM.z * smoothstep(0.0, 0.04, u) * (1.0 - smoothstep(0.25, 1.0, u)) * near * size / (size + sl * 0.7);
   vTone = fract(aM.x * 13.7);
   vSunV = normalize(mat3(viewMatrix) * uSun);
