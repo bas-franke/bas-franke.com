@@ -19,12 +19,16 @@ interface Spec {
   /** Tilt-shift blur resolution divisor; 0 = off. */
   tiltDiv: number;
   fxaa: boolean;
+  /** Grade trims so every quality matches high: low has no shadows (brighter, limer lawn) and a shorter bloom chain. */
+  exposure: number;
+  sat: number;
+  bloomGain: number;
 }
 
 const SPECS: Record<Quality, Spec> = {
-  low: { samples: 0, bloomLevels: 4, tiltDiv: 0, fxaa: true },
-  medium: { samples: 2, bloomLevels: 5, tiltDiv: 4, fxaa: false },
-  high: { samples: 4, bloomLevels: 6, tiltDiv: 2, fxaa: false },
+  low: { samples: 0, bloomLevels: 4, tiltDiv: 0, fxaa: true, exposure: 0.96, sat: 0.95, bloomGain: 0.6 },
+  medium: { samples: 2, bloomLevels: 5, tiltDiv: 4, fxaa: false, exposure: 1, sat: 1.04, bloomGain: 0.55 },
+  high: { samples: 4, bloomLevels: 6, tiltDiv: 2, fxaa: false, exposure: 1, sat: 1.04, bloomGain: 0.55 },
 };
 
 const vert = /* glsl */ `
@@ -114,6 +118,7 @@ uniform float tilt;
 uniform float focusY;
 uniform float bloomGain;
 uniform float exposure;
+uniform float sat;
 uniform vec2 res;
 uniform float encode;
 varying vec2 vUv;
@@ -132,19 +137,19 @@ void main() {
   vec3 col = texture2D(tScene, vUv).rgb;
   if (tilt > 0.0) {
     float d = abs(vUv.y - focusY);
-    float t = smoothstep(0.16, 0.5, d) * tilt;
+    float t = smoothstep(0.26, 0.6, d) * tilt;
     col = mix(col, texture2D(tBlur, vUv).rgb, t);
   }
   col += texture2D(tBloom, vUv).rgb * bloomGain;
   col *= exposure * vec3(1.05, 1.0, 0.93);
   col = aces(col);
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col = mix(vec3(l), col, 1.04);
+  col = mix(vec3(l), col, sat);
   vec3 shadowTint = vec3(0.94, 1.0, 1.07);
   vec3 lightTint = vec3(1.04, 1.0, 0.94);
   col *= mix(shadowTint, lightTint, smoothstep(0.1, 0.7, l));
   vec2 q = (vUv - 0.5) * vec2(res.x / res.y, 1.0);
-  col *= 1.0 - 0.2 * smoothstep(0.45, 1.15, length(q));
+  col *= 1.0 - 0.32 * smoothstep(0.4, 1.1, length(q));
   col = clamp(col, 0.0, 1.0);
   if (encode > 0.5) col = toSRGB(col);
   col += (ign(gl_FragCoord.xy) - 0.5) / 255.0;
@@ -267,6 +272,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, quality)
     focusY: { value: 0.5 },
     bloomGain: { value: 0.55 },
     exposure: { value: 1.0 },
+    sat: { value: 1.04 },
     res: { value: new THREE.Vector2(1, 1) },
     encode: { value: 1 },
   });
@@ -375,11 +381,14 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, quality)
         draw(gauss, a);
         final.uniforms.tBlur.value = a.texture;
         // Stronger when zoomed in (the miniature look), subtle when overviewing.
-        tilt = THREE.MathUtils.clamp(1.15 - focusDist / 140, 0.3, 0.9);
+        tilt = THREE.MathUtils.clamp(1.0 - focusDist / 90, 0, 0.45);
         proj.copy(focus).project(camera);
         final.uniforms.focusY.value = THREE.MathUtils.clamp(proj.y * 0.5 + 0.5, 0.2, 0.8);
       }
       final.uniforms.tilt.value = tilt;
+      final.uniforms.exposure.value = spec.exposure;
+      final.uniforms.sat.value = spec.sat;
+      final.uniforms.bloomGain.value = spec.bloomGain;
 
       // Grade.
       final.uniforms.tScene.value = sceneRT.texture;

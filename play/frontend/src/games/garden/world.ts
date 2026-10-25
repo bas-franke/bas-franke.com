@@ -46,9 +46,27 @@ const SWAY: Partial<Record<KitName, number>> = {
   flowers_c: 1,
   grass_tuft: 1.4,
   reeds: 1.2,
+  hedge_strip: 0.25,
 };
-const CASTS = new Set<KitName>(['rock_a', 'rock_b', 'rock_c', 'bush_a', 'bush_b', 'tree_a', 'tree_b', 'lamp', 'solar', 'fern']);
+const CASTS = new Set<KitName>(['rock_a', 'rock_b', 'rock_c', 'bush_a', 'bush_b', 'tree_a', 'tree_b', 'lamp', 'solar', 'fern', 'hedge_strip']);
 const DENSITY: Record<Quality, number> = { low: 0.35, medium: 0.7, high: 1 };
+
+/** Concatenates simple geometries (position + normal) into one non-indexed geometry. */
+function mergeGeos(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const nor: number[] = [];
+  for (const g of list) {
+    const n = g.index ? g.toNonIndexed() : g;
+    pos.push(...(n.attributes.position.array as Float32Array));
+    nor.push(...(n.attributes.normal.array as Float32Array));
+    if (n !== g) n.dispose();
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  return out;
+}
 
 const glslColor = (hex: number) => {
   const c = new THREE.Color(hex);
@@ -68,9 +86,9 @@ float gFbm(vec2 p) { return gNoise(p) * 0.55 + gNoise(p * 2.07 + 13.1) * 0.3 + g
 vec3 gCanopy(vec2 w) {
   float n = gFbm(w * 0.09);
   float m = gFbm(w * 0.35 + 3.0);
-  float b = smoothstep(0.35, 0.75, n * 0.7 + m * 0.5);
-  vec3 c = mix(${glslColor(0x21431c)}, ${glslColor(0x3f7430)}, b);
-  c = mix(c, ${glslColor(0x6a9636)}, smoothstep(0.72, 0.9, m) * 0.4);
+  float b = smoothstep(0.35, 0.8, n * 0.7 + m * 0.5);
+  vec3 c = mix(${glslColor(0x1e3a1c)}, ${glslColor(0x2f5a27)}, b);
+  c = mix(c, ${glslColor(0x4a7a30)}, smoothstep(0.78, 0.95, m) * 0.25);
   return c;
 }
 `;
@@ -115,6 +133,13 @@ function blur(src: Float32Array<ArrayBuffer>, w: number, h: number, r: number, p
   return a;
 }
 
+const pathy = (c: string | undefined) => c === '#' || c === '=';
+/** A buildable cell within one step (8-neighbourhood) of a path: kept clear as a build spot, the rest is planted. */
+function nearPath(def: GMapDef, c: number, r: number) {
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if (pathy(def.grid[r + dr]?.[c + dc])) return true;
+  return false;
+}
+
 function buildMask(def: GMapDef): MapMask {
   const W = def.grid[0].length;
   const H = def.grid.length;
@@ -144,7 +169,11 @@ function buildMask(def: GMapDef): MapMask {
       if (c === '~' || c === 'o' || c === '=') water[i] = 1;
       if (c === 'f' || c === 'T') soil[i] = 1;
       else if (c === 'R' || c === 'l' || c === 's') soil[i] = 0.4;
-      if (c === '.') build[i] = 1;
+      if (c === '.') {
+        build[i] = 1;
+        // Planted buildable cells away from the paths: a little mulch under the shrubs.
+        if (!nearPath(def, col, row)) soil[i] = 0.55;
+      }
     }
   }
   const pb = blur(path, w, h, 3);
@@ -252,9 +281,9 @@ vec2 lp = vGLocal.xz;
 float n1 = gFbm(wp * 0.11);
 float n2 = gNoise(wp * 1.1);
 float n3 = gNoise(wp * vec2(7.0, 2.5));
-vec3 grass = mix(${glslColor(0x3a7530)}, ${glslColor(0x6aa244)}, smoothstep(0.2, 0.85, n1));
-grass = mix(grass, ${glslColor(0x9cc25a)}, smoothstep(0.62, 0.95, n2) * 0.3);
-grass = mix(grass, ${glslColor(0x2f6a2a)}, smoothstep(0.55, 0.9, gNoise(wp * 0.45 + 5.0)) * 0.35);
+vec3 grass = mix(${glslColor(0x2f6b2a)}, ${glslColor(0x4f8f35)}, smoothstep(0.2, 0.85, n1));
+grass = mix(grass, ${glslColor(0x7fb04a)}, smoothstep(0.62, 0.95, n2) * 0.2);
+grass = mix(grass, ${glslColor(0x285c25)}, smoothstep(0.55, 0.9, gNoise(wp * 0.45 + 5.0)) * 0.3);
 grass *= 0.92 + 0.12 * n3;
 // Buildable cells: a faint lighter rounded square in every cell.
 vec2 cp = (lp + uGridHalf) / ${CELL.toFixed(1)};
@@ -283,15 +312,16 @@ vec2 tq = vec2(tp.x / 1.0 + 0.5 * mod(row, 2.0), tp.y / 1.0);
 vec2 tid = floor(tq);
 vec2 tf = fract(tq);
 float tr = gHash(tid + 3.7);
-vec3 slab = mix(${glslColor(0xe2c29a)}, ${glslColor(0xeed7b6)}, tr);
-slab = mix(slab, ${glslColor(0xd3ac80)}, smoothstep(0.75, 1.0, gHash(tid + 9.1)) * 0.6);
+vec3 slab = mix(${glslColor(0xf2c9a4)}, ${glslColor(0xfbd9b8)}, tr);
+slab = mix(slab, ${glslColor(0xe3b48a)}, smoothstep(0.75, 1.0, gHash(tid + 9.1)) * 0.6);
 slab *= 0.93 + 0.1 * gNoise(wp * 6.0) + 0.04 * gNoise(wp * 23.0);
 float grout = smoothstep(0.035, 0.0, min(min(tf.x, 1.0 - tf.x), min(tf.y, 1.0 - tf.y)));
 float bevel = smoothstep(0.14, 0.03, min(min(tf.x, 1.0 - tf.x), min(tf.y, 1.0 - tf.y)));
 slab *= 1.0 - 0.06 * bevel;
-slab = mix(slab, ${glslColor(0xa98d6c)}, grout * 0.75);
-float curb = onPath * (1.0 - smoothstep(0.55, 0.6, gPath));
-vec3 curbC = ${glslColor(0xf6ead9)} * (0.92 + 0.1 * gNoise(wp * 8.0));
+slab = mix(slab, ${glslColor(0xc29a78)}, grout * 0.7);
+// Narrow tan kerb with a darker outer line where it meets the planting.
+float curb = onPath * (1.0 - smoothstep(0.53, 0.56, gPath));
+vec3 curbC = mix(${glslColor(0x8a6b4e)}, ${glslColor(0xb8946c)}, smoothstep(0.455, 0.49, gPath)) * (0.92 + 0.1 * gNoise(wp * 8.0));
 vec3 pathC = mix(slab, curbC, curb);
 col = mix(col, pathC, onPath * (1.0 - smoothstep(0.5, 0.8, gWater) * (1.0 - step(0.9, gPath))));
 // Eliminated board: wilted and grey-brown.
@@ -445,6 +475,72 @@ void main() {
   });
 }
 
+/** Soft direction chevrons painted on the paths: a slow brightness wave runs along each route towards the greenhouse. */
+function chevronMaterial(time: { value: number }, wilt: { value: number }): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: time, uWilt: wilt },
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    vertexShader: /* glsl */ `
+attribute float aPhase;
+varying vec2 vUv;
+varying float vPhase;
+void main() {
+  vUv = uv;
+  vPhase = aPhase;
+  gl_Position = projectionMatrix * viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0);
+}`,
+    fragmentShader: /* glsl */ `
+uniform float uTime;
+uniform float uWilt;
+varying vec2 vUv;
+varying float vPhase;
+void main() {
+  vec2 p = vUv * 2.0 - 1.0;
+  // A rounded V pointing along +v (the walking direction).
+  float y = p.y + abs(p.x) * 0.8 - 0.3;
+  float band = smoothstep(0.26, 0.16, abs(y)) * (1.0 - smoothstep(0.66, 0.82, abs(p.x)));
+  float wave = 0.5 + 0.5 * sin(vPhase * 0.6 - uTime * 2.2);
+  float a = band * (0.34 + 0.36 * wave * wave) * (1.0 - uWilt);
+  if (a < 0.003) discard;
+  // Warm tan on the peach paving, a touch lighter as the wave passes.
+  gl_FragColor = vec4(mix(${glslColor(0xb7764a)}, ${glslColor(0xd99a66)}, wave * wave), a);
+}`,
+  });
+}
+
+const ENTRY_TINT = [0xff8a3d, 0x2fc6c8, 0xa869ff, 0xf0c33c, 0x6bbf4b, 0xff6f9a];
+
+/** Small cream plaque with the entry number, ringed in the entry's tint (canvas texture for a sprite). */
+function entryPlaque(n: number): THREE.CanvasTexture | null {
+  if (typeof document === 'undefined') return null;
+  const S = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  if (!g) return null;
+  const tint = '#' + new THREE.Color(ENTRY_TINT[(n - 1) % ENTRY_TINT.length]).getHexString();
+  g.beginPath();
+  g.arc(S / 2, S / 2, S * 0.44, 0, Math.PI * 2);
+  g.fillStyle = tint;
+  g.fill();
+  g.beginPath();
+  g.arc(S / 2, S / 2, S * 0.36, 0, Math.PI * 2);
+  g.fillStyle = '#fbf1e2';
+  g.fill();
+  g.fillStyle = '#4a3a2a';
+  g.font = `bold ${Math.round(S * 0.46)}px system-ui, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(String(n), S / 2, S / 2 + S * 0.03);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
 // ---- view -------------------------------------------------------------------------------------------------------
 
 interface Inst {
@@ -455,6 +551,8 @@ interface Inst {
   z: number;
   ry: number;
   s: number;
+  /** Optional local-space scale multipliers (x, y, z) before rotation. */
+  sv?: [number, number, number];
   /** Kept when below the quality density (scatter only; 0 = always). */
   keep: number;
   cast: boolean;
@@ -473,6 +571,8 @@ interface Board {
   greenGlow: { m: THREE.MeshStandardMaterial; base: number }[];
   portalGlow: { m: THREE.MeshStandardMaterial; base: number }[];
   light: THREE.PointLight;
+  chevrons: THREE.InstancedMesh | null;
+  plaques: THREE.Sprite[];
   health: number;
   out: boolean;
 }
@@ -630,6 +730,45 @@ transformed.z += cos(uTime * 1.3 + swIp.z * 0.41) * swH * 0.03;`,
     return c;
   };
 
+  // Kit parts, with local stand-ins for pieces kit.glb may not have yet (hedge_strip, pad).
+  type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4 };
+  const fallback = new Map<KitName, Part[]>();
+  const fallbackOwned: { dispose(): void }[] = [];
+  const partsFor = (name: KitName): Part[] => {
+    const real = models.kitParts(name);
+    if (real.length) return real;
+    let f = fallback.get(name);
+    if (f) return f;
+    const list: Part[] = [];
+    const add = (geometry: THREE.BufferGeometry, color: number) => {
+      const material = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
+      fallbackOwned.push(geometry, material);
+      list.push({ geometry, material, matrix: new THREE.Matrix4() });
+    };
+    if (name === 'hedge_strip') {
+      add(new THREE.CapsuleGeometry(0.17, 1.66, 3, 8).rotateZ(Math.PI / 2).scale(1, 1, 1.15).translate(0, 0.17, 0), 0x3e7a33);
+      const dots: THREE.BufferGeometry[] = [];
+      for (let i = 0; i < 7; i++) dots.push(new THREE.IcosahedronGeometry(0.05, 0).translate(-0.85 + i * 0.28, 0.33, (i % 2 ? 1 : -1) * 0.08));
+      add(mergeGeos(dots), 0xf3a6c8);
+    } else if (name === 'pad') {
+      add(new THREE.RingGeometry(0.62, 0.8, 40).rotateX(-Math.PI / 2).translate(0, 0.025, 0), 0xf5e7d6);
+      add(new THREE.CircleGeometry(0.3, 5).scale(0.6, 1, 1).rotateX(-Math.PI / 2).translate(0, 0.02, 0), 0x6baf4b);
+    }
+    f = list;
+    fallback.set(name, f);
+    return f;
+  };
+  /** True when a kit piece's long horizontal axis is its local Z. */
+  const longAlongZ = (name: KitName) => {
+    const box = new THREE.Box3();
+    const b = new THREE.Box3();
+    for (const p of partsFor(name)) {
+      p.geometry.computeBoundingBox();
+      box.union(b.copy(p.geometry.boundingBox!).applyMatrix4(p.matrix));
+    }
+    return !box.isEmpty() && box.max.z - box.min.z > box.max.x - box.min.x;
+  };
+
   const poolGeo = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
   const swirlGeo = new THREE.PlaneGeometry(1, 1);
   const swirlMat = new THREE.ShaderMaterial({
@@ -653,12 +792,20 @@ void main() {
   float a = atan(q.y, q.x);
   float sw = gNoise(vec2(a * 2.0 + r * 4.0 - uTime * 1.8, r * 3.0 - uTime * 0.6));
   float core = exp(-r * 2.2);
-  vec3 col = mix(${glslColor(0xa869ff)}, ${glslColor(0xffa940)}, smoothstep(0.2, 0.9, core + sw * 0.4));
+  vec3 col = mix(${glslColor(0xd2601c)}, ${glslColor(0xffa940)}, smoothstep(0.1, 0.7, core + sw * 0.4));
+  col = mix(col, ${glslColor(0xffe2a8)}, smoothstep(0.75, 1.0, core));
+  col = mix(col, ${glslColor(0xa869ff)}, smoothstep(0.62, 0.85, sw) * (1.0 - core) * 0.45);
   float k = inside * (0.35 + 0.9 * core + 0.5 * smoothstep(0.45, 0.8, sw));
-  gl_FragColor = vec4(col * k * 1.2, 1.0);
+  float pulse = 0.5 + 0.5 * sin(uTime * 2.0);
+  gl_FragColor = vec4(col * k * (1.25 + 0.6 * pulse * pulse), 1.0);
 }`,
   });
   const boards: Board[] = [];
+  const tmpM = new THREE.Matrix4();
+  const tmpQ = new THREE.Quaternion();
+  const tmpS = new THREE.Vector3();
+  const tmpP = new THREE.Vector3();
+  const yAxis = new THREE.Vector3(0, 1, 0);
   const fixed: Inst[] = [];
   const scatter: Inst[] = [];
   const pools: { b: number; x: number; y: number; z: number; r: number; color: THREE.Color }[] = [];
@@ -667,15 +814,75 @@ void main() {
   const AMBER = new THREE.Color(0xffa940);
 
   // Versus overviews show every board at once: thin the border greenery when there are many.
-  const ringDensity = origins.length > 3 ? 0.5 : origins.length > 1 ? 0.75 : 1;
+  const ringDensity = origins.length > 3 ? 0.42 : origins.length > 1 ? 0.75 : 1;
+  // ... and the optional scatter inside the boards (applied on top of the quality density), with fewer shadow casters.
+  const many = origins.length > 3;
+  const crowd = many ? 0.55 : origins.length > 1 ? 0.8 : 1;
   const isWater = (c: string | undefined) => c === '~' || c === 'o';
   const isPathy = (c: string | undefined) => c === '#' || c === '=';
+
+  // Direction chevrons (board-local): every ~2.6 m along each route, skipping bridges, the portal mouth and the
+  // greenhouse door, and where a chevron of another route already points the same way nearby (shared trunks).
+  const chevLocal: { x: number; z: number; yaw: number; phase: number }[] = [];
+  {
+    const o0 = { x: 0, z: 0 };
+    for (const rt of def.routes) {
+      const pts = rt.pts.map(([x, y]) => cellToWorld(def, o0, x, y));
+      let total = 0;
+      for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+      let along = 0;
+      let next = 2.2;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b2 = pts[i];
+        const len = Math.hypot(b2.x - a.x, b2.z - a.z);
+        if (len < 1e-3) continue;
+        const dx = (b2.x - a.x) / len;
+        const dz = (b2.z - a.z) / len;
+        while (next <= along + len) {
+          const t = next - along;
+          const x = a.x + dx * t;
+          const z = a.z + dz * t;
+          const d = next;
+          next += 3.2;
+          if (total - d < 2.5) continue;
+          const col = Math.floor(x / CELL + W / 2);
+          const row = Math.floor(z / CELL + H / 2);
+          if (cell(col, row) !== '#') continue;
+          // Keep clear of corners (the polyline bends there).
+          if (t < 0.9 || len - t < 0.9) continue;
+          if (chevLocal.some((cv) => Math.hypot(cv.x - x, cv.z - z) < 2)) continue;
+          chevLocal.push({ x, z, yaw: Math.atan2(-dx, -dz), phase: d });
+        }
+        along += len;
+      }
+    }
+  }
+  const chevGeo = new THREE.PlaneGeometry(1.5, 1.5).rotateX(-Math.PI / 2);
+  const plaqueTex = def.entries.map((_, i) => entryPlaque(i + 1));
+  const plaqueMats = plaqueTex.map((t) => (t ? new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, fog: false }) : null)) as THREE.SpriteMaterial[];
+
+  // "Build here" pads: on buildable cells beside a path, spaced out (at least 3 cells apart) so they read as a
+  // scattering of invitations rather than a bead chain. Same cells on every board.
+  const padCells = new Set<number>();
+  {
+    const taken: [number, number][] = [];
+    for (let r = 0; r < H; r++)
+      for (let c = 0; c < W; c++) {
+        if (cell(c, r) !== '.' || ![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => isPathy(cell(c + dc, r + dr)))) continue;
+        if (taken.some(([tc, tr]) => Math.max(Math.abs(tc - c), Math.abs(tr - r)) < 4)) continue;
+        taken.push([c, r]);
+        padCells.add(r * W + c);
+      }
+  }
 
   origins.forEach((o, b) => {
     const R = rng(1013 + b * 7919);
     const wp = (cx: number, cy: number) => cellToWorld(def, o, cx, cy);
-    const put = (list: Inst[], name: KitName, x: number, z: number, s = 1, y?: number, ry = R() * Math.PI * 2, keep = 0, cast = true) =>
-      list.push({ name, b, x, z, y: y ?? groundHeight(mask, x - o.x, z - o.z), ry, s, keep, cast: cast && CASTS.has(name) });
+    const put = (list: Inst[], name: KitName, x: number, z: number, s = 1, y?: number, ry = R() * Math.PI * 2, keep = 0, cast = true, sv?: [number, number, number]) =>
+      list.push({ name, b, x, z, y: y ?? groundHeight(mask, x - o.x, z - o.z), ry, s, keep, cast: cast && CASTS.has(name), sv });
+    const FLOWERS: KitName[] = ['flowers_a', 'flowers_b', 'flowers_c'];
+    const flower = () => FLOWERS[Math.floor(R() * 3)];
 
     // Ground + water.
     const groundU: GroundU = { uMask: { value: mask.tex }, uGridHalf: { value: new THREE.Vector2(halfX, halfZ) }, uWilt: { value: 0 } };
@@ -719,7 +926,7 @@ void main() {
           }
           case 'T': {
             if (R() < 0.32) {
-              put(fixed, R() < 0.5 ? 'tree_a' : 'tree_b', p.x + j(0.3), p.z + j(0.3), 0.75 + R() * 0.35);
+              put(fixed, R() < 0.75 ? 'tree_a' : 'tree_b', p.x + j(0.3), p.z + j(0.3), 0.75 + R() * 0.35);
               put(scatter, 'fern', p.x + j(0.8), p.z + j(0.8), 0.8 + R() * 0.3, undefined, undefined, R());
             } else {
               put(fixed, R() < 0.7 ? 'bush_a' : 'bush_b', p.x + j(0.4), p.z + j(0.4), 1.05 + R() * 0.4);
@@ -754,7 +961,30 @@ void main() {
             if (R() < 0.08) put(scatter, 'lilypad', p.x + j(0.6), p.z + j(0.6), 0.6 + R() * 0.5, WATER_Y + 0.012, undefined, R());
             break;
           case '.': {
-            // Sparse tufts near the cell edges keep the centres clean (buildable reads clearly).
+            if (!nearPath(def, c, r)) {
+              // Away from the paths: planted at roughly 0.5-0.7 cover, shrubs towards the corners so a tower's
+              // planter in the middle still sits clear, with ferns and flowers between.
+              const corners = [0, 1, 2, 3].sort(() => R() - 0.5);
+              const nb = !many && R() < 0.55 ? 2 : 1;
+              for (let i = 0; i < nb; i++) {
+                const k = corners[i];
+                const cx = (k & 1 ? 1 : -1) * (0.5 + R() * 0.15);
+                const cz = (k & 2 ? 1 : -1) * (0.5 + R() * 0.15);
+                put(i === 0 ? fixed : scatter, R() < 0.75 ? 'bush_a' : 'bush_b', p.x + cx, p.z + cz, 0.7 + R() * 0.3, undefined, undefined, i === 0 ? 0 : R(), i === 0 && !many);
+              }
+              for (let i = 0; i < 4 - nb; i++) {
+                const k = corners[nb + i];
+                const cx = (k & 1 ? 1 : -1) * (0.45 + R() * 0.2);
+                const cz = (k & 2 ? 1 : -1) * (0.45 + R() * 0.2);
+                put(scatter, i === 0 || R() < 0.4 ? 'fern' : flower(), p.x + cx, p.z + cz, 0.8 + R() * 0.4, undefined, undefined, R() * 0.8, false);
+              }
+              for (let i = 0; i < 2; i++) put(scatter, flower(), p.x + j(0.7), p.z + j(0.7), 0.6 + R() * 0.3, undefined, undefined, i === 0 ? 0 : R());
+              if (R() < 0.5) put(scatter, 'grass_tuft', p.x + j(0.6), p.z + j(0.6), 0.9 + R() * 0.4, undefined, undefined, R());
+              break;
+            }
+            // Next to a path: a clear build spot with a cream "build here" pad; sparse tufts near the cell edges.
+            if (padCells.has(r * W + c))
+              put(fixed, 'pad', p.x, p.z, 1, groundHeight(mask, p.x - o.x, p.z - o.z) + 0.01, 0, 0, false);
             for (let i = 0; i < 2; i++) {
               const a = R() * Math.PI * 2;
               const d = 0.62 + R() * 0.3;
@@ -778,14 +1008,55 @@ void main() {
             if (n === undefined || isWater(n) || isPathy(n) || n === '=' || n === 'G' || n === 'E') continue;
             if (ch === '=') continue;
             for (let i = 0; i < 2; i++) {
-              if (R() > 0.75) continue;
-              const along = (R() - 0.5) * 0.9;
+              if (R() > 0.9) continue;
+              const along = (i - 0.5) * 0.5 + (R() - 0.5) * 0.35;
               const ex = p.x + dc * CELL * 0.45 + (dr !== 0 ? along * CELL : 0);
               const ez = p.z + dr * CELL * 0.45 + (dc !== 0 ? along * CELL : 0);
-              put(i === 0 ? fixed : scatter, R() < 0.5 ? 'rock_b' : 'rock_a', ex, ez, 0.45 + R() * 0.35, -0.12, undefined, i === 0 ? 0 : R());
+              const k = R();
+              put(i === 0 ? fixed : scatter, k < 0.4 ? 'rock_b' : k < 0.75 ? 'rock_a' : 'rock_c', ex, ez, 0.7 + R() * 0.3, -0.14, undefined, i === 0 ? 0 : R());
             }
             if (R() < 0.25) put(scatter, 'reeds', p.x + dc * CELL * 0.35, p.z + dr * CELL * 0.35, 0.8 + R() * 0.4, WATER_Y, undefined, R());
           }
+        }
+      }
+
+    // Hedge edging along every path edge: a full flowered hedge where the path borders planting (beds, trees,
+    // rocks, lamps), a low flowered edging (~0.2 m) next to buildable cells so it never hides towers.
+    const hedgeZ = longAlongZ('hedge_strip');
+    const TALL = new Set(['T', 'f', 'R', 'l', 's']);
+    for (let r = 0; r < H; r++)
+      for (let c = 0; c < W; c++) {
+        if (cell(c, r) !== '#') continue;
+        for (const [dc, dr] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ]) {
+          const n = cell(c + dc, r + dr);
+          if (n === undefined) continue;
+          const tall = TALL.has(n);
+          if (!tall && n !== '.') continue;
+          // Along the edge (ax/az): trim the ends where the neighbour cell's sides also meet a path (the path's
+          // rounded inner corner reaches in there).
+          const ax = dr !== 0 ? 1 : 0;
+          const az = dc !== 0 ? 1 : 0;
+          const tA = isPathy(cell(c + dc - ax, r + dr - az)) ? 0.55 : 0;
+          const tB = isPathy(cell(c + dc + ax, r + dr + az)) ? 0.55 : 0;
+          const len = CELL - tA - tB;
+          if (len < 0.8) continue;
+          const shift = (tA - tB) / 2;
+          const off = tall ? 0.26 : 0.18;
+          const e = wp(c + 0.5 + dc * 0.5, r + 0.5 + dr * 0.5);
+          const x = e.x + dc * off + ax * shift;
+          const z = e.z + dr * off + az * shift;
+          const ry = (ax ? 0 : Math.PI / 2) + (hedgeZ ? Math.PI / 2 : 0) + (R() < 0.5 ? Math.PI : 0);
+          const L = (len / CELL) * 1.04;
+          const sy = tall ? 1 : 0.58;
+          const sw = tall ? 1 : 0.8;
+          const sv: [number, number, number] = hedgeZ ? [sw, sy, L] : [L, sy, sw];
+          // Low edging is dropped as a whole on low quality (never patchy).
+          put(fixed, 'hedge_strip', x, z, 1, undefined, ry, tall ? 0 : 0.5, tall && !many, sv);
         }
       }
 
@@ -805,11 +1076,14 @@ void main() {
       if (portalLocal.some((p) => Math.hypot(p.x - x, p.z - z) < 4.2)) continue;
       const k = R();
       // Low quality keeps the hedge line hugging the grid and drops most of the deeper ring (keep = drop order).
-      const keep = d < 1.6 ? 0.3 * R() : 0.3 + 0.7 * R();
-      if (d > 2.8 && k < 0.26) put(scatter, R() < 0.5 ? 'tree_a' : 'tree_b', o.x + x, o.z + z, 1.1 + R() * 0.7, undefined, undefined, keep, d < 3.5);
-      else if (k < 0.82) put(scatter, R() < 0.75 ? 'bush_a' : 'bush_b', o.x + x, o.z + z, 1.5 + R() * 0.9, undefined, undefined, keep, d < 1.8);
-      else if (k < 0.92) put(scatter, (['flowers_a', 'flowers_b', 'flowers_c'] as KitName[])[Math.floor(R() * 3)], o.x + x, o.z + z, 1 + R() * 0.4, undefined, undefined, R());
-      else put(scatter, 'fern', o.x + x, o.z + z, 1 + R() * 0.5, undefined, undefined, R());
+      // (x crowd: the ring is already thinned by count above, so the in-board crowd factor must not thin it again.)
+      const keep = (d < 1.6 ? 0.3 * R() : 0.3 + 0.7 * R()) * crowd;
+      // Mostly green: pink blossom trees about 1 in 4, big fern / broadleaf clumps between the shrubs.
+      if (d > 2.8 && k < 0.26) put(scatter, R() < 0.75 ? 'tree_a' : 'tree_b', o.x + x, o.z + z, 1.1 + R() * 0.7, undefined, undefined, keep, d < 3.5);
+      else if (k < 0.66) put(scatter, R() < 0.8 ? 'bush_a' : 'bush_b', o.x + x, o.z + z, 1.5 + R() * 0.9, undefined, undefined, keep, d < 1.8);
+      else if (k < 0.8) put(scatter, 'fern', o.x + x, o.z + z, 1.8 + R() * 0.8, undefined, undefined, keep, d < 1.8);
+      else if (k < 0.9) put(scatter, flower(), o.x + x, o.z + z, 1 + R() * 0.4, undefined, undefined, R() * crowd);
+      else put(scatter, 'fern', o.x + x, o.z + z, 1 + R() * 0.5, undefined, undefined, R() * crowd);
     }
 
     // Bridges: one per connected run of '=' cells, along the path direction.
@@ -909,20 +1183,51 @@ void main() {
     light.position.set(gc.x, 2.2, gc.z);
     group.add(light);
 
-    boards.push({ o, ground, water, groundU, waterU, wilt, pools: null, meshes: [], green, greenGlow, portalGlow, light, health: 1, out: false });
+    // Direction chevrons along the routes.
+    let chevrons: THREE.InstancedMesh | null = null;
+    if (chevLocal.length) {
+      const geo = chevGeo.clone();
+      geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(Float32Array.from(chevLocal, (cv) => cv.phase), 1));
+      const im = new THREE.InstancedMesh(geo, chevronMaterial(time, wilt), chevLocal.length);
+      chevLocal.forEach((cv, i) => {
+        tmpQ.setFromAxisAngle(yAxis, cv.yaw);
+        tmpM.compose(tmpP.set(o.x + cv.x, 0.03, o.z + cv.z), tmpQ, tmpS.setScalar(1));
+        im.setMatrixAt(i, tmpM);
+      });
+      chevrons = im;
+      chevrons.renderOrder = 2;
+      chevrons.computeBoundingSphere();
+      group.add(chevrons);
+    }
+    // Numbered entry plaques floating beside each portal mouth.
+    const plaques: THREE.Sprite[] = [];
+    def.entries.forEach((e, i) => {
+      const tex = plaqueTex[i];
+      if (!tex) return;
+      const route = def.routes.find((rt) => rt.entry === i);
+      const mouth = route ? route.pts[0] : [e.x + Math.sin(e.facing), e.y + Math.cos(e.facing)];
+      const c = wp(e.x, e.y);
+      const m = wp(mouth[0], mouth[1]);
+      // Between the portal and the mouth, lifted above the arch.
+      const sp = new THREE.Sprite(plaqueMats[i]);
+      sp.position.set(c.x * 0.2 + m.x * 0.8, 3.3, c.z * 0.2 + m.z * 0.8);
+      sp.scale.setScalar(2.4);
+      sp.renderOrder = 4;
+      sp.userData.baseY = sp.position.y;
+      sp.userData.ph = i * 1.7;
+      group.add(sp);
+      plaques.push(sp);
+    });
+
+    boards.push({ o, ground, water, groundU, waterU, wilt, pools: null, meshes: [], green, greenGlow, portalGlow, light, chevrons, plaques, health: 1, out: false });
   });
 
   // ---- build instanced meshes (rebuilt on quality change) ----
-  const tmpM = new THREE.Matrix4();
-  const tmpQ = new THREE.Quaternion();
-  const tmpS = new THREE.Vector3();
-  const tmpP = new THREE.Vector3();
-  const yAxis = new THREE.Vector3(0, 1, 0);
   const WHITE = new THREE.Color(1, 1, 1);
   const WILT = new THREE.Color(0.62, 0.55, 0.45);
 
   const buildInstances = (q: Quality) => {
-    const dens = DENSITY[q];
+    const dens = DENSITY[q] * crowd;
     for (const bd of boards) {
       for (const m of bd.meshes) {
         group.remove(m);
@@ -952,11 +1257,13 @@ void main() {
         for (const list of byName.values()) {
           const name = list[0].name;
           const sway = SWAY[name] ?? 0;
-          for (const part of models.kitParts(name)) {
+          for (const part of partsFor(name)) {
             const im = new THREE.InstancedMesh(part.geometry, matFor(part.material, sway), list.length);
             list.forEach((it, i) => {
               tmpQ.setFromAxisAngle(yAxis, it.ry);
-              tmpM.compose(tmpP.set(it.x, it.y, it.z), tmpQ, tmpS.setScalar(it.s)).multiply(part.matrix);
+              if (it.sv) tmpS.set(it.s * it.sv[0], it.s * it.sv[1], it.s * it.sv[2]);
+              else tmpS.setScalar(it.s);
+              tmpM.compose(tmpP.set(it.x, it.y, it.z), tmpQ, tmpS).multiply(part.matrix);
               im.setMatrixAt(i, tmpM);
               im.setColorAt(i, bd.out ? WILT : WHITE);
             });
@@ -1004,7 +1311,8 @@ void main() {
     const k = bd.out ? 0.05 : (0.35 + 0.65 * hp) * flick * (0.94 + 0.06 * Math.sin(t * 1.4));
     for (const g of bd.greenGlow) g.m.emissiveIntensity = g.base * k;
     bd.light.intensity = 22 * k;
-    const pk = bd.out ? 0.05 : 0.85 + 0.15 * Math.sin(t * 2.2);
+    const pw = 0.5 + 0.5 * Math.sin(t * 2.0);
+    const pk = bd.out ? 0.05 : 0.9 + 0.6 * pw * pw;
     for (const g of bd.portalGlow) g.m.emissiveIntensity = g.base * pk;
   };
 
@@ -1031,7 +1339,13 @@ void main() {
     },
     update(_dt, t) {
       time.value = t;
-      for (const bd of boards) setGlow(bd, t);
+      for (const bd of boards) {
+        setGlow(bd, t);
+        for (const sp of bd.plaques) {
+          sp.visible = !bd.out;
+          sp.position.y = sp.userData.baseY + Math.sin(t * 1.6 + sp.userData.ph) * 0.12;
+        }
+      }
     },
     setQuality(nq) {
       if (nq === q) return;
@@ -1052,6 +1366,17 @@ void main() {
         for (const g of [...bd.greenGlow, ...bd.portalGlow]) g.m.dispose();
       }
       for (const m of [...swayMats.values(), ...hotMats.values()]) m.dispose();
+      for (const d of fallbackOwned) d.dispose();
+      for (const bd of boards) {
+        if (bd.chevrons) {
+          bd.chevrons.geometry.dispose();
+          (bd.chevrons.material as THREE.Material).dispose();
+          bd.chevrons.dispose();
+        }
+      }
+      chevGeo.dispose();
+      for (const t of plaqueTex) t?.dispose();
+      for (const m of plaqueMats) m?.dispose();
       groundGeo.dispose();
       poolGeo.dispose();
       swirlGeo.dispose();
