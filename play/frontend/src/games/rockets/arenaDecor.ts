@@ -53,7 +53,7 @@ export const BASE_SURFACES: Record<Visible, Surface> = {
 
 const THEMES: Record<string, Theme> = {
   foundry: {
-    surfaces: { wall: s('metal', 'panels'), floor: s('metal', 'strata') },
+    surfaces: { wall: s('metal', 'panels'), floor: s('metal', 'strata'), pillar: s('metal', 'panels'), tower: s('metal', 'panels') },
     props: ['pipes', 'lamps', 'antennas', 'billboards'],
     skyline: 'neon',
     stars: 60,
