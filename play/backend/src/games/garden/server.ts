@@ -28,9 +28,14 @@
 //   The early bonus is G.earlyBonusPerSec x whole seconds skipped, capped at G.betweenWaves seconds, to every defender.
 // - Co-op permissions: anyone upgrades or retargets any tower, only the builder sells; the seller gets the refund
 //   (G.sellRefund of everything spent on it, or all of it when sold in the same build phase it was built in).
-// - Leavers: co-op towers stay (anyone upgrades, nobody sells) and the leaver's gold is split among the defenders;
-//   a versus board plays on without a builder until it falls. Joiners: co-op joiners defend with
-//   max(start gold, median defender gold), once per name (a rejoin gets start gold); versus joiners spectate.
+// - Leavers: co-op towers stay (anyone upgrades, nobody sells) and the leaver's gold is parked under their
+//   lower-case name (not shared out); a versus board plays on without a builder until it falls. Joiners: a co-op
+//   rejoin under a parked name gets exactly that gold back; a new name defends with start gold plus the clear
+//   bonuses paid so far (capped at the true median defender gold, never below start gold), at most
+//   MAX_COOP_PURSES purses per match (later new names start with 0). Versus joiners spectate; while a versus match
+//   is playing, rooms.ts seats a joiner over the limit instead of evicting a bot (bots are trimmed after the match).
+// - Flood limits per player: 'sync' at most once per SYNC_EVERY s, 'view' unlimited (cheap), every other action
+//   through a token bucket (ACTION_RATE/s, burst ACTION_BURST); excess is dropped silently.
 // - Versus: everyone gets the same base waves at once. Sends queue into the target's next wave (BoardSnap.inc),
 //   enter from 4 s in with that wave's waveHp, pay the defender 50% bounty, at most sendCap(n) per player per wave;
 //   default target cycles through living opponents. Income (G.baseIncome + sends) is paid at each wave start. Each
@@ -50,6 +55,11 @@ import { GardenSim } from './sim.js';
 const SCORE_EVERY = 3;
 /** Versus: boards a client neither owns nor views come in every Nth snapshot. */
 const FAR_EVERY = 4;
+/** Seconds between honoured 'sync' requests per player (each answer is a full init). */
+const SYNC_EVERY = 2;
+/** Action token bucket per player: refill per second and capacity. */
+const ACTION_RATE = 12;
+const ACTION_BURST = 20;
 
 /** Map for this match: the chosen one if it fits the mode, else a random map of that mode. */
 export function pickGardenMap(mode: GMode, id: string | undefined, rnd: () => number = Math.random): GMapDef {
@@ -70,6 +80,14 @@ class GardenGame implements GameServer {
   private done = false;
   /** Board each human's camera is on (client 'view' message). */
   private readonly views = new Map<string, number>();
+  /** Last honoured 'sync' per player (ms). */
+  private readonly syncAt = new Map<string, number>();
+  /** Action token buckets per player. */
+  private readonly buckets = new Map<string, { tokens: number; at: number }>();
+  /** Versus: owner name per board, so the end message names a winner who has since left. */
+  private boardNames: string[] = [];
+  /** Clock (ms); tests may replace it. */
+  now: () => number = () => Date.now();
 
   constructor(private readonly host: GameHost) {
     const s = host.settings as unknown as { mode?: unknown; map?: string };
@@ -91,6 +109,7 @@ class GardenGame implements GameServer {
       seed: (Date.now() ^ 0x6a4d3e11) >>> 0,
       createBot: createGardenBot,
     });
+    this.boardNames = this.sim.boards.map((b) => (b.owner ? (players.find((p) => p.id === b.owner)?.name ?? '') : ''));
     for (const p of this.host.players()) if (!p.bot) this.host.send(p.id, this.out(this.initMsg(p.id)));
     this.timer = setInterval(() => this.loop(), 1000 / G.tickRate);
   }
@@ -109,6 +128,8 @@ class GardenGame implements GameServer {
 
   removePlayer(id: string) {
     this.views.delete(id);
+    this.syncAt.delete(id);
+    this.buckets.delete(id);
     if (!this.sim) return;
     this.sim.removePlayer(id);
     this.host.broadcast(this.out({ k: 'score', scores: this.sim.scores() }));
@@ -119,7 +140,11 @@ class GardenGame implements GameServer {
     const p = this.sim.players.get(id);
     if (!p || p.bot || !m || typeof m !== 'object') return;
     const msg = m as unknown as { k?: unknown; b?: unknown };
+    const now = this.now();
     if (msg.k === 'sync') {
+      const last = this.syncAt.get(id);
+      if (last !== undefined && now - last < SYNC_EVERY * 1000) return;
+      this.syncAt.set(id, now);
       this.host.send(id, this.out(this.initMsg(id)));
       return;
     }
@@ -127,6 +152,12 @@ class GardenGame implements GameServer {
       if (Number.isInteger(msg.b) && (msg.b as number) >= 0 && (msg.b as number) < this.sim.boards.length) this.views.set(id, msg.b as number);
       return;
     }
+    let bk = this.buckets.get(id);
+    if (!bk) this.buckets.set(id, (bk = { tokens: ACTION_BURST, at: now }));
+    bk.tokens = Math.min(ACTION_BURST, bk.tokens + ((now - bk.at) / 1000) * ACTION_RATE);
+    bk.at = now;
+    if (bk.tokens < 1) return;
+    bk.tokens -= 1;
     this.sim.handle(id, m);
   }
 
@@ -167,7 +198,9 @@ class GardenGame implements GameServer {
     const sim = this.sim;
     const far = this.snaps++ % FAR_EVERY === 0;
     if (sim.boards.length <= 1 || far) {
-      this.host.broadcast(this.out({ k: 'snap', s: sim.snapshot() }));
+      // Per client (not broadcast) so the room's backpressure drop for slow sockets applies.
+      const msg = this.out({ k: 'snap', s: sim.snapshot() });
+      for (const gp of this.host.players()) if (!gp.bot) this.host.send(gp.id, msg);
       return;
     }
     for (const gp of this.host.players()) {
@@ -204,7 +237,8 @@ class GardenGame implements GameServer {
     if (this.mode === 'coop') {
       this.host.systemChat(end.win ? `The garden held! All ${end.wave} waves defended on ${this.def.name}.` : `The garden fell on wave ${end.wave} in ${this.def.name}.`);
     } else {
-      const name = end.winner ? this.host.players().find((p) => p.id === end.winner)?.name : undefined;
+      const b = end.winner ? this.sim.boards.findIndex((bd) => bd.owner === end.winner) : -1;
+      const name = end.winner ? this.host.players().find((p) => p.id === end.winner)?.name || this.boardNames[b] || 'The winner' : undefined;
       this.host.systemChat(name ? `${name}'s garden is the last one standing (wave ${end.wave}).` : `Every garden fell on wave ${end.wave}.`);
     }
     this.stop();

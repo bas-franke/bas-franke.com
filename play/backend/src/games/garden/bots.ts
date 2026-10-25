@@ -521,7 +521,8 @@ class GardenBot implements GardenBotBrain {
 
   /** Versus: spend the send bank. */
   private send(view: BotView, gold: number): BotAction | null {
-    if (!view.opponents.length || this.bank <= 0) return null;
+    // The server refuses sends past the per-wave cap: do not spend the bank on those.
+    if (!view.opponents.length || this.bank <= 0 || (view.sendsLeft ?? Infinity) <= 0) return null;
     const wave = this.nextWave(view);
     const budget = Math.min(this.bank, gold);
     const ok = SENDS.filter((s) => s.from <= wave && s.cost <= budget);

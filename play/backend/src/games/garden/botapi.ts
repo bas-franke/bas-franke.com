@@ -46,6 +46,8 @@ export interface BotView {
   opponents: { b: number; lives: number; owner: string }[];
   /** Number of defenders (co-op scaling). */
   players: number;
+  /** Versus: sends still allowed this wave (sendCap minus sends made); 0 in co-op. */
+  sendsLeft?: number;
 }
 
 export type BotAction =

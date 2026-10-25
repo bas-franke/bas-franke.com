@@ -148,10 +148,14 @@ export class Room implements GameHost {
   addHuman(socket: WebSocket, rawName: string): Member {
     if (this.closed) throw new RoomError('This room has closed.', 410);
     if (this.members.size >= this.settings.maxPlayers) {
-      // Humans take priority over bots: drop a bot to make space.
+      // Humans take priority over bots: drop a bot to make space. A Garden Sentinels versus match in progress keeps
+      // its bots (each owns a board) and seats the joiner as a spectator over the limit, one per bot at most; the
+      // extra bots are trimmed when the match ends (stopGame).
       const bot = this.bots().pop();
       if (!bot) throw new RoomError('This room is full.', 409);
-      this.removeMember(bot.id, 'replaced by a player');
+      if (this.gardenVersusPlaying()) {
+        if (this.members.size >= this.settings.maxPlayers + this.bots().length) throw new RoomError('This room is full.', 409);
+      } else this.removeMember(bot.id, 'replaced by a player');
     }
     const member: Member = {
       id: randomId('p'),
@@ -173,6 +177,10 @@ export class Room implements GameHost {
     this.systemChat(`${member.name} joined`);
     this.game?.addPlayer(member);
     return member;
+  }
+
+  private gardenVersusPlaying() {
+    return this.settings.game === 'garden' && this.settings.mode === 'vs' && this.state === 'playing';
   }
 
   private uniqueName(name: string) {
@@ -304,6 +312,8 @@ export class Room implements GameHost {
     game.stop();
     this.state = 'waiting';
     this.systemChat(reason);
+    // Garden versus may have seated spectators over the limit (addHuman): drop bots until the room fits again.
+    if (this.settings.game === 'garden' && this.members.size > this.settings.maxPlayers) this.setBots(this.bots().length);
     this.broadcastRoom();
   }
 
@@ -392,6 +402,8 @@ export class Room implements GameHost {
     const member = this.members.get(id);
     // Snapshots are superseded 30 times a second: skip them for a socket that is not draining.
     if (member?.socket && (m as { k?: string }).k === 'snap' && member.socket.bufferedAmount > 64 * 1024) return;
+    // Garden Sentinels: a re-sent full init ('sync') is not queued behind a socket that is already badly backed up.
+    if (member?.socket && this.settings.game === 'garden' && (m as { k?: string }).k === 'init' && member.socket.bufferedAmount > 256 * 1024) return;
     if (member) this.sendTo(member, { t: 'g', m });
   }
 

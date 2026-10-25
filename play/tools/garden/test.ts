@@ -61,7 +61,8 @@ function cells(def: GMapDef, ch: string): [number, number][] {
 /** Builds `kind` on the next free '.' cell for player `pid`, upgrades it to `lv`, and moves it to world (x, z). */
 function tower(sim: any, pid: string, kind: TowerKind, x = FAR, z = FAR, lv = 1): any {
   const p = sim.players.get(pid);
-  p.gold += 10000;
+  const g0 = p.gold;
+  p.gold += 1e7;
   const bd = sim.boards[p.board];
   const free = sim.free(bd) as [number, number][];
   assert.ok(free.length, 'no free cell');
@@ -69,8 +70,7 @@ function tower(sim: any, pid: string, kind: TowerKind, x = FAR, z = FAR, lv = 1)
   assert.equal(sim.handle(pid, { k: 'build', t: kind, x: c, y: r }), true, 'build failed');
   const id = bd.cells[r * sim.W + c];
   for (let l = 1; l < lv; l++) assert.equal(sim.handle(pid, { k: 'up', id }), true, 'upgrade failed');
-  p.gold -= 10000 - 0; // keep the net cost visible to tests that do not care
-  p.gold = Math.max(p.gold, 0);
+  p.gold = g0; // the tower is free: the player's gold is exactly what it was
   const tw = sim.towers.get(id);
   tw.x = x;
   tw.z = z;
@@ -265,7 +265,7 @@ describe('upgrade and sell', () => {
     assert.equal(sim.denies.at(-1).why, 'Only the builder can sell that');
     assert.equal(sim.handle('a', { k: 'sell', id }), true);
   });
-  it("co-op leaver: towers stay (upgradeable, unsellable), gold split among the rest", () => {
+  it("co-op leaver: towers stay (upgradeable, unsellable), gold parked (not split), returned on rejoin", () => {
     const sim = mkSim('coop', ['a', 'b', 'c']);
     const [c, r] = cells(COOP_MAP, '.')[0];
     sim.handle('c', { k: 'build', t: 'laser', x: c, y: r });
@@ -273,15 +273,16 @@ describe('upgrade and sell', () => {
     sim.players.get('c').gold = 301;
     const ga = sim.players.get('a').gold;
     sim.removePlayer('c');
-    assert.equal(sim.players.get('a').gold, ga + 150);
-    assert.equal(sim.players.get('b').gold, ga + 150);
+    assert.equal(sim.players.get('a').gold, ga);
+    assert.equal(sim.players.get('b').gold, ga);
+    assert.equal(sim.addPlayer({ id: 'c2', name: 'C', bot: false }).gold, 301, 'rejoin (any case) gets the parked gold');
+    sim.removePlayer('c2');
     assert.ok(sim.towers.has(id));
     assert.equal(sim.handle('a', { k: 'sell', id }), false);
     assert.equal(sim.handle('a', { k: 'up', id }), true);
   });
   it('co-op: leaving and rejoining (rooms.ts gives a new id) must not mint gold', () => {
-    // removePlayer splits the leaver's gold among the rest; the rejoin (same name, new id) must then get start gold,
-    // not the median top-up, or one page refresh roughly doubles the team's gold.
+    // removePlayer parks the leaver's gold; the rejoin (same name, new id) gets exactly that back.
     const sim = mkSim('coop', ['a', 'b']);
     sim.wave = 5;
     sim.players.get('a').gold = 1000;
@@ -289,7 +290,42 @@ describe('upgrade and sell', () => {
     const total = () => [...sim.players.values()].reduce((s: number, p: any) => s + p.gold, 0);
     sim.removePlayer('a');
     sim.addPlayer({ id: 'a2', name: 'a', bot: false });
-    assert.ok(total() <= 2000 + G.startGold.coop, `team gold went from 2000 to ${total()} after one leave + rejoin`);
+    assert.equal(total(), 2000, `team gold went from 2000 to ${total()} after one leave + rejoin`);
+  });
+  it('co-op: a leave/rejoin loop (same name, then renamed) gains at most one capped purse per new name', () => {
+    const sim = mkSim('coop', ['a', 'b']);
+    const start = G.startGold.coop;
+    const total = () => [...sim.players.values()].reduce((s: number, p: any) => s + p.gold, 0);
+    const t0 = total();
+    let id = 'b';
+    for (let i = 0; i < 5; i++) {
+      sim.removePlayer(id);
+      id = 'b' + (i + 1);
+      sim.addPlayer({ id, name: 'b', bot: false });
+    }
+    assert.equal(total(), t0, 'same-name rejoins mint nothing');
+    sim.wave = 3;
+    sim.clearPaid = 90;
+    sim.players.get('a').gold = 5000; // the richest player's gold must not leak to joiners
+    const t1 = total();
+    for (let i = 0; i < 5; i++) {
+      sim.removePlayer(id);
+      id = 'x' + i;
+      const p = sim.addPlayer({ id, name: 'x' + i, bot: false });
+      assert.ok(p.gold <= start + 90, `renamed joiner got ${p.gold}`);
+    }
+    // b's gold stays parked; the team in play gains at most (start + clear bonuses) per new name.
+    assert.ok(t1 === 5000 + start && total() <= 5000 + start + 90, `team gold in play ${t1} -> ${total()}`);
+    // Spending everything then rejoining under ever new names stops paying out after MAX_COOP_PURSES purses.
+    let minted = 0;
+    for (let i = 0; i < 40; i++) {
+      sim.players.get(id).gold = 0;
+      sim.removePlayer(id);
+      id = 'y' + i;
+      minted += sim.addPlayer({ id, name: 'y' + i, bot: false }).gold;
+    }
+    assert.ok(minted <= 12 * (start + 90), `40 renamed rejoins minted ${minted}`);
+    assert.equal(sim.addPlayer({ id: 'late', name: 'late', bot: false }).gold, 0);
   });
 });
 
@@ -745,6 +781,25 @@ describe('colossus', () => {
     assert.ok(c.dead);
     assert.equal(skitters().length, 18);
   });
+  it('skitters shed by a blow are not hit by that same blow (missile splash, slow field, shield pulse)', () => {
+    for (const how of ['missile', 'slow', 'shield'] as const) {
+      const sim = mkSim('coop', ['a']);
+      const c = enemy(sim, 'colossus', FAR, FAR);
+      c.hp = c.maxHp * 0.76;
+      if (how === 'missile') {
+        sim.missiles.push({ mid: 1, b: 0, tw: 0, owner: 'a', en: c.id, x: c.x, z: c.z, t: 0, dmg: c.maxHp * 0.05, splash: 2.6 });
+        sim.flyMissiles(0.05);
+      } else {
+        const t = tower(sim, 'a', how, FAR, FAR, 3);
+        t.zapT = 0;
+        t.lv = { ...t.lv, dmg: c.maxHp * 0.05 * (how === 'slow' ? 1 / DT : 1) };
+        sim.fields(sim.boards[0], DT);
+      }
+      const sk = sim.boards[0].en.filter((e: any) => e.kind === 'skitter');
+      assert.ok(sk.length > 0, `${how}: no shed`);
+      for (const s of sk) assert.equal(s.hp, s.maxHp, `${how}: a shed skitter was hit by the blow that shed it`);
+    }
+  });
 });
 
 describe('leaks and lives', () => {
@@ -985,6 +1040,15 @@ describe('versus sends', () => {
     assert.equal(sim.handle('a', { k: 'send', e: 'runner' }), true);
     assert.equal(sim.boards[1].queued.length, 6);
   });
+  it('BotView.sendsLeft tells bots how many sends the cap still allows', () => {
+    const sim = mkSim('vs', ['a', 'b']);
+    const p = sim.players.get('a');
+    const cap = sendCap(sim.wave + 1);
+    assert.equal(sim.botView(p).sendsLeft, cap);
+    p.sends = cap;
+    assert.equal(sim.botView(p).sendsLeft, 0);
+    assert.equal(mkSim('coop', ['a']).botView(mkSim('coop', ['a']).players.get('a')).sendsLeft, 0);
+  });
   it('co-op has no sends', () => {
     const sim = mkSim('coop');
     sim.wave = 5;
@@ -1056,13 +1120,14 @@ describe('server', () => {
     assert.equal(inits[0].m.map.id, 'seedling-plot');
     assert.equal(inits[0].m.boards.length, 3);
   });
-  it('mid-match co-op joiner gets init, defends, gets max(start gold, median gold)', () => {
+  it('mid-match co-op joiner gets init, defends, gets start gold + clear bonuses, capped at the median', () => {
     const { host, players } = fakeHost('coop', ['a', 'b', 'c'], 'greenhouse-commons');
     const game: any = createGardenGame(host as any);
     game.start();
     game.stop();
     const sim = game.sim;
     sim.wave = 4;
+    sim.clearPaid = 400;
     sim.players.get('a').gold = 100;
     sim.players.get('b').gold = 500;
     sim.players.get('c').gold = 900;
@@ -1138,6 +1203,8 @@ describe('server', () => {
       { k: 'view', b: -1 },
       { k: 'view', b: 0.5 },
     ];
+    let clock = 0;
+    game.now = () => (clock += 1000); // keep the action token bucket full
     for (const m of junk) assert.doesNotThrow(() => game.onMessage('a', m as any), `threw on ${JSON.stringify(m)}`);
     // Unknown senders and bots are ignored.
     assert.doesNotThrow(() => game.onMessage('nobody', { k: 'build', t: 'laser', x: c + 1, y: r }));
@@ -1161,6 +1228,73 @@ describe('server', () => {
     assert.equal(host.ended, 1);
     assert.equal(host.bcast.filter((m) => m.k === 'end').length, 1);
     assert.equal(host.bcast.find((m) => m.k === 'end').win, false);
+  });
+  it("'sync' is answered at most once per 2 s per player", () => {
+    const { host } = fakeHost('coop', ['a', 'b'], 'greenhouse-commons');
+    const game: any = createGardenGame(host as any);
+    game.start();
+    game.stop();
+    let now = 10_000;
+    game.now = () => now;
+    host.sent = [];
+    for (let i = 0; i < 50; i++) game.onMessage('a', { k: 'sync' });
+    game.onMessage('b', { k: 'sync' });
+    const inits = (id: string) => host.sent.filter((s) => s.id === id && s.m.k === 'init').length;
+    assert.equal(inits('a'), 1);
+    assert.equal(inits('b'), 1);
+    now += 1999;
+    game.onMessage('a', { k: 'sync' });
+    assert.equal(inits('a'), 1);
+    now += 1;
+    game.onMessage('a', { k: 'sync' });
+    assert.equal(inits('a'), 2);
+  });
+  it('actions go through a per-player token bucket (burst 20, ~12/s), excess dropped silently', () => {
+    const { host } = fakeHost('coop', ['a', 'b'], 'greenhouse-commons');
+    const game: any = createGardenGame(host as any);
+    game.start();
+    game.stop();
+    const sim = game.sim;
+    let now = 0;
+    game.now = () => now;
+    let pings = 0;
+    const orig = sim.handle.bind(sim);
+    sim.handle = (id: string, m: any) => {
+      if (id === 'a') pings++;
+      return orig(id, m);
+    };
+    for (let i = 0; i < 200; i++) game.onMessage('a', { k: 'ping', x: 1, z: 1 });
+    assert.equal(pings, 20, 'burst');
+    game.onMessage('b', { k: 'ping', x: 1, z: 1 }); // b has its own bucket
+    now += 1000;
+    for (let i = 0; i < 200; i++) game.onMessage('a', { k: 'ping', x: 1, z: 1 });
+    assert.equal(pings, 32, 'refill per second');
+    for (let i = 0; i < 50; i++) game.onMessage('a', { k: 'view', b: 0 }); // 'view' is not rate-limited this way
+    assert.equal(game.views.get('a'), 0);
+  });
+  it('snapshots go per client through host.send (backpressure applies), every board every 4th', () => {
+    const { host } = fakeHost('vs', ['a', 'b', 'c'], 'seedling-plot');
+    const game: any = createGardenGame(host as any);
+    game.start();
+    game.stop();
+    host.bcast = [];
+    host.sent = [];
+    for (let i = 0; i < 4; i++) game.sendSnapshots();
+    assert.equal(host.bcast.filter((m) => m.k === 'snap').length, 0);
+    const snaps = host.sent.filter((s) => s.m.k === 'snap');
+    assert.equal(snaps.length, 12);
+    assert.equal(snaps.filter((s) => s.m.s.eb === undefined).length, 3, 'one all-boards snapshot per client');
+  });
+  it('versus: the end message names a winner who has left', () => {
+    const { host, players } = fakeHost('vs', ['a', 'b'], 'seedling-plot');
+    const game: any = createGardenGame(host as any);
+    game.start();
+    game.stop();
+    players.splice(0, 1); // 'a' left the room
+    game.removePlayer('a');
+    game.sim.end = { win: true, winner: 'a', wave: 7 };
+    game.finish();
+    assert.ok(host.chat.some((t) => t.startsWith("a's garden is the last one standing")), host.chat.join(' | '));
   });
   it('bot players cannot send messages through the server', () => {
     const { host } = fakeHost('coop', ['a', 'bot1'], 'greenhouse-commons');

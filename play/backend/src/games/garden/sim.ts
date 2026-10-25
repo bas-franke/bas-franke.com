@@ -41,6 +41,8 @@ const BOT_THINK = 0.25;
 const SEND_GAP = 0.6;
 const SEND_AT = 4;
 const SHED_AT = [0.75, 0.5, 0.25];
+/** Co-op: most purses (start gold + clear bonuses) one match hands out; later new names start with 0 gold. */
+const MAX_COOP_PURSES = 12;
 const CHEAPEST_TOWER = Math.min(...TOWER_KINDS.map((k) => TOWERS[k].levels[0].cost));
 
 export interface SimPlayerInit {
@@ -184,8 +186,12 @@ export class GardenSim {
   readonly H: number;
   readonly boards: Board[] = [];
   readonly players = new Map<string, SimPlayer>();
-  /** Lower-case names of everyone who has joined this match (the late-joiner gold top-up is once per name). */
-  private readonly seenNames = new Set<string>();
+  /** Co-op: gold of defenders who left, by lower-case name; a rejoin under that name gets exactly this back. */
+  private readonly parked = new Map<string, number>();
+  /** Co-op: purses handed out so far (initial players + new joiners); capped by MAX_COOP_PURSES. */
+  private purses = 0;
+  /** Co-op: clear bonuses paid so far, per defender (the most a genuinely new joiner gets on top of start gold). */
+  clearPaid = 0;
   /** Events since the last drain (the server batches them per tick). */
   events: GEvent[] = [];
   /** Rejected actions: sent privately to that player. */
@@ -256,14 +262,7 @@ export class GardenSim {
     const existing = this.players.get(p.id);
     if (existing) return existing;
     let gold: number = G.startGold[this.mode];
-    // A late co-op joiner is topped up to the median defender's gold, but only once per name: someone who left
-    // (their gold went to the others) and rejoins with a new id gets start gold, so a page refresh never mints gold.
-    const key = p.name.toLowerCase();
-    if (board >= 0 && this.wave > 0 && !this.seenNames.has(key)) {
-      const golds = [...this.players.values()].filter((q) => q.board >= 0).map((q) => q.gold).sort((a, b) => a - b);
-      if (golds.length) gold = Math.max(gold, Math.floor(golds[golds.length >> 1]));
-    }
-    this.seenNames.add(key);
+    if (this.mode === 'coop' && board >= 0) gold = this.coopPurse(p.name);
     const sp: SimPlayer = {
       id: p.id,
       name: p.name,
@@ -291,10 +290,35 @@ export class GardenSim {
     const p = this.players.get(id);
     this.players.delete(id);
     if (!p || this.mode !== 'coop' || p.board < 0 || this.end) return;
-    const rest = [...this.players.values()].filter((q) => q.board >= 0);
-    if (!rest.length) return;
-    const share = Math.floor(p.gold / rest.length);
-    for (const q of rest) q.gold += share;
+    const key = p.name.toLowerCase();
+    this.parked.set(key, (this.parked.get(key) ?? 0) + p.gold);
+  }
+
+  /**
+   * Co-op starting gold for a joiner. Leaving and rejoining (rooms.ts gives a new id) or renaming must never mint
+   * gold: a rejoin under a parked name gets exactly the parked gold back; a new name gets start gold plus the clear
+   * bonuses paid so far (never more than the true median defender's gold, never less than start gold), and only
+   * while the match has purses left (MAX_COOP_PURSES); after that a new name starts with nothing.
+   */
+  private coopPurse(name: string): number {
+    const key = name.toLowerCase();
+    const back = this.parked.get(key);
+    if (back !== undefined) {
+      this.parked.delete(key);
+      return back;
+    }
+    if (this.purses >= MAX_COOP_PURSES) return 0;
+    this.purses++;
+    const start = G.startGold.coop;
+    if (!this.clearPaid) return start;
+    const golds = [...this.players.values()].filter((q) => q.board >= 0).map((q) => q.gold).sort((a, b) => a - b);
+    let cap = start + this.clearPaid;
+    if (golds.length) {
+      const m = golds.length >> 1;
+      const median = golds.length % 2 ? golds[m] : (golds[m - 1] + golds[m]) / 2;
+      cap = Math.min(cap, Math.floor(median));
+    }
+    return Math.max(start, cap);
   }
 
   private defenders(): number {
@@ -607,6 +631,7 @@ export class GardenSim {
 
   private clearWave() {
     const bonus = G.clearBonus + G.clearBonusPerWave * this.wave;
+    this.clearPaid += bonus;
     this.events.push({ k: 'clear', n: this.wave, bonus });
     for (const p of this.players.values())
       if (p.board >= 0) {
@@ -770,7 +795,8 @@ export class GardenSim {
       if (k === 'slow') {
         const slow = t.lv.slow ?? 0;
         const dmg = t.lv.dmg * mul * dt;
-        for (let j = 0; j < en.length; j++) {
+        // Skitters a colossus sheds during this pass join en but are not part of it.
+        for (let j = 0, n = en.length; j < n; j++) {
           const e = en[j];
           if (e.dead) continue;
           const dx = e.x - t.x;
@@ -784,7 +810,7 @@ export class GardenSim {
         if (t.zapT > 0) continue;
         let hit = false;
         const dmg = t.lv.dmg * mul * ZAP_EVERY;
-        for (let j = 0; j < en.length; j++) {
+        for (let j = 0, n = en.length; j < n; j++) {
           const e = en[j];
           if (e.dead) continue;
           const dx = e.x - t.x;
@@ -990,7 +1016,8 @@ export class GardenSim {
       this.events.push({ k: 'boom', b: m.b, x: r2(m.x), z: r2(m.z), r: m.splash, mid: m.mid });
       const t = this.towers.get(m.tw) ?? null;
       const en = bd.en;
-      for (let j = 0; j < en.length; j++) {
+      // Skitters shed by this blast are not hit by it.
+      for (let j = 0, n = en.length; j < n; j++) {
         const v = en[j];
         if (v.dead) continue;
         const dist = Math.hypot(v.x - m.x, v.z - m.z);
@@ -1161,6 +1188,7 @@ export class GardenSim {
       opponents:
         this.mode === 'vs' ? this.boards.filter((b) => !b.out && b.b !== bd.b).map((b) => ({ b: b.b, lives: b.lives, owner: b.owner ?? '' })) : [],
       players: this.defenders(),
+      sendsLeft: this.mode === 'vs' ? Math.max(0, sendCap(this.sendWave()) - p.sends) : 0,
     };
   }
 
