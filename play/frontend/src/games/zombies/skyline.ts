@@ -26,7 +26,7 @@ export interface Skyline {
 }
 
 /** Linear HDR gain of a fully lit window; aviation lights and neon scale from it. Tuned against the night fog. */
-const WINDOW_GLOW = 9;
+const WINDOW_GLOW = 16;
 
 function seeded(seed: number) {
   let a = seed >>> 0;
@@ -140,7 +140,11 @@ if (skKind < 1.5 || skKind > 3.5) {
   vec2 lo = office ? vec2(0.04, 0.24) : shop ? vec2(0.05, 0.06) : vec2(0.2, 0.3);
   vec2 hi = office ? vec2(0.96, 0.9) : shop ? vec2(0.95, 0.78) : vec2(0.8, 0.86);
   // Far away a window shrinks under a pixel: fade from the filtered shape to its average coverage.
+  // Past ~40 m the fog smears everything anyway: drop the room detail too, so a window is one even glow (the fog's
+  // bright-pass would otherwise punch holes where curtains and sash bars darken it).
+  float dist = length(vViewPosition);
   float far = smoothstep(0.3, 0.8, max(fw.x, fw.y));
+  float fd = max(far, smoothstep(35.0, 70.0, dist));
   vec2 cv = skCover(f, fw, lo, hi);
   float area = (hi.x - lo.x) * (hi.y - lo.y);
   float m = cv.x * cv.y;
@@ -168,7 +172,7 @@ if (skKind < 1.5 || skKind > 3.5) {
   }
   // Shops are closed at 2 am: a few lit displays and night lights, dim and mostly warm.
   if (shop) c = mix(vec3(0.16, 0.08, 0.025), vec3(0.03, 0.05, 0.08), step(0.85, th));
-  float level = 0.4 + 0.9 * skHash(cell + skSeed + 2.7);
+  float level = mix(0.4 + 0.9 * skHash(cell + skSeed + 2.7), 0.85, 0.6 * fd);
   // Blinds lowered from the top by a random amount; the room shows dimly through them.
   float wy = clamp((f.y - lo.y) / (hi.y - lo.y), 0.0, 1.0);
   float bl = skHash(cell * 1.31 + skSeed + 9.0);
@@ -176,7 +180,7 @@ if (skKind < 1.5 || skKind > 3.5) {
   if (shop) bl = 0.0;
   float fy = fw.y / (hi.y - lo.y);
   float cover = smoothstep(1.0 - bl - fy - 0.01, 1.0 - bl + fy + 0.01, wy);
-  float shade = mix(mix(1.0, 0.22, cover), 1.0 - 0.78 * bl, far);
+  float shade = mix(mix(1.0, 0.22, cover), 1.0 - 0.78 * bl, fd);
   // Inside the room: a lamp somewhere along the window (homes) or fluorescent strips under the ceiling (offices),
   // curtains drawn in from the sides, and the sash bars of a home window. All fade out at distance.
   float wx = clamp((f.x - lo.x) / (hi.x - lo.x), 0.0, 1.0);
@@ -196,10 +200,10 @@ if (skKind < 1.5 || skKind > 3.5) {
       room *= 1.0 - 0.85 * bars;
     }
   }
-  shade *= mix(room, 0.9, far);
+  shade *= mix(room, 0.9, fd);
   // Close windows (the blocks across the plaza, a few metres of fog away) are held back so they do not blow out;
   // far ones get the full HDR gain to punch through the murk.
-  float gain = skGlow * mix(0.4, 1.0, smoothstep(12.0, 55.0, length(vViewPosition)));
+  float gain = skGlow * mix(0.25, 1.0, smoothstep(10.0, 60.0, dist));
   skEmis = c * (lit * level * shade * m * gain);
   // Dark windows still hint at a room behind the glass.
   skEmis += vec3(0.5, 0.6, 0.8) * ((1.0 - lit) * m * 0.004 * skGlow);
@@ -482,15 +486,15 @@ export function buildSkyline(o: SkylineOpts): Skyline {
     // Aviation lights: every building over ~40 m, corners synchronised per building, plus a mast on the tallest.
     if (y > 40) {
       const ph = r();
-      lamps.add(x0, y + 0.4, z0, 0.4, ph, 0, 3, RED);
-      lamps.add(x1, y + 0.4, z1, 0.4, ph, 0, 3, RED);
-      lamps.add(x0, y + 0.4, z1, 0.4, ph, 0, 3, RED);
+      lamps.add(x0, y + 0.4, z0, 0.4, ph, 0, 6, RED);
+      lamps.add(x1, y + 0.4, z1, 0.4, ph, 0, 6, RED);
+      lamps.add(x0, y + 0.4, z1, 0.4, ph, 0, 6, RED);
       if (y > 85) {
         const mh = 8 + r() * 10;
         const mx = (x0 + x1) / 2;
         const mz = (z0 + z1) / 2;
         clutter.box(mx - 0.2, mx + 0.2, mz - 0.2, mz + 0.2, y, y + mh, y, seed, 1, 1, 0, BLANK);
-        lamps.add(mx, y + mh + 0.3, mz, 0.5, ph + 0.5, 0, 3.5, RED);
+        lamps.add(mx, y + mh + 0.3, mz, 0.5, ph + 0.5, 0, 7, RED);
         lamps.add(mx, y + mh * 0.55, mz - 0.25, 0.25, 0, 1, 0.8, RED);
       }
     }
@@ -588,7 +592,7 @@ export function buildSkyline(o: SkylineOpts): Skyline {
   applyQuality(o.quality);
 
   // Neon flicker: the DINER sign stutters now and then, the blade hums steadily.
-  const NEON_GAIN = WINDOW_GLOW * 0.9;
+  const NEON_GAIN = 8;
   let stutter = 0;
   let nextStutter = 3;
   return {
