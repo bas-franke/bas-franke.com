@@ -61,8 +61,26 @@
   box-sizing: border-box;
 }
 
+html {
+  /* No double-tap zoom, and nothing may push the page sideways on a phone. */
+  touch-action: manipulation;
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Scrolling still works everywhere (wheel, touch, keyboard); only the bars are hidden. */
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
 body {
   margin: 0;
+  overflow-x: clip;
   min-height: 100vh;
   color: var(--ink);
   background: var(--page);
@@ -1979,6 +1997,11 @@ a.ph-domain:hover {
 @media (max-width: 640px) {
   :root {
     --gutter: 16px;
+  }
+
+  /* Below 16px iOS zooms the page in when an input gets focus. */
+  .login input:not([type='checkbox']) {
+    font-size: 1rem;
   }
 
   .page {

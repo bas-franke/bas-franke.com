@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useContext, useEffect, useRef, useState, type MouseEvent, type TouchEvent } from 'react';
 import { UnauthorizedContext, usePoll, useTicker } from '../api';
 import { timeAgo } from '../format';
 import { Link } from '../router';
@@ -154,8 +154,14 @@ function Feed({ shots, showProject, onOpen }: { shots: Screenshot[]; showProject
 
 function ShotCard({ shot, showProject, onOpen }: { shot: Screenshot; showProject: boolean; onOpen: () => void }) {
   const [broken, setBroken] = useState(false);
+  // A real link to the image, so ctrl/middle-click and a phone's long-press "Open in new tab" work; a plain click opens the lightbox.
+  const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    onOpen();
+  };
   return (
-    <button type="button" className="shot-card" onClick={onOpen} aria-label={`${shot.title}, ${shot.project}, ${relativeTime(shot.createdAt)}`}>
+    <a href={shot.url} target="_blank" rel="noreferrer" className="shot-card" onClick={onClick} aria-label={`${shot.title}, ${shot.project}, ${relativeTime(shot.createdAt)}`}>
       <span className="shot-thumb" style={{ aspectRatio: ratio(shot) }}>
         {broken ? (
           <span className="shot-broken muted small">Image unavailable</span>
@@ -174,7 +180,7 @@ function ShotCard({ shot, showProject, onOpen }: { shot: Screenshot; showProject
         <span className="shot-title">{shot.title}</span>
         {shot.note && <span className="shot-note muted">{shot.note}</span>}
       </span>
-    </button>
+    </a>
   );
 }
 
@@ -281,6 +287,22 @@ function Lightbox({
     }
   }
 
+  // Swipe left/right on the image to step through the feed on a phone.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = e.touches.length === 1 && t ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const onTouchEnd = (e: TouchEvent) => {
+    const start = swipeStart.current;
+    const t = e.changedTouches[0];
+    swipeStart.current = null;
+    if (!start || !t) return;
+    const dx = t.clientX - start.x;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(t.clientY - start.y) * 1.5) return;
+    if (dx > 0 && hasPrev) onIndex(index - 1);
+    else if (dx < 0 && hasNext) onIndex(index + 1);
+  };
   // A click on the backdrop lands on the <dialog> itself; clicks inside land on its children.
   const onBackdrop = (e: MouseEvent<HTMLDialogElement>) => {
     if (e.target === e.currentTarget) onClose();
@@ -304,8 +326,10 @@ function Lightbox({
           </button>
         </header>
 
-        <div className="sd-stage">
-          <img key={shot.id} src={shot.url} alt={shot.title} width={shot.width ?? undefined} height={shot.height ?? undefined} />
+        <div className="sd-stage" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          <a className="sd-zoom" href={shot.url} target="_blank" rel="noreferrer" title="Open full size in a new tab to zoom in">
+            <img key={shot.id} src={shot.url} alt={shot.title} width={shot.width ?? undefined} height={shot.height ?? undefined} />
+          </a>
           {hasPrev && (
             <button type="button" className="sd-nav sd-prev" onClick={() => onIndex(index - 1)} aria-label="Previous screenshot" title="Previous (←)">
               ‹
@@ -329,7 +353,7 @@ function Lightbox({
           </span>
           <span className="sd-actions">
             <a className="btn btn-sm" href={shot.url} target="_blank" rel="noreferrer">
-              Open original <span aria-hidden="true">↗</span>
+              Open in new tab <span aria-hidden="true">↗</span>
             </a>
             <button type="button" className="btn btn-sm sd-delete" onClick={remove} disabled={deleting}>
               {deleting ? 'Deleting…' : 'Delete'}
