@@ -489,9 +489,9 @@ void main() {
     wsum += w;
   }
   vec4 fog = mix(vec4(0.0, 0.0, 0.0, 1.0), sum / max(wsum, 1e-5), fogOn);
-  // Thick fog smears what is behind it (multiple scattering). Only pixels deep in the fog take the blurred scene (so
-  // near alpha-tested leaves never pick up the windows behind them as outlines); everything else gets the blur as a
-  // soft additive glow in the fog in front of it, which turns lit windows and lamps into haloes.
+  // Thick fog smears what is behind it (multiple scattering): pixels well into the fog take the blurred scene, so
+  // mid-distance leaf canopies soften instead of cutting crisp outlines into the windows behind them, and the blur
+  // also glows additively in the fog in front of everything, which turns lit windows and lamps into haloes.
   float fogged = 1.0 - fog.a;
   vec3 wide = vec3(0.0);
   // A 12-tap Vogel disc on the quarter-res image, weighted towards the centre: round and soft, no rings.
@@ -505,7 +505,7 @@ void main() {
     wsumB += wb;
   }
   wide /= wsumB;
-  col = mix(col, wide, smoothstep(0.85, 0.995, fogged));
+  col = mix(col, wide, smoothstep(0.55, 0.95, fogged));
   // Bright far things (the city's lit windows, lamp heads) glow through fog that would swallow them: a transmittance
   // floor that only bright pixels reach, so dark towers stay lost in the murk. Never for the sky.
   float bright = smoothstep(0.4, 4.0, dot(col, vec3(0.2126, 0.7152, 0.0722)));
@@ -824,10 +824,10 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     // lamps, flashlights, sun, density
     gain: { value: new THREE.Vector4(6, 0.6, 4, 1) },
     // outside density (1/m, ~5 m visibility), inside density, fog creep behind the glass (m), street-light gain
-    night: { value: new THREE.Vector4(0.22, 0.028, 3.5, 0.08) },
+    night: { value: new THREE.Vector4(0.22, 0.036, 3.5, 0.08) },
     // The shafts in the thin lobby haze would be far fainter than the lamp-lit fog outside; lift them so the lobby
     // reads as lit by the street.
-    inBoost: { value: 8 },
+    inBoost: { value: 10 },
     dbg: { value: 0 },
     slCount: { value: 0 },
     slShadows: { value: 0 },
