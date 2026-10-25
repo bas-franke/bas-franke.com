@@ -168,14 +168,15 @@ const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; colo
 const ROCKET_COLOR = 0xffa14a;
 /**
  * Viewmodel placement relative to the camera: carried on the right shoulder like a bazooka, the open exhaust at the
- * back big in the bottom-right corner and the tube running in well below the crosshair, its right flank showing.
+ * back big in the bottom-right corner and the tube running in below and right of the crosshair. Yaw and pitch aim the
+ * bore at a point ~4 m down the view axis, so the barrel reads as pointing at the crosshair without covering it.
  */
-const VM_POS = { x: 0.32, y: -0.46, z: -0.8 };
-const VM_YAW = 0.22;
-const VM_PITCH = 0.02;
-const VM_SCALE = 1;
+const VM_POS = { x: 0.55, y: -0.48, z: -1.3 };
+const VM_YAW = 0.198;
+const VM_PITCH = 0.143;
+const VM_SCALE = 1.3;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */
-const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.84);
+const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.6);
 /** The viewmodel draws last, after a depth clear, so it never pokes into walls. */
 const VM_ORDER = 100;
 /** How fast a fired rocket's visual offset from its true path fades (seconds). */
@@ -929,7 +930,7 @@ export class RocketsClient implements GameClient {
     engine.scene.add(this.arena.group);
     // Neon maps glow: bloom on the bright strips, signs and the sun.
     if (themeOf(map).neon) {
-      const bloom = (this.bloom = createBloom(engine.renderer));
+      const bloom = (this.bloom = createBloom(engine.renderer, { saturation: 1.02 }));
       engine.renderHook = () => (this.bloomOn ? bloom.render(engine.scene, engine.camera) : engine.renderer.render(engine.scene, engine.camera));
       // Neon trails: a hot pink streak cooling into lavender haze.
       this.effects?.trailColors.hot.set(0xff6ad8);
@@ -1010,7 +1011,7 @@ export class RocketsClient implements GameClient {
         mat.onBeforeRender = src.onBeforeRender;
         mat.customProgramCacheKey = src.customProgramCacheKey;
         if ((src as THREE.MeshToonMaterial).isMeshToonMaterial) {
-          // Worn metal: a warm rim light round the gun's silhouette edges, picking up the dusk sun.
+          // Worn metal: a rim light round the gun's silhouette edges, cyan sky on the upper edges and warm dusk sun below.
           const base = src.onBeforeCompile.bind(src);
           const key = src.customProgramCacheKey.bind(src);
           mat.onBeforeCompile = (shader, renderer) => {
@@ -1019,7 +1020,8 @@ export class RocketsClient implements GameClient {
               '#include <opaque_fragment>',
               `{
                 float rim = pow(1.0 - max(dot(normalize(normal), normalize(vViewPosition)), 0.0), 3.0);
-                outgoingLight += vec3(1.0, 0.58, 0.32) * rim * 0.5;
+                vec3 rimColor = mix(vec3(1.0, 0.58, 0.32), vec3(0.3, 0.85, 1.0), smoothstep(-0.2, 0.5, normal.y));
+                outgoingLight += rimColor * rim * 0.6;
               }
               #include <opaque_fragment>`,
             );
@@ -1573,7 +1575,7 @@ export class RocketsClient implements GameClient {
       if (this.warhead) {
         const r = this.reload;
         this.warhead.visible = r > 0.25;
-        this.warhead.position.z = WARHEAD_REST_Z + (1 - Math.min(1, (r - 0.25) / 0.6)) * 0.35;
+        this.warhead.position.z = WARHEAD_REST_Z + (1 - Math.min(1, (r - 0.25) / 0.6)) * 0.245;
       }
       if (this.muzzleGlow) this.muzzleGlow.intensity = this.recoil * 14;
     }

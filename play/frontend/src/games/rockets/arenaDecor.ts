@@ -60,7 +60,7 @@ const THEMES: Record<string, Theme> = {
     dusk: true,
     neon: true,
     sun: [0.62, 0.2, -0.76],
-    light: { sky: 0x9a8cff, ground: 0x4a2c5c, hemi: 1.35, sun: 0xffa060, sunI: 3.2 },
+    light: { sky: 0xa8a8ec, ground: 0x3c2a4c, hemi: 1.1, sun: 0xffa868, sunI: 3.6 },
   },
   skyway: { surfaces: { floor: s('turf', 'strata'), platform: s('planks'), stair: s('planks') }, props: [], skyline: 'islands', under: 'rocks' },
   canyon: {
@@ -680,7 +680,7 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, fade: Bucket, rand:
  */
 function rooftops(half: number, wallTop: number, solid: Bucket, glow: Bucket, rand: () => number) {
   const dark = 0x3a3848;
-  const pinks = [0xc23c8c, 0xa8357a, 0x4a4660, 0x5a566e];
+  const pinks = [0xc4407e, 0xa8357a, 0x4a4660, 0x5a566e];
   const n = 26;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + rand() * 0.15;

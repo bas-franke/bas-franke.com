@@ -44,7 +44,7 @@ function foundry(): MapData {
     half,
     skyColor: 0x22308e,
     fogColor: 0xc06c9e,
-    tint: { floor: 0x58647a, wall: 0xc23c8c, platform: 0xe2489e, stair: 0xf2c232, pillar: 0xf2c232, tower: 0xd8409a, crate: 0x2fbccc, ledge: 0xf2c232 },
+    tint: { floor: 0x58647a, wall: 0xc4407e, platform: 0xe24c8a, stair: 0xf2c232, pillar: 0xf2c232, tower: 0xd8448a, crate: 0x2fbccc, ledge: 0xf2c232 },
   });
 }
 
