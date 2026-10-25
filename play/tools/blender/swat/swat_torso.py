@@ -118,8 +118,8 @@ def lin(hexstr):
 
 def mats():
     return {
-        "nylon": material("Torso_Nylon", lin("#101113"), 0.78, bump=0.42, bump_scale=700),
-        "webbing": material("Torso_Webbing", lin("#0e0f10"), 0.7, bump=0.3, bump_scale=1500),
+        "nylon": material("Torso_Nylon", lin("#0c0d0e"), 0.74, bump=0.42, bump_scale=700),
+        "webbing": material("Torso_Webbing", lin("#0a0b0c"), 0.68, bump=0.3, bump_scale=1500),
         "polymer": material("Torso_Polymer", lin("#111112"), 0.42),
         "metal": material("Torso_Metal", lin("#2a2b2d"), 0.35, metal=1.0),
         "rubber": material("Torso_Rubber", lin("#0f0f10"), 0.62),
@@ -550,23 +550,17 @@ class Plate:
         return out
 
 
-def molle_on_plate(b, plate, mat, z0, z1, x0, x1, base_out, pitch=0.038, strip=0.025, col=0.0381, gap=0.004):
-    """Rows of flat 25 mm webbing on a plate face, cut into bar-tacked segments."""
+def molle_on_plate(b, plate, mat, z0, z1, x0, x1, base_out, pitch=0.038, strip=0.025, col=0.0381, gap=0.0045):
+    """Rows of flat 25 mm webbing on a plate face, cut into bar-tacked segments: one low-poly box per segment, raised
+    3 mm and set on the plate's local tangent so the rows follow its curve."""
     z = z0 + strip / 2
     while z + strip / 2 <= z1 + 1e-6:
         x = x0
         while x + 0.01 < x1:
             xe = min(x + col - gap, x1)
-            pts, nrm = [], []
-            for xx in (x, (x + xe) / 2, xe):
-                row_p, row_n = [], []
-                for zz in (z - strip / 2, z + strip / 2):
-                    p, n = plate.point(xx, zz, base_out)
-                    row_p.append(p)
-                    row_n.append(n)
-                pts.append(row_p)
-                nrm.append(row_n)
-            b.add_bm(shell_bm(pts, nrm, 0.0028), mat)
+            xm = (x + xe) / 2
+            M = plate.frame(xm, z, base_out)
+            b.add_bm(box_bm((xe - x, 0.0032, strip), (0, 0.0016, 0)), mat, M)
             x += col
         z += pitch
 
@@ -609,11 +603,11 @@ def mag_pouch_bm(w, d, h):
     two webbing bands across the front (local: back at y=0, bottom at z=0)."""
     parts = {"nylon": [], "webbing": [], "polymer": [], "velcro": []}
     parts["nylon"].append(rbox_bm((w, d, h), (0, d / 2, h / 2), r=0.008, seg=1))
-    parts["polymer"].append(rbox_bm((w - 0.016, d - 0.018, 0.034), (0, d / 2, h + 0.008), r=0.004, seg=1))  # mag
-    parts["polymer"].append(rbox_bm((w - 0.01, d - 0.01, 0.009), (0, d / 2, h + 0.028), r=0.003, seg=1))  # baseplate
-    for sx in (-0.014, 0.014):
-        parts["webbing"].append(box_bm((0.005, d + 0.006, 0.005), (sx, d / 2, h + 0.035)))  # bungee over the top
-        parts["webbing"].append(box_bm((0.005, 0.005, 0.05), (sx, d + 0.002, h + 0.01)))  # bungee down the front
+    for mx in (-w / 4 + 0.002, w / 4 - 0.002):  # two magazines per pouch, like the sheet's doubles
+        parts["polymer"].append(rbox_bm((w / 2 - 0.012, d - 0.02, 0.05), (mx, d / 2, h + 0.012), r=0.004, seg=1))
+        parts["polymer"].append(rbox_bm((w / 2 - 0.008, d - 0.014, 0.01), (mx, d / 2, h + 0.04), r=0.003, seg=1))
+        parts["webbing"].append(box_bm((0.005, d + 0.006, 0.005), (mx, d / 2, h + 0.047)))  # bungee over the top
+        parts["webbing"].append(box_bm((0.005, 0.005, 0.055), (mx, d + 0.002, h + 0.018)))  # bungee down the front
     parts["polymer"].append(rbox_bm((0.026, 0.006, 0.02), (0, d + 0.004, h - 0.018), r=0.002, seg=1))  # pull tab
     for zz in (0.35, 0.62):
         parts["webbing"].append(box_bm((w + 0.004, 0.004, 0.022), (0, d + 0.001, h * zz)))
@@ -647,22 +641,20 @@ def build_torso(fit, coll, m, bp):
 
     # MOLLE: lower front (behind and between the mag pouches), most of the back panel.
     b = Builder("Torso_Molle")
-    molle_on_plate(b, front, m["webbing"], fbot(front) + 0.012, fbot(front) + 0.012 + 0.038 * 6 - 0.013, -0.158, 0.158, T)
+    molle_on_plate(b, front, m["webbing"], fbot(front) + 0.01, ftop(front) - 0.29, -0.158, 0.158, T)
     molle_on_plate(b, back, m["webbing"], fbot(back) + 0.014, ftop(back) - 0.14, -0.162, 0.162, T)
-    ob = b.finish(coll, smooth=False)
-    ob["high"] = 1  # bake source: the finish worker bakes the webbing into the plates' normal map
-    objs.append(ob)
+    objs.append(b.finish(coll, smooth=False))
 
     # Velcro admin field on the front top (the patch sits on it) and the back top.
     b = Builder("Torso_Velcro")
-    for plate, w, h, dz in ((front, 0.23, 0.094, 0.072), (back, 0.275, 0.11, 0.086)):
+    for plate, w, h, dz in ((front, 0.21, 0.084, 0.046), (back, 0.275, 0.11, 0.086)):
         M = plate.frame(0, ftop(plate) - dz, T)
         b.add_bm(rbox_bm((w, 0.003, h), (0, 0.0015, 0), r=0.0012, seg=1), m["velcro"], M)
     objs.append(b.finish(coll, smooth=False))
 
     # SWAT patches: front, back (bigger), left sleeve.
     b = Builder("Torso_Patches")
-    for plate, w, h, th, dz in ((front, 0.208, 0.078, 0.056, 0.072), (back, 0.252, 0.094, 0.07, 0.086)):
+    for plate, w, h, th, dz in ((front, 0.19, 0.072, 0.052, 0.046), (back, 0.252, 0.094, 0.07, 0.086)):
         M = plate.frame(0, ftop(plate) - dz, T + 0.003)
         b.add_bm(rbox_bm((w, 0.003, h), (0, 0.0015, 0), r=0.002, seg=1), m["patch"], M)
         b.add_bm(text_bm("SWAT", th, 0.0), m["text"], M @ Matrix.Translation((0, 0.0036, -0.001)))
@@ -672,22 +664,26 @@ def build_torso(fit, coll, m, bp):
     out_dir = Vector((-1, 0.1, 0.1))
     out_dir = (out_dir - axis * out_dir.dot(axis)).normalized()
     hit = fit.outer(c, out_dir) or c + out_dir * 0.06
+    objs.append(b.finish(coll, smooth=False))
+    b = Builder("Torso_SleevePatch")  # weight entirely to upperarm.L
     M = frame(hit + out_dir * 0.002, out_dir, up=-axis)
     b.add_bm(rbox_bm((0.098, 0.0028, 0.064), (0, 0.0014, 0), r=0.003, seg=1), m["patch"], M)
     b.add_bm(text_bm("SWAT", 0.027, 0.0), m["text"], M @ Matrix.Translation((0, 0.0034, -0.0005)))
-    objs.append(b.finish(coll, smooth=False))
+    ob = b.finish(coll, smooth=False)
+    ob["bone"] = "upperarm.L"
+    objs.append(ob)
 
     # Mag pouches: three 5.56 pouches on the lower front.
     b = Builder("Torso_MagPouches")
-    z0 = fbot(front) + 0.014
-    for x in (-0.1, 0.0, 0.1):
+    z0 = ftop(front) - 0.292  # patch, a small gap, the mag tops, then the pouches (top to bottom, as on the sheet)
+    for x in (-0.096, 0.0, 0.096):
         M = front.frame(x, z0, T + 0.004)
-        add_parts(b, mag_pouch_bm(0.094, 0.052, 0.165), M, m)
+        add_parts(b, mag_pouch_bm(0.09, 0.052, 0.15), M, m)
     objs.append(b.finish(coll, smooth=True))
 
     # Radio pouch with radio and antenna, upper front on the wearer's left (-X), under the shoulder strap.
     b = Builder("Torso_Radio")
-    xr, zr = -0.146, ftop(front) - 0.19
+    xr, zr = -0.136, ftop(front) - 0.1
     M = front.frame(xr, zr, T + 0.003)
     add_parts(b, pouch_bm(0.062, 0.038, 0.105, flap=False, bungee=True, tab=False), M, m)
     b.add_bm(rbox_bm((0.052, 0.03, 0.05), (0, 0.022, 0.125), r=0.004, seg=2), m["polymer"], M)  # radio top
@@ -725,22 +721,13 @@ def build_torso(fit, coll, m, bp):
             seg_th = np.linspace(th_f - 0.25, th_b + 0.25, 7)
             for k in range(len(seg_th) - 1):
                 ta, tb = seg_th[k], seg_th[k + 1] - 0.03
-                pp, nn = [], []
-                for th in (ta, (ta + tb) / 2, tb):
-                    rp, rn = [], []
-                    for z in (zc - 0.0125, zc + 0.0125):
-                        cy = fit.axis_y(z)
-                        ang = th if s > 0 else math.pi - th
-                        p, d = fit.radial(Vector((0, cy, z)), ang, 0.16)
-                        rp.append(p + d * 0.0225)
-                        rn.append(d)
-                    pp.append(rp)
-                    nn.append(rn)
-                bw.add_bm(shell_bm(pp, nn, 0.0026), m["webbing"])
+                pa, da = fit.radial(Vector((0, fit.axis_y(zc), zc)), ta if s > 0 else math.pi - ta, 0.16)
+                pb, db = fit.radial(Vector((0, fit.axis_y(zc), zc)), tb if s > 0 else math.pi - tb, 0.16)
+                d = (da + db).normalized()
+                c = (pa + pb) / 2 + d * 0.0225
+                bw.add_bm(box_bm(((pb - pa).length, 0.003, 0.025), (0, 0.0015, 0)), m["webbing"], frame(c, d))
     objs.append(b.finish(coll, bevel=0.004, segments=1, angle=40))
-    ob = bw.finish(coll, smooth=False)
-    ob["high"] = 1
-    objs.append(ob)
+    objs.append(bw.finish(coll, smooth=False))
 
     # Side pouches on the cummerbund.
     b = Builder("Torso_SidePouches")

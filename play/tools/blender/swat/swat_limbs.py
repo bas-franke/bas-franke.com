@@ -259,10 +259,10 @@ def keep_high(o, mat):
 # the body's hand length. The glove replaces the hand: the finish stage hides the Body_Skin faces weighted to it.
 
 FINGERS = [  # base x, segment lengths, base radius, splay (degrees)
-    (-0.0340, (0.049, 0.030, 0.024), 0.0098, -7.0),
-    (-0.0114, (0.053, 0.033, 0.025), 0.0103, -2.5),
-    (0.0114, (0.050, 0.031, 0.024), 0.0098, 3.0),
-    (0.0334, (0.039, 0.024, 0.021), 0.0088, 8.5),
+    (-0.0352, (0.049, 0.030, 0.024), 0.0109, -7.0),
+    (-0.0118, (0.053, 0.033, 0.025), 0.0114, -2.5),
+    (0.0118, (0.050, 0.031, 0.024), 0.0109, 3.0),
+    (0.0346, (0.039, 0.024, 0.021), 0.0098, 8.5),
 ]
 CURL = (math.radians(8), math.radians(16), math.radians(12))
 KNUCKLE_Y = 0.099
@@ -341,8 +341,8 @@ def glove_shell(coll, cuff):
     tube(bm, Vector((0, -0.085, 0.001)), Vector((0, 0.020, 0.0)), 0.042, 0.037, segs=20, scale_x=1.22)
     bmesh.ops.scale(bm, vec=(cuff[0], 1, cuff[1]), verts=list(bm.verts))
     # Hand: a flat-backed mitt with a thick heel and a knuckle ridge.
-    ellipsoid(bm, Vector((0, 0.062, 0.0)), (0.047, 0.055, 0.0175), segs=(20, 12))
-    ellipsoid(bm, Vector((0.004, 0.036, -0.004)), (0.042, 0.038, 0.020), segs=(18, 10))
+    ellipsoid(bm, Vector((0, 0.062, 0.0)), (0.050, 0.056, 0.0205), segs=(20, 12))
+    ellipsoid(bm, Vector((0.004, 0.036, -0.004)), (0.045, 0.039, 0.023), segs=(18, 10))
     tube(bm, Vector((-0.041, KNUCKLE_Y + 0.004, 0.001)), Vector((0.040, KNUCKLE_Y + 0.002, 0.001)), 0.012, 0.0108, segs=10)
     # Thenar mound and the thumb.
     ellipsoid(bm, Vector((-0.032, 0.040, -0.009)), (0.020, 0.031, 0.016))
@@ -391,12 +391,12 @@ def glove_parts(tree, chains, thumb, coll, cuff):
     parts = []
     # Raised armour base across the knuckles, and a hard oval cap over each knuckle.
     bm = conform_grid(tree, 8, 2, lambda u, v: Vector((u * 0.041 - 0.001, KNUCKLE_Y - 0.003 + v * 0.011, 0.12)), down, 0.0003)
-    parts.append((modified(mesh_from_bm("armor", bm), coll, [("SOLIDIFY", {"thickness": 0.0018, "offset": 1.0})]), 4))
+    parts.append((modified(mesh_from_bm("armor", bm), coll, [("SOLIDIFY", {"thickness": 0.0030, "offset": 1.0})]), 1))
     bm = bmesh.new()
     for pts, dirs, r in chains:
         hit, n = ray(tree, pts[0] + Vector((0, 0.001, 0.12)), down, 0.3)
         if hit is not None:
-            ellipsoid(bm, hit + n * 0.0030, (r * 0.88, 0.0100, 0.0036), frame(n, Vector((0, 1, 0))), segs=(8, 4))
+            ellipsoid(bm, hit + n * 0.0040, (r * 0.98, 0.0115, 0.0052), frame(n, Vector((0, 1, 0))), segs=(8, 4))
     parts.append((mesh_from_bm("caps", bm), 1))
     # Padded armour on the first two finger segments and on the thumb.
     bm = bmesh.new()
@@ -411,7 +411,7 @@ def glove_parts(tree, chains, thumb, coll, cuff):
         hit, n = ray(tree, mid + back * 0.05, -back, 0.1)
         if hit is None:
             continue
-        box(bm, hit + n * 0.0013, frame(n, d), (r * 1.15, (p1 - p0).length * 0.46, 0.0028))
+        box(bm, hit + n * 0.0016, frame(n, d), (r * 1.2, (p1 - p0).length * 0.5, 0.0036))
     parts.append((mesh_from_bm("pads", bm), 1))
     # Textured panel on the back of the hand, and the grip panel on the palm.
     bm = conform_grid(tree, 4, 3, lambda u, v: Vector((u * 0.036, 0.055 + v * 0.026, 0.12)), down, 0.0005)
@@ -555,8 +555,8 @@ def knee_pad(side, M, coll, mt):
 
 WIDTH = [(0.0, 0.033), (0.08, 0.041), (0.25, 0.042), (0.5, 0.044), (0.68, 0.049), (0.82, 0.047), (0.92, 0.038), (0.975, 0.022), (1.0, 0.004)]
 HEIGHT = [(0.0, 0.105), (0.28, 0.104), (0.42, 0.098), (0.55, 0.088), (0.7, 0.072), (0.85, 0.058), (0.95, 0.045), (1.0, 0.03)]
-SOLE_TOP = 0.040
-SHAFT_TOP = 0.232
+SOLE_TOP = 0.044
+SHAFT_TOP = 0.335  # high tactical boot up the shin: the trousers end at ~0.31 m and blouse over the collar
 FIT = {"heel": -0.072, "toe": 0.236, "wscale": 1.0, "rx": 0.043, "ry": 0.051, "cx": 0.0, "cy": 0.0}
 
 
@@ -657,14 +657,14 @@ def boot_shell(side, coll):
     bm.faces.new(rings[-1])
     # Shaft: elliptical sections hugging the ankle, flaring slightly to the collar, leaning a little forward.
     rings = []
-    n_z = 10
+    n_z = 16
     for i in range(n_z + 1):
         f = i / n_z
         z = 0.06 + (SHAFT_TOP - 0.06) * f
-        waist = 0.15 * math.exp(-((f - 0.28) / 0.22) ** 2)  # narrowest just above the ankle bones
-        rx = FIT["rx"] * (0.98 + 0.10 * f - waist)
-        ry = FIT["ry"] * (1.0 + 0.07 * f - waist * 0.7)
-        yc = FIT["cy"] - 0.004 + 0.010 * f
+        waist = 0.12 * math.exp(-((f - 0.22) / 0.16) ** 2)  # narrowest just above the ankle bones
+        rx = FIT["rx"] * (0.97 + 0.08 * f - waist)
+        ry = FIT["ry"] * (1.0 + 0.05 * f - waist * 0.7)
+        yc = FIT["cy"] - 0.004 + 0.008 * f
         ring = [bm.verts.new((FIT["cx"] + rx * math.cos(2 * math.pi * k / 20), yc + ry * math.sin(2 * math.pi * k / 20), z)) for k in range(20)]
         rings.append(ring)
     for i in range(n_z):
@@ -750,16 +750,16 @@ def boot(side, M, coll, mt):
 
     # Lugged outsole with a heel break, and a plain midsole band.
     bm = bmesh.new()
-    extrude_outline(bm, outline(side, 18, notch=0.007, grow=0.005), 0.0, 0.016, lift_bottom=True)
-    prism(bm, outline(side, 18, grow=0.0045), outline(side, 18, grow=0.0005), 0.015, SOLE_TOP + 0.001)
+    extrude_outline(bm, outline(side, 20, notch=0.008, grow=0.007), 0.0, 0.021, lift_bottom=True)
+    prism(bm, outline(side, 20, grow=0.0065), outline(side, 20, grow=0.001), 0.020, SOLE_TOP + 0.001)
     parts.append((mesh_from_bm("sole", bm), 3))
 
     # Lacing: rows on the instep (cast down) and up the shaft front (cast backwards).
     rows = []
-    for t in (0.74, 0.67, 0.60, 0.53):
+    for t in (0.70, 0.635, 0.57):
         y = foot_y(t)
         rows.append([ray(tree, Vector((FIT["cx"] + sx * 0.0165, y, 0.4)), Vector((0, 0, -1)), 0.5) for sx in (-1, 1)])
-    for z in (0.120, 0.148, 0.176, 0.204, 0.230):
+    for z in (0.128, 0.156, 0.184, 0.212, 0.240, 0.268, 0.296, 0.320):
         rows.append([ray(tree, Vector((FIT["cx"] + sx * 0.0175, 0.4, z)), Vector((0, -1, 0)), 0.5) for sx in (-1, 1)])
     rows = [r for r in rows if r[0][0] is not None and r[1][0] is not None]
     # Padded tongue strip down the middle of the lacing.
@@ -816,6 +816,12 @@ def boot(side, M, coll, mt):
     keep_high(high, mt["leather"])
     for o in (final, high):
         o.data.transform(M)
+    # Where the trousers tuck in (world space, the boot faces +Y): the finish stage pulls Body_Trousers vertices below
+    # tuck_top inside the ellipse (tuck_cx, tuck_cy, tuck_rx, tuck_ry) and lets them blouse just above it.
+    c = M @ Vector((FIT["cx"], FIT["cy"] + 0.004, SHAFT_TOP))
+    final["tuck_top"] = c.z
+    final["tuck_cx"], final["tuck_cy"] = c.x, c.y
+    final["tuck_rx"], final["tuck_ry"] = FIT["rx"] - 0.004, FIT["ry"] - 0.004
     return final, high
 
 
@@ -934,13 +940,14 @@ def fit_boot(side, tag, M, skin, tree):
         if pts:
             ys = [p.y for p in pts]
             xs = [p.x for p in pts]
-            FIT["heel"] = min(min(ys) - 0.016, -0.06)
-            FIT["toe"] = max(max(ys) + 0.024, 0.20)
-            FIT["wscale"] = max(1.0, (max(abs(x) for x in xs) + 0.007) / 0.049)
+            # A chunky boot: generous toe box and width round the body's foot.
+            FIT["heel"] = min(min(ys) - 0.020, -0.066)
+            FIT["toe"] = max(max(ys) + 0.040, 0.24)
+            FIT["wscale"] = max(1.12, (max(abs(x) for x in xs) + 0.010) / 0.049)
     if tree:
         # Widest leg section (trousers bloused into the boot) between the ankle and the collar.
         rx, ry, cxs, cys = 0.0, 0.0, [], []
-        for z in (0.12, 0.16, 0.20, SHAFT_TOP - 0.01):
+        for z in (0.12, 0.17, 0.22, SHAFT_TOP - 0.02):
             ex = {}
             for name, d in (("+x", Vector((1, 0, 0))), ("-x", Vector((-1, 0, 0))), ("+y", Vector((0, 1, 0))), ("-y", Vector((0, -1, 0)))):
                 wd = (M.to_3x3() @ d).normalized()
@@ -956,8 +963,9 @@ def fit_boot(side, tag, M, skin, tree):
                 cys.append((ex["+y"].y + ex["-y"].y) / 2)
         if cxs:
             # The ankle and lower calf (skin) inside a snug shaft; the trousers blouse over the top as on the sheet.
-            FIT["rx"] = min(0.050, max(0.040, rx + 0.012))
-            FIT["ry"] = min(0.056, max(0.047, ry + 0.012))
+            # Room for the tucked trouser leg inside the shaft.
+            FIT["rx"] = min(0.060, max(0.046, rx + 0.016))
+            FIT["ry"] = min(0.066, max(0.052, ry + 0.016))
             FIT["cx"] = sum(cxs) / len(cxs)
             FIT["cy"] = sum(cys) / len(cys)
     print(f"  boot {tag} fit: " + ", ".join(f"{k}={v:.3f}" for k, v in FIT.items()))
@@ -1061,6 +1069,46 @@ def hide_covered_skin():
     bm.free()
 
 
+def load_parts():
+    """Preview only: the other workers' parts (head, torso), so the four views show the whole operator."""
+    for name in ("swat_head.blend", "swat_torso.blend"):
+        path = os.path.join(HERE, "out", name)
+        if not os.path.exists(path):
+            continue
+        with bpy.data.libraries.load(path, link=False) as (src, dst):
+            dst.objects = list(src.objects)
+        for o in dst.objects:
+            if o is not None and o.type == "MESH" and not o.get("high"):
+                bpy.context.scene.collection.objects.link(o)
+
+
+def tuck_trousers(boots):
+    """Preview only: what the finish stage does with the tuck_* properties: trouser legs pulled inside the boot
+    shafts below the collar, bloused just above it."""
+    trousers = next((o for o in bpy.context.scene.objects if o.name.startswith("Body_Trousers")), None)
+    if trousers is None:
+        return
+    mw = trousers.matrix_world
+    inv = mw.inverted()
+    for v in trousers.data.vertices:
+        p = mw @ v.co
+        for b in boots:
+            top = b["tuck_top"]
+            dx, dy = p.x - b["tuck_cx"], p.y - b["tuck_cy"]
+            if abs(dx) > 0.15 or abs(dy) > 0.15 or p.z > top + 0.07:
+                continue
+            e = math.hypot(dx / b["tuck_rx"], dy / b["tuck_ry"])
+            if p.z < top - 0.04:
+                k = min(1.0, 0.92 / max(e, 1e-6))  # tucked inside the shaft
+            else:
+                # Bloused: the fabric drapes out over the collar and hangs a few centimetres down over the shaft.
+                f = min(1.0, (p.z - (top - 0.04)) / 0.11)
+                k = max(1.18 / max(e, 1e-6), 1.0) * (1.0 + 0.06 * math.sin(math.pi * f))
+                k = k * (1 - f) + max(k, 1.0) * f if e > 1.0 else k
+            p = Vector((b["tuck_cx"] + dx * k, b["tuck_cy"] + dy * k, p.z))
+            v.co = inv @ p
+
+
 def previews(anch, objs):
     os.makedirs(PREVIEW, exist_ok=True)
     extra = bpy.data.collections.new("Preview")
@@ -1068,6 +1116,8 @@ def previews(anch, objs):
     if not bpy.data.collections.get("BodyRef"):
         standin_body(anch, extra)
     hide_covered_skin()
+    load_parts()
+    tuck_trousers([objs["Limbs_Boot.R"], objs["Limbs_Boot.L"]])
     floor = bpy.data.meshes.new("floor")
     bm = bmesh.new()
     bmesh.ops.create_grid(bm, x_segments=1, y_segments=1, size=6)
@@ -1111,6 +1161,9 @@ def previews(anch, objs):
     if body:
         body.hide_render = False
     shoot("lower", Vector((0, 0, 0.62)), Vector((0.35, 1.0, 0.12)), Vector((0, 0, 1)), 3.2, lens=60, res=(900, 1100), key=(-1.0, 1.3, 1.2))
+    # The sheet's four views of the whole operator: front, left, back, three-quarters.
+    for name, d in (("v_front", (0, 1, 0.05)), ("v_left", (-1, 0, 0.05)), ("v_back", (0, -1, 0.05)), ("v_34", (-0.75, 1, 0.08))):
+        shoot(name, Vector((0, 0, 0.93)), Vector(d), Vector((0, 0, 1)), 5.2, lens=50, res=(500, 1000), key=(-1.0, 1.4, 1.1))
 
 
 # ---- main ---------------------------------------------------------------------------------------------------------

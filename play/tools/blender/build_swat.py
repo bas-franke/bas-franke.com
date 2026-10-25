@@ -85,6 +85,7 @@ def palette():
 
 CATEGORY_KEYS = [
     ("Team", ("team",)),
+    ("Gear", ("patchbase", "patch_base", "backing")),
     ("Lens", ("lens", "glass", "visor_clear")),
     ("Patch", ("patch", "swat", "label", "cross", "text")),
     ("Balaclava", ("balaclava", "mask", "knit")),
@@ -112,9 +113,9 @@ def category(name):
 
 # Base colours per category (linear). Navy ripstop uniform (#1f2433), black nylon and polymer, white patches.
 LIB_COLOR = {
-    "Uniform": (0.0137, 0.0176, 0.0319), "Gear": (0.024, 0.024, 0.026), "Strap": (0.019, 0.019, 0.021),
-    "Polymer": (0.021, 0.021, 0.023), "Helmet": (0.016, 0.016, 0.018), "Rubber": (0.015, 0.015, 0.016),
-    "Leather": (0.019, 0.018, 0.018), "Glove": (0.02, 0.02, 0.022), "Balaclava": (0.018, 0.018, 0.02),
+    "Uniform": (0.0137, 0.0176, 0.0319), "Gear": (0.0037, 0.004, 0.0044), "Strap": (0.0045, 0.0047, 0.005),
+    "Polymer": (0.008, 0.008, 0.009), "Helmet": (0.007, 0.007, 0.008), "Rubber": (0.006, 0.006, 0.0065),
+    "Leather": (0.007, 0.0068, 0.0066), "Glove": (0.007, 0.007, 0.0075), "Balaclava": (0.006, 0.006, 0.0065),
     "GearMetal": (0.1, 0.1, 0.105), "Buckle": (0.03, 0.03, 0.032), "Patch": (0.72, 0.72, 0.72), "Team": (0.8, 0.8, 0.8),
     "Skin": (0.42, 0.28, 0.22),
 }
@@ -723,6 +724,29 @@ def armband(p, x):
     return join([band, patch], "Survivor_Armband")
 
 
+def tuck_trousers(meshes):
+    """Boots that carry tuck_* properties (centre and radii of the boot opening) get the trouser legs tucked in: every
+    trouser vertex more than 4 cm below the boot top is pulled inside 85% of the opening ellipse."""
+    boots = [m for m in meshes if "tuck_top" in m.keys()]
+    legs = [m for m in meshes if "trouser" in m.name.lower() or "pant" in m.name.lower()]
+    for b in boots:
+        top, cx, cy, rx, ry = (float(b[k]) for k in ("tuck_top", "tuck_cx", "tuck_cy", "tuck_rx", "tuck_ry"))
+        for leg in legs:
+            moved = 0
+            for v in leg.data.vertices:
+                c = leg.matrix_world @ v.co
+                if c.z > top - 0.04 or abs(c.x - cx) > rx * 2.2 or abs(c.y - cy) > ry * 2.2:
+                    continue
+                dx, dy = c.x - cx, c.y - cy
+                e = math.hypot(dx / rx, dy / ry)
+                if e > 0.85:
+                    k = 0.85 / e
+                    w = leg.matrix_world.inverted() @ Vector((cx + dx * k, cy + dy * k, c.z))
+                    v.co = w
+                    moved += 1
+            print("TUCK", leg.name, "into", b.name, moved)
+
+
 def fitted_armband(p, arm, sleeve):
     """The Team band around the left upper arm, sized to the actual sleeve: a flat band just outside the cloth."""
     b = arm.data.bones["upperarm.L"]
@@ -922,7 +946,20 @@ def bake(meshes, size=ATLAS):
         mr.inputs["To Max"].default_value = 1.12
         nt.links.new(nz.outputs["Fac"], mr.inputs["Value"])
         col = nn("ShaderNodeVectorMath", operation="SCALE")
-        if linked is not None:
+        alpha_src = None
+        if linked is not None and bsdf.inputs["Alpha"].links:
+            alpha_src = bsdf.inputs["Alpha"].links[0].from_socket
+        elif linked is not None and "Alpha" in linked.node.outputs and linked.node.type == "TEX_IMAGE":
+            alpha_src = linked.node.outputs["Alpha"]
+        if linked is not None and alpha_src is not None:
+            # Text/emblem textures with a transparent background (white SWAT letters): composite over the black
+            # patch backing, since the exported material is opaque.
+            mixa = nn("ShaderNodeMix", data_type="RGBA", blend_type="MIX")
+            nt.links.new(alpha_src, mixa.inputs["Factor"])
+            mixa.inputs[6].default_value = (0.012, 0.012, 0.013, 1.0)
+            nt.links.new(linked, mixa.inputs[7])
+            nt.links.new(mixa.outputs[2], col.inputs[0])
+        elif linked is not None:
             nt.links.new(linked, col.inputs[0])
         else:
             col.inputs[0].default_value = base
@@ -1023,6 +1060,7 @@ def bake(meshes, size=ATLAS):
         return nodes
 
     run("NORMAL", nrm, normal_setup, samples=2, normal_space="TANGENT")
+    bake_high(meshes, nrm)
     nrm.pack()
     # Roughness (G) and metalness (B), baked as emission.
     orm = new_img("SurvivorORM", size // 2, True, (1, 0.7, 0, 1))
@@ -1083,9 +1121,62 @@ def bake(meshes, size=ATLAS):
     print("BAKED survivor maps")
 
 
+def bake_high(meshes, nrm):
+    """Projects the parts' high-detail sources (MOLLE rows, sculpted mask/head/helmet, gloves, boots) onto their low
+    meshes' islands of the shared normal atlas (selected-to-active, short rays), then deletes the sources."""
+    if not HIGHS:
+        return
+    by_name = {m.name: m for m in meshes}
+    pairs = {}
+    for h in HIGHS:
+        targets = HIGH_TARGETS.get(h.name)
+        if targets is None:
+            base = h.name[:-5] if h.name.lower().endswith("_high") else h.name[:-4] if h.name.endswith("High") else None
+            targets = [base] if base else []
+        for t in targets:
+            if t in by_name:
+                pairs.setdefault(t, []).append(h)
+    scene = bpy.context.scene
+    scene.cycles.samples = 2
+    for low_name, highs in pairs.items():
+        low = by_name[low_name]
+        temp = []
+        for mat in low.data.materials:
+            if not mat or category(mat.name) == "Lens":
+                continue
+            t = mat.node_tree.nodes.new("ShaderNodeTexImage")
+            t.image = nrm
+            mat.node_tree.nodes.active = t
+            temp.append((mat, t))
+        bpy.ops.object.select_all(action="DESELECT")
+        for h in highs:
+            h.hide_set(False)
+            h.select_set(True)
+        low.select_set(True)
+        bpy.context.view_layer.objects.active = low
+        try:
+            bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT", use_selected_to_active=True, cage_extrusion=0.012, max_ray_distance=0.03, margin=4, use_clear=False)
+            print("BAKED HIGH", low_name, "<-", [h.name for h in highs])
+        except RuntimeError as exc:
+            print("HIGH BAKE FAILED", low_name, exc)
+        for mat, t in temp:
+            mat.node_tree.nodes.remove(t)
+    for h in HIGHS:
+        bpy.data.objects.remove(h, do_unlink=True)
+    HIGHS.clear()
+
+
 # ---- build ------------------------------------------------------------------------------------------------------------
 
 SWAT_OUT = HERE / "swat" / "out"
+HIGHS = []
+# Which low mesh a high-detail bake source projects onto (by name); `_high` / `High` suffixes are matched generically.
+HIGH_TARGETS = {
+    "Torso_Molle": ["Torso_FrontPlate", "Torso_BackPlate"],
+    "Torso_CummerbundMolle": ["Torso_Cummerbund"],
+    "Head_HeadHigh": ["Head_Face"],
+    "Head_HelmetParts": ["Head_HelmetGear", "Head_Helmet"],
+}
 PART_FILES = {"body": "swat_body.blend", "head": "swat_head.blend", "torso": "swat_torso.blend", "limbs": "swat_limbs.blend"}
 BONE_NAMES = [b[0] for b in bz.BONES]
 BUDGET = 30000
@@ -1102,8 +1193,12 @@ def load_part(path):
             bpy.context.collection.objects.link(o)
     for o in list(objs):
         if o.get("high"):
-            bpy.data.objects.remove(o, do_unlink=True)
+            # Kept for the high-to-low normal bake (bake_high), never exported.
             objs.remove(o)
+            if o.type == "MESH":
+                HIGHS.append(o)
+            else:
+                bpy.data.objects.remove(o, do_unlink=True)
     print("PART", path.name, [o.name for o in objs])
     return objs
 
@@ -1189,8 +1284,12 @@ def bind(obj, arm, src):
     """Weights for one exported mesh: its own if it has bone groups, rigid for head gear, else from the body (or by
     region for the stand-in), then parented to the armature."""
     n = obj.name.lower()
-    rigid = next((b for k, b in RIGID.items() if k in n), None)
-    if rigid and not has_weights(obj):
+    rigid = obj.get("bone") if obj.get("bone") in BONE_NAMES else next((b for k, b in RIGID.items() if k in n), None)
+    if obj.get("bone") in BONE_NAMES:
+        for g in list(obj.vertex_groups):
+            obj.vertex_groups.remove(g)
+        obj.vertex_groups.new(name=rigid).add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+    elif rigid and not has_weights(obj):
         for g in list(obj.vertex_groups):
             obj.vertex_groups.remove(g)
         obj.vertex_groups.new(name=rigid).add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
@@ -1209,9 +1308,15 @@ def bind(obj, arm, src):
     return obj
 
 
+FIRST_TO_GO = ("beltpouch", "sidepouch", "medic")
+
+
 def fit_budget(meshes, budget=BUDGET):
-    """Decimates the densest meshes until the whole operator fits the triangle budget."""
+    """Decimates the densest meshes until the whole operator fits the triangle budget (belt pouches first)."""
     total = sum(tris(m) for m in meshes)
+    if total > budget:
+        meshes = [bz.decimate(m, 0.5) if any(k in m.name.lower() for k in FIRST_TO_GO) and tris(m) > 300 else m for m in meshes]
+        total = sum(tris(m) for m in meshes)
     if total <= budget:
         return meshes
     out = []
@@ -1290,6 +1395,7 @@ def build():
             bpy.data.objects.remove(m, do_unlink=True)
     parts.update(standin_parts(p, [k for k in PART_FILES if k not in parts]))
     meshes = [m for ms in parts.values() for m in ms]
+    tuck_trousers(meshes)
     if not any(mat and mat.name == "Team" for m in meshes for mat in m.data.materials):
         sleeve = next((m for m in meshes if "shirt" in m.name.lower()), None)
         meshes.append(fitted_armband(p, arm, sleeve) if sleeve else armband(p, -1))

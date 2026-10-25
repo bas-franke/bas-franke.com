@@ -218,6 +218,16 @@ def decimate_to(o, tris):
         apply_mods(o)
 
 
+def decimate_planar(o, tris, angle=12):
+    """Hard-surface parts: dissolve coplanar faces first (keeps shapes intact), then collapse what is left."""
+    m = o.modifiers.new("planar", "DECIMATE")
+    m.decimate_type = "DISSOLVE"
+    m.angle_limit = math.radians(angle)
+    tri = o.modifiers.new("tri", "TRIANGULATE")
+    apply_mods(o)
+    decimate_to(o, tris)
+
+
 def tri_count(o):
     return sum(len(p.vertices) - 2 for p in o.data.polygons)
 
@@ -409,7 +419,7 @@ def materials():
     M = {}
     M["helmet"] = add_bump(mottle(principled("Head_Helmet", (0.032, 0.034, 0.038), 0.78), (0.024, 0.026, 0.029), (0.055, 0.057, 0.062), 14), "noise", 1300, 0.75, 10, 0.0007)
     M["rail"] = add_bump(principled("Head_Rail", (0.028, 0.029, 0.031), 0.55), "noise", 1500, 0.15)
-    M["velcro"] = add_bump(principled("Head_Velcro", (0.05, 0.051, 0.055), 0.95), "noise", 2600, 0.6, 2, 0.0005)
+    M["velcro"] = add_bump(principled("Head_Velcro", (0.075, 0.076, 0.08), 0.97), "noise", 2600, 0.7, 2, 0.0006)
     M["metal"] = principled("Head_Metal", (0.08, 0.08, 0.085), 0.4, 1.0)
     M["slot"] = principled("Head_Slot", (0.004, 0.004, 0.005), 0.9)
     M["lens"] = principled("Head_Lens", (0.95, 0.96, 0.95), 0.02, 0.0, **{"Transmission Weight": 1.0, "IOR": 1.49})
@@ -827,7 +837,7 @@ def build_face_low(head_high, M):
 
 # Shell: an ellipsoid standing off the scalp by the pad thickness, cut high over the ears.
 SHELL_C = (0.0, -0.014, 0.096)  # head-local centre (x, y, down-from-crown)
-SHELL_R = (0.106, 0.128, 0.122)
+SHELL_R = (0.111, 0.134, 0.127)
 
 
 def rim_drop(phi):
@@ -947,28 +957,28 @@ def build_rails(M):
         pts, ups = [], []
         n = 24
         for i in range(n + 1):
-            a = math.radians(42 + (152 - 42) * i / n)
+            a = math.radians(38 + (156 - 38) * i / n)
             phi = side * a
-            d = rim_drop(phi) - 0.016
+            d = rim_drop(phi) - 0.017
             th = theta_at(phi, d)
             p, nrm, tp, tt = surface_frame(phi, th, -0.001)
             pts.append(p)
             ups.append(nrm)
-        ws = [0.016 + 0.012 * min(1.0, math.sin(math.pi * k / n) * 2.2) for k in range(n + 1)]
-        rail = sweep(f"rail{side}", pts, 0.027, 0.011, ups=ups, widths=ws)
+        ws = [0.019 + 0.013 * min(1.0, math.sin(math.pi * k / n) * 2.2) for k in range(n + 1)]
+        rail = sweep(f"rail{side}", pts, 0.032, 0.014, ups=ups, widths=ws)
         # Slots: a row of rectangular cut-outs along the rail.
         cutters = []
-        for i in (5, 9, 13, 17):
-            a = math.radians(42 + (152 - 42) * i / n)
+        for i in (4, 7, 10, 13, 16, 19):
+            a = math.radians(38 + (156 - 38) * i / n)
             phi = side * a
-            th = theta_at(phi, rim_drop(phi) - 0.016)
+            th = theta_at(phi, rim_drop(phi) - 0.017)
             p, nrm, tp, tt = surface_frame(phi, th, -0.001)
             bm = bmesh.new()
             bmesh.ops.create_cylinder(bm, cap_ends=True, segments=20, radius1=1.0, radius2=1.0, depth=1.0) if hasattr(bmesh.ops, "create_cylinder") else bmesh.ops.create_cone(bm, cap_ends=True, segments=20, radius1=1.0, radius2=1.0, depth=1.0)
             mat = Matrix((tp, tt, nrm)).transposed()
             for v in bm.verts:
                 # An oval slot recessed into the rail's outer face.
-                v.co = p + mat @ Vector((v.co.x * 0.011 * F.s, v.co.y * 0.0055 * F.s, (v.co.z * 0.002 + 0.0105) * F.s))
+                v.co = p + mat @ Vector((v.co.x * 0.0115 * F.s, v.co.y * 0.0068 * F.s, (v.co.z * 0.002 + 0.0135) * F.s))
             cutters.append(mesh_obj("slot", bm))
         slots = join(cutters, "slots")
         set_mat(slots, M["slot"])
@@ -977,10 +987,10 @@ def build_rails(M):
         smooth_shade(rail, 30)
         parts.append(rail)
         # Screws at both ends.
-        for a in (45, 74, 122, 149):
+        for a in (41, 70, 126, 153):
             phi = side * math.radians(a)
-            th = theta_at(phi, rim_drop(phi) - 0.016)
-            p, nrm, tp, tt = surface_frame(phi, th, 0.0105)
+            th = theta_at(phi, rim_drop(phi) - 0.017)
+            p, nrm, tp, tt = surface_frame(phi, th, 0.0135)
             bm = bmesh.new()
             bmesh.ops.create_cone(bm, cap_ends=True, segments=8, radius1=0.0036 * F.s, radius2=0.0028 * F.s, depth=0.0016 * F.s)
             rot = nrm.to_track_quat("Z", "Y").to_matrix()
@@ -989,6 +999,19 @@ def build_rails(M):
             sc = mesh_obj("screw", bm)
             set_mat(sc, M["metal"])
             parts.append(sc)
+    # Rail accessories that read at a distance: a strobe on the left rail, a battery counterweight at the back.
+    phi = -math.radians(118)
+    p, nrm, tp, tt = surface_frame(phi, theta_at(phi, rim_drop(phi) - 0.017), 0.014)
+    rot = Matrix((tp, tt, nrm)).transposed()
+    strobe = rounded_box(p + nrm * 0.008 * F.s, (0.03, 0.022, 0.016), 0.003, "strobe", rot)
+    set_mat(strobe, M["rail"])
+    parts.append(strobe)
+    phi = math.pi
+    p, nrm, tp, tt = surface_frame(phi, theta_at(phi, rim_drop(phi) - 0.05), 0.002)
+    rot = Matrix((tp, tt, nrm)).transposed()
+    pouch = rounded_box(p + nrm * 0.012 * F.s, (0.075, 0.06, 0.024), 0.006, "counterweight", rot)
+    set_mat(pouch, M["velcro"])
+    parts.append(pouch)
     return parts
 
 
@@ -999,7 +1022,7 @@ def build_shroud(M):
     th = theta_at(phi, d)
     p, nrm, tp, tt = surface_frame(phi, th, 0.002)
     rot = Matrix((tp, tt, nrm)).transposed()
-    base = patch("shroudbase", -0.34, 0.34, rim_drop(0) - 0.064, rim_drop(0) - 0.008, 0.0005, 0.004, M["rail"])
+    base = patch("shroudbase", -0.4, 0.4, rim_drop(0) - 0.074, rim_drop(0) - 0.006, 0.0005, 0.0045, M["rail"])
     parts = [base]
 
     def box(sx, sy, sz, off, name):
@@ -1014,23 +1037,24 @@ def build_shroud(M):
         apply_mods(o)
         return o
 
-    frame = box(0.054, 0.052, 0.017, (0, 0, 0.0105), "shroudframe")
-    boolean(frame, box(0.038, 0.036, 0.05, (0, 0.004, 0.0105), "win"))
-    for sx in (0.018, -0.018):
-        boolean(frame, box(0.008, 0.02, 0.05, (sx * 1.48, -0.016, 0.0105), "side"))
-    boolean(frame, box(0.06, 0.014, 0.011, (0, -0.019, 0.017), "notch"))
-    lug = box(0.02, 0.012, 0.012, (0, 0.028, 0.008), "lug")
-    ears_l = box(0.011, 0.032, 0.011, (0.032, -0.004, 0.008), "earL")
-    ears_r = box(0.011, 0.032, 0.011, (-0.032, -0.004, 0.008), "earR")
-    shroud = join([frame, lug, ears_l, ears_r], "Head_Shroud")
+    frame = box(0.066, 0.062, 0.022, (0, 0, 0.0135), "shroudframe")
+    boolean(frame, box(0.044, 0.04, 0.06, (0, 0.006, 0.0135), "win"))
+    for sx in (0.022, -0.022):
+        boolean(frame, box(0.009, 0.024, 0.06, (sx * 1.5, -0.02, 0.0135), "side"))
+    boolean(frame, box(0.07, 0.016, 0.014, (0, -0.024, 0.022), "notch"))
+    lug = box(0.026, 0.016, 0.016, (0, 0.034, 0.01), "lug")
+    ears_l = box(0.013, 0.04, 0.014, (0.039, -0.004, 0.01), "earL")
+    ears_r = box(0.013, 0.04, 0.014, (-0.039, -0.004, 0.01), "earR")
+    stub = box(0.03, 0.012, 0.026, (0, -0.035, 0.026), "stub")
+    shroud = join([frame, lug, ears_l, ears_r, stub], "Head_Shroud")
     set_mat(shroud, M["rail"])
     smooth_shade(shroud, 30)
     parts.append(shroud)
-    for sx, sy in ((0.02, 0.016), (-0.02, 0.016), (0.0, -0.022)):
+    for sx, sy in ((0.025, 0.02), (-0.025, 0.02), (0.0, -0.027)):
         bm = bmesh.new()
         bmesh.ops.create_cone(bm, cap_ends=True, segments=8, radius1=0.0028 * F.s, radius2=0.0024 * F.s, depth=0.002 * F.s)
         for v in bm.verts:
-            v.co = p + rot @ (v.co + Vector((sx * F.s, sy * F.s, 0.016 * F.s)))
+            v.co = p + rot @ (v.co + Vector((sx * F.s, sy * F.s, 0.0255 * F.s)))
         sc = mesh_obj("screw", bm)
         set_mat(sc, M["metal"])
         parts.append(sc)
@@ -1039,7 +1063,7 @@ def build_shroud(M):
 
 def build_velcro(M):
     parts = [
-        patch("velTop", -0.3, 0.3, rim_drop(0) - 0.128, rim_drop(0) - 0.085, 0.0004, 0.0012, M["velcro"]),
+        patch("velTop", -0.42, 0.42, rim_drop(0) - 0.142, rim_drop(0) - 0.074, 0.0004, 0.0024, M["velcro"]),
         patch("velBack", math.pi - 0.38, math.pi + 0.38, rim_drop(math.pi) - 0.09, rim_drop(math.pi) - 0.045, 0.0004, 0.0012, M["velcro"]),
     ]
     for side in (1, -1):
@@ -1288,16 +1312,32 @@ def build_headset(M):
             kb = mesh_obj("knob", bm)
             set_mat(kb, M["rail"])
             parts.append(kb)
-        # Rail adapter on the helmet and a flat arm down to the top of the cup.
-        phi = side * math.radians(97)
-        rail_p, rn, _, _ = surface_frame(phi, theta_at(phi, rim_drop(phi) - 0.016), 0.009)
-        top = c + tilt @ Vector((side * 0.006, 0, 0.044)) * F.s
-        arm_pts = smooth_path([rail_p, rail_p.lerp(top, 0.5) + out * 0.004 * F.s, top], 6)
-        arm = sweep("arm", arm_pts, 0.012, 0.004, ups=[out] * len(arm_pts))
-        set_mat(arm, M["rail"])
-        adapter = rounded_box(rail_p, (0.016, 0.03, 0.02), 0.003, "adapter")
-        set_mat(adapter, M["rail"])
-        parts += [arm, adapter]
+        # Yoke from the cup top up to the headband.
+        top = c + tilt @ Vector((side * 0.004, 0, 0.046)) * F.s
+        yoke = rounded_box(top + Vector((0, 0, 0.008)) * F.s, (0.012, 0.026, 0.02), 0.003, "yoke", tilt)
+        set_mat(yoke, M["rail"])
+        parts.append(yoke)
+    # Headband: from one yoke up over the helmet shell and down to the other, padded on top.
+    pts = []
+    for side in (1, -1):
+        c = F.p(side * 0.099, -0.006, E + 0.014)
+        seg = [c + Vector((side * 0.01, 0, 0.062)) * F.s]
+        phi = side * math.radians(90)
+        th0 = theta_at(phi, rim_drop(phi) - 0.004)
+        for k in range(11):
+            th = th0 * (1 - k / 10)
+            seg.append(shell_point(phi, max(th, 0.001), 0.009))
+        pts += seg if side > 0 else list(reversed(seg))
+    pts = smooth_path(pts, 3)
+    hb_centre = F.p(0, -0.006, 0.09)
+    band = sweep("headband", pts, 0.024, 0.0045, centre=hb_centre)
+    set_mat(band, M["rail"])
+    pad = [p for p in pts if (F.crown - p.z) / F.s < 0.02]
+    if len(pad) > 2:
+        cushion_band = sweep("headpad", pad, 0.03, 0.009, centre=hb_centre, base=0.004)
+        set_mat(cushion_band, M["cushion"])
+        parts.append(cushion_band)
+    parts.append(band)
     # Boom mic from the left cup (-X) round to the mouth.
     c = F.p(-0.099, -0.006, E + 0.014)
     boom = [c + Vector((-0.012, 0.03, -0.022)) * F.s, F.p(-0.104, 0.05, E + 0.06), F.p(-0.084, 0.088, E + 0.082), F.p(-0.042, 0.108, E + 0.083)]
@@ -1328,13 +1368,16 @@ def build_headset(M):
 
 # ---- assembly ------------------------------------------------------------------------------------------------------
 
-def make_low(high, name, tris):
+def make_low(high, name, tris, planar=False):
     """A decimated export copy of a dense object; the dense one keeps `high` for baking."""
     low = high.copy()
     low.data = high.data.copy()
     low.name = low.data.name = name
     coll().objects.link(low)
-    decimate_to(low, tris)
+    if planar:
+        decimate_planar(low, tris)
+    else:
+        decimate_to(low, tris)
     high["high"] = 1
     high.hide_render = False
     return low
@@ -1372,8 +1415,8 @@ def main():
     # Export copies within the 8k budget.
     lows = [
         make_low(shell, "Head_Helmet", 1700),
-        make_low(hardware, "Head_HelmetGear", 1100),
-        make_low(mask_high, "Head_Mask", 1300),
+        make_low(hardware, "Head_HelmetGear", 1150, planar=True),
+        make_low(mask_high, "Head_Mask", 1200),
     ]
     for o in (shell, hardware, mask_high):
         o.hide_render = True
@@ -1383,7 +1426,7 @@ def main():
         print(f"[head] export mask: {wrap_outside(mlow, 0.0035, 6)} vertices needed a push")
     decimate_to(face, 700)
     for o in headset:
-        decimate_to(o, 400 if o.name == "Head_Headset" else 200)
+        decimate_planar(o, {"Head_Headset": 380, "Head_Headset_Rail": 320}.get(o.name, 180), 6)
     for o in goggles:
         decimate_to(o, 360)
     strap_obj = bpy.data.objects.get("Head_Straps")
