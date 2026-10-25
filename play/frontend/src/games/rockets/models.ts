@@ -307,6 +307,10 @@ function barrelParts(k: Kit) {
   // A rail along the top with a glowing strip.
   k.add(box(0.05, 0.02, 0.4), GUN_DARK, [0, BORE_Y + 0.158, -0.43]);
   k.glowing(box(0.016, 0.006, 0.3), VENT, [0, BORE_Y + 0.169, -0.43]);
+  // An armoured bracket over the front of the barrel: two posts and a bar with a red plate.
+  for (const z of [-0.68, -0.52]) k.add(box(0.045, 0.07, 0.04), GUN_DARK, [0, BORE_Y + 0.19, z]);
+  k.add(box(0.06, 0.035, 0.22), GUN, [0, BORE_Y + 0.235, -0.6]);
+  k.add(box(0.064, 0.012, 0.12), ARMOR, [0, BORE_Y + 0.256, -0.6]);
 }
 
 function receiverParts(k: Kit, accent: number) {
@@ -370,34 +374,35 @@ export function buildLauncher(accent = RED): THREE.Group {
 
 const viewHands = new Map<number, THREE.Group>();
 /**
- * The first-person support glove on the launcher (same model space as buildLauncher): palm flat on the barrel's left
- * flank, fingers curled over the top, knuckle plates and the gauntlet in `color` over a black under-suit, the forearm
- * running back and down off the screen. Only for the viewmodel: the robot has its own hands.
+ * The first-person support glove on the launcher (same model space as buildLauncher): palm under the tube, fingers
+ * curled up its left side, knuckle plates and a heavy gauntlet in `color` over a black under-suit, the forearm running
+ * back and down off the screen. Only for the viewmodel: the robot has its own hands.
  */
 export function buildViewHand(color = RED): THREE.Group {
   let t = viewHands.get(color);
   if (!t) {
     const k = new Kit();
     const SUIT = 0x1a1b20;
-    const z0 = -0.31;
-    // Palm against the flank, a back-of-hand plate outside it, a thumb lying along the side.
-    k.add(box(0.05, 0.13, 0.13), SUIT, [-0.205, BORE_Y + 0.04, z0]);
-    k.add(box(0.016, 0.1, 0.11), color, [-0.236, BORE_Y + 0.05, z0]);
-    k.add(box(0.03, 0.032, 0.1), SUIT, [-0.2, BORE_Y - 0.035, z0 + 0.06]);
-    // Four fingers over the top of the barrel, each with a knuckle plate.
+    const z0 = -0.36;
+    const y0 = BORE_Y - 0.2;
+    // Palm under the tube, an armour plate on the back of the hand, a thumb up the right side.
+    k.add(box(0.13, 0.05, 0.14), SUIT, [-0.05, y0, z0]);
+    k.add(box(0.12, 0.018, 0.12), color, [-0.05, y0 - 0.032, z0]);
+    k.add(box(0.03, 0.09, 0.034), SUIT, [0.07, y0 + 0.05, z0 + 0.03], [0, 0, -0.4]);
+    // Four fingers curling up the left side, each with a knuckle plate.
     for (let i = 0; i < 4; i++) {
-      const z = z0 - 0.045 + i * 0.03;
-      k.add(box(0.13, 0.03, 0.026), SUIT, [-0.13, BORE_Y + 0.2, z], [0, 0, -0.6]);
-      k.add(box(0.06, 0.012, 0.028), color, [-0.165, BORE_Y + 0.235, z], [0, 0, -0.6], undefined, false);
+      const z = z0 - 0.05 + i * 0.033;
+      k.add(box(0.03, 0.13, 0.028), SUIT, [-0.165, y0 + 0.07, z], [0, 0, 0.55]);
+      k.add(box(0.014, 0.05, 0.03), color, [-0.19, y0 + 0.05, z], [0, 0, 0.55], undefined, false);
     }
-    // Wrist cuff, then the gauntlet: armour over a suit sleeve, running back and down off the screen.
-    inFrame(k, [-0.215, BORE_Y - 0.03, z0 + 0.06], [-0.9, 0, -0.35], () => {
-      k.add(tube(0.065, 0.07, 0.06, 10), SUIT, [0, -0.02, 0]);
-      k.add(tube(0.068, 0.085, 0.55, 10), SUIT, [0, -0.32, 0]);
-      k.add(oct(0.15, 0.13, 0.34, 0.25, 0.92), color, [0, -0.26, 0.012], [Math.PI / 2, 0, 0]);
-      k.add(box(0.152, 0.02, 0.1), IRON, [0, -0.26, 0.08]);
-      k.glowing(box(0.06, 0.012, 0.03), 0xff8c1a, [0, -0.2, 0.083]);
-      for (const y of [-0.1, -0.42]) k.add(tube(0.084, 0.084, 0.025, 10), IRON, [0, y, 0]);
+    // Wrist cuff, then a heavy gauntlet: armour over a suit sleeve, running back and down off the screen.
+    inFrame(k, [-0.04, y0 - 0.03, z0 + 0.05], [-0.7, 0, -0.2], () => {
+      k.add(tube(0.075, 0.08, 0.06, 10), SUIT, [0, -0.02, 0]);
+      k.add(tube(0.08, 0.1, 0.6, 10), SUIT, [0, -0.34, 0]);
+      k.add(oct(0.19, 0.17, 0.36, 0.25, 0.92), color, [0, -0.28, 0.015], [Math.PI / 2, 0, 0]);
+      k.add(box(0.192, 0.024, 0.12), IRON, [0, -0.28, 0.1]);
+      k.glowing(box(0.07, 0.014, 0.034), 0xff8c1a, [0, -0.22, 0.103]);
+      for (const y of [-0.1, -0.46]) k.add(tube(0.1, 0.1, 0.03, 10), IRON, [0, y, 0]);
     });
     t = k.build('viewHand', false);
     viewHands.set(color, t);
