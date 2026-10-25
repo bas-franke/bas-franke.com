@@ -168,9 +168,9 @@ const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; colo
 const ROCKET_COLOR = 0xffa14a;
 /**
  * Viewmodel placement relative to the camera: carried on the right shoulder like a bazooka, the open exhaust at the
- * back big in the bottom-right corner and the tube running in to just under the crosshair, its right flank showing.
+ * back big in the bottom-right corner and the tube running in well below the crosshair, its right flank showing.
  */
-const VM_POS = { x: 0.26, y: -0.28, z: -0.8 };
+const VM_POS = { x: 0.32, y: -0.46, z: -0.8 };
 const VM_YAW = 0.22;
 const VM_PITCH = 0.02;
 const VM_SCALE = 1;
