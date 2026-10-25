@@ -316,6 +316,8 @@ export class RocketsClient implements GameClient {
   private effects?: Effects;
   private arena?: ArenaView;
   private bloom?: Bloom;
+  /** The quality preset allows the bloom pass (neon maps only build one). */
+  private bloomOn = true;
   private map?: MapData;
   private readonly snaps = new SnapshotTimeline<RocketsSnapshot>();
   private readonly remotes = new Map<string, Remote>();
@@ -928,7 +930,7 @@ export class RocketsClient implements GameClient {
     // Neon maps glow: bloom on the bright strips, signs and the sun.
     if (themeOf(map).neon) {
       const bloom = (this.bloom = createBloom(engine.renderer));
-      engine.renderHook = () => bloom.render(engine.scene, engine.camera);
+      engine.renderHook = () => (this.bloomOn ? bloom.render(engine.scene, engine.camera) : engine.renderer.render(engine.scene, engine.camera));
       // Neon trails: a hot pink streak cooling into lavender haze.
       this.effects?.trailColors.hot.set(0xff6ad8);
       this.effects?.trailColors.smoke.set(0xb8a0ff);
@@ -1054,11 +1056,12 @@ export class RocketsClient implements GameClient {
     this.raise.reset(-0.3);
   }
 
-  /** Pixel-ratio cap, shadows and outlines for a quality preset. applyQuality drops the shadow map, so redraw it. */
+  /** Pixel-ratio cap, shadows, outlines and bloom for a quality preset. applyQuality drops the shadow map, so redraw it. */
   private applyQualityNow(q: Quality) {
     const engine = this.engine;
     if (!engine) return;
     engine.setMaxPixelRatio(QUALITY[q].pixelRatio);
+    this.bloomOn = QUALITY[q].bloom;
     applyQuality(engine.scene, q);
     engine.invalidateShadows();
   }

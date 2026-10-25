@@ -74,10 +74,11 @@ export const DEFAULTS: RocketsSettings = {
 };
 
 /** What each graphics preset means. `pixelRatio` caps the renderer (the engine governor can still go lower). */
-export const QUALITY: Record<Quality, { pixelRatio: number; shadows: boolean; shadowMap: number; outlines: boolean }> = {
-  low: { pixelRatio: 1, shadows: false, shadowMap: 512, outlines: false },
-  medium: { pixelRatio: 1.25, shadows: true, shadowMap: 1024, outlines: true },
-  high: { pixelRatio: 1.5, shadows: true, shadowMap: 2048, outlines: true },
+/** `bloom` is the neon maps' glow pass (bloom.ts); low quality draws them without it. */
+export const QUALITY: Record<Quality, { pixelRatio: number; shadows: boolean; shadowMap: number; outlines: boolean; bloom: boolean }> = {
+  low: { pixelRatio: 1, shadows: false, shadowMap: 512, outlines: false, bloom: false },
+  medium: { pixelRatio: 1.25, shadows: true, shadowMap: 1024, outlines: true, bloom: true },
+  high: { pixelRatio: 1.5, shadows: true, shadowMap: 2048, outlines: true, bloom: true },
 };
 
 const KEY = 'rockets.settings.v1';
