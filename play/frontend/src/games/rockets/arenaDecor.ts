@@ -463,6 +463,30 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, fade: Bucket, rand:
     const h = b.max.y - b.min.y;
     if (h < 1.8) continue;
     const color = rand() < 0.22 ? cyan : pink;
+    // Plated tops: a dark seam frame inset from the edge, cross seams on long decks and a floor grille on the big
+    // ones, all flat decals a hair above the surface (nothing to trip on).
+    const tx = b.max.x - b.min.x;
+    const tz = b.max.z - b.min.z;
+    if (tx >= 2.5 && tz >= 2.5) {
+      const seam = 0x5a1a44;
+      const y = b.max.y + 0.012;
+      const cx = (b.min.x + b.max.x) / 2;
+      const cz = (b.min.z + b.max.z) / 2;
+      const flat = (w: number, d: number, x: number, z: number, c: number) => solid.add(at(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2), x, y, z), c);
+      const ins = 0.35;
+      flat(tx - ins * 2, 0.07, cx, b.min.z + ins, seam);
+      flat(tx - ins * 2, 0.07, cx, b.max.z - ins, seam);
+      flat(0.07, tz - ins * 2, b.min.x + ins, cz, seam);
+      flat(0.07, tz - ins * 2, b.max.x - ins, cz, seam);
+      for (let x = b.min.x + 3; x < b.max.x - 2; x += 3) flat(0.05, tz - ins * 2, x, cz, seam);
+      for (let z = b.min.z + 3; z < b.max.z - 2; z += 3) flat(tx - ins * 2, 0.05, cx, z, seam);
+      if (tx * tz >= 24) {
+        const gx = cx + (tx > tz ? tx * 0.2 : 0);
+        const gz = cz + (tx > tz ? 0 : tz * 0.2);
+        flat(1.6, 1.1, gx, gz, 0x2a2634);
+        for (let i = 0; i < 5; i++) flat(1.4, 0.07, gx, gz - 0.4 + i * 0.2, 0x4a4458);
+      }
+    }
     const faces: [number, number, boolean][] = [
       [b.max.x, 1, false],
       [b.min.x, -1, false],

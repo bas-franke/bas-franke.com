@@ -22,8 +22,8 @@ function foundry(): MapData {
   // The furnace tower blocks the views across the dais; its top and health pack are a rocket jump away.
   b.block('platform', 0, 0, 8, 8, platH).block('stair', 0, 0, 2.5, 2.5, 12).pack(0, 12, 0);
   b.pair((p) => p.stairs('z', -1, 0, 8 + B.run(0, platH), 5, 0, platH).pack(5, platH, 5));
-  // Chimneys (pink and teal by quarter) straddle the wall ledges: walk under the arch, but nobody sees along the whole ring.
-  marks(['tower', 'crate', 'tower', 'crate'], (p) => p.box('tower', 25, 0, -1.5, 27, 15, 1.5).box('tower', 27, ring + 2.4, -1.5, half, 15, 1.5));
+  // Chimneys (pink and yellow by quarter) straddle the wall ledges: walk under the arch, but nobody sees along the whole ring.
+  marks(['tower', 'pillar', 'tower', 'pillar'], (p) => p.box('tower', 25, 0, -1.5, 27, 15, 1.5).box('tower', 27, ring + 2.4, -1.5, half, 15, 1.5));
   b.quad((p) => {
     const steps = B.run(ring, gantry);
     p.box('platform', half - 5, 0, -10 - steps, half, ring, 10 + steps).stairs('x', 1, half - 5 - B.run(0, ring), 6, 3, 0, ring);
