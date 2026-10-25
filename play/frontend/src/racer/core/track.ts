@@ -6,7 +6,7 @@
 // There is no road: the course is a corridor of open sand between rock walls, wide in the basins and narrow in the
 // passes, and `width` is the distance between those walls. The track also owns what is in the corridor: jump ramps
 // (sand ridges built into the ground's height), caves the course runs through, and the rock formations to steer round,
-// which grow out of the walls (spurs, gates, rockfalls) or stand in the open (buttes, hoodoos).
+// which all grow out of the walls (spurs, rockfalls, and gates and barriers that leave one or two gaps).
 
 import * as THREE from 'three';
 import type { TrackDef } from './tracks';
@@ -313,11 +313,11 @@ export class Track {
   }
 
   /**
-   * Rock formations every couple of hundred metres. Most grow out of the corridor walls: a spur (a ridge of blocks
-   * reaching a third to half way across), a gate (spurs from both walls with a gap between), a rockfall (boulders
-   * tumbled out from one wall). In wider stretches a butte stands in the middle with room round either side, and
-   * hoodoo pillars stand alone or in a pair with a gap only a pod on its side fits through. Never near the start, the
-   * finish, a jump's kicker and landing, a boost pad, the gorge bridge or inside a cave.
+   * Rock formations every couple of hundred metres, all grown out of the corridor walls: a spur (a ridge of blocks
+   * reaching a third to half way across), a gate (spurs from both walls with one gap between), a rockfall (boulders
+   * tumbled out from one wall) and, in wider stretches, a barrier right across the course with two gaps. Nothing stands
+   * loose in the open. Never near the start, the finish, a jump's kicker and landing, a boost pad, the gorge bridge or
+   * inside a cave.
    */
   private placeObstacles(): Obstacle[] {
     const r = rng(this.def.seed * 31 + 7);
@@ -347,6 +347,18 @@ export class Track {
       }
       group++;
     };
+    /** The middle of a barrier: a ridge of blocks across the course from x0 to x1, tallest in its middle. */
+    const middle = (s: number, x0: number, x1: number, lean: number) => {
+      const top = 12 + r() * 8;
+      const n = Math.max(2, Math.round((x1 - x0) / 5));
+      const rad = Math.min(5.5, ((x1 - x0) / n) * 0.75);
+      for (let k = 0; k < n; k++) {
+        const x = x0 + rad + ((x1 - x0 - 2 * rad) * k) / (n - 1);
+        const t = Math.abs((k / (n - 1)) * 2 - 1);
+        rock(s + x * lean + (r() - 0.5) * 2, x, rad, top * (1 - 0.3 * t), 'spur', 0, t);
+      }
+      group++;
+    };
     let s = this.startS + 320;
     while (s < this.finishS - 220) {
       if (blocked(s) || blocked(s + 120)) {
@@ -357,21 +369,28 @@ export class Track {
       const hw = w / 2;
       const side: -1 | 1 = r() < 0.5 ? -1 : 1;
       const kind = r();
-      if (w > 62 && kind < 0.22) {
-        // Butte in the middle: a few big blocks along the course, a lane of at least 15 m either side.
-        const x = (r() * 2 - 1) * Math.max(0, hw - 28) * 0.4;
-        const big = Math.min(6.5, (hw - 18 - Math.abs(x)) / 1.6);
-        for (let k = 0; k < 4; k++) rock(s + k * big * 1.3, x + (r() - 0.5) * 2, big * (1 - k * 0.15), (18 + r() * 12) * (1 - k * 0.12), 'island', 0, k / 3);
-        group++;
-      } else if (kind < 0.45) {
+      if (w > 76 && kind < 0.3) {
+        // Barrier with two gaps: spurs from both walls and a block of wall across the middle, so the corridor is shut
+        // off except for two passes of 16-20 m. The middle takes 40-55% of the closed width, so it reads as a wall
+        // across the course, not a lone rock.
+        const gap = 16 + r() * 4;
+        const closed = w - 2 * gap;
+        const mid = closed * (0.4 + r() * 0.15);
+        const rest = closed - mid;
+        const a = rest * (0.3 + r() * 0.4);
+        const lean = (r() - 0.5) * 0.15;
+        spur(s, -1, a);
+        spur(s + (r() - 0.5) * 6, 1, Math.max(4, rest - a));
+        middle(s, -hw + a + gap, -hw + a + gap + mid, lean);
+      } else if (kind < 0.48) {
         spur(s, side, w * (0.35 + r() * 0.17));
-      } else if (kind < 0.62) {
-        // Gate: spurs from both walls, a gap of 18-26 m somewhere across the middle.
+      } else if (kind < 0.8) {
+        // Gate: spurs from both walls with one gap of 18-26 m, sometimes in the middle, sometimes hard by one wall.
         const gap = 18 + r() * 8;
-        const c = (r() * 2 - 1) * hw * 0.3;
+        const c = (r() * 2 - 1) * Math.max(0, hw - gap / 2 - 5) * (r() < 0.4 ? 1 : 0.35);
         spur(s, -1, Math.max(4, hw + c - gap / 2));
         spur(s + (r() - 0.5) * 8, 1, Math.max(4, hw - c - gap / 2));
-      } else if (kind < 0.8) {
+      } else {
         // Rockfall: a heap of boulders tumbled out of one wall, smaller towards its toe.
         const n = 4 + Math.floor(r() * 3);
         const reach = w * (0.25 + r() * 0.12);
@@ -381,19 +400,6 @@ export class Track {
           rock(s + t * 14 + (r() - 0.5) * 6, side * (hw + 1 - rad - t * reach), rad, rad * 1.4, 'boulder', side, t);
         }
         group++;
-      } else if (kind < 0.92 || w < 50) {
-        // A lone hoodoo.
-        const rad = 2.6 + r() * 0.8;
-        rock(s, (r() * 2 - 1) * 0.5 * hw, rad, 12 + r() * 6, 'pillar', 0, 0);
-        group++;
-      } else {
-        // Needle: two hoodoos, edges 4.6 m apart; a pod is 6.8 m wide flat and about 3 m on its side.
-        const rad = 3 + r() * 0.6;
-        const xc = (r() * 2 - 1) * 0.25 * hw;
-        for (const sd of [-1, 1]) {
-          rock(s, xc + sd * (2.3 + rad), rad, 13 + r() * 5, 'pillar', 0, 0);
-          group++;
-        }
       }
       s += 180 + r() * 150;
     }

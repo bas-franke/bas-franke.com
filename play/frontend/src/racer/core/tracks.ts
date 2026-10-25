@@ -220,7 +220,7 @@ export const TRACKS: TrackDef[] = [
   {
     id: 'spires',
     name: 'Needle Spires',
-    blurb: 'A slalom through the rock needles. Thread the gaps on your side.',
+    blurb: 'Rock walls close across the canyon. Find the gap and thread it.',
     width: 42,
     widthVar: 0.1,
     points: stage([[240, 40, 200], [140, -70, 180], [140, 75, 180], [140, -70, 180], [200, 45, 260], [260, -60, 220], [160, 70, 200], [160, -65, 200], [180, 60, 200], [160, -70, 190], [200, 55, 220], [160, -60, 200], [220, 50, 240], [380, 0, 0]], [[0, 0], [0.2, 10], [0.35, -6], [0.55, 12], [0.8, -4], [1, 0]]),
