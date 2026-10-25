@@ -266,20 +266,18 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       disposables.push(geo, mat);
     }
     const puffTex = radialGlow();
-    const puffMat = new THREE.SpriteMaterial({ map: puffTex, color: 0xe6d2f4, transparent: true, opacity: 0.24, depthWrite: false });
+    const wallPuffs: Puff[] = [];
     const wall = map.half + 0.5;
     for (let i = 0; i < 10; i++) {
       const t = (rand() - 0.5) * map.half * 1.6;
       const side = Math.floor(rand() * 4);
       const [x, z] = side === 0 ? [t, -wall] : side === 1 ? [wall, t] : side === 2 ? [t, wall] : [-wall, t];
       for (let k = 0; k < 3; k++) {
-        const puff = new THREE.Sprite(puffMat);
         const s = 4 + k * 3 + rand() * 2;
-        puff.scale.set(s, s, 1);
-        puff.position.set(x * (1 + k * 0.02), 11 + k * 3.2, z * (1 + k * 0.02));
-        sky.add(puff);
+        wallPuffs.push({ x: x * (1 + k * 0.02), y: 11 + k * 3.2, z: z * (1 + k * 0.02), w: s, h: s });
       }
     }
+    sky.add(puffCloud(wallPuffs, puffTex, 0xe6d2f4, 0.24, disposables));
     // Steam pooling round the foot of the furnace tower and its dais.
     let core: { x: number; z: number; y: number; r: number } | null = null;
     for (const b of map.boxes) {
@@ -288,19 +286,16 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       if (b.kind !== 'clip' && b.kind !== 'floor' && Math.abs(cx) < 1 && Math.abs(cz) < 1 && (!core || b.max.y > core.y)) core = { x: cx, z: cz, y: b.max.y, r: (b.max.x - b.min.x) / 2 };
     }
     if (core) {
-      const groundMat = new THREE.SpriteMaterial({ map: puffTex, color: 0xf0d8ff, transparent: true, opacity: 0.2, depthWrite: false });
+      const ground: Puff[] = [];
       for (let i = 0; i < 9; i++) {
         const a = (i / 9) * Math.PI * 2 + rand() * 0.5;
         const d = core.r + 4 + rand() * 4;
-        const puff = new THREE.Sprite(groundMat);
         const s = 3.5 + rand() * 3;
-        puff.scale.set(s * 1.6, s, 1);
-        puff.position.set(core.x + Math.cos(a) * d, 0.8 + rand() * 1.2, core.z + Math.sin(a) * d);
-        sky.add(puff);
+        ground.push({ x: core.x + Math.cos(a) * d, y: 0.8 + rand() * 1.2, z: core.z + Math.sin(a) * d, w: s * 1.6, h: s });
       }
-      disposables.push(groundMat);
+      sky.add(puffCloud(ground, puffTex, 0xf0d8ff, 0.2, disposables));
     }
-    disposables.push(puffTex, puffMat);
+    disposables.push(puffTex);
   }
 
   // ---- space: stars, a ringed planet and a moon ----
@@ -400,6 +395,66 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     }
   }
   return sky;
+}
+
+interface Puff {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Soft steam puffs as one mesh: a quad per puff, turned to face the camera in the vertex shader (like sprites, but a
+ * single draw call for the lot), textured with `tex` and see-through.
+ */
+function puffCloud(puffs: Puff[], tex: THREE.Texture, color: number, opacity: number, disposables: Disposable[]): THREE.Mesh {
+  const centre = new Float32Array(puffs.length * 12);
+  const corner = new Float32Array(puffs.length * 8);
+  const uv = new Float32Array(puffs.length * 8);
+  const index: number[] = [];
+  puffs.forEach((p, i) => {
+    const c: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    c.forEach(([cx, cy], k) => {
+      centre.set([p.x, p.y, p.z], (i * 4 + k) * 3);
+      corner.set([(cx * p.w) / 2, (cy * p.h) / 2], (i * 4 + k) * 2);
+      uv.set([(cx + 1) / 2, (cy + 1) / 2], (i * 4 + k) * 2);
+    });
+    index.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3);
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(centre, 3));
+  geo.setAttribute('corner', new THREE.BufferAttribute(corner, 2));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { map: { value: tex }, color: { value: new THREE.Color(color) }, opacity: { value: opacity } },
+    vertexShader: /* glsl */ `
+      attribute vec2 corner;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        mv.xy += corner;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D map;
+      uniform vec3 color;
+      uniform float opacity;
+      varying vec2 vUv;
+      void main() {
+        gl_FragColor = vec4(color, texture2D(map, vUv).a * opacity);
+        #include <colorspace_fragment>
+      }`,
+    transparent: true,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  disposables.push(geo, mat);
+  return mesh;
 }
 
 /** A small white-to-clear radial gradient, for additive glows. */
