@@ -164,8 +164,8 @@ if (skKind < 1.5 || skKind > 3.5) {
   float wh = skHash(cell + skSeed * 7.13);
   float lit = step(wh, p);
   float th = skHash(cell.yx * 1.7 + skSeed * 3.3 + 11.0);
-  float coolShare = office ? 0.68 : 0.14;
-  vec3 c = th < coolShare ? vec3(0.6, 0.8, 1.0) : vec3(1.0, 0.54, 0.22);
+  float coolShare = office ? 0.42 : 0.12;
+  vec3 c = th < coolShare ? vec3(0.72, 0.86, 1.0) : mix(vec3(1.0, 0.6, 0.28), vec3(1.0, 0.8, 0.52), skHash(cell + skSeed * 4.1));
   if (!office && !shop && th > 0.92) {
     float tv = 0.6 + 0.4 * sin(skTime * (6.0 + 9.0 * wh) + wh * 50.0) * sin(skTime * (1.3 + 2.0 * th) + 4.0 * wh);
     c = vec3(0.28, 0.42, 1.0) * tv;
@@ -426,7 +426,7 @@ export function buildSkyline(o: SkylineOpts): Skyline {
     const kind = office ? OFFICE : HOME;
     const floorH = office ? 3.8 + r() * 0.4 : 3.0 + r() * 0.4;
     const bay = office ? 1.6 + r() * 0.6 : 2.6 + r() * 0.8;
-    const lit = office ? 0.15 + r() * 0.25 : 0.3 + r() * 0.3;
+    const lit = office ? 0.28 + r() * 0.27 : 0.4 + r() * 0.3;
     let x0 = L.x - L.w / 2;
     let x1 = L.x + L.w / 2;
     let z0 = L.z - L.d / 2;
