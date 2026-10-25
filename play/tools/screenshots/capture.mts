@@ -499,9 +499,14 @@ async function shootGarden(context: BrowserContext): Promise<Shot[]> {
       // The masterwork with the most upgraded towers around it, from close up.
       await page.evaluate(() => {
         const g = (window as unknown as GardenDev).__garden!;
+        // No named helpers in here: tsx wraps them in esbuild's __name(), which the page does not have.
         const top = g.state().towers.filter((t) => t.lv === 3);
-        const near = (a: (typeof top)[0]) => top.filter((t) => Math.hypot(t.x - a.x, t.y - a.y) <= 3).length;
-        const best = top.sort((a, b) => near(b) - near(a))[0];
+        let best = top[0];
+        let most = -1;
+        for (const a of top) {
+          const n = top.filter((t) => Math.hypot(t.x - a.x, t.y - a.y) <= 3).length;
+          if (n > most) [best, most] = [a, n];
+        }
         const p = g.cellToWorld(best.b, best.x, best.y)!;
         g.lookAt(p.x, p.z, 16);
       });
