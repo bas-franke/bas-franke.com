@@ -2,7 +2,7 @@
 // Heights are tuned to the movement in constants.ts: a plain jump clears about 2.3 m, a rocket jump well over 15 m.
 
 import { v3 } from '../math.js';
-import { MapBuilder as B, type MapData } from './map.js';
+import { MapBuilder as B, CURB, type MapData } from './map.js';
 
 /**
  * The original arena, scaled up: a dais with a furnace in the middle, and a raised ring all the way round the walls,
@@ -39,7 +39,7 @@ function foundry(): MapData {
   return b.build({ id: 'foundry', accent: 0x2ed8a0, name: 'Foundry', half, skyColor: 0x3f9be8, fogColor: 0x5aa0e0, tint: { stair: 0x56607a, wall: 0xa04a32 } });
 }
 
-/** Floating islands over the void, joined by narrow bridges and pads; fall off and you are gone. */
+/** Floating islands over the void, joined by bridges and pads; curbs line the edges, but fall off and you are gone. */
 function skyway(): MapData {
   const half = 40;
   const b = new B().shell(half, 0, false);
@@ -55,14 +55,24 @@ function skyway(): MapData {
   marks(['platform', 'ledge', 'tower', 'crate'], (p) => p.box('platform', 21, 4, 21, 31, 5, 31));
   b.quad((p) => {
     p.block('pillar', 6.5, 6.5, 0.7, 0.7, 3.5);
-    p.box('platform', 10, -1, -1.2, 19, 0, 1.2).pack(14.5, 0, 0);
+    // Hub edge curbs, open where the bridge leaves (each piece stops short of the next quarter's corner).
+    p.curb(10 - CURB, -10, 10, -2.5, 0).curb(10 - CURB, 2.5, 10, 10 - CURB, 0);
+    p.box('platform', 10, -1, -2.5, 19, 0, 2.5).pack(14.5, 0, 0);
+    p.curb(10, -2.5, 19, -2.5 + CURB, 0).curb(10, 2.5 - CURB, 19, 2.5, 0);
     // Side island: a wall to duck behind when you come off the bridge, and a pad up to the next corner island.
     p.box('floor', 19, -1, -7, 33, 0, 7).block('pillar', 23, 0, 0.6, 2.6, 3.5).spawn(29, 0, -4);
     p.padTo(v3(30, 0, 4), v3(26, 5, 24), 1.6);
+    // Curbs all round it, open for the bridge and for the previous quarter's stairs up (x 22.5..27.5 on the -z side).
+    p.curb(33 - CURB, -7, 33, 7, 0).curb(19, -7 + CURB, 19 + CURB, -2.5, 0).curb(19, 2.5, 19 + CURB, 7 - CURB, 0);
+    p.curb(19, 7 - CURB, 33 - CURB, 7, 0).curb(19, -7, 22.5, -7 + CURB, 0).curb(27.5, -7, 33 - CURB, -7 + CURB, 0);
     // Corner island, five metres up: stairs down to the next island round, a pad back to the hub.
     p.block('pillar', 22.5, 28, 1.2, 1, 6.8, 5).spawn(27, 5, 28).pack(29, 5, 24.5);
-    p.stairs('x', 1, 7, 25, 4, 0, 5).box('platform', 7 + B.run(0, 5), 4, 23, 21, 5, 27);
-    p.padTo(v3(23.5, 5, 23.5), v3(4, 0, 7.5), 2);
+    p.stairs('x', 1, 7, 25, 5, 0, 5).box('platform', 7 + B.run(0, 5), 4, 22.5, 21, 5, 27.5);
+    // The rail on the hub side stops short: the corner pad's flight back to the hub skims that corner.
+    p.curb(7 + B.run(0, 5), 22.5, 19.5, 22.5 + CURB, 5).curb(7 + B.run(0, 5), 27.5 - CURB, 21, 27.5, 5);
+    // Outer edges curbed; the inner edges stay open for the pads in and out.
+    p.curb(31 - CURB, 21, 31, 31, 5).curb(21, 31 - CURB, 31 - CURB, 31, 5).curb(21, 27.5, 21 + CURB, 31 - CURB, 5);
+    p.padTo(v3(23.5, 5, 23.5), v3(4, 0, 6), 2);
   });
   return b.build({
     id: 'skyway',
@@ -214,7 +224,7 @@ function fortress(): MapData {
 }
 
 /**
- * A ring of floor around a bottomless pit. Narrow ramps on two sides and pads on the other two reach the island in
+ * A ring of floor around a bottomless pit, curbed along its inner edge. Ramps on two sides and pads on the other two reach the island in
  * the middle; a cannon pad on each pad side throws players over the pit onto a perch above it.
  */
 function pit(): MapData {
@@ -223,9 +233,13 @@ function pit(): MapData {
   const islandY = 3;
   b.box('platform', -4.5, islandY - 1, -4.5, 4.5, islandY, 4.5).block('pillar', 0, 0, 0.8, 0.8, islandY + 3, islandY).pack(0, islandY + 3, 0);
   b.quad((p) => {
-    // The ring, with a drain in the middle of each side: splash someone near it and they are gone.
-    p.box('floor', 11, -1, -half, 17, 0, 11).box('floor', 22, -1, -half, half, 0, 11);
-    p.box('floor', 17, -1, -half, 22, 0, -3).box('floor', 17, -1, 3, 22, 0, 11);
+    // The ring, with a small curbed drain in the middle of each side: splash someone over the lip and they are gone.
+    p.box('floor', 11, -1, -half, 18, 0, 11).box('floor', 21, -1, -half, half, 0, 11);
+    p.box('floor', 18, -1, -half, 21, 0, -2).box('floor', 18, -1, 2, 21, 0, 11);
+    p.curb(18 - CURB, -2 - CURB, 21 + CURB, -2, 0).curb(18 - CURB, 2, 21 + CURB, 2 + CURB, 0);
+    p.curb(18 - CURB, -2, 18, 2, 0).curb(21, -2, 21 + CURB, 2, 0);
+    // The pit's lip, open where the ramps and pads meet it.
+    p.curb(11, -11 - CURB, 11 + CURB, -1.75, 0).curb(11, 1.75, 11 + CURB, 11, 0);
     p.padTo(v3(3.4, islandY, 3.4), v3(18, 0, 14), 1.6, 0.8);
     p.block('ledge', 15, 15, 1.6, 0.4, 1.3).block('ledge', 22.5, 17, 0.4, 2, 1.3);
     // Corner tower and the raised walkway along the outer edge; a pad in the corner pocket climbs back up.
@@ -236,7 +250,7 @@ function pit(): MapData {
     p.pack(0, 5, 29.5);
   });
   b.pair((p) => {
-    p.stairs('x', -1, 11.1, 0, 2.2, 0, islandY, 1.1);
+    p.stairs('x', -1, 11.1, 0, 3.5, 0, islandY, 1.1);
   });
   b.pair((p) => {
     p.padTo(v3(0, 0, 12.5), v3(0, islandY, 2.4), 1.6, 1);
@@ -320,7 +334,7 @@ function downtown(): MapData {
 }
 
 /**
- * Platforms over the void. Ramps climb from the hub to a square ring of pods joined by narrow catwalks, pads throw
+ * Platforms over the void. Ramps climb from the hub to a square ring of pods joined by railed catwalks, pads throw
  * players from the ring out to four high pods, and their pads send players back to the hub edge.
  */
 function orbit(): MapData {
@@ -331,13 +345,24 @@ function orbit(): MapData {
   b.box('platform', -7, -1, -7, 7, 0, 7).block('pillar', 0, 0, 1.2, 1.2, 6).pack(0, 6, 0);
   b.quad((p) => {
     p.block('ledge', 6.3, 2.5, 0.4, 1.2, 1.6);
-    p.stairs('x', 1, 7, 0, 2.2, 0, ring).padTo(v3(4.5, 0, 4.5), v3(16, ring, 16));
-    // Inner ring: a pod at each side and corner, catwalks between them.
-    p.box('platform', 7 + B.run(0, ring), ring - 1, -3.5, 19.6, ring, 3.5).block('platform', 16, 16, 3.5, 3.5, ring, ring - 1);
-    p.box('platform', 14.4, ring - 0.5, 3.5, 16, ring, 12.5).box('platform', 3.5, ring - 0.5, 14.4, 12.5, ring, 16);
+    p.stairs('x', 1, 7, 0, 3.5, 0, ring).padTo(v3(4.5, 0, 4.5), v3(16, ring, 16));
+    p.curb(7 - CURB, -7, 7, -1.75, 0).curb(7 - CURB, 1.75, 7, 7 - CURB, 0);
+    // Inner ring: a pod at each side and corner, railed catwalks between them.
+    const s0 = 7 + B.run(0, ring);
+    p.box('platform', s0, ring - 1, -3.5, 19.6, ring, 3.5).block('platform', 16, 16, 3.5, 3.5, ring, ring - 1);
+    // The outer edge is open in front of the pad out to the high pod.
+    p.curb(19.6 - CURB, -3.5, 19.6, -1.5, ring).curb(19.6 - CURB, 1.5, 19.6, 3.5, ring).curb(s0, -3.5, s0 + CURB, -1.75, ring).curb(s0, 1.75, s0 + CURB, 3.5, ring);
+    for (const z of [-3.5, 3.5 - CURB]) p.curb(s0 + CURB, z, 14.2, z + CURB, ring).curb(17.8, z, 19.6 - CURB, z + CURB, ring);
+    p.box('platform', 14.2, ring - 0.5, 3.5, 17.8, ring, 12.5).box('platform', 3.5, ring - 0.5, 14.2, 12.5, ring, 17.8);
+    p.curb(14.2, 3.5, 14.2 + CURB, 12.5, ring).curb(17.8 - CURB, 3.5, 17.8, 12.5, ring);
+    p.curb(3.5, 14.2, 12.5, 14.2 + CURB, ring).curb(3.5, 17.8 - CURB, 12.5, 17.8, ring);
+    // The corner pod's outer edges, and its inner ones beside the catwalks (the hub pad lands over the inner corner).
+    p.curb(19.5 - CURB, 12.5, 19.5, 19.5, ring).curb(12.5, 19.5 - CURB, 19.5 - CURB, 19.5, ring);
+    p.curb(12.5, 17.8, 12.5 + CURB, 19.5 - CURB, ring).curb(17.8, 12.5, 19.5 - CURB, 12.5 + CURB, ring);
     p.block('crate', 18, 18, 0.7, 0.7, ring + 1.3, ring);
-    // Outer pods: reached by pad, left by pad back to the hub edge.
+    // Outer pods: reached by pad, left by pad back to the hub edge; curbed on all but the hub side.
     p.block('platform', 30, 0, 4, 4, outer, outer - 1).block('crate', 32.5, -2, 0.9, 0.9, outer + 1.4, outer);
+    p.curb(34 - CURB, -4, 34, 4, outer).curb(26, -4, 34 - CURB, -4 + CURB, outer).curb(26, 4 - CURB, 34 - CURB, 4, outer);
     p.padTo(v3(18.5, ring, 0), v3(30, outer, 0), 1.4, 0.9).padTo(v3(30, outer, 2.8), v3(2.5, 0, 5), 2.5, 0.8);
     p.spawn(28, outer, -2.5).spawn(14, ring, 14);
     p.pack(32, outer, 2.2);

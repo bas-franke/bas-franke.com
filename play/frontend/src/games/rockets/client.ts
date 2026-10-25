@@ -163,11 +163,11 @@ const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; colo
 
 const ROCKET_COLOR = 0xffa14a;
 /**
- * Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the
- * crosshair. Pulled back so the receiver runs off the bottom-right corner, as if it sits on your shoulder.
+ * Viewmodel placement relative to the camera: big and low, close to the middle with the barrel angled in a touch at
+ * the crosshair. Pulled well back so the breech runs off the bottom of the screen, as if it sits on your shoulder.
  */
-const VM_POS = { x: 0.4, y: -0.42, z: -0.68 };
-const VM_YAW = 0.1;
+const VM_POS = { x: 0.26, y: -0.47, z: -0.5 };
+const VM_YAW = 0.05;
 const VM_PITCH = 0.05;
 const VM_SCALE = 1.2;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */

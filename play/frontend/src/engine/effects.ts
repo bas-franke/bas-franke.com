@@ -12,8 +12,17 @@ import * as THREE from 'three';
 import { hullGeometry, INK, inkMaterial, toonRamp } from './toon';
 
 const MAX = 1500;
-/** Smoke puffs (rocket trails, explosion clouds, dust). When full, slots are reused in turn. */
+/** Smoke puffs (explosion clouds, dust). When full, slots are reused in turn. */
 const PUFFS = 384;
+/** Rocket-trail puffs: their own soft, see-through pool, so a long trail never pushes explosion smoke out. */
+const TRAIL_PUFFS = 1024;
+/** How long a trail puff lasts, and the most of its alpha (the hot start is more solid, the smoke well see-through). */
+const TRAIL_LIFE = 1.7;
+const TRAIL_ALPHA = 0.32;
+const TRAIL_HOT_ALPHA = 0.75;
+/** Trail colours: a hot orange right behind the motor, cooling into pale grey smoke. */
+const TRAIL_HOT = new THREE.Color(0xffa040);
+const TRAIL_SMOKE = new THREE.Color(0xe6e2dc);
 const DEBRIS = 96;
 const DECALS = 32;
 const RINGS = 8;
@@ -429,10 +438,22 @@ export class Effects {
   private readonly pSize = new Float32Array(PUFFS);
   private readonly pHeat = new Float32Array(PUFFS);
   private readonly pRise = new Float32Array(PUFFS);
-  /** 1 for rocket-trail puffs: they shrink away sooner, so a trail reads as a line rather than a cloud. */
-  private readonly pTrail = new Float32Array(PUFFS);
   private nextPuff = 0;
   private livePuffs = 0;
+
+  // Rocket-trail puffs: unlit, alpha blended and uninked, so a trail is a straight see-through ribbon of smoke.
+  // They stay where they were laid (no drift), swell slowly and fade out. Live ones are slots 0..liveTrail-1.
+  private readonly trailGeo = new THREE.IcosahedronGeometry(1, 1);
+  private readonly trailMat = instancedAlphaMaterial(0xffffff, THREE.FrontSide, false);
+  private readonly trailAlpha = new Float32Array(TRAIL_PUFFS);
+  private readonly trailMesh: THREE.InstancedMesh;
+  private readonly tPos = new Float32Array(TRAIL_PUFFS * 3);
+  private readonly tQuat = new Float32Array(TRAIL_PUFFS * 4);
+  private readonly tLife = new Float32Array(TRAIL_PUFFS);
+  private readonly tSize = new Float32Array(TRAIL_PUFFS);
+  private readonly tHeat = new Float32Array(TRAIL_PUFFS);
+  private nextTrail = 0;
+  private liveTrail = 0;
 
   // Debris chunks: same materials, their own instanced pair. Live chunks are slots 0..liveChunks-1.
   private readonly chunkGeo = new THREE.TetrahedronGeometry(1, 0);
@@ -524,6 +545,9 @@ export class Effects {
 
     this.ringMesh = this.instancedAlpha(this.ringGeo, this.ringMat, this.ringAlpha, RINGS, true);
     this.ringMesh.renderOrder = 2;
+    this.trailMesh = this.instancedAlpha(this.trailGeo, this.trailMat, this.trailAlpha, TRAIL_PUFFS, true);
+    this.trailMesh.count = 0;
+    this.trailMesh.renderOrder = 2;
     for (let i = 0; i < RINGS; i++) this.rings.push({ pos: new THREE.Vector3(), quat: new THREE.Quaternion(), life: 0, max: 1, radius: 1 });
 
     // The core draws first so it shows through the shell as the shell fades.
@@ -660,21 +684,28 @@ export class Effects {
     this.pSize[i] = size;
     this.pHeat[i] = heat;
     this.pRise[i] = 0.6 + Math.random() * 0.6;
-    this.pTrail[i] = 0;
     return i;
   }
 
-  /** One rocket-trail puff at `pos`. Call it every TRAIL_STEP metres of travel (or use trailSegment). */
+  /**
+   * One rocket-trail puff at `pos`. Call it every TRAIL_STEP metres of travel (or use trailSegment). The puff stays
+   * on the flight line, so the trail runs dead straight behind the rocket. `heat` 1 starts hot orange.
+   */
   trail(pos: P3, heat = 1) {
-    _v.set((Math.random() - 0.5) * 0.4, 0.15 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4);
-    const i = this.puff(
-      { x: pos.x + (Math.random() - 0.5) * 0.08, y: pos.y + (Math.random() - 0.5) * 0.08, z: pos.z + (Math.random() - 0.5) * 0.08 },
-      0.2 + Math.random() * 0.1,
-      0.52 + Math.random() * 0.25,
-      _v,
-      heat,
-    );
-    if (i >= 0) this.pTrail[i] = 1;
+    if (document.hidden) return;
+    let i: number;
+    if (this.liveTrail < TRAIL_PUFFS) i = this.liveTrail++;
+    else {
+      i = this.nextTrail;
+      this.nextTrail = (i + 1) % TRAIL_PUFFS;
+    }
+    this.tPos[i * 3] = pos.x;
+    this.tPos[i * 3 + 1] = pos.y;
+    this.tPos[i * 3 + 2] = pos.z;
+    randomQuat(this.tQuat, i * 4);
+    this.tLife[i] = TRAIL_LIFE * (0.9 + Math.random() * 0.2);
+    this.tSize[i] = 0.2 + Math.random() * 0.05;
+    this.tHeat[i] = heat;
   }
 
   /**
@@ -884,6 +915,7 @@ export class Effects {
   update(dt: number) {
     if (this.liveDots > 0) this.updateDots(dt);
     this.updatePuffs(dt);
+    this.updateTrail(dt);
     this.updateDebris(dt);
     this.updateDecals(dt);
     this.updateRings(dt);
@@ -957,7 +989,56 @@ export class Effects {
     this.pSize[to] = this.pSize[from];
     this.pHeat[to] = this.pHeat[from];
     this.pRise[to] = this.pRise[from];
-    this.pTrail[to] = this.pTrail[from];
+  }
+
+  private updateTrail(dt: number) {
+    if (this.liveTrail <= 0) return;
+    const m = this.trailMesh.instanceMatrix.array as Float32Array;
+    const col = this.trailMesh.instanceColor!.array as Float32Array;
+    const pos = this.tPos;
+    const q = this.tQuat;
+    const cam = this.cam;
+    let n = this.liveTrail;
+    let i = 0;
+    while (i < n) {
+      this.tLife[i] -= dt;
+      if (this.tLife[i] <= 0) {
+        n--;
+        if (i < n) {
+          move(pos, 3, n, i);
+          move(q, 4, n, i);
+          this.tLife[i] = this.tLife[n];
+          this.tSize[i] = this.tSize[n];
+          this.tHeat[i] = this.tHeat[n];
+        }
+        this.tLife[n] = 0;
+        continue;
+      }
+      const t = 1 - this.tLife[i] / TRAIL_LIFE;
+      // Smoke barely lifts: enough to soften the line, never enough to bend it.
+      pos[i * 3 + 1] += 0.12 * dt;
+      // Swells fast out of the nozzle, then keeps spreading slowly while it fades.
+      let r = this.tSize[i] * (t < 0.08 ? 0.5 + 0.5 * (t / 0.08) : 1 + 1.6 * (t - 0.08));
+      const d = Math.hypot(pos[i * 3] - cam.x, pos[i * 3 + 1] - cam.y, pos[i * 3 + 2] - cam.z);
+      const room = (d - 0.3) * 0.5;
+      if (r > room) r = Math.max(0, room);
+      writeTRS(m, i * 16, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], q[i * 4], q[i * 4 + 1], q[i * 4 + 2], q[i * 4 + 3], r);
+      // Hot for the first moments (when the rocket is fresh), then pale smoke thinning out to nothing.
+      const hot = this.tHeat[i] * Math.max(0, 1 - t / 0.12);
+      col[i * 3] = TRAIL_SMOKE.r + (TRAIL_HOT.r - TRAIL_SMOKE.r) * hot;
+      col[i * 3 + 1] = TRAIL_SMOKE.g + (TRAIL_HOT.g - TRAIL_SMOKE.g) * hot;
+      col[i * 3 + 2] = TRAIL_SMOKE.b + (TRAIL_HOT.b - TRAIL_SMOKE.b) * hot;
+      const fade = (1 - t) * (1 - t);
+      this.trailAlpha[i] = (TRAIL_ALPHA + (TRAIL_HOT_ALPHA - TRAIL_ALPHA) * hot) * fade * Math.min(1, d / 1.5);
+      i++;
+    }
+    this.liveTrail = n;
+    if (this.nextTrail >= n) this.nextTrail = 0;
+    this.trailMesh.count = n;
+    this.trailMesh.visible = n > 0;
+    upload(this.trailMesh.instanceMatrix, n);
+    upload(this.trailMesh.instanceColor!, n);
+    upload(this.trailGeo.attributes.alpha as THREE.InstancedBufferAttribute, n);
   }
 
   private updatePuffs(dt: number) {
@@ -987,12 +1068,12 @@ export class Effects {
       pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
       pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
       // Pop out, keep billowing a little, then shrink away at the end: opaque comic smoke that never needs alpha
-      // sorting. Trail puffs shrink sooner, so a trail stays a clean line.
+      // sorting.
       let s: number;
       if (t < 0.18) s = 0.35 + 0.65 * (t / 0.18);
       else {
         const k = (t - 0.18) / 0.82;
-        s = this.pTrail[i] ? (1 + 0.1 * k) * (1 - k * k) : (1 + 0.25 * k) * (1 - k * k * k);
+        s = (1 + 0.25 * k) * (1 - k * k * k);
       }
       let r = s * this.pSize[i];
       // A puff never swallows the camera (its ink hull would black out the screen): it stays clear of the eye.
@@ -1181,9 +1262,9 @@ export class Effects {
       w.sprite.material.dispose();
     }
     for (const t of this.wordTextures) t.dispose();
-    for (const g of [this.ballGeo, this.coreGeo, this.ballHull, this.puffGeo, this.puffHull, this.chunkGeo, this.chunkHull, this.decalGeo, this.ringGeo]) g.dispose();
-    for (const m of [this.puffs, this.puffInk, this.chunks, this.chunkInk, this.decals, this.ringMesh, this.cores, this.shells, this.ballInk]) m.dispose();
-    for (const m of [this.toonMat, this.inkMat, this.decalMat, this.ringMat, this.shellMat, this.coreMat]) m.dispose();
+    for (const g of [this.ballGeo, this.coreGeo, this.ballHull, this.puffGeo, this.puffHull, this.chunkGeo, this.chunkHull, this.decalGeo, this.ringGeo, this.trailGeo]) g.dispose();
+    for (const m of [this.puffs, this.puffInk, this.chunks, this.chunkInk, this.decals, this.ringMesh, this.trailMesh, this.cores, this.shells, this.ballInk]) m.dispose();
+    for (const m of [this.toonMat, this.inkMat, this.decalMat, this.ringMat, this.trailMat, this.shellMat, this.coreMat]) m.dispose();
     this.scorchTex.dispose();
   }
 }

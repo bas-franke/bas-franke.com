@@ -79,6 +79,10 @@ const rotPoint = (p: Vec3, turns: number): Vec3 => {
   return v3(x, p.y, z);
 };
 
+/** Height and thickness of a curb (see MapBuilder.curb). */
+export const CURB_H = 0.8;
+export const CURB = 0.3;
+
 /** Collects boxes, pads, spawns and packs. `quad` and `pair` stamp a piece of layout with rotational symmetry. */
 export class MapBuilder {
   readonly boxes: MapBox[] = [];
@@ -94,6 +98,15 @@ export class MapBuilder {
   /** A box centred on (cx, cz) with half-extents hx, hz, from y0 up to y1. */
   block(kind: BoxKind, cx: number, cz: number, hx: number, hz: number, y1: number, y0 = 0) {
     return this.box(kind, cx - hx, y0, cz - hz, cx + hx, y1, cz + hz);
+  }
+
+  /**
+   * A knee-high curb along the edge of a walkway over the void: too tall to walk over (above RK.stepHeight), low
+   * enough to jump, so a player sliding from a hit stops at the edge instead of dropping off. Runs from (x0, z0) to
+   * (x1, z1) on a surface at height y; give it a thin side (CURB) on the inside of the edge.
+   */
+  curb(x0: number, z0: number, x1: number, z1: number, y: number) {
+    return this.box('ledge', x0, y, z0, x1, y + CURB_H, z1);
   }
 
   /** A staircase climbing in +dir along one axis from (startX, startZ), each step RK.stepHeight tall. */
