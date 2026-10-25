@@ -9,13 +9,13 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { G, coopBountyShare, coopCount } from '../../backend/src/shared/garden/constants.js';
+import { G, coopBountyShare, coopCount, coopEarly } from '../../backend/src/shared/garden/constants.js';
 import { ENEMIES, SENDS, SKITTER_PACK, sendCap, vsHpRamp, waveBounty, waveHp } from '../../backend/src/shared/garden/enemies.js';
 import { GMAPS, type GMapDef, gmapById } from '../../backend/src/shared/garden/maps.js';
 import { boardOrigin, routeGeom, routePos } from '../../backend/src/shared/garden/board.js';
 import { TFlag } from '../../backend/src/shared/garden/protocol.js';
 import { TOWERS, type TowerKind } from '../../backend/src/shared/garden/towers.js';
-import { GardenSim, fallbackGardenBot } from '../../backend/src/games/garden/sim.js';
+import { GardenSim, VS_RECLAIM, fallbackGardenBot } from '../../backend/src/games/garden/sim.js';
 import { createGardenBot } from '../../backend/src/games/garden/bots.js';
 import { createGardenGame } from '../../backend/src/games/garden/server.js';
 
@@ -942,14 +942,20 @@ describe('economy', () => {
     assert.equal(sim3.wave, 1);
     assert.equal(sim3.players.get('p1').gold, g3);
   });
-  it('ready toggles for humans and only in the build phase; spectators cannot ready', () => {
+  it('ready toggles for humans in the build phase (co-op humans also during a wave); spectators cannot ready', () => {
     const sim = mkSim('coop');
     assert.equal(sim.handle('p1', { k: 'ready' }), true);
     assert.equal(sim.players.get('p1').ready, true);
     sim.handle('p1', { k: 'ready' });
     assert.equal(sim.players.get('p1').ready, false);
     sim.phase = 'wave';
-    assert.equal(sim.handle('p1', { k: 'ready' }), false);
+    assert.equal(sim.handle('p1', { k: 'ready' }), true, 'co-op: humans may ready during a wave');
+    const bots = mkSim('coop', ['bot1'], { bots: true });
+    bots.phase = 'wave';
+    assert.equal(bots.handle('bot1', { k: 'ready' }), false, 'bots never ready during a wave');
+    const v = mkSim('vs', ['a', 'b']);
+    v.phase = 'wave';
+    assert.equal(v.handle('a', { k: 'ready' }), false, 'versus: build phase only');
     const vs = mkSim('vs', ['a', 'b']);
     vs.addPlayer({ id: 's', name: 's', bot: false });
     assert.equal(vs.handle('s', { k: 'ready' }), false);
@@ -1006,18 +1012,24 @@ describe('versus sends', () => {
   });
   it('unlock wave and per-wave cap are checked against the wave the send enters', () => {
     const sim = mkSim('vs', ['a', 'b']);
-    sim.wave = 1;
+    // SENDS.from is the earliest wave a send can ENTER; it always enters wave + 1.
+    const from = (k: string) => SENDS.find((s) => s.kind === k)!.from;
     sim.players.get('a').gold = 1e6;
-    assert.equal(sim.handle('a', { k: 'send', e: 'skitter' }), false);
-    assert.equal(sim.denies.at(-1).why, 'Unlocks on wave 3');
-    for (let i = 0; i < sendCap(2); i++) assert.equal(sim.handle('a', { k: 'send', e: 'runner' }), true);
+    sim.wave = from('runner') - 1;
+    assert.equal(sim.handle('a', { k: 'send', e: 'runner' }), true, 'runner can be bought the build phase before it enters');
+    sim.players.get('a').sends = 0;
+    sim.wave = from('disruptor') - 2;
+    assert.equal(sim.handle('a', { k: 'send', e: 'disruptor' }), false);
+    assert.equal(sim.denies.at(-1).why, `Unlocks on wave ${from('disruptor')}`);
+    sim.players.get('a').sends = 0;
+    for (let i = 0; i < sendCap(sim.wave + 1); i++) assert.equal(sim.handle('a', { k: 'send', e: 'runner' }), true);
     assert.equal(sim.handle('a', { k: 'send', e: 'runner' }), false);
     assert.equal(sim.denies.at(-1).why, 'Send limit reached this wave');
-    sim.startWave(); // wave 2: counter resets
-    assert.equal(sim.handle('a', { k: 'send', e: 'skitter' }), true);
-    sim.wave = 15;
+    sim.startWave(); // counter resets, and the disruptor now enters its unlock wave
+    assert.equal(sim.handle('a', { k: 'send', e: 'disruptor' }), true);
+    sim.wave = from('colossus') - 1;
     sim.players.get('a').sends = 0;
-    assert.equal(sim.handle('a', { k: 'send', e: 'colossus' }), true, 'colossus from 15 (enters 16)');
+    assert.equal(sim.handle('a', { k: 'send', e: 'colossus' }), true, 'colossus enters on its unlock wave');
   });
   it('not enough gold is refused and charges nothing', () => {
     const sim = mkSim('vs', ['a', 'b']);
@@ -1060,7 +1072,7 @@ describe('versus sends', () => {
     sim.players.get('a').gold = 1000;
     sim.handle('a', { k: 'send', e: 'runner', to: 1 });
     sim.handle('a', { k: 'send', e: 'skitter', to: 1 });
-    const inc = G.baseIncome + 5 + 6;
+    const inc = G.baseIncome + SENDS.find((s) => s.kind === 'runner')!.income + SENDS.find((s) => s.kind === 'skitter')!.income;
     const g = sim.players.get('a').gold;
     const gb = sim.players.get('b').gold;
     const t0 = sim.time;
@@ -1304,6 +1316,140 @@ describe('server', () => {
     const [c, r] = cells(COOP_MAP, '.')[0];
     game.onMessage('bot1', { k: 'build', t: 'laser', x: c, y: r });
     assert.equal(game.sim.towers.size, 0);
+  });
+});
+
+// ---- rejoin, loading, pacing ----------------------------------------------------------------------------------------
+
+describe('rejoin and pacing', () => {
+  it('versus: a leaver is parked; a same-name rejoin within VS_RECLAIM reclaims board, gold, income, score, towers', () => {
+    const sim = mkSim('vs', ['a', 'b']);
+    const tw = tower(sim, 'a', 'laser');
+    const a = sim.players.get('a');
+    a.gold = 777;
+    a.income = 23;
+    a.score.kills = 9;
+    sim.removePlayer('a');
+    assert.equal(sim.boards[0].owner, 'a', 'board stays reserved');
+    // The board keeps defending and earning for the parked owner.
+    const e = enemy(sim, 'runner');
+    sim.hurt(e, 1e6, 1, tw);
+    sim.step(DT * 20);
+    const back = sim.addPlayer({ id: 'a2', name: 'A', bot: false });
+    assert.equal(back.board, 0);
+    assert.ok(back.gold > 777, `bounty paid while parked: ${back.gold}`);
+    assert.equal(back.income, 23);
+    assert.equal(back.score.kills, 10);
+    assert.equal(back.score.id, 'a2');
+    assert.equal(sim.boards[0].owner, 'a2');
+    assert.equal(sim.towers.get(tw.info.id).info.own, 'a2');
+    assert.equal(sim.handle('a2', { k: 'sell', id: tw.info.id }), true, 'the reclaimed towers are theirs again');
+  });
+  it('versus: after VS_RECLAIM the board is lost and a same-name join spectates', () => {
+    const sim = mkSim('vs', ['a', 'b']);
+    sim.removePlayer('a');
+    for (let t = 0; t <= VS_RECLAIM + 1; t += 0.5) sim.step(0.5);
+    if (sim.end) return;
+    assert.equal(sim.addPlayer({ id: 'a2', name: 'a', bot: false }).board, -1);
+  });
+  it('versus: a rejoin sends every human a fresh init carrying the new owner and myBoard', () => {
+    const { host, players } = fakeHost('vs', ['a', 'b'], 'seedling-plot');
+    const game: any = createGardenGame(host as any);
+    game.start();
+    game.stop();
+    players.splice(0, 1);
+    game.removePlayer('a');
+    const p = { id: 'a2', name: 'a', bot: false, color: 1 };
+    players.push(p);
+    host.sent = [];
+    game.addPlayer(p);
+    const mine = host.sent.find((s) => s.id === 'a2' && s.m.k === 'init');
+    assert.equal(mine!.m.myBoard, 0);
+    assert.equal(mine!.m.boards[0].own, 'a2');
+    assert.ok(host.sent.some((s) => s.id === 'b' && s.m.k === 'init'), 'opponents learn the new owner');
+  });
+  it('init carries finishing places of boards already out (BoardInfo.place)', () => {
+    const sim = mkSim('vs', ['a', 'b', 'c']);
+    sim.boards[2].lives = 0;
+    sim.step(DT);
+    const info = sim.boardInfo();
+    assert.equal(info[2].place, 3);
+    assert.equal(info[0].place, undefined);
+  });
+  it('the first build countdown waits for every human to sync (or leave), capped at 20 s', () => {
+    const { host } = fakeHost('coop', ['a', 'b', 'bot1'], 'greenhouse-commons');
+    const game: any = createGardenGame(host as any);
+    game.start();
+    game.stop();
+    const left0 = game.sim.left;
+    for (let i = 0; i < 40; i++) game.loop();
+    assert.equal(game.sim.left, left0, 'held while loading');
+    game.onMessage('a', { k: 'sync' });
+    game.loop();
+    assert.equal(game.sim.left, left0, 'b still loading');
+    game.removePlayer('b');
+    game.loop();
+    assert.ok(game.sim.left < left0, 'released once nobody is loading');
+    const g2: any = createGardenGame(fakeHost('coop', ['a'], 'greenhouse-commons').host as any);
+    g2.start();
+    g2.stop();
+    for (let i = 0; i < 20 * G.tickRate + 2; i++) g2.loop();
+    assert.ok(g2.sim.left < G.firstBuild && !g2.sim.hold, 'safety cap');
+  });
+  it('co-op: everyone ready during a wave with <= overlapLeft enemies left starts the next wave over them', () => {
+    const sim = mkSim('coop', ['a', 'b']);
+    sim.left = 0;
+    sim.step(DT);
+    assert.equal(sim.wave, 1);
+    sim.boards[0].pending.length = 0;
+    for (const e of sim.boards[0].en) e.dead = true;
+    for (let i = 0; i <= G.overlapLeft; i++) enemy(sim, 'brute');
+    sim.handle('a', { k: 'ready' });
+    sim.handle('b', { k: 'ready' });
+    sim.step(DT);
+    assert.equal(sim.wave, 1, `${G.overlapLeft + 1} enemies left: no overlap`);
+    sim.boards[0].en.find((e: any) => !e.dead).dead = true;
+    const g = sim.players.get('a').gold;
+    sim.step(DT);
+    assert.equal(sim.wave, 2, 'overlapped');
+    assert.equal(sim.phase, 'wave');
+    assert.equal(sim.players.get('a').gold, g + G.clearBonus + G.clearBonusPerWave * 1 + G.overlapBonus);
+    assert.equal(sim.players.get('a').ready, false);
+  });
+  it('co-op early waves hit small hoarding teams harder (coopEarly), tapering off by wave 11', () => {
+    const hoard = 2000;
+    assert.equal(coopEarly(2, 1, hoard), 1);
+    assert.ok(coopEarly(5, 1, hoard) > coopEarly(5, 2, hoard) && coopEarly(5, 2, hoard) > 1);
+    near(coopEarly(5, 1, hoard), 1.35);
+    assert.equal(coopEarly(5, 3, hoard), 1);
+    assert.ok(coopEarly(9, 1, hoard) < coopEarly(8, 1, hoard) && coopEarly(9, 1, hoard) > 1);
+    assert.equal(coopEarly(11, 1, hoard), 1);
+    assert.equal(coopEarly(5, 1, 100), 1, 'a garden that spends keeps the normal curve');
+    near(coopEarly(5, 1, 325 * 1.5), 1.175);
+  });
+  it('easy bots wait ~8 s before their first build', () => {
+    const sim = mkSim('coop', ['bot1'], { bots: true });
+    sim.players.get('bot1').brain = createGardenBot('bot1', 'easy', 7);
+    for (let i = 0; i < 7 * G.tickRate; i++) sim.step(DT);
+    assert.equal(sim.towers.size, 0);
+    for (let i = 0; i < 4 * G.tickRate; i++) sim.step(DT);
+    assert.ok(sim.towers.size > 0);
+  });
+  it('versus bots save up for bigger sends (not only runners)', () => {
+    const kinds: Record<string, number> = {};
+    for (const seed of [1, 2]) {
+      const sim = mkSim('vs', ['bot1', 'bot2', 'bot3', 'bot4'], { bots: true, seed });
+      while (!sim.end && sim.time < 1800) {
+        sim.step(DT);
+        for (const e of sim.events) if (e.k === 'send') kinds[e.kind] = (kinds[e.kind] ?? 0) + 1;
+        sim.events = [];
+        sim.denies = [];
+      }
+    }
+    const total = Object.values(kinds).reduce((a, b) => a + b, 0);
+    assert.ok(total > 0);
+    assert.ok((kinds.runner ?? 0) < total * 0.6, `send mix ${JSON.stringify(kinds)}`);
+    assert.ok((kinds.brute ?? 0) + (kinds.disruptor ?? 0) > 0, `send mix ${JSON.stringify(kinds)}`);
   });
 });
 

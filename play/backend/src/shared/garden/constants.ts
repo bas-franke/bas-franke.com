@@ -23,7 +23,11 @@ export const G = {
   earlyBonusPerSec: 2,
   /** Versus: the next build phase starts this many seconds after a wave's last spawn even if some board still has
    * enemies on its path (they keep walking), so one board flooded with sends cannot stall everyone. */
-  vsOvertime: 25,
+  vsOvertime: 12,
+  /** Co-op: during a wave, once every human is ready, the spawns are done and at most this many enemies are left, the
+   * next wave starts over them (overlapping); every defender gets this wave's clear bonus plus overlapBonus. */
+  overlapLeft: 3,
+  overlapBonus: 10,
   /** Co-op ends in victory after this wave; versus keeps going until one garden is left. */
   coopWaves: 30,
   /** Gold each player starts with, by mode. */
@@ -41,6 +45,17 @@ export const G = {
 /** Co-op scaling with the number of players (humans + bots) defending: enemy health and count multipliers (the server
  * rounds counts; bosses are not multiplied). Read at each wave start only. */
 export const coopHp = (players: number) => 1 + 0.4 * (Math.max(1, players) - 1);
+/** Co-op: extra health for small teams (1-2 defenders) in waves 3-8, tapering off over waves 9-11, scaled by how
+ * much gold the defenders sit on at the wave start: from nothing at an average of (200 + 25 x wave) unspent gold to
+ * the full +35% (solo) / +20% (duo) at twice that. A garden that spends keeps the normal curve; one that hoards five
+ * level-1 towers and 600+ gold gets pushed. */
+export const coopEarly = (wave: number, players: number, avgGold = 0) => {
+  const k = players <= 1 ? 0.35 : players === 2 ? 0.2 : 0;
+  const f = wave < 3 ? 0 : wave <= 8 ? 1 : wave <= 11 ? (11 - wave) / 3 : 0;
+  const base = 200 + 25 * wave;
+  const idle = Math.min(1, Math.max(0, (avgGold - base) / base));
+  return 1 + k * f * idle;
+};
 export const coopCount = (players: number) => 1 + 0.22 * (Math.max(1, players) - 1);
 /** Co-op: how much of a kill bounty every defender receives (a kill pays everyone, so nobody steals kills). */
 export const coopBountyShare = (players: number) => (1 + 0.25 * (Math.max(1, players) - 1)) / Math.max(1, players);

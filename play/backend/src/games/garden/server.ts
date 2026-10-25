@@ -24,13 +24,24 @@
 // - Targeting: first = least distance left to the greenhouse, last = most, strong = most health, close = nearest.
 // - Disruptor: once its timer runs out it charges 0.6 s (EFlag.charging) while a non-disabled tower is in range,
 //   then bolts the closest; stunned disruptors neither move nor fire.
-// - Ready: only during the build phase; humans toggle, bots count as ready once they asked or can't afford any tower.
+// - Ready: during the build phase; humans toggle, bots count as ready once they asked or can't afford any tower.
 //   The early bonus is G.earlyBonusPerSec x whole seconds skipped, capped at G.betweenWaves seconds, to every defender.
+//   Co-op humans may also ready during a wave: once every human defender is ready, the wave's spawns are done and at
+//   most G.overlapLeft enemies are left, the next wave starts over them (not after the last wave); every defender
+//   gets that wave's clear bonus now plus G.overlapBonus. Bots never ready during a wave.
+// - The first build countdown is paused until every human in the room at the start has sent 'sync' (their client
+//   mounted) or left, at most LOAD_CAP s; bots build meanwhile; mid-match joiners don't count. Easy bots wait 8 s
+//   before their first build.
+// - Co-op waves 3-8 get up to +35% (solo) / +20% (duo) health when the defenders sit on lots of unspent gold
+//   at the wave start (coopEarly), tapering off over waves 9-11. Brutes lead
+//   their wave (from 2 s in) so a slow straggler doesn't hold a wave open.
 // - Co-op permissions: anyone upgrades or retargets any tower, only the builder sells; the seller gets the refund
 //   (G.sellRefund of everything spent on it, or all of it when sold in the same build phase it was built in).
 // - Leavers: co-op towers stay (anyone upgrades, nobody sells) and the leaver's gold is parked under their
-//   lower-case name (not shared out); a versus board plays on without a builder until it falls. Joiners: a co-op
-//   rejoin under a parked name gets exactly that gold back; a new name defends with start gold plus the clear
+//   lower-case name (not shared out). A versus leaver (human) is parked for VS_RECLAIM (60) s: their board keeps
+//   defending and earning (bounties, income, clear bonus) for them; after that it plays on unbuilt until it falls.
+//   Joiners: a rejoin under a parked name reclaims everything (board, gold, income, score, towers move to the new
+//   id; in versus every human gets a fresh init with the new owner); a new co-op name defends with start gold plus the clear
 //   bonuses paid so far (capped at the true median defender gold, never below start gold), at most
 //   MAX_COOP_PURSES purses per match (later new names start with 0). Versus joiners spectate; while a versus match
 //   is playing, rooms.ts seats a joiner over the limit instead of evicting a bot (bots are trimmed after the match).
@@ -60,6 +71,8 @@ const SYNC_EVERY = 2;
 /** Action token bucket per player: refill per second and capacity. */
 const ACTION_RATE = 12;
 const ACTION_BURST = 20;
+/** Seconds the first build countdown waits at most for clients to load. */
+const LOAD_CAP = 20;
 
 /** Map for this match: the chosen one if it fits the mode, else a random map of that mode. */
 export function pickGardenMap(mode: GMode, id: string | undefined, rnd: () => number = Math.random): GMapDef {
@@ -86,6 +99,9 @@ class GardenGame implements GameServer {
   private readonly buckets = new Map<string, { tokens: number; at: number }>();
   /** Versus: owner name per board, so the end message names a winner who has since left. */
   private boardNames: string[] = [];
+  /** Humans whose client has not sent its first 'sync' yet (the first build countdown waits for them). */
+  private readonly loading = new Set<string>();
+  private holdT = 0;
   /** Clock (ms); tests may replace it. */
   now: () => number = () => Date.now();
 
@@ -111,6 +127,9 @@ class GardenGame implements GameServer {
     });
     this.boardNames = this.sim.boards.map((b) => (b.owner ? (players.find((p) => p.id === b.owner)?.name ?? '') : ''));
     for (const p of this.host.players()) if (!p.bot) this.host.send(p.id, this.out(this.initMsg(p.id)));
+    // The first build countdown waits until every human's client has mounted (its 'sync'), at most LOAD_CAP s.
+    for (const p of this.host.players()) if (!p.bot) this.loading.add(p.id);
+    this.sim.hold = this.loading.size > 0;
     this.timer = setInterval(() => this.loop(), 1000 / G.tickRate);
   }
 
@@ -121,8 +140,13 @@ class GardenGame implements GameServer {
 
   addPlayer(p: GamePlayer) {
     if (!this.sim) return;
-    if (!this.sim.players.has(p.id)) this.sim.addPlayer({ id: p.id, name: p.name, bot: p.bot });
-    if (!p.bot) this.host.send(p.id, this.out(this.initMsg(p.id)));
+    const known = this.sim.players.has(p.id);
+    const sp = this.sim.addPlayer({ id: p.id, name: p.name, bot: p.bot });
+    if (!known && this.mode === 'vs' && sp.board >= 0) {
+      // A versus rejoin reclaimed its board (new id): everyone needs the new owner, so every human gets a fresh init.
+      this.boardNames[sp.board] = p.name;
+      for (const gp of this.host.players()) if (!gp.bot) this.host.send(gp.id, this.out(this.initMsg(gp.id)));
+    } else if (!p.bot) this.host.send(p.id, this.out(this.initMsg(p.id)));
     this.host.broadcast(this.out({ k: 'score', scores: this.sim.scores() }));
   }
 
@@ -130,6 +154,7 @@ class GardenGame implements GameServer {
     this.views.delete(id);
     this.syncAt.delete(id);
     this.buckets.delete(id);
+    this.loaded(id);
     if (!this.sim) return;
     this.sim.removePlayer(id);
     this.host.broadcast(this.out({ k: 'score', scores: this.sim.scores() }));
@@ -142,6 +167,7 @@ class GardenGame implements GameServer {
     const msg = m as unknown as { k?: unknown; b?: unknown };
     const now = this.now();
     if (msg.k === 'sync') {
+      this.loaded(id);
       const last = this.syncAt.get(id);
       if (last !== undefined && now - last < SYNC_EVERY * 1000) return;
       this.syncAt.set(id, now);
@@ -159,6 +185,12 @@ class GardenGame implements GameServer {
     if (bk.tokens < 1) return;
     bk.tokens -= 1;
     this.sim.handle(id, m);
+  }
+
+  /** A human finished loading (or left): release the first countdown once nobody is loading. */
+  private loaded(id: string) {
+    if (!this.loading.delete(id) || !this.sim) return;
+    if (!this.loading.size) this.sim.hold = false;
   }
 
   private initMsg(id: string): GardenServerMsg {
@@ -179,6 +211,10 @@ class GardenGame implements GameServer {
   private loop() {
     if (this.done) return;
     const sim = this.sim;
+    if (sim.hold && (this.holdT += 1 / G.tickRate) >= LOAD_CAP) {
+      sim.hold = false;
+      this.loading.clear();
+    }
     try {
       sim.step(1 / G.tickRate);
     } catch (err) {

@@ -5,7 +5,7 @@
 
 import { rng as makeRng } from '../../shared/math.js';
 import type { BotDifficulty } from '../../shared/protocol.js';
-import { G, type GMode, coopBountyShare, coopCount, coopHp } from '../../shared/garden/constants.js';
+import { G, type GMode, coopBountyShare, coopCount, coopEarly, coopHp } from '../../shared/garden/constants.js';
 import { ENEMIES, type EnemyDef, type EnemyKind, SENDS, SENT_BOUNTY, SKITTER_PACK, isEnemyKind, sendCap, vsHpRamp, waveBounty, waveHp, waveSpawns } from '../../shared/garden/enemies.js';
 import type { GMapDef } from '../../shared/garden/maps.js';
 import { type BoardOrigin, type RouteGeom, type RoutePos, boardOrigin, cellToWorld, routeGeom, routePos } from '../../shared/garden/board.js';
@@ -43,6 +43,8 @@ const SEND_AT = 4;
 const SHED_AT = [0.75, 0.5, 0.25];
 /** Co-op: most purses (start gold + clear bonuses) one match hands out; later new names start with 0 gold. */
 const MAX_COOP_PURSES = 12;
+/** Versus: seconds a leaver's board, gold and score stay reserved for a rejoin under the same name. */
+export const VS_RECLAIM = 60;
 const CHEAPEST_TOWER = Math.min(...TOWER_KINDS.map((k) => TOWERS[k].levels[0].cost));
 
 export interface SimPlayerInit {
@@ -186,8 +188,12 @@ export class GardenSim {
   readonly H: number;
   readonly boards: Board[] = [];
   readonly players = new Map<string, SimPlayer>();
-  /** Co-op: gold of defenders who left, by lower-case name; a rejoin under that name gets exactly this back. */
-  private readonly parked = new Map<string, number>();
+  /**
+   * Players who left mid-match, by lower-case name: a join under that name reclaims everything (board, gold, income,
+   * score, towers). Co-op keeps them for the whole match (so leaving never mints gold); versus for VS_RECLAIM s, while
+   * their board keeps defending and earning for them.
+   */
+  private readonly parked = new Map<string, { sp: SimPlayer; at: number }>();
   /** Co-op: purses handed out so far (initial players + new joiners); capped by MAX_COOP_PURSES. */
   private purses = 0;
   /** Co-op: clear bonuses paid so far, per defender (the most a genuinely new joiner gets on top of start gold). */
@@ -202,6 +208,8 @@ export class GardenSim {
   tick = 0;
   time = 0;
   end: SimEnd | null = null;
+  /** The build countdown is paused (server: the first one waits until every human has loaded). */
+  hold = false;
   /** Counters for the balance tool. */
   stats = { leaks: 0, kills: 0, spawned: 0 };
   /** Enemies spawned in the current wave so far (all boards). */
@@ -261,8 +269,10 @@ export class GardenSim {
   addPlayer(p: SimPlayerInit, board = this.mode === 'vs' ? -1 : 0): SimPlayer {
     const existing = this.players.get(p.id);
     if (existing) return existing;
+    const back = this.reclaim(p);
+    if (back) return back;
     let gold: number = G.startGold[this.mode];
-    if (this.mode === 'coop' && board >= 0) gold = this.coopPurse(p.name);
+    if (this.mode === 'coop' && board >= 0) gold = this.coopPurse();
     const sp: SimPlayer = {
       id: p.id,
       name: p.name,
@@ -283,30 +293,65 @@ export class GardenSim {
   }
 
   /**
-   * A player left. Their towers keep working (co-op: anyone may still upgrade them, nobody can sell them) and in co-op
-   * their gold is split among the remaining defenders. In versus their board plays on without a builder.
+   * A player left. Their towers keep working (co-op: anyone may still upgrade them, nobody can sell them) and the
+   * player is parked under their lower-case name (see `parked`): co-op until the match ends, versus (humans only) for
+   * VS_RECLAIM s while their board keeps defending and earning for them. After that a versus board plays on unbuilt.
    */
   removePlayer(id: string) {
     const p = this.players.get(id);
     this.players.delete(id);
-    if (!p || this.mode !== 'coop' || p.board < 0 || this.end) return;
+    if (!p || p.board < 0 || this.end || (this.mode === 'vs' && p.bot)) return;
     const key = p.name.toLowerCase();
-    this.parked.set(key, (this.parked.get(key) ?? 0) + p.gold);
+    const prev = this.parked.get(key);
+    if (prev && this.mode === 'coop') p.gold += prev.sp.gold;
+    this.parked.set(key, { sp: p, at: this.time });
+  }
+
+  /** A join under a parked name takes the parked player's place: board, gold, income, score and towers move to the new id. */
+  private reclaim(p: SimPlayerInit): SimPlayer | null {
+    const key = p.name.toLowerCase();
+    const pk = this.parked.get(key);
+    if (!pk || pk.sp.bot !== p.bot) return null;
+    this.parked.delete(key);
+    const old = pk.sp;
+    const sp: SimPlayer = { ...old, id: p.id, name: p.name, ready: false, score: { ...old.score, id: p.id }, brain: undefined };
+    if (p.bot) sp.brain = this.createBot(p.id, this.difficulty, Math.floor(this.rng() * 1e9));
+    const from = old.id;
+    for (const bd of this.boards) {
+      if (bd.owner === from) bd.owner = p.id;
+      for (const s of bd.pending) if (s.from === from) s.from = p.id;
+      for (const q of bd.queued) if (q.from === from) q.from = p.id;
+    }
+    for (const t of this.towers.values()) if (t.info.own === from) t.info.own = p.id;
+    for (const e of this.enemies.values()) if (e.from === from) e.from = p.id;
+    for (const m of this.missiles) if (m.owner === from) m.owner = p.id;
+    this.players.set(p.id, sp);
+    return sp;
+  }
+
+  /** Versus: the player a board pays (its owner, or the owner parked while they reconnect). */
+  private holder(id: string | null): SimPlayer | undefined {
+    if (!id) return undefined;
+    const p = this.players.get(id);
+    if (p || this.mode !== 'vs') return p;
+    for (const pk of this.parked.values()) if (pk.sp.id === id) return pk.sp;
+    return undefined;
+  }
+
+  /** Everyone holding a board: players plus (versus) parked leavers. */
+  private holders(): SimPlayer[] {
+    const out = [...this.players.values()];
+    if (this.mode === 'vs') for (const pk of this.parked.values()) out.push(pk.sp);
+    return out;
   }
 
   /**
-   * Co-op starting gold for a joiner. Leaving and rejoining (rooms.ts gives a new id) or renaming must never mint
-   * gold: a rejoin under a parked name gets exactly the parked gold back; a new name gets start gold plus the clear
-   * bonuses paid so far (never more than the true median defender's gold, never less than start gold), and only
-   * while the match has purses left (MAX_COOP_PURSES); after that a new name starts with nothing.
+   * Co-op starting gold for a new name (a parked name reclaims instead, see reclaim). Leaving and rejoining (rooms.ts
+   * gives a new id) or renaming must never mint gold: a new name gets start gold plus the clear bonuses paid so far
+   * (never more than the true median defender's gold, never less than start gold), and only while the match has
+   * purses left (MAX_COOP_PURSES); after that a new name starts with nothing.
    */
-  private coopPurse(name: string): number {
-    const key = name.toLowerCase();
-    const back = this.parked.get(key);
-    if (back !== undefined) {
-      this.parked.delete(key);
-      return back;
-    }
+  private coopPurse(): number {
     if (this.purses >= MAX_COOP_PURSES) return 0;
     this.purses++;
     const start = G.startGold.coop;
@@ -319,6 +364,17 @@ export class GardenSim {
       cap = Math.min(cap, Math.floor(median));
     }
     return Math.max(start, cap);
+  }
+
+  private avgDefenderGold(): number {
+    let g = 0;
+    let n = 0;
+    for (const p of this.players.values())
+      if (p.board >= 0) {
+        g += p.gold;
+        n++;
+      }
+    return n ? g / n : 0;
   }
 
   private defenders(): number {
@@ -344,7 +400,8 @@ export class GardenSim {
       case 'tm':
         return this.setTarget(p, msg.id, msg.tm);
       case 'ready':
-        if (p.board < 0 || this.phase !== 'build') return false;
+        // Build phase: anyone. Co-op wave phase: humans may ready up to call the next wave over the last stragglers.
+        if (p.board < 0 || (this.phase !== 'build' && !(this.mode === 'coop' && this.phase === 'wave' && !p.bot))) return false;
         p.ready = p.bot ? true : !p.ready;
         return true;
       case 'send':
@@ -561,11 +618,11 @@ export class GardenSim {
     this.left = 0;
     const n = this.wave;
     const players = this.defenders();
-    const hpMul = waveHp(n) * (this.mode === 'coop' ? coopHp(players) : vsHpRamp(n));
+    const hpMul = waveHp(n) * (this.mode === 'coop' ? coopHp(players) * coopEarly(n, players, this.avgDefenderGold()) : vsHpRamp(n));
     const cMul = this.mode === 'coop' ? coopCount(players) : 1;
     this.waveSpawned = 0;
     this.lastSpawnAt = this.time;
-    for (const p of this.players.values()) {
+    for (const p of this.holders()) {
       p.ready = false;
       p.sends = 0;
       if (this.mode === 'vs' && p.board >= 0 && !this.boards[p.board].out) {
@@ -616,7 +673,7 @@ export class GardenSim {
       }
       bd.cleared = true;
       this.events.push({ k: 'clear', n: this.wave, bonus, b: bd.b });
-      for (const p of this.players.values())
+      for (const p of this.holders())
         if (p.board === bd.b) {
           p.gold += bonus;
           this.events.push({ k: 'gold', id: p.id, n: bonus, why: 'clear' });
@@ -629,7 +686,49 @@ export class GardenSim {
     }
   }
 
+  /**
+   * Co-op: every human defender is ready during a wave, its spawns are done and at most G.overlapLeft enemies are
+   * still walking (not on the last wave): the next wave starts over the stragglers.
+   */
+  private overlapReady(): boolean {
+    if (this.mode !== 'coop' || this.wave >= G.coopWaves) return false;
+    const bd = this.boards[0];
+    if (bd.pending.length > 0) return false;
+    let alive = 0;
+    for (const e of bd.en) if (!e.dead) alive++;
+    if (alive > G.overlapLeft) return false;
+    let humans = 0;
+    for (const p of this.players.values()) {
+      if (p.bot || p.board < 0) continue;
+      humans++;
+      if (!p.ready) return false;
+    }
+    return humans > 0;
+  }
+
+  /** Starts the next co-op wave early: this wave's clear bonus now, plus the small G.overlapBonus to every defender. */
+  private overlapWave() {
+    this.payClear();
+    for (const p of this.players.values())
+      if (p.board >= 0) {
+        p.gold += G.overlapBonus;
+        this.events.push({ k: 'gold', id: p.id, n: G.overlapBonus, why: 'early' });
+      }
+    this.left = 0;
+    this.startWave();
+  }
+
   private clearWave() {
+    this.payClear();
+    if (this.mode === 'coop' && this.wave >= G.coopWaves) {
+      this.finish({ win: true, winner: null, wave: this.wave });
+      return;
+    }
+    this.phase = 'build';
+    this.left = G.betweenWaves;
+  }
+
+  private payClear() {
     const bonus = G.clearBonus + G.clearBonusPerWave * this.wave;
     this.clearPaid += bonus;
     this.events.push({ k: 'clear', n: this.wave, bonus });
@@ -638,12 +737,6 @@ export class GardenSim {
         p.gold += bonus;
         this.events.push({ k: 'gold', id: p.id, n: bonus, why: 'clear' });
       }
-    if (this.mode === 'coop' && this.wave >= G.coopWaves) {
-      this.finish({ win: true, winner: null, wave: this.wave });
-      return;
-    }
-    this.phase = 'build';
-    this.left = G.betweenWaves;
   }
 
   private finish(e: SimEnd) {
@@ -663,11 +756,12 @@ export class GardenSim {
     if (this.end) return;
     this.tick++;
     this.time += dt;
+    if (this.mode === 'vs') for (const [key, pk] of this.parked) if (this.time - pk.at > VS_RECLAIM) this.parked.delete(key);
     for (const bd of this.boards) bd.livesAtTick = bd.lives;
     this.runBots(dt);
     if (this.end) return;
     if (this.phase === 'build') {
-      this.left -= dt;
+      if (!this.hold) this.left -= dt;
       if (this.left <= 0 || this.allReady()) this.startWave();
     }
     for (const bd of this.boards) {
@@ -684,7 +778,10 @@ export class GardenSim {
     this.checkBoards();
     if (this.end) return;
     if (this.mode === 'vs') this.vsClears();
-    else if (this.phase === 'wave' && this.waveCleared()) this.clearWave();
+    else if (this.phase === 'wave') {
+      if (this.waveCleared()) this.clearWave();
+      else if (this.overlapReady()) this.overlapWave();
+    }
   }
 
   private spawn(bd: Board) {
@@ -1033,7 +1130,7 @@ export class GardenSim {
     const amt = raw * (1 - e.def.armor * (1 - pierce));
     const dealt = Math.min(amt, e.hp);
     e.hp -= amt;
-    const p = owner ? this.players.get(owner) : undefined;
+    const p = this.holder(owner ?? null);
     if (p) p.score.dmg += dealt;
     if (e.def.shed && e.shed < SHED_AT.length) {
       let n = 0;
@@ -1066,8 +1163,7 @@ export class GardenSim {
       ev.gold = Math.ceil(bounty * coopBountyShare(this.defenders()));
       for (const q of this.players.values()) if (q.board >= 0) q.gold += ev.gold;
     } else {
-      const owner = this.boards[e.b].owner;
-      const q = owner ? this.players.get(owner) : undefined;
+      const q = this.holder(this.boards[e.b].owner);
       if (q) {
         ev.gold = Math.round(bounty * (e.from ? SENT_BOUNTY : 1));
         ev.to = q.id;
@@ -1096,7 +1192,7 @@ export class GardenSim {
     const falling = this.boards.filter((b) => !b.out && b.lives <= 0);
     if (!falling.length) return;
     // Worst first: fewer lives at the start of the tick, then less damage dealt by the owner.
-    const dmg = (b: Board) => (b.owner ? (this.players.get(b.owner)?.score.dmg ?? 0) : 0);
+    const dmg = (b: Board) => (this.holder(b.owner)?.score.dmg ?? 0);
     falling.sort((a, b) => a.livesAtTick - b.livesAtTick || dmg(a) - dmg(b));
     const living = this.boards.filter((b) => !b.out).length;
     // When every remaining garden falls on the same tick, the best of them is the last one standing.
@@ -1107,7 +1203,7 @@ export class GardenSim {
       const win = survivor ?? rest[0];
       if (win) {
         win.place = 1;
-        for (const p of this.players.values()) if (p.board === win.b) p.score.place = 1;
+        for (const p of this.holders()) if (p.board === win.b) p.score.place = 1;
       }
       this.finish({ win: !!win, winner: win?.owner ?? null, wave: this.wave });
     }
@@ -1124,7 +1220,7 @@ export class GardenSim {
       t.ch.length = 0;
     }
     for (const [id, e] of this.enemies) if (e.b === bd.b) this.enemies.delete(id);
-    for (const p of this.players.values()) if (p.board === bd.b) p.score.place = bd.place;
+    for (const p of this.holders()) if (p.board === bd.b) p.score.place = bd.place;
     this.events.push({ k: 'out', b: bd.b, place: bd.place });
   }
 
@@ -1195,7 +1291,7 @@ export class GardenSim {
   // ---- wire views -------------------------------------------------------------------------------------------------
 
   boardInfo(): BoardInfo[] {
-    return this.boards.map((b) => ({ b: b.b, own: b.owner }));
+    return this.boards.map((b) => (b.place ? { b: b.b, own: b.owner, place: b.place } : { b: b.b, own: b.owner }));
   }
 
   towerInfos(): TowerInfo[] {

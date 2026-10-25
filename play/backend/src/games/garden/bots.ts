@@ -43,12 +43,21 @@ interface Params {
   /** Versus: first wave to send on, and how much defence (gold in towers, x the default curve) must stand first. */
   sendFrom: number;
   defNeed: number;
+  /** Seconds after the match starts before the first build (easy bots let new players act first). */
+  firstBuild: number;
 }
 
 const PARAMS: Record<BotDifficulty, Params> = {
-  easy: { think: [1.1, 1.5], actions: 1, topN: 6, upgrade: 0.45, save: 0, noise: 0.35, missileFrom: 6, sendShare: 0.15, finish: 0.1, readyDelay: 4, sendFrom: 6, defNeed: 1.3 },
-  normal: { think: [0.6, 0.9], actions: 1, topN: 2, upgrade: 1, save: 0.7, noise: 0.08, missileFrom: 5, sendShare: 0.32, finish: 0.35, readyDelay: 1.5, sendFrom: 5, defNeed: 1.1 },
-  hard: { think: [0.4, 0.55], actions: 2, topN: 1, upgrade: 1.1, save: 0.8, noise: 0, missileFrom: 3, sendShare: 0.5, finish: 0.6, readyDelay: 0.5, sendFrom: 4, defNeed: 1 },
+  easy: { think: [1.1, 1.5], actions: 1, topN: 6, upgrade: 0.45, save: 0, noise: 0.35, missileFrom: 6, sendShare: 0.15, finish: 0.1, readyDelay: 4, sendFrom: 4, defNeed: 1.3, firstBuild: 8 },
+  normal: { think: [0.6, 0.9], actions: 1, topN: 2, upgrade: 1, save: 0.7, noise: 0.08, missileFrom: 5, sendShare: 0.32, finish: 0.35, readyDelay: 1.5, sendFrom: 3, defNeed: 1.1, firstBuild: 0 },
+  hard: { think: [0.4, 0.55], actions: 2, topN: 1, upgrade: 1.1, save: 0.8, noise: 0, missileFrom: 3, sendShare: 0.5, finish: 0.6, readyDelay: 0.5, sendFrom: 2, defNeed: 1, firstBuild: 0 },
+};
+
+/** Versus: how often each send is the goal the bank saves for, by difficulty (weights over the unlocked sends). */
+const SEND_MIX: Record<BotDifficulty, Partial<Record<EnemyKind, number>>> = {
+  easy: { runner: 5, skitter: 3, disruptor: 1, brute: 1 },
+  normal: { runner: 3, skitter: 2, disruptor: 2, brute: 3, colossus: 1 },
+  hard: { runner: 2, skitter: 1.5, disruptor: 2, brute: 4, colossus: 2 },
 };
 
 const ATTACKERS: ReadonlySet<TowerKind> = new Set(['laser', 'missile']);
@@ -206,10 +215,14 @@ class GardenBot implements GardenBotBrain {
   private lostPrev = 0;
   private lastGold = -1;
   private bank = 0;
+  /** Versus: the send the bank is saving for, the wave it was picked, and its target (-1 = server rotation). */
+  private goal: EnemyKind | null = null;
+  private goalWave = 0;
+  private target: number | null = null;
   private waitSince = -1;
   private jitter = new Map<number, number>();
 
-  constructor(private id: string, difficulty: BotDifficulty, seed: number) {
+  constructor(private id: string, private difficulty: BotDifficulty, seed: number) {
     this.p = PARAMS[difficulty] ?? PARAMS.normal;
     this.r = rng(seed ^ 0x9e3779b9);
     this.timer = 0.3 + this.r() * 1.2;
@@ -244,8 +257,10 @@ class GardenBot implements GardenBotBrain {
     const free = new Set(view.free.map(([c, r]) => r * geo.W + c));
     let bought = false;
     let waiting = false;
-    while (out.length < this.p.actions + (tm ? 1 : 0)) {
-      const spendable = gold - (view.mode === 'vs' ? Math.min(this.bank, gold) : 0) - this.reserve(view);
+    const started = this.clock >= this.p.firstBuild;
+    while (started && out.length < this.p.actions + (tm ? 1 : 0)) {
+      // While leaking, the send bank is fair game for the defence.
+      const spendable = gold - (view.mode === 'vs' && !this.leakingNow(view) ? Math.min(this.bank, gold) : 0) - this.reserve(view);
       // Cheapest thing we could buy at all; below that there is nothing to think about.
       let cheapest = Math.min(...TOWER_KINDS.map((k) => TOWERS[k].levels[0].cost));
       for (const t of towers) if (t.own === this.id && t.lv < 3) cheapest = Math.min(cheapest, TOWERS[t.k].levels[t.lv as 1 | 2].cost);
@@ -280,7 +295,7 @@ class GardenBot implements GardenBotBrain {
     // A bot saving up still readies after a few seconds, so it never holds humans back for long.
     if (!waiting) this.waitSince = -1;
     const patient = !waiting || this.clock - this.waitSince > 4;
-    if (view.phase === 'build' && !bought && patient && this.readyWave !== view.wave && this.clock - this.lastBuy >= this.p.readyDelay) {
+    if (view.phase === 'build' && started && !bought && patient && this.readyWave !== view.wave && this.clock - this.lastBuy >= this.p.readyDelay) {
       this.readyWave = view.wave;
       out.push({ k: 'ready' });
     }
@@ -294,7 +309,8 @@ class GardenBot implements GardenBotBrain {
       else if (view.phase === 'build' && this.lastPhase === 'wave') {
         this.lostPrev = this.lostLast;
         this.lostLast = Math.max(0, this.livesAtWave - view.lives);
-        if (this.lostLast > 0) this.bank = 0;
+        // A leaky wave releases half the send bank to the defence (it used to wipe it, so bots never saved up).
+        if (this.lostLast > 0) this.bank *= 0.5;
       }
       this.lastPhase = view.phase;
     }
@@ -309,7 +325,6 @@ class GardenBot implements GardenBotBrain {
         !this.leakingNow(view);
       this.bank += (view.gold - this.lastGold) * (holding ? this.p.sendShare : 0);
     }
-    if (this.leakingNow(view)) this.bank = 0;
     this.bank = Math.min(this.bank, view.gold);
     this.lastGold = view.gold;
   }
@@ -519,38 +534,59 @@ class GardenBot implements GardenBotBrain {
     return null;
   }
 
-  /** Versus: spend the send bank. */
+  /**
+   * Versus: spend the send bank. The bot picks a goal (a weighted draw over the unlocked sends, mixed by difficulty and
+   * by the target's splash) and saves the bank until it can afford it, so brutes and disruptors show up instead of a
+   * runner every time the bank reaches 40. A goal that stays out of reach for two waves falls back to a cheaper one.
+   */
   private send(view: BotView, gold: number): BotAction | null {
     // The server refuses sends past the per-wave cap: do not spend the bank on those.
     if (!view.opponents.length || this.bank <= 0 || (view.sendsLeft ?? Infinity) <= 0) return null;
-    const wave = this.nextWave(view);
-    const budget = Math.min(this.bank, gold);
-    const ok = SENDS.filter((s) => s.from <= wave && s.cost <= budget);
-    if (!ok.length) return null;
-    // Opponents' towers, when visible: lots of splash makes swarms pointless, few towers make runners deadly.
-    const target = this.pickTarget(view);
-    const theirs = view.towers.filter((t) => (target === undefined ? t.b !== view.board : t.b === target));
-    const missiles = theirs.filter((t) => t.k === 'missile').length;
-    const score = (k: EnemyKind) => {
-      const e = ENEMIES[k];
-      const d = SENDS.find((s) => s.kind === k)!;
-      const n = k === 'skitter' ? d.count * 5 : d.count;
-      let v = (n * e.hp * (1 + e.armor) * e.lives + d.income * 12) / d.cost;
-      if ((k === 'skitter' || k === 'runner') && missiles >= 2) v *= 0.6;
-      if (k === 'brute' || k === 'disruptor') v *= 1.1;
-      return v * (0.85 + this.r() * 0.3);
-    };
-    // Bigger sends hit harder; wait for one when the bank is close to it.
-    const bestAll = SENDS.filter((s) => s.from <= wave).sort((a, b) => score(b.kind) - score(a.kind))[0];
-    if (bestAll && bestAll.cost > budget && budget > bestAll.cost * 0.6 && this.p.save > 0) return null;
-    const pick = ok.sort((a, b) => score(b.kind) - score(a.kind))[0];
-    this.bank -= pick.cost;
-    return target === undefined ? { k: 'send', e: pick.kind } : { k: 'send', e: pick.kind, to: target };
+    // SENDS.from is the earliest wave a send can enter; a send always enters the next wave (server sendWave()).
+    const wave = view.wave + 1;
+    const unlocked = SENDS.filter((s) => s.from <= wave);
+    if (!unlocked.length) return null;
+    if (this.target === null || !view.opponents.some((o) => o.b === this.target)) this.target = this.pickTarget(view) ?? -1;
+    const target = this.target >= 0 ? this.target : undefined;
+    if (!this.goal || !unlocked.some((s) => s.kind === this.goal)) this.goal = this.pickGoal(view, unlocked, target);
+    if (view.wave - this.goalWave >= 2) {
+      // Out of reach for too long: settle for the best send the bank can already pay for.
+      const cheaper = unlocked.filter((s) => s.cost <= this.bank).sort((a, b) => b.cost - a.cost)[0];
+      if (cheaper) this.goal = cheaper.kind;
+    }
+    const goal = SENDS.find((s) => s.kind === this.goal)!;
+    if (goal.cost > Math.min(this.bank, gold)) return null;
+    this.bank -= goal.cost;
+    this.goal = null;
+    this.target = null;
+    return target === undefined ? { k: 'send', e: goal.kind } : { k: 'send', e: goal.kind, to: target };
   }
 
+  private pickGoal(view: BotView, unlocked: typeof SENDS, target: number | undefined): EnemyKind {
+    this.goalWave = view.wave;
+    // Opponents' towers, when visible: lots of splash makes swarms pointless, few towers make runners deadly.
+    const theirs = view.towers.filter((t) => (target === undefined ? t.b !== view.board : t.b === target));
+    const boards = target === undefined ? Math.max(1, view.opponents.length) : 1;
+    const missiles = theirs.filter((t) => t.k === 'missile').length / boards;
+    const mix = SEND_MIX[this.difficulty];
+    const weights = unlocked.map((s) => {
+      let w = mix[s.kind] ?? 0;
+      if ((s.kind === 'runner' || s.kind === 'skitter') && missiles >= 2) w *= 0.5;
+      if (s.kind === 'skitter' && missiles < 1) w *= 1.5;
+      return w;
+    });
+    let x = this.r() * weights.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < unlocked.length; i++) if ((x -= weights[i]) < 0) return unlocked[i].kind;
+    return unlocked[0].kind;
+  }
+
+  /** The leader (most lives) to keep the race close, the weakest to finish it off, else the server's rotation. */
   private pickTarget(view: BotView): number | undefined {
-    const weakest = view.opponents.reduce((a, b) => (b.lives < a.lives ? b : a));
-    if (weakest.lives <= 12 && this.r() < this.p.finish) return weakest.b;
+    const opp = view.opponents;
+    const weakest = opp.reduce((a, b) => (b.lives < a.lives ? b : a));
+    if (weakest.lives <= 8 && this.r() < this.p.finish) return weakest.b;
+    const leader = opp.reduce((a, b) => (b.lives > a.lives ? b : a));
+    if (opp.length > 1 && leader.lives > view.lives && this.r() < this.p.finish * 0.6) return leader.b;
     return undefined;
   }
 }

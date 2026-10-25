@@ -65,8 +65,10 @@ export const waveBounty = (n: number) => 1 + 0.01 * (Math.max(1, n) - 1);
 
 /** Health multiplier for wave n (1-based). */
 export const waveHp = (n: number) => 1 + 0.1 * (n - 1) + 0.04 * (n - 1) * (n - 1);
-/** Versus only: extra health ramp on top of waveHp (base waves and sends) so matches end in ~20-35 waves. */
-export const vsHpRamp = (n: number) => Math.pow(1.06, Math.max(0, n - 12));
+/** Versus only: extra health ramp on top of waveHp (base waves and sends) so matches end around wave 13-16 (12-15 min). */
+export const vsHpRamp = (n: number) => Math.pow(VS_RAMP, Math.max(0, n - VS_RAMP_FROM));
+export const VS_RAMP = 1.06;
+export const VS_RAMP_FROM = 6;
 
 /** One group in a wave: `count` enemies of `kind` from route `route` (-1 = spread over every route), `gap` seconds apart, starting `at` seconds into the wave. */
 export interface SpawnGroup {
@@ -86,7 +88,8 @@ export function waveSpawns(n: number, routes: number): SpawnGroup[] {
   g.push({ kind: 'runner', count: Math.ceil((6 + Math.floor(n * 1.2)) * (boss ? 0.5 : 1)), gap: Math.max(0.35, 1.1 - n * 0.02), at: 0, route: all });
   if (n >= 3) g.push({ kind: 'skitter', count: 2 + Math.floor(n / 3), gap: 2.2, at: 3, route: all });
   if (n >= 5) g.push({ kind: 'disruptor', count: 1 + Math.floor((n - 5) / 4), gap: 3, at: 6, route: all });
-  if (n >= 7) g.push({ kind: 'brute', count: 1 + Math.floor((n - 7) / 3), gap: 2.5, at: 9, route: all });
+  // Brutes are slow (1.2 m/s): they lead their wave so one straggler cannot hold the wave open for minutes.
+  if (n >= 7) g.push({ kind: 'brute', count: 1 + Math.floor((n - 7) / 3), gap: 2.5, at: 2, route: all });
   if (boss) g.push({ kind: 'colossus', count: 1 + Math.floor(n / 30), gap: 8, at: 12, route: n === 10 ? 0 : all });
   // Skitter groups are packs: each "count" is one pack of five.
   void routes;
@@ -98,7 +101,7 @@ export const SKITTER_PACK = 5;
 
 /**
  * Versus: enemies a player can send at an opponent. Sending costs gold now and raises your income every wave (payback
- * ~9 waves). Rules (server): a skitter send's `count` is packs of SKITTER_PACK; sent units have waveHp(n) health of
+ * ~6 waves). Rules (server): a skitter send's `count` is packs of SKITTER_PACK; sent units have waveHp(n) health of
  * the wave they enter; they queue into the target's NEXT wave (shown as BoardSnap.inc) and enter from 4 s into it;
  * the defender earns 50% bounty for killing one; at most sendCap(n) sends per player per wave.
  */
@@ -107,15 +110,19 @@ export interface SendDef {
   count: number;
   cost: number;
   income: number;
-  /** Earliest wave it can be sent. */
+  /**
+   * Earliest wave the send can ENTER. A send always enters the target's next wave (server: sendWave() = wave + 1,
+   * during the build phase before that wave and during the wave before it), so it can be bought once wave + 1 >= from;
+   * from 1 means it can be bought in the very first build phase.
+   */
   from: number;
 }
 export const SENDS: SendDef[] = [
-  { kind: 'runner', count: 3, cost: 40, income: 5, from: 2 },
-  { kind: 'skitter', count: 1, cost: 55, income: 6, from: 3 },
-  { kind: 'disruptor', count: 1, cost: 80, income: 9, from: 4 },
-  { kind: 'brute', count: 1, cost: 150, income: 17, from: 6 },
-  { kind: 'colossus', count: 1, cost: 900, income: 90, from: 15 },
+  { kind: 'runner', count: 3, cost: 40, income: 7, from: 1 },
+  { kind: 'skitter', count: 1, cost: 55, income: 9, from: 2 },
+  { kind: 'disruptor', count: 1, cost: 80, income: 13, from: 4 },
+  { kind: 'brute', count: 1, cost: 150, income: 25, from: 5 },
+  { kind: 'colossus', count: 1, cost: 900, income: 150, from: 12 },
 ];
 /** Versus: sends one player may make per wave (counted from one wave start to the next). */
 export const sendCap = (n: number) => 2 + Math.floor(Math.max(0, n) / 4);
