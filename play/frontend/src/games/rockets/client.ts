@@ -165,13 +165,13 @@ const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; colo
 
 const ROCKET_COLOR = 0xffa14a;
 /**
- * Viewmodel placement relative to the camera: big and low on the right, the barrel angled in at the crosshair so its
- * right flank shows. Pulled well back so the breech runs off the bottom of the screen, as if it sits on your shoulder.
+ * Viewmodel placement relative to the camera: carried on the right shoulder like a bazooka, the open exhaust at the
+ * back big in the bottom-right corner and the tube running in to just under the crosshair, its right flank showing.
  */
-const VM_POS = { x: 0.3, y: -0.5, z: -0.5 };
-const VM_YAW = 0.12;
-const VM_PITCH = 0.05;
-const VM_SCALE = 1.2;
+const VM_POS = { x: 0.26, y: -0.28, z: -0.8 };
+const VM_YAW = 0.22;
+const VM_PITCH = 0.02;
+const VM_SCALE = 1;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */
 const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.84);
 /** The viewmodel draws last, after a depth clear, so it never pokes into walls. */

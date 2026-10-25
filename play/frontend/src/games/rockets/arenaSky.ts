@@ -124,7 +124,7 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
   };
 
   // ---- clouds (asteroids in space): clusters of flattened icosahedra, toon-lit, inked ----
-  const count = space ? 18 : 14;
+  const count = space ? 18 : dusk ? 20 : 14;
   for (let c = 0; c < count; c++) {
     const a = (c / count) * Math.PI * 2 + rand() * 0.3;
     const dist = 150 + rand() * 40;
@@ -139,13 +139,14 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       continue;
     }
     // Kept below ~18 degrees of elevation so at a level gaze they stay clear of the top HUD panels.
-    const cy = 20 + rand() * 28;
-    const blobs = 3 + Math.floor(rand() * 3);
-    const tint = dusk ? new THREE.Color(0xd88ab0).lerp(zenith, 0.35) : new THREE.Color(0xffffff).lerp(horizon, 0.18);
+    // Dusk clouds are long dark violet banks, lower down; the low sun catches their edges warm.
+    const cy = dusk ? 16 + rand() * 26 : 20 + rand() * 28;
+    const blobs = dusk ? 5 + Math.floor(rand() * 3) : 3 + Math.floor(rand() * 3);
+    const tint = dusk ? new THREE.Color(0x4e3880).lerp(zenith, 0.2) : new THREE.Color(0xffffff).lerp(horizon, 0.18);
     for (let i = 0; i < blobs; i++) {
       const r = 7 + rand() * 6;
       const g = new THREE.IcosahedronGeometry(r, 1);
-      g.scale(dusk ? 1.6 : 1, dusk ? 0.22 : 0.6, 1);
+      g.scale(dusk ? 2.2 : 1, dusk ? 0.16 : 0.6, dusk ? 0.8 : 1);
       g.translate(cx + (i - blobs / 2) * r * 0.9, cy + rand() * 3, cz + (rand() - 0.5) * 6);
       lit.add(inked(g), tint);
     }
