@@ -73,6 +73,41 @@ function fbm(u: number, v: number, f: number, oct: number, s: number) {
   return sum / norm;
 }
 
+/**
+ * Cached fbm: the field is computed once on a periodic grid just fine enough for its highest octave, then sampled
+ * bilinearly. Smooth warp and cloud fields cost one lookup per pixel instead of a full fbm, which keeps the
+ * domain-warped sets (marble, travertine, walnut) fast enough for the texture workers.
+ */
+const fieldCache = new Map<number, { g: number; data: Float32Array }>();
+function cfbm(u: number, v: number, f: number, oct: number, s: number) {
+  const key = (f * 16 + oct) * 1000003 + s;
+  let fld = fieldCache.get(key);
+  if (!fld) {
+    const top = f * 2 ** (oct - 1);
+    let g = 64;
+    while (g < top * 3 && g < 512) g *= 2;
+    const data = new Float32Array(g * g);
+    for (let y = 0; y < g; y++) for (let x = 0; x < g; x++) data[y * g + x] = fbm(x / g, y / g, f, oct, s);
+    fld = { g, data };
+    fieldCache.set(key, fld);
+  }
+  const g = fld.g;
+  const x = u * g - 0.5;
+  const y = v * g - 0.5;
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const fx = x - xi;
+  const fy = y - yi;
+  const x0 = wrap(xi, g);
+  const x1 = wrap(xi + 1, g);
+  const y0 = wrap(yi, g) * g;
+  const y1 = wrap(yi + 1, g) * g;
+  const d = fld.data;
+  const a = d[y0 + x0] + (d[y0 + x1] - d[y0 + x0]) * fx;
+  const b = d[y1 + x0] + (d[y1 + x1] - d[y1 + x0]) * fx;
+  return a + (b - a) * fy;
+}
+
 /** Cellular noise over the tile: distances to the nearest and second-nearest feature points (in cell units). */
 function worley(u: number, v: number, n: number, s: number): [number, number] {
   const x = u * n;
@@ -482,40 +517,72 @@ const mud: Gen = (u, v, px) => {
 // ---- hotel lobby ---------------------------------------------------------------------------------------------------
 
 /**
- * Black marble with gold and white veins. Veins follow warped sine fields (three families at different angles), so
- * they branch and thin out like real calcite; a cloudy grey body underneath.
+ * Black marble in the Nero Portoro style: a near-black body with faint warm clouds, cut by a crackle network of bold
+ * cream veins with amber halos (cell edges of domain-warped cellular noise at two scales), plus fine hair veins.
  */
-function marbleBody(u: number, v: number, px: Px, seed: number) {
-  const cloud = fbm(u, v, 3, 5, seed + 1);
-  const cloud2 = fbm(u, v, 9, 4, seed + 2);
-  px.r = 0.028 + cloud * 0.05 + cloud2 * 0.02;
-  px.g = 0.026 + cloud * 0.046 + cloud2 * 0.018;
-  px.b = 0.026 + cloud * 0.044 + cloud2 * 0.017;
-  let gold = 0;
-  let white = 0;
-  for (let k = 0; k < 3; k++) {
-    const a = 0.6 + k * 1.1 + hash(k, seed, 5) * 0.8;
-    // Each family wraps over the tile an integer number of times so the set stays seamless.
-    const f = [1, 2, 3][k];
-    const fu = Math.round(Math.cos(a) * f);
-    const fv = Math.round(Math.sin(a) * f) || 1;
-    const warp = fbm(u, v, 2 + k, 5, seed + 10 + k) * (1.3 - k * 0.25) + fbm(u, v, 10, 3, seed + 20 + k) * 0.12;
-    const s = Math.abs(Math.sin((fu * u + fv * v + warp) * Math.PI));
-    const width = [0.05, 0.06, 0.03][k] * (0.4 + fbm(u, v, 5, 3, seed + 30 + k) * 1.2);
-    // Gold runs only in some regions; the white threads are everywhere, faint in places.
-    const line = smooth(width, 0, s) * (k === 0 ? smooth(0.36, 0.58, fbm(u, v, 3, 4, seed + 40 + k)) : smooth(0.12, 0.4, fbm(u, v, 3, 4, seed + 40 + k)));
-    if (k === 0) gold = Math.max(gold, line);
-    else white = Math.max(white, line * (k === 1 ? 0.9 : 0.55));
+function veinNetRaw(u: number, v: number, n: number, warp: number, seed: number) {
+  const wu = u + (cfbm(u, v, 3, 4, seed + 1) - 0.5) * warp + (cfbm(u, v, 9, 3, seed + 2) - 0.5) * warp * 0.25;
+  const wv = v + (cfbm(u, v, 3, 4, seed + 3) - 0.5) * warp + (cfbm(u, v, 9, 3, seed + 4) - 0.5) * warp * 0.25;
+  const [f1, f2] = worley(wu - Math.floor(wu), wv - Math.floor(wv), n, seed + 5);
+  return f2 - f1;
+}
+
+/** The vein distance field, cached on a 512 grid (it is continuous, so bilinear sampling keeps the edges crisp). */
+const veinCache = new Map<number, Float32Array>();
+function veinNet(u: number, v: number, n: number, warp: number, seed: number) {
+  const g = 512;
+  const key = n * 100003 + seed;
+  let d = veinCache.get(key);
+  if (!d) {
+    d = new Float32Array(g * g);
+    for (let y = 0; y < g; y++) for (let x = 0; x < g; x++) d[y * g + x] = veinNetRaw((x + 0.5) / g, (y + 0.5) / g, n, warp, seed);
+    veinCache.set(key, d);
   }
-  // Milky clouds of calcite drifting through the black.
-  tint(px, 0.32, 0.3, 0.28, smooth(0.62, 0.8, fbm(u, v, 3, 5, seed + 50)) * 0.35);
-  tint(px, 0.16, 0.11, 0.05, smooth(0, 0.6, gold) * 0.35);
-  tint(px, 0.6, 0.44, 0.22, smooth(0.35, 0.9, gold) * 0.9);
-  // White veins with a soft milky edge.
-  tint(px, 0.45, 0.44, 0.42, smooth(0, 0.5, white) * 0.35);
-  tint(px, 0.8, 0.79, 0.75, smooth(0.3, 0.9, white) * 0.8);
-  px.h = 0.5 + cloud * 0.02;
-  px.rough = 0.05 + cloud2 * 0.05 + gold * 0.04;
+  const x = u * g - 0.5;
+  const y = v * g - 0.5;
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const fx = x - xi;
+  const fy = y - yi;
+  const x0 = wrap(xi, g);
+  const x1 = wrap(xi + 1, g);
+  const y0 = wrap(yi, g) * g;
+  const y1 = wrap(yi + 1, g) * g;
+  const p = d[y0 + x0] + (d[y0 + x1] - d[y0 + x0]) * fx;
+  const q = d[y1 + x0] + (d[y1 + x1] - d[y1 + x0]) * fx;
+  return p + (q - p) * fy;
+}
+
+function marbleBody(u: number, v: number, px: Px, seed: number) {
+  const cloud = cfbm(u, v, 3, 5, seed + 1);
+  const cloud2 = cfbm(u, v, 12, 4, seed + 2);
+  px.r = 0.035 + cloud * 0.07 + cloud2 * 0.02;
+  px.g = 0.03 + cloud * 0.055 + cloud2 * 0.016;
+  px.b = 0.027 + cloud * 0.042 + cloud2 * 0.013;
+  // Bold veins: cell edges of a coarse network, widths wandering along their length; not every edge is a vein.
+  const e1 = veinNet(u, v, 3, 0.25, seed + 10);
+  const w1 = 0.007 + Math.pow(cfbm(u, v, 6, 3, seed + 20), 2) * 0.075;
+  const keep1 = smooth(0.3, 0.45, cfbm(u, v, 3, 3, seed + 21));
+  const big = smooth(w1, w1 * 0.25, e1) * keep1;
+  const halo1 = smooth(w1 * 1.8, w1 * 0.7, e1) * keep1;
+  // Secondary veins: a finer network, thinner and patchier.
+  const e2 = veinNet(u, v, 7, 0.14, seed + 30);
+  const w2 = 0.005 + Math.pow(cfbm(u, v, 8, 3, seed + 40), 2) * 0.03;
+  const keep2 = smooth(0.4, 0.56, cfbm(u, v, 4, 3, seed + 41));
+  const mid = smooth(w2, w2 * 0.2, e2) * keep2;
+  const halo2 = smooth(w2 * 1.8, w2 * 0.6, e2) * keep2;
+  // Hair veins: long warped threads.
+  const t = Math.abs(Math.sin((u * 2 + v * 3 + cfbm(u, v, 4, 5, seed + 50) * 1.6) * Math.PI));
+  const hair = smooth(0.025, 0.004, t) * smooth(0.45, 0.7, cfbm(u, v, 3, 3, seed + 51)) * 0.6;
+  const halo = Math.max(halo1, halo2 * 0.8);
+  const core = Math.max(big, mid * 0.85, hair);
+  // Amber halo bleeding into the black, then the cream calcite core with a little speckle.
+  tint(px, 0.22, 0.14, 0.06, halo * 0.3);
+  tint(px, 0.46, 0.33, 0.16, smooth(0.4, 0.9, halo) * 0.3 * (0.4 + cloud2 * 0.9));
+  const speck = hash(Math.floor(u * 300), Math.floor(v * 300), seed + 60);
+  tint(px, 0.7 + speck * 0.06, 0.67 + speck * 0.05, 0.6 + speck * 0.04, smooth(0.2, 0.8, core) * 0.92);
+  px.h = 0.5 + cloud * 0.02 - core * 0.01;
+  px.rough = 0.05 + cloud2 * 0.05 + core * 0.06;
   px.metal = 0;
 }
 
@@ -530,7 +597,10 @@ const marbleFloor: Gen = (u, v, px) => {
   const id = hash(ix, iy, 61);
   const turn = Math.floor(id * 4);
   const [ru, rv] = turn === 0 ? [lx, ly] : turn === 1 ? [ly, 1 - lx] : turn === 2 ? [1 - lx, 1 - ly] : [1 - ly, lx];
-  marbleBody(ru, rv, px, 100 + Math.floor(id * 7) * 17);
+  // One shared vein field; each tile is cut from a different part of it (cheap, and no two tiles match).
+  const ou = hash(ix, iy, 65);
+  const ov = hash(ix, iy, 66);
+  marbleBody((ru * 0.6 + ou) % 1, (rv * 0.6 + ov) % 1, px, 100);
   shade(px, 0.85 + hash(ix, iy, 62) * 0.3);
   const e = Math.min(lx, 1 - lx, ly, 1 - ly) * 1.2;
   const joint = smooth(0.0035, 0.001, e);
@@ -538,55 +608,67 @@ const marbleFloor: Gen = (u, v, px) => {
   px.h -= joint * 0.25;
   px.rough = Math.max(px.rough, joint * 0.6);
   // Faint scuffs where the polish has worn.
-  const scuff = smooth(0.7, 0.85, fbm(u, v, 18, 3, 63)) * smooth(0.55, 0.8, fbm(u, v, 3, 3, 64));
+  const scuff = smooth(0.7, 0.85, cfbm(u, v, 18, 3, 63)) * smooth(0.55, 0.8, cfbm(u, v, 3, 3, 64));
   px.rough += scuff * 0.1;
 };
 
 const marbleSlab: Gen = (u, v, px) => marbleBody(u, v, px, 300);
 
-/** Cream travertine: horizontal bedding, long open pores, slabs 1.2 x 0.6 m in running bond with fine joints. */
+/** Cream travertine: horizontal bedding with tan and brown streaks, long open pores, 1.2 x 0.6 m slabs in running bond. */
 const travertine: Gen = (u, v, px) => {
-  const band = fbm(u, v, 2, 3, 72) * 0.4 + (0.5 + 0.5 * Math.sin((v * 7 + fbm(u, v, 2, 4, 71) * 0.35) * Math.PI * 2)) * 0.6;
-  const streak = 0.5 + 0.5 * Math.sin((v * 46 + fbm(u, v, 3, 3, 73) * 0.6) * Math.PI * 2);
-  px.r = 0.8 + band * 0.08 - streak * 0.03;
-  px.g = 0.75 + band * 0.075 - streak * 0.032;
-  px.b = 0.66 + band * 0.07 - streak * 0.035;
-  // Pores: cellular holes squashed along the bedding.
-  const [f1] = worley(u, v, 40, 74);
-  const pore = smooth(0.1, 0.04, f1) * smooth(0.5, 0.72, fbm(u, v, 7, 3, 75)) * smooth(0.3, 0.6, vnoise(u * 160, v * 40, 160, 77));
-  shade(px, 1 - pore * 0.18);
-  tint(px, 0.62, 0.52, 0.38, pore * 0.15);
-  px.h = 0.6 + band * 0.05 - pore * 0.35;
-  px.rough = 0.4 + band * 0.12 + pore * 0.3;
-  px.metal = 0;
   const ry = v * 4;
   const row = Math.floor(ry);
   const rx = u * 2 + (row % 2 ? 0.5 : 0);
+  const slab = hash(wrap(Math.floor(rx), 2), row, 76);
+  // Bedding: wavy horizontal layers; each slab is cut from a different part of the block.
+  const bed = v * 9 + slab * 3.7 + cfbm(u, v, 2, 4, 71) * 0.25 + cfbm(u, v, 8, 3, 70) * 0.03;
+  const band = 0.5 + 0.5 * Math.sin(bed * Math.PI * 2);
+  const fineBed = v * 21 + slab * 5 + cfbm(u, v, 2, 4, 73) * 0.22;
+  const streak = smooth(0.8, 0.97, 0.5 + 0.5 * Math.sin(fineBed * Math.PI * 2)) * smooth(0.3, 0.7, cfbm(u * 0.5, v, 3, 3, 72));
+  const thread = smooth(0.975, 0.999, 0.5 + 0.5 * Math.sin((v * 70 + cfbm(u, v, 3, 3, 78) * 0.3) * Math.PI * 2)) * smooth(0.5, 0.7, cfbm(u, v, 6, 3, 79));
+  px.r = 0.88 - band * 0.05;
+  px.g = 0.82 - band * 0.06;
+  px.b = 0.7 - band * 0.075;
+  tint(px, 0.74, 0.62, 0.46, streak * 0.45);
+  tint(px, 0.56, 0.44, 0.31, thread * 0.4);
+  // Pores: small holes squashed along the bedding, clustered in some layers.
+  const [f1] = worley(u, v, 48, 74);
+  const pore = smooth(0.14, 0.06, f1) * smooth(0.45, 0.7, cfbm(u, v, 7, 3, 75)) * smooth(0.45, 0.75, vnoise(u * 256, v * 24, 256, 77));
+  shade(px, 1 - pore * 0.3);
+  tint(px, 0.55, 0.45, 0.33, pore * 0.25);
+  px.h = 0.6 + band * 0.03 - pore * 0.4;
+  px.rough = 0.36 + band * 0.08 + pore * 0.35;
+  px.metal = 0;
   const lx = rx - Math.floor(rx);
   const ly = ry - row;
   const e = Math.min(lx * 1.2, (1 - lx) * 1.2, ly * 0.6, (1 - ly) * 0.6);
   const joint = smooth(0.004, 0.0012, e);
-  shade(px, 1 - joint * 0.35);
+  shade(px, 1 - joint * 0.4);
   px.h -= joint * 0.3;
-  shade(px, 0.94 + hash(wrap(Math.floor(rx), 2), row, 76) * 0.1);
+  shade(px, 0.95 + slab * 0.08);
 };
 
-/** Book-matched walnut panels, 0.6 m wide, lacquered, with a dark reveal between them. */
+/** Book-matched walnut panels, 0.6 m wide: straight vertical grain with a soft cathedral figure, satin lacquer. */
 const walnut: Gen = (u, v, px) => {
   const cx = u * 2;
   const col = Math.floor(cx);
   let lx = cx - col;
   if (col % 2) lx = 1 - lx;
-  const warp = fbm(lx * 0.5, v, 2, 4, 81) * 0.9;
-  const ring = 0.5 + 0.5 * Math.sin((lx * 14 + warp * 2.2 + Math.sin(v * Math.PI * 2) * 0.25) * Math.PI * 2);
-  const fine = vnoise(u * 900, v * 30, 900, 82);
-  const figure = fbm(u, v, 5, 4, 83);
-  px.r = 0.3 + ring * 0.09 + figure * 0.07;
-  px.g = 0.17 + ring * 0.055 + figure * 0.04;
-  px.b = 0.09 + ring * 0.03 + figure * 0.025;
-  shade(px, 0.82 + fine * 0.3);
-  px.h = 0.55 + ring * 0.03 + fine * 0.02;
-  px.rough = 0.26 + fine * 0.12;
+  // Mostly straight growth rings, gently drifting; a cathedral arch in the middle of each leaf.
+  const drift = cfbm(lx * 0.5, v, 2, 4, 81) * 0.35;
+  const arch = Math.max(0, 1 - Math.abs(lx - 0.5) * 3.2) * 0.18 * Math.sin(v * Math.PI * 4 + 1);
+  const g = lx * 26 + drift * 2 + arch * 6;
+  const ring = Math.pow(0.5 + 0.5 * Math.sin(g * Math.PI * 2), 3);
+  const late = Math.pow(0.5 + 0.5 * Math.sin(g * Math.PI * 6 + 1), 6);
+  const fine = vnoise(u * 1400, v * 22, 1400, 82);
+  const figure = cfbm(u, v, 4, 4, 83);
+  const ray = smooth(0.85, 0.98, vnoise(u * 60, v * 900, 60, 84)) * 0.25;
+  px.r = 0.36 - ring * 0.13 - late * 0.04 + figure * 0.06;
+  px.g = 0.22 - ring * 0.09 - late * 0.03 + figure * 0.035;
+  px.b = 0.13 - ring * 0.06 - late * 0.02 + figure * 0.02;
+  shade(px, 0.88 + fine * 0.2 + ray * 0.3);
+  px.h = 0.55 - ring * 0.02 + fine * 0.015;
+  px.rough = 0.3 + fine * 0.1 + ring * 0.05;
   px.metal = 0;
   const e = Math.min(lx, 1 - lx) * 0.6;
   const reveal = smooth(0.006, 0.002, e);
@@ -595,16 +677,15 @@ const walnut: Gen = (u, v, px) => {
   px.rough = Math.max(px.rough, reveal * 0.7);
 };
 
-/** Brushed brass: fine horizontal brushing, gentle tarnish clouds. */
+/** Brushed brass: fine brushing streaks along u, warm gold, faint polish variation (no blotchy tarnish). */
 const brass: Gen = (u, v, px) => {
-  const brush = vnoise(u * 4, v * 700, 4, 91) * 0.6 + vnoise(u * 16, v * 1400, 16, 92) * 0.4;
-  const tarnish = smooth(0.55, 0.8, fbm(u, v, 3, 4, 93));
-  px.r = 0.92 - brush * 0.08;
-  px.g = 0.7 - brush * 0.07;
-  px.b = 0.38 - brush * 0.05;
-  tint(px, 0.55, 0.42, 0.24, tarnish * 0.35);
-  px.h = 0.5 + brush * 0.04;
-  px.rough = 0.2 + brush * 0.12 + tarnish * 0.12;
+  const brush = vnoise(u * 3, v * 900, 3, 91) * 0.55 + vnoise(u * 12, v * 2200, 12, 92) * 0.45;
+  const polish = fbm(u, v, 2, 3, 93);
+  px.r = 0.95 - brush * 0.06;
+  px.g = 0.74 - brush * 0.06 + polish * 0.02;
+  px.b = 0.4 - brush * 0.05;
+  px.h = 0.5 + brush * 0.03;
+  px.rough = 0.16 + brush * 0.1 + (1 - polish) * 0.06;
   px.metal = 1;
 };
 
