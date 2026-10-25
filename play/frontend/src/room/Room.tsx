@@ -4,6 +4,7 @@ import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type Roc
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
 import { GMODES } from '@shared/garden/constants';
+import { drTrackById } from '@shared/dustrunners/tracks';
 import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
@@ -14,6 +15,7 @@ import { RoomSocket } from '../net/socket';
 import { GameCover } from '../ui/GameCover';
 import { GameDetails } from '../ui/GameDetails';
 import { Header } from '../ui/Header';
+import { DustrunnersPanels, DustrunnersSoloLink, dustrunnersTrackName } from './DustrunnersPanels';
 import { GardenPanels, gardenMapName, gardenMode } from './GardenPanels';
 import { MapPicker } from './MapPicker';
 
@@ -34,7 +36,7 @@ interface LastMatch {
   /** False when the host ended it before anyone won. */
   finished: boolean;
   winner: string | null;
-  rows: { id: string; value: number }[];
+  rows: { id: string; value: number; time?: number | null }[];
   /** What `value` counts: frags in Rockets, points in Ruckus. */
   unit: string;
   /** Rockets map the match was played on. */
@@ -46,9 +48,12 @@ interface LastMatch {
 
 /** Reads the final standings out of a game's `end` message; every game sends `scores` and `winner`. */
 function lastMatchFrom(end: GameServerMsg | undefined, init: GameServerMsg | undefined): LastMatch {
-  const e = end as { winner?: string | null; winnerTeam?: Team | null; scores?: { id: string; frags?: number; points?: number }[] } | undefined;
-  const map = (init as { map?: { id: string; name: string } } | undefined)?.map;
-  const rows = (e?.scores ?? []).map((r) => ({ id: r.id, value: r.frags ?? r.points ?? 0 }));
+  const e = end as { winner?: string | null; winnerTeam?: Team | null; scores?: { id: string; frags?: number; points?: number; time?: number | null }[] } | undefined;
+  // Dustrunners names its course `track` (an id) instead of a `map` object.
+  const track = (init as { track?: string } | undefined)?.track;
+  const map = (init as { map?: { id: string; name: string } } | undefined)?.map ?? (track ? { id: track, name: drTrackById(track)?.name ?? track } : undefined);
+  // Dustrunners scores also carry the race time (null for pods that did not finish).
+  const rows = (e?.scores ?? []).map((r) => ({ id: r.id, value: r.frags ?? r.points ?? 0, time: r.time }));
   const unit = e?.scores?.[0] && 'frags' in e.scores[0] ? 'frags' : 'points';
   return { finished: !!e, winner: e?.winner ?? null, rows, unit, mapId: map?.id, mapName: map?.name, winnerTeam: e?.winnerTeam };
 }
@@ -317,7 +322,8 @@ function WaitingRoom({
   const start = () => (sfx.unlock(), socket.send({ t: 'start' }));
   const hasMaps = room.game === 'rockets';
   const zombies = room.game === 'zombies';
-  const mapName = zombies ? 'Grand Meridian Hotel' : (MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map');
+  const dustrunners = room.game === 'dustrunners';
+  const mapName = zombies ? 'Grand Meridian Hotel' : dustrunners ? dustrunnersTrackName(room) : (MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map');
   const difficulty = DIFFICULTIES.find((d) => d.id === room.botDifficulty) ?? DIFFICULTIES[1];
   const botsLabel = `${bots} ${difficulty.label.toLowerCase()} ${bots === 1 ? 'bot' : 'bots'}`;
   const rules = hasMaps ? (MODES[room.mode as RocketsMode] ?? MODES.ffa) : null;
@@ -328,6 +334,8 @@ function WaitingRoom({
     ? `${rules!.name}: ${teamCount(room.players, 0)} vs ${teamCount(room.players, 1)}${onMap}, first to ${rules!.limit} ${GOAL_WORDS[rules!.goal]}`
     : garden
       ? `${GMODES[gardenMode(room)].name}: ${humans} ${humans === 1 ? 'gardener' : 'gardeners'}${bots ? ` and ${botsLabel}` : ''} in ${gardenMapName(room)}`
+      : dustrunners
+      ? `${humans} ${humans === 1 ? 'pilot' : 'pilots'}${bots ? ` and ${botsLabel}` : ''} on ${room.map === RANDOM_MAP ? 'a random track' : mapName}, one race`
       : zombies
       ? `${humans} ${humans === 1 ? 'operator' : 'operators'}${bots ? ` and ${botsLabel}` : ''}${onMap}, endless waves`
       : `${rules ? `${rules.name}: ` : ''}${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${onMap}${rules ? `, first to ${rules.limit} frags` : ''}`;
@@ -364,7 +372,7 @@ function WaitingRoom({
           <span className="slots">
             {humans} {humans === 1 ? 'player' : 'players'}
             {bots ? ` + ${botsLabel}` : ''} · {room.maxPlayers} seats
-            {(hasMaps || zombies) && ` · ${mapName}`}
+            {(hasMaps || zombies || dustrunners) && ` · ${mapName}`}
           </span>
         </div>
         <div className="room-code-box" title="Share this code">
@@ -538,6 +546,8 @@ function WaitingRoom({
 
           {garden && <GardenPanels room={room} isHost={isHost} playing={playing} setMode={setMode} setMap={setMap} />}
 
+          {dustrunners && <DustrunnersPanels room={room} isHost={isHost} playing={playing} setMap={setMap} />}
+
           {zombies && (
             <div className="panel">
               <div className="section-head">
@@ -605,6 +615,7 @@ function WaitingRoom({
                 </div>
               ))}
             </dl>
+            {dustrunners && <DustrunnersSoloLink />}
           </div>
           <Chat chat={chat} socket={socket} />
         </div>
@@ -625,6 +636,9 @@ const GOAL_WORDS = { frags: 'frags', captures: 'captures', rounds: 'rounds' } as
 const teamCount = (players: PlayerInfo[], team: Team) => players.filter((p) => p.team === team).length;
 /** A comic glyph per mode for the mode cards. */
 const MODE_ICONS: Record<RocketsMode, string> = { ffa: '✸', tdm: '⚔', ctf: '⚑', elim: '☠' };
+
+/** 84.3 -> "1:24.30" (Dustrunners race times). */
+const raceTime = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
 
@@ -686,6 +700,7 @@ function AfterMatch({
                 <li key={r.id} className={r.id === you ? 'me' : ''}>
                   <span className="swatch" style={{ background: p ? colorHex(p.color) : 'var(--ink-faint)' }} />
                   <span className="who">{p?.name ?? 'Left the room'}</span>
+                  {typeof r.time === 'number' && <span className="slots">{raceTime(r.time)}</span>}
                   <span className="num">{r.value}</span>
                 </li>
               );
@@ -762,6 +777,9 @@ function GameStage({ game, ctx, attach }: { game: GameId; ctx: ClientContext; at
   const module = gameModules[game];
 
   useEffect(() => {
+    // A focused chat box would keep eating the game's keys (WASD typed into it, Enter sending them).
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(focused.tagName)) focused.blur();
     const c = module.create(ctx);
     c.mount(hostRef.current!);
     attach(c);

@@ -2,6 +2,8 @@
 
 import type { ComponentType } from 'react';
 import type { GameId } from '@shared/protocol';
+import { DustrunnersClient } from './dustrunners/client';
+import { DustrunnersHud } from './dustrunners/Hud';
 import { GardenClient } from './garden/client';
 import { GardenHud } from './garden/Hud';
 import { RocketsClient } from './rockets/client';
@@ -23,4 +25,5 @@ export const gameModules: Record<GameId, GameModule<any>> = {
   ruckus: { create: (ctx) => new RuckusClient(ctx), Hud: RuckusHud },
   zombies: { create: (ctx) => new ZombiesClient(ctx), Hud: ZombiesHud },
   garden: { create: (ctx) => new GardenClient(ctx), Hud: GardenHud },
+  dustrunners: { create: (ctx) => new DustrunnersClient(ctx), Hud: DustrunnersHud },
 };

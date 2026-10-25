@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { GAME_IDS, GAMES, SOLO_GAME_IDS, SOLO_GAMES, type GameId, type GameMeta, type RoomSummary, type SoloGameMeta } from '@shared/protocol';
+import { GAME_IDS, GAMES, SOLO_GAME_IDS, SOLO_GAMES, type GameId, type GameMeta, type RoomSummary, type SoloGameId, type SoloGameMeta } from '@shared/protocol';
 import { type QuickStart, listRooms, quickBots, quickPlay } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
@@ -13,6 +13,8 @@ import { RoomList } from './RoomList';
 type Dialog = { kind: 'create'; game?: GameId } | { kind: 'details'; game: GameId } | null;
 
 const isGame = (v: string | null): v is GameId => v !== null && v in GAMES;
+/** Typed lookup that still compiles while there are no solo games (SoloGameId is then `never`). */
+const soloMeta = (id: SoloGameId): SoloGameMeta => SOLO_GAMES[id];
 
 /** The front page: the list of open rooms with one big button to create a room, then the game catalogue. */
 export function Lobby() {
@@ -82,7 +84,7 @@ export function Lobby() {
   }, [query]);
   const soloGames = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return SOLO_GAME_IDS.filter((id) => !q || SOLO_GAMES[id].name.toLowerCase().includes(q) || SOLO_GAMES[id].tagline.toLowerCase().includes(q));
+    return SOLO_GAME_IDS.filter((id) => !q || soloMeta(id).name.toLowerCase().includes(q) || soloMeta(id).tagline.toLowerCase().includes(q));
   }, [query]);
 
   return (
@@ -169,7 +171,7 @@ export function Lobby() {
               />
             ))}
             {soloGames.map((id) => (
-              <SoloTile key={id} meta={SOLO_GAMES[id]} onPlay={() => navigate(SOLO_GAMES[id].path)} />
+              <SoloTile key={id} meta={soloMeta(id)} onPlay={() => navigate(soloMeta(id).path)} />
             ))}
           </div>
         ) : (
@@ -235,7 +237,7 @@ function GameTile({ meta, busy, onDetails, onHost, onPlay }: { meta: GameMeta; b
 
 /** A single-player game: same card, but it opens the game's own page instead of a room. */
 function SoloTile({ meta, onPlay }: { meta: SoloGameMeta; onPlay: () => void }) {
-  const shots = SCREENSHOTS[meta.id].length;
+  const shots = (SCREENSHOTS[meta.id] as unknown[]).length;
   return (
     <article className="game-tile" style={{ ['--accent' as string]: meta.accent }}>
       <button type="button" className="tile-media" onClick={onPlay} aria-label={`Play ${meta.name}`}>

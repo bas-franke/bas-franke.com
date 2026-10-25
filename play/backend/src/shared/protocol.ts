@@ -6,8 +6,9 @@ import type { RocketsClientMsg, RocketsServerMsg } from './rockets/protocol.js';
 import type { RuckusClientMsg, RuckusServerMsg } from './ruckus/protocol.js';
 import type { ZombiesClientMsg, ZombiesServerMsg } from './zombies/protocol.js';
 import type { GardenClientMsg, GardenServerMsg } from './garden/protocol.js';
+import type { DustrunnersClientMsg, DustrunnersServerMsg } from './dustrunners/protocol.js';
 
-export type GameId = 'rockets' | 'ruckus' | 'zombies' | 'garden';
+export type GameId = 'rockets' | 'ruckus' | 'zombies' | 'garden' | 'dustrunners';
 export type BotDifficulty = 'easy' | 'normal' | 'hard';
 export type RoomState = 'waiting' | 'playing';
 /** Game modes: Rockets' (rules in shared/rockets/modes.ts) and Garden Sentinels' co-op / versus. Other games ignore the mode. */
@@ -106,15 +107,35 @@ export const GAMES: Record<GameId, GameMeta> = {
       { keys: 'Tab', does: 'Scores' },
     ],
   },
+  dustrunners: {
+    id: 'dustrunners',
+    name: 'Dustrunners',
+    tagline: 'Online podracing through red-rock canyons.',
+    description:
+      'Race twin-turbine pods through sun-baked canyons against your friends and bot pilots. Thread the arches, take ' +
+      'the shortcuts, boost down the straights and knife-edge through the gaps; scrape the walls and parts of your pod ' +
+      'come off. Points by finishing place, and the solo career with cups and upgrades is one click away.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    accent: '#ff9a3c',
+    controls: [
+      { keys: 'W / ↑', does: 'Thrust' },
+      { keys: 'S / ↓', does: 'Air brake' },
+      { keys: 'A D / ← →', does: 'Steer' },
+      { keys: 'Space / Shift', does: 'Boost' },
+      { keys: 'Q / E', does: 'Knife-edge roll' },
+    ],
+  },
 };
 
 export const GAME_IDS = Object.keys(GAMES) as GameId[];
 
 /**
  * Single-player games that run entirely in the browser, outside the room system: the lobby lists them next to the
- * room games with a Play button that opens their own page.
+ * room games with a Play button that opens their own page. None right now: Dustrunners became a room game (its solo
+ * career still lives on its own page, /race, linked from the room).
  */
-export type SoloGameId = 'dustrunners';
+export type SoloGameId = never;
 
 export interface SoloGameMeta {
   id: SoloGameId;
@@ -127,24 +148,7 @@ export interface SoloGameMeta {
   controls: { keys: string; does: string }[];
 }
 
-export const SOLO_GAMES: Record<SoloGameId, SoloGameMeta> = {
-  dustrunners: {
-    id: 'dustrunners',
-    name: 'Dustrunners',
-    tagline: 'Podracing through red-rock canyons.',
-    description:
-      'Fly a twin-turbine pod through sun-baked canyons against seven rival pilots. Win cups in the career to earn ' +
-      'credits for new pods and upgrades, or jump into a quick race or a time trial.',
-    path: '/race',
-    accent: '#ff9a3c',
-    controls: [
-      { keys: 'W / ↑', does: 'Thrust' },
-      { keys: 'S / ↓', does: 'Air brake' },
-      { keys: 'A D / ← →', does: 'Steer' },
-      { keys: 'Space / Shift', does: 'Boost' },
-    ],
-  },
-};
+export const SOLO_GAMES: Record<SoloGameId, SoloGameMeta> = {};
 
 export const SOLO_GAME_IDS = Object.keys(SOLO_GAMES) as SoloGameId[];
 
@@ -162,7 +166,7 @@ export interface RoomSettings {
   maxPlayers: number;
   bots: number;
   botDifficulty: BotDifficulty;
-  /** Map id of the room's game (Rockets, Last Light, Garden Sentinels), or 'random' for a different one every match. Other games ignore it. */
+  /** Map id of the room's game (Rockets, Last Light, Garden Sentinels; a Dustrunners track), or 'random' for a different one every match. Other games ignore it. */
   map: string;
   /** Rockets game mode, or Garden Sentinels 'coop' / 'vs'. Other games ignore it. */
   mode: GameMode;
@@ -207,8 +211,8 @@ export interface RoomView {
   players: PlayerInfo[];
 }
 
-export type GameClientMsg = RocketsClientMsg | RuckusClientMsg | ZombiesClientMsg | GardenClientMsg;
-export type GameServerMsg = RocketsServerMsg | RuckusServerMsg | ZombiesServerMsg | GardenServerMsg;
+export type GameClientMsg = RocketsClientMsg | RuckusClientMsg | ZombiesClientMsg | GardenClientMsg | DustrunnersClientMsg;
+export type GameServerMsg = RocketsServerMsg | RuckusServerMsg | ZombiesServerMsg | GardenServerMsg | DustrunnersServerMsg;
 
 export type ClientMsg =
   | { t: 'setBots'; count: number; difficulty?: BotDifficulty }

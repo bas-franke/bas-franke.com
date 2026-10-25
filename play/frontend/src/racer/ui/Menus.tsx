@@ -101,7 +101,8 @@ function initialView(finished: boolean): View {
   return { k: 'title' };
 }
 
-export function Menus(props: { finished: { req: RaceRequest; result: RaceResult } | null; onRace(req: RaceRequest): void; onExit(): void }) {
+/** `onOnline`: start an online race (a Dustrunners room, quick play); the title menu shows the entry when it is set. */
+export function Menus(props: { finished: { req: RaceRequest; result: RaceResult } | null; onRace(req: RaceRequest): void; onExit(): void; onOnline?(): void }) {
   useMenuFontAndAmbience();
   const [view, setView] = useState<View>(() => initialView(!!props.finished));
   // Award the finished race (once; cached per result) before the save is read below.
@@ -186,7 +187,7 @@ export function Menus(props: { finished: { req: RaceRequest; result: RaceResult 
   let body: React.ReactNode;
   switch (view.k) {
     case 'title':
-      body = <Title save={save} onCareer={() => go(save ? { k: 'career' } : { k: 'pilot' })} onQuick={() => go({ k: 'quick' })} onTrial={() => go({ k: 'trial' })} onExit={props.onExit} />;
+      body = <Title save={save} onCareer={() => go(save ? { k: 'career' } : { k: 'pilot' })} onQuick={() => go({ k: 'quick' })} onTrial={() => go({ k: 'trial' })} onOnline={props.onOnline} onExit={props.onExit} />;
       break;
     case 'pilot':
       body = (
@@ -258,7 +259,7 @@ export function Menus(props: { finished: { req: RaceRequest; result: RaceResult 
   );
 }
 
-function Title(props: { save: CareerSave | null; onCareer(): void; onQuick(): void; onTrial(): void; onExit(): void }) {
+function Title(props: { save: CareerSave | null; onCareer(): void; onQuick(): void; onTrial(): void; onOnline?(): void; onExit(): void }) {
   const s = props.save;
   const careerSub = !s
     ? 'Start your racing career'
@@ -283,6 +284,7 @@ function Title(props: { save: CareerSave | null; onCareer(): void; onQuick(): vo
         <TitleItem n="01" label="Career" sub={careerSub} onClick={props.onCareer} autoFocus extra={s ? <Credits n={s.credits} /> : null} />
         <TitleItem n="02" label="Quick Race" sub="Any track, any field, right now" onClick={props.onQuick} />
         <TitleItem n="03" label="Time Trial" sub="Just you, the canyon and the clock" onClick={props.onTrial} />
+        {props.onOnline && <TitleItem n="04" label="Online Race" sub="Race friends and bots in a room" onClick={props.onOnline} />}
         <button className="dr-exit" onClick={props.onExit}>
           <span>‹</span> play.bas-franke.com
         </button>

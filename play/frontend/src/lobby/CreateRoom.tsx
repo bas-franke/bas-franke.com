@@ -1,6 +1,7 @@
 import { type FormEvent, useMemo, useState } from 'react';
 import { GAME_IDS, GAMES, LIMITS, type BotDifficulty, type GameId } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
+import { DR_TRACKS } from '@shared/dustrunners/tracks';
 import { createRoom, saveName, savedName } from '../api';
 import { GameCover } from '../ui/GameCover';
 import { Modal } from '../ui/Modal';
@@ -117,7 +118,7 @@ function Settings({
   const [map, setMap] = useState(RANDOM_MAP);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const maps = game === 'rockets' ? MAP_LIST : [];
+  const maps: { id: string; name: string }[] = game === 'rockets' ? MAP_LIST : game === 'dustrunners' ? DR_TRACKS : [];
   const hasMaps = maps.length > 0;
   const botCount = Math.min(bots, maxPlayers - 1);
 
@@ -205,7 +206,7 @@ function Settings({
         </div>
         {hasMaps && (
           <label className="field">
-            Map
+            {game === 'dustrunners' ? 'Track' : 'Map'}
             <select value={map} onChange={(e) => setMap(e.target.value)}>
               <option value={RANDOM_MAP}>Random every match</option>
               {maps.map((m) => (

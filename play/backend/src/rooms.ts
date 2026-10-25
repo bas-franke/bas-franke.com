@@ -28,6 +28,7 @@ import { randomLook, sanitizeLook } from './shared/rockets/cosmetics.js';
 import { zmapById } from './shared/zombies/maps.js';
 import { isGMode } from './shared/garden/constants.js';
 import { gmapById } from './shared/garden/maps.js';
+import { drTrackById } from './shared/dustrunners/tracks.js';
 import type { GameMode, RocketsMode, Team } from './shared/protocol.js';
 
 export class RoomError extends Error {
@@ -439,7 +440,7 @@ export class Room implements GameHost {
   }
 }
 
-/** Whether `id` is one of the maps of `game` (Garden Sentinels: of that mode; games without maps have none). */
+/** Whether `id` is one of the maps of `game` (Dustrunners: its tracks; games without maps have none). */
 const validMap = (game: GameId, id: string, mode?: GameMode) =>
   game === 'rockets'
     ? !!mapById(id)
@@ -447,7 +448,9 @@ const validMap = (game: GameId, id: string, mode?: GameMode) =>
       ? !!zmapById(id)
       : game === 'garden'
         ? !!gmapById(id)?.modes.includes(isGMode(mode) ? mode : 'coop')
-        : false;
+        : game === 'dustrunners'
+          ? !!drTrackById(id)
+          : false;
 
 /** Modes per game: Rockets has its MODES, Garden Sentinels co-op / versus, the others ignore the mode. */
 const validMode = (game: GameId, mode: unknown) => (game === 'garden' ? isGMode(mode) : typeof mode === 'string' && mode in MODES);

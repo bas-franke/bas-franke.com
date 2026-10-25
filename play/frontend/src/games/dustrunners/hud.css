@@ -1,0 +1,78 @@
+/* Dustrunners room layer over the racer HUD (racer/ui/hud.css): loading card, spectator banner, classification,
+   standings / results board and the menu button. Sized in em off .hud like the racer HUD, same slanted panels. */
+
+.drn { z-index: 2; }
+.drn button { pointer-events: auto; }
+
+.drn-center { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.drn-card { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: stretch; gap: 0.6em; min-width: 26em; max-width: min(46em, 92vw); padding: 2em 3em 2.2em 3.6em; animation: hud-fade 0.2s ease-out; }
+.drn-card::before { content: ''; position: absolute; inset: 0; z-index: -1; transform: skewX(var(--hud-skew)); background: linear-gradient(160deg, rgba(36, 26, 22, 0.9), rgba(18, 14, 14, 0.9)); border-left: 0.3em solid var(--hud-yellow); box-shadow: 0 1em 3em rgba(0, 0, 0, 0.5); }
+.drn-title { font-size: 2.8em; font-weight: 900; letter-spacing: -0.01em; }
+.drn-sub { margin: 0; font-size: 1.1em; font-weight: 500; color: rgba(255, 255, 255, 0.8); line-height: 1.35; }
+.drn-spinner { width: 2.4em; height: 2.4em; margin-top: 0.4em; border-radius: 50%; border: 0.3em solid rgba(255, 255, 255, 0.15); border-top-color: var(--hud-yellow); animation: drn-spin 0.8s linear infinite; }
+@keyframes drn-spin { to { transform: rotate(360deg); } }
+
+/* The grid while waiting for the other pilots. */
+.drn-grid { list-style: none; margin: 0.6em 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.3em 1.2em; font-size: 1em; font-weight: 600; }
+.drn-grid li, .drn-class li { display: flex; align-items: center; gap: 0.5em; padding: 0.3em 1em 0.3em 0.5em; position: relative; isolation: isolate; }
+.drn-grid li::before, .drn-class li::before { content: ''; position: absolute; inset: 0; z-index: -1; background: rgba(255, 255, 255, 0.06); transform: skewX(var(--hud-skew)); }
+.drn-grid li.me, .drn-class li.me { color: var(--hud-yellow); }
+.drn-grid li.me::before, .drn-class li.me::before { box-shadow: inset 0.18em 0 0 var(--hud-yellow); }
+.drn-grid b, .drn-class b { width: 1.2em; text-align: right; font-weight: 800; }
+.drn-grid i, .drn-class i, .drn-swatch { display: inline-block; width: 0.35em; height: 0.9em; transform: skewX(var(--hud-skew)); border-radius: 0.05em; flex: none; }
+.drn-grid span, .drn-class span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drn-tag { font-style: normal; font-size: 0.7em; font-weight: 700; letter-spacing: 0.08em; padding: 0.15em 0.45em; margin-left: 0.6em; border-radius: 0.2em; background: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.85); }
+.drn-tag.you { background: var(--hud-yellow); color: #1c1206; text-shadow: none; }
+
+/* Spectator banner, top centre under the menu button. */
+.drn-banner { position: absolute; left: 50%; top: 4.8em; transform: translateX(-50%); padding: 0.55em 2em; font-size: 1.15em; font-weight: 600; white-space: nowrap; isolation: isolate; }
+.drn-banner::before { content: ''; position: absolute; inset: 0; z-index: -1; transform: skewX(var(--hud-skew)); background: rgba(18, 14, 16, 0.72); border-left: 0.25em solid var(--hud-cyan); }
+.drn-follow { margin-left: 1em; padding: 0.3em 0.9em; border: none; cursor: pointer; font-weight: 700; background: var(--hud-cyan); color: #06141a !important; text-shadow: none; transform: skewX(var(--hud-skew)); }
+.drn-banner b { color: var(--hud-cyan); margin-right: 0.6em; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* Classification on the right as pods cross the line. */
+.drn-class { position: absolute; right: max(1.2em, env(safe-area-inset-right)); top: 9.5em; width: 17em; display: flex; flex-direction: column; gap: 0.2em; font-size: 0.95em; font-weight: 600; animation: hud-fade 0.25s ease-out; }
+.drn-class-head { font-size: 1.1em; font-weight: 800; color: var(--hud-yellow); letter-spacing: 0.1em; padding: 0 0 0.3em 0.6em; }
+.drn-class-head small { color: rgba(255, 255, 255, 0.7); font-weight: 600; margin-left: 0.4em; }
+.drn-class ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.18em; }
+.drn-class li::before { background: rgba(18, 14, 16, 0.55); }
+.drn-class span { flex: 1; }
+.drn-class em { font-style: normal; color: rgba(255, 255, 255, 0.85); }
+
+/* Standings (Tab) and the final results. */
+.drn-board { min-width: 34em; }
+.drn-table { width: 100%; border-collapse: separate; border-spacing: 0 0.18em; font-size: 1.05em; font-weight: 600; }
+.drn-table th { text-align: left; font-size: 0.8em; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); padding: 0 0.8em 0.2em; }
+.drn-table td { padding: 0.4em 0.8em; background: rgba(255, 255, 255, 0.06); white-space: nowrap; }
+.drn-table td:first-child { font-weight: 800; width: 3.2em; }
+.drn-table .drn-swatch { margin-right: 0.6em; vertical-align: -0.1em; }
+.drn-table .num { text-align: right; }
+.drn-table tr.me td { background: rgba(255, 204, 26, 0.16); color: var(--hud-yellow); }
+.drn-board .hud-pause-item { margin-top: 0.4em; }
+
+/* Standings toggle for touch and narrow screens (no Tab key there), right of the menu button. */
+.drn-board-btn { display: none; position: absolute; left: calc(50% + 2.6em); top: 1.6em; padding: 0.45em 1.1em; border: none; cursor: pointer; font: inherit; font-size: 0.9em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: rgba(20, 16, 18, 0.55); transform: skewX(var(--hud-skew)); opacity: 0.85; }
+.drn-board-btn.on { background: var(--hud-yellow); color: #1c1206; text-shadow: none; }
+.hud.drn.touch .drn-board-btn { display: block; left: calc(50% + 3em); top: 1.9em; }
+
+.drn-menu-note { margin: -0.4em 0 0.4em; font-size: 1em; font-weight: 500; color: rgba(255, 255, 255, 0.7); }
+.drn-hint { position: absolute; left: 50%; right: auto; bottom: 0.8em; transform: translateX(-50%); text-align: center; font-size: 0.85em; font-weight: 600; color: rgba(255, 255, 255, 0.55); white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .drn-card, .drn-board { min-width: 0; width: 92vw; padding: 1.4em 1.6em 1.6em 2em; }
+  .drn-grid { grid-template-columns: 1fr; }
+  .drn-class { display: none; }
+  .drn-hint { display: none; }
+  .drn-board-btn { display: block; top: 3.6em; left: calc(50% + 2.6em); }
+  .hud.drn.touch .drn-board-btn { top: 4em; left: calc(50% + 3em); }
+  .drn-banner { white-space: normal; width: 80vw; text-align: center; top: 7em; }
+}
+
+/* Wraps the racer HUD without boxing it; hides its finish banner under the results board. */
+.drn-race {
+  display: contents;
+}
+
+.drn-race.boarded .hud-finish {
+  display: none;
+}

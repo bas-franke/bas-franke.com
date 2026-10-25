@@ -93,6 +93,12 @@ export interface RaceViewOptions {
   onFinish?(result: RaceResult): void;
   /** Called every frame before the race steps (networked races write the remote pods and the clock here). */
   onFrame?(dt: number): void;
+  /**
+   * A race in a room (racer/net): the debug URL parameters ?at, ?freeze and ?skipintro do nothing (?autopilot only in
+   * dev builds, for the screenshot tool), and a slow frame is caught up in full (up to the Race's 0.25 s) instead of
+   * running the local pod in slow motion against everyone else's.
+   */
+  networked?: boolean;
 }
 
 export class RaceView {
@@ -122,7 +128,7 @@ export class RaceView {
   private readonly camUp = new THREE.Vector3(0, 1, 0);
   private readonly observer: ResizeObserver;
   private readonly params = new URLSearchParams(location.search);
-  private readonly frozen = this.params.has('freeze');
+  private readonly frozen: boolean;
   private readonly tagLayer = document.createElement('div');
   private readonly tags: HTMLDivElement[] = [];
   private readonly debris: DebrisSystem;
@@ -159,9 +165,12 @@ export class RaceView {
         if (r === this.race.player) this.audio.finish(r.position);
       },
     });
-    if (this.params.has('autopilot')) this.race.autopilot = true;
-    if (this.params.has('skipintro')) this.race.time = -0.01;
-    const at = Number(this.params.get('at'));
+    // Debug parameters: in a room they would move the pod for everyone (?at=0.95 wins the race).
+    const net = !!opts.networked;
+    this.frozen = !net && this.params.has('freeze');
+    if (this.params.has('autopilot') && (!net || import.meta.env.DEV)) this.race.autopilot = true;
+    if (!net && this.params.has('skipintro')) this.race.time = -0.01;
+    const at = net ? 0 : Number(this.params.get('at'));
     if (at > 0) {
       this.race.time = 0.01;
       this.race.phase = 'racing';
@@ -263,7 +272,7 @@ export class RaceView {
     this.last = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
-      const dt = Math.min(0.05, (now - this.last) / 1000);
+      const dt = Math.min(this.opts.networked ? 0.25 : 0.05, (now - this.last) / 1000);
       this.last = now;
       this.frame(dt);
     };

@@ -1,0 +1,55 @@
+/* Dustrunners waiting room: track cards with the course outline on top, and the link to the solo career. Builds on
+   .mode-cards / .mode-card. */
+
+.mode-cards.drr-tracks {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+.drr-track {
+  padding: 8px 8px 10px;
+}
+.drr-track > b,
+.drr-track > span:not(.drr-thumb),
+.drr-track > em {
+  padding-inline: 4px;
+}
+.drr-track > b {
+  margin-top: 4px;
+}
+
+.drr-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-height: 150px;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #c98a56;
+  box-shadow:
+    inset 0 0 0 1px rgba(11, 11, 18, 0.55),
+    0 6px 14px -8px rgba(0, 0, 0, 0.8);
+  transition: transform 0.25s ease;
+}
+.drr-track:hover:not(:disabled) .drr-thumb {
+  transform: scale(1.03);
+}
+.drr-track.active .drr-thumb {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    0 6px 14px -8px rgba(0, 0, 0, 0.8);
+}
+.drr-random {
+  display: grid;
+  place-items: center;
+  font-family: 'Bangers', 'Luckiest Guy', Impact, 'Arial Black', var(--font);
+  font-size: 56px;
+  color: #fff6e0;
+  text-shadow: 3px 3px 0 #0b0b12;
+  background: repeating-linear-gradient(135deg, #d9733b 0 14px, #c2602e 14px 28px);
+}
+
+.drr-solo {
+  display: inline-flex;
+  margin-top: 12px;
+  text-decoration: none;
+}

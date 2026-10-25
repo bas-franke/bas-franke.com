@@ -186,6 +186,8 @@ export class Race {
   autopilot = false;
   /** Networked: while true the race waits on the grid (time does not run) until the server's go. */
   hold = false;
+  /** Networked (set by NetCore): bots race flat out, with no rubber band on whoever this screen shows. */
+  networked = false;
   private acc = 0;
   private lastCount = 99;
   private readonly playerAi: AiProfile = { skill: 0.9, bias: 0, aggression: 0.6 };
@@ -269,7 +271,7 @@ export class Race {
           state: r.state,
           stats: r.stats,
           profile,
-          gapToPlayer: r === this.me ? 0 : r.progress - (this.me ?? this.focus).progress,
+          gapToPlayer: r === this.me || this.networked ? 0 : r.progress - (this.me ?? this.focus).progress,
           others: others.filter((_, j) => j !== i),
           wear: Math.max(...r.damage),
         }, this.time);
@@ -671,7 +673,9 @@ export class Race {
     if (!!r.remote === remote) return;
     r.remote = remote;
     if (remote) return;
-    r.lap = r.finish !== null ? 1 : r.state.s >= this.track.startS ? 0 : -1;
+    // Past the finish line already (it crossed on the previous pilot's screen): it must not cross it again here.
+    const t = this.track;
+    r.lap = r.finish !== null || r.state.s >= t.finishS ? 1 : r.state.s >= t.startS ? 0 : -1;
     r.lapStart = 0;
     r.handling = handlingOf(r.stats, r.parts, r.handling.seed);
     r.steerOut = 0;
@@ -710,7 +714,8 @@ export class Race {
     }
     const hits: PartHit[] = [];
     for (const id of now) {
-      if (r.parts.broken.has(id) || !(id in r.parts.health)) continue;
+      // Own keys only: 'constructor' and the like are `in` every object but are not parts.
+      if (r.parts.broken.has(id) || !Object.hasOwn(r.parts.health, id) || !Object.hasOwn(r.anchors, id)) continue;
       hits.push({ part: id, amount: r.parts.health[id], health: 0, broke: true });
       r.parts.health[id] = 0;
       r.parts.broken.add(id);

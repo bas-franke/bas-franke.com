@@ -253,25 +253,31 @@ async function shootRuckus(context: BrowserContext): Promise<Shot[]> {
   return MINIGAME_IDS.filter((id) => got.has(id)).map((id) => got.get(id)!);
 }
 
-/** Dustrunners tracks shown, each a little way into the run so the scenery and the pack are in view. */
+/** Dustrunners tracks shown: one room race per track, a few seconds after the green light with the pack in view. */
 const RACER_SHOTS = [
-  { track: 'falls', at: 0.3, caption: 'Thunder Falls' },
-  { track: 'redrock', at: 0.12, caption: 'Redrock Run' },
-  { track: 'mesa', at: 0.2, caption: 'Mesa Run' },
-  { track: 'spires', at: 0.2, caption: 'Needle Spires' },
+  { track: 'falls', caption: 'Thunder Falls' },
+  { track: 'redrock', caption: 'Redrock Run' },
+  { track: 'mesa', caption: 'Mesa Run' },
+  { track: 'spires', caption: 'Needle Spires' },
 ];
 
 async function shootDustrunners(context: BrowserContext): Promise<Shot[]> {
   const shots: Shot[] = [];
-  for (const { track, at, caption } of RACER_SHOTS) {
+  for (const { track, caption } of RACER_SHOTS) {
     log(`Dustrunners · ${caption}`);
+    const code = await createRoom('dustrunners', track);
+    // ?autopilot lets the racer AI fly our pod too (RaceView debug parameter), so the shot is mid-pack at speed.
     const page = await context.newPage();
     page.on('pageerror', (e) => console.error(`[page] ${e.message}`));
-    await page.goto(`${site}/race?go=${track}&autopilot&at=${at}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => !!(window as unknown as { __racer?: unknown }).__racer, null, { timeout: 90_000 });
-    // A few seconds at speed: dust, trails and motion blur build up.
-    await sleep(6000);
-    await page.addStyleTag({ content: '.hud-pause-btn { display: none !important; }' });
+    await page.goto(`${site}/room/${code}?autopilot`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('start').click({ timeout: 60_000 });
+    type Dev = { __playClient?: { hud: { get(): { ready: boolean; phase: string } } } };
+    await page.waitForFunction(() => (window as unknown as Dev).__playClient?.hud.get().ready === true, null, { timeout: 90_000 });
+    // We are the only human, so the lights go as soon as we are loaded; then the intro fly-over and the countdown.
+    await page.waitForFunction(() => (window as unknown as Dev).__playClient?.hud.get().phase === 'racing', null, { timeout: 60_000 });
+    // A few seconds at speed: dust, trails and motion blur build up, the pack is still close.
+    await sleep(5000);
+    await page.addStyleTag({ content: '.menu-hint, .drn-menu-btn { display: none !important; }' });
     const file = `dustrunners-${track}.jpg`;
     await screenshot(page, file);
     shots.push({ file, caption });

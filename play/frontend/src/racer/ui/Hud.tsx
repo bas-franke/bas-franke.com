@@ -10,11 +10,13 @@ import { VolumeControl } from '../../ui/VolumeControl';
 import { TouchControls } from './TouchControls';
 import './hud.css';
 
-export function Hud({ view, onQuit, onRestart, onExit }: { view: RaceView; onQuit(): void; onRestart(): void; onExit(): void }) {
+/** `online`: a room race (games/dustrunners). No pause or restart there; the room's own HUD brings the menu. */
+export function Hud({ view, onQuit, onRestart, onExit, online }: { view: RaceView; onQuit(): void; onRestart(): void; onExit(): void; online?: boolean }) {
   const [touch, setTouch] = useState(wantsTouch);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (online) return;
       const paused = view.hud.get().paused;
       if (e.code === 'Escape' || e.code === 'KeyP') {
         if (view.hud.get().phase !== 'finished' || paused) view.setPaused(!paused);
@@ -32,7 +34,7 @@ export function Hud({ view, onQuit, onRestart, onExit }: { view: RaceView; onQui
       window.removeEventListener('keydown', key);
       window.removeEventListener('pointerdown', first);
     };
-  }, [view, onQuit, onRestart, onExit]);
+  }, [view, onQuit, onRestart, onExit, online]);
 
   return (
     <div className={`hud${touch ? ' touch' : ''}`}>
@@ -56,8 +58,8 @@ export function Hud({ view, onQuit, onRestart, onExit }: { view: RaceView; onQui
       <FinishBanner view={view} />
       <IntroHint view={view} touch={touch} />
       {touch && <TouchControls view={view} />}
-      <PauseButton view={view} />
-      <PauseMenu view={view} onQuit={onQuit} onRestart={onRestart} onExit={onExit} />
+      {!online && <PauseButton view={view} />}
+      {!online && <PauseMenu view={view} onQuit={onQuit} onRestart={onRestart} onExit={onExit} />}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { type QuickStart, quickPlay } from '../api';
 import { sfx } from '../engine/audio';
 import { newCareer, playerRacer, quickRaceRacers } from './core/career';
 import { trackById } from './core/tracks';
@@ -15,6 +16,8 @@ type Screen = { kind: 'menu' } | { kind: 'race'; req: RaceRequest; n: number } |
 
 export function RacerPage() {
   const navigate = useNavigate();
+  /** An Online Race request is in flight (double clicks would open two rooms). */
+  const joining = useRef(false);
   const [screen, setScreen] = useState<Screen>(() => {
     // /race?go=<track> jumps straight into a quick race (debug, screenshots).
     const go = new URLSearchParams(location.search).get('go');
@@ -54,6 +57,22 @@ export function RacerPage() {
         setScreen({ kind: 'race', req, n: Date.now() });
       }}
       onExit={() => navigate('/')}
+      onOnline={() => {
+        // Online race: a quick-play Dustrunners room that starts the moment we are in, like the lobby's Play now.
+        if (joining.current) return;
+        joining.current = true;
+        sfx.unlock();
+        quickPlay('dustrunners')
+          .then((code) => navigate(`/room/${code}`, { state: { quickStart: true } satisfies QuickStart }))
+          .catch((e: unknown) => {
+            // No quick-play room: fall back to the create dialog with Dustrunners picked.
+            console.warn('Online race: quick play failed, opening the create dialog', e);
+            navigate('/?create=dustrunners');
+          })
+          .finally(() => {
+            joining.current = false;
+          });
+      }}
     />
   );
 }
