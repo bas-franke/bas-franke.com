@@ -39,6 +39,9 @@ export function mount(el: HTMLElement) {
     standings: names.map((name, i) => ({ name, color: colors[i], player: i === 4, finished: false })),
     wrongWay: state === 'wrongway',
     paused: state === 'pause',
+    damage: q.has('damage') ? [0.85, 0.3, 0.55] : [0, 0, 0],
+    wrecked: state === 'wrecked' ? 1.6 : 0,
+    ghost: 0,
   });
   const touch = { steer: 0, throttle: 0, brake: 0, boost: false, active: false };
   const view = { hud, touch, setPaused: (p: boolean) => hud.set({ paused: p }) } as unknown as RaceView;

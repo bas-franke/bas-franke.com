@@ -1,6 +1,7 @@
 // World-space speed effects for a race: billowing sand clouds under and behind every pod, exhaust heat trails, speed
 // lines and sand grains rushing past the camera, sparks on wall hits, glow rings on boost pads and the shock cone of a
-// boosting pod. Built from a handful of instanced systems (8 draw calls); per-frame work is emitting new particles
+// boosting pod, and black smoke (with embers once it is bad) from damaged parts and wrecks. Built from a handful of
+// instanced systems (9 draw calls); per-frame work is emitting new particles
 // into ring buffers and updating a few uniforms, with no allocation.
 
 import * as THREE from 'three';
@@ -23,6 +24,9 @@ interface PodState {
   wasPad: boolean;
   wasBoost: boolean;
   cone: number;
+  /** Smoke emission accumulators per damage part, and whether the pod was wrecked last frame. */
+  smoke: number[];
+  wasWrecked: boolean;
   glow: THREE.Color;
   glowHex: string;
 }
@@ -38,6 +42,11 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
   const trails = new TrailSystem(MAX_TRAILS);
   const air = new AirSystem(Math.round(150 * Math.max(0.35, qs)), Math.round(420 * qs), new THREE.Color(theme.sand), new THREE.Color(theme.sunColor));
   const bursts = new BurstSystem(Math.round(420 * Math.max(0.35, qs)), 24, MAX_PODS);
+  const smoke = new DustSystem(Math.round(1600 * Math.max(0.4, qs)), theme, sunDir, {
+    lit: new THREE.Vector3(0.16, 0.15, 0.14),
+    shade: new THREE.Vector3(0.035, 0.033, 0.035),
+  }, [2, 9]);
+  smoke.mesh.name = 'smoke';
   dust.mesh.name = 'dust';
   trails.mesh.name = 'trails';
   air.motes.name = 'motes';
@@ -45,7 +54,7 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
   bursts.sparks.name = 'sparks';
   bursts.rings.name = 'rings';
   bursts.cones.name = 'cones';
-  group.add(dust.mesh, trails.mesh, air.motes, air.lines, bursts.sparks, bursts.rings, bursts.cones);
+  group.add(smoke.mesh, dust.mesh, trails.mesh, air.motes, air.lines, bursts.sparks, bursts.rings, bursts.cones);
 
   const states: PodState[] = [];
   const camVel = new THREE.Vector3();
@@ -69,7 +78,7 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
   const stateFor = (k: number): PodState => {
     let s = states[k];
     if (!s) {
-      s = { init: false, prevGround: new THREE.Vector3(), acc: 0, hitCool: 0, wasPad: false, wasBoost: false, cone: 0, glow: new THREE.Color(DEFAULT_GLOW), glowHex: '' };
+      s = { init: false, prevGround: new THREE.Vector3(), acc: 0, hitCool: 0, wasPad: false, wasBoost: false, cone: 0, smoke: [0, 0, 0], wasWrecked: false, glow: new THREE.Color(DEFAULT_GLOW), glowHex: '' };
       states[k] = s;
     }
     return s;
@@ -129,6 +138,42 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
     }
   }
 
+  /** Smoke from a damaged part: thick and dark, carried back by the pod's speed, rising and spreading as it slows. */
+  function emitSmoke(fp: FxPod, part: number, heavy: number) {
+    fp.visual.damagePoints[part].getWorldPosition(puff.pos);
+    puff.pos.x += (Math.random() - 0.5) * 1.2;
+    puff.pos.z += (Math.random() - 0.5) * 1.2;
+    puff.normal.set(0, 1, 0);
+    // The player's smoke rides along with the pod for a moment (like its dust) and is thinner, so the camera sees it
+    // pour off the hurt part instead of a wall of smoke streaming into the lens.
+    const own = fp.isPlayer && !fp.wrecked;
+    puff.vel.copy(fp.velocity).multiplyScalar(own ? 1 : 0.55 + Math.random() * 0.25);
+    puff.vel.x += (Math.random() - 0.5) * 3;
+    puff.vel.z += (Math.random() - 0.5) * 3;
+    puff.size0 = 0.6 + Math.random() * 0.6;
+    puff.size1 = (own ? 1.8 + Math.random() * 1.6 : 3 + Math.random() * 2.5) * (1 + 0.7 * heavy) * (fp.wrecked ? 1.6 : 1);
+    puff.life = (own ? 0.7 + Math.random() * 0.5 : 1.2 + Math.random() * 0.9) + heavy * 0.6;
+    puff.opacity = 0.4 + 0.3 * heavy;
+    puff.rise = 2 + Math.random() * 2.5;
+    puff.drag = own ? 0.06 + Math.random() * 0.06 : 1.1 + Math.random() * 0.6;
+    smoke.emit(puff);
+    // Embers once the part is close to going.
+    if (heavy > 0.5 && Math.random() < 0.5) {
+      v.copy(fp.velocity).multiplyScalar(0.6).add(q.set((Math.random() - 0.5) * 5, 3 + Math.random() * 6, (Math.random() - 0.5) * 5));
+      bursts.spark(puff.pos, v, 0.3 + Math.random() * 0.4, 0.03 + Math.random() * 0.03);
+    }
+  }
+
+  /** A pod going down: a shower of sparks and a burst of black smoke all round it. */
+  function wreckBurst(fp: FxPod) {
+    const pos = fp.visual.object.position;
+    for (let j = 0; j < 60 * Math.max(0.5, qs); j++) {
+      v.copy(fp.velocity).multiplyScalar(0.5).add(q.set((Math.random() - 0.5) * 30, 4 + Math.random() * 18, (Math.random() - 0.5) * 30));
+      bursts.spark(pos, v, 0.5 + Math.random() * 0.7, 0.04 + Math.random() * 0.04);
+    }
+    for (let j = 0; j < 14; j++) emitSmoke(fp, j % 3, 1);
+  }
+
   function padBurst(fp: FxPod) {
     p.copy(fp.ground).addScaledVector(fp.groundNormal, 0.2);
     bursts.ring(p, right, fwd, 10, 0.7, padColor);
@@ -166,6 +211,7 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
       camVel.lerp(v, Math.min(1, dt * 20));
       prevCam.copy(cam);
       dust.setTime(time, camVel);
+      smoke.setTime(time, camVel);
       bursts.setTime(time, camVel);
 
       let nTrails = 0;
@@ -203,7 +249,7 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
         s.prevGround.copy(fp.ground);
 
         // Exhaust trails.
-        for (const nz of fp.visual.nozzles) {
+        for (const nz of fp.wrecked ? [] : fp.visual.nozzles) {
           if (nTrails >= MAX_TRAILS) break;
           nz.getWorldPosition(p);
           trails.update(nTrails++, time, { nozzle: p, glow: s.glow, speed01: intensity, boost }, cam);
@@ -220,6 +266,21 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
         if (boosting && !s.wasBoost && dist < 400) boostKick(fp, s.glow);
         s.wasBoost = boosting;
 
+        // Smoke: from a part once it is a quarter gone, thicker the worse it is; a wreck pours it out of everything.
+        if (dist < 700) {
+          if (fp.wrecked && !s.wasWrecked) wreckBurst(fp);
+          for (let part = 0; part < 3; part++) {
+            const d = fp.wrecked ? 1 : fp.damage[part] ?? 0;
+            if (d < 0.25) continue;
+            s.smoke[part] += (fp.wrecked ? 16 : fp.isPlayer ? 8 + 30 * (d - 0.25) : 3 + 13 * (d - 0.25)) * Math.max(0.4, qs) * dt;
+            while (s.smoke[part] >= 1) {
+              s.smoke[part] -= 1;
+              emitSmoke(fp, part, Math.min(1, (d - 0.25) / 0.6));
+            }
+          }
+        }
+        s.wasWrecked = fp.wrecked;
+
         s.cone += (boost - s.cone) * Math.min(1, dt * (boost > s.cone ? 10 : 4));
         if (s.cone > 0.01 && intensity > 0.3) {
           const wob = 1 + Math.sin(time * 31 + k) * 0.04;
@@ -231,11 +292,13 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
       for (let k = Math.min(pods.length, MAX_PODS); k < MAX_PODS; k++) bursts.cone(k, null, 0, ringColor);
       trails.finish(nTrails);
       dust.flush();
+      smoke.flush();
       bursts.flush();
       air.update(dt, time, camera, camVel, view.speed01, playerBoost);
     },
     dispose() {
       dust.dispose();
+      smoke.dispose();
       trails.dispose();
       air.dispose();
       bursts.dispose();

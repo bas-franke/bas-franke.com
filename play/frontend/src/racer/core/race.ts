@@ -1,5 +1,8 @@
 // One race: the grid, the countdown, every pod's flight, contacts between pods, slipstream, positions and the final
 // classification. Courses are point-to-point, so a race is one run from the start line to the finish line. Pure simulation: no three.js scene, no DOM. RaceView renders it; the career awards it.
+// Hits damage a pod where they land (the engine on that side, or the cockpit from behind and on hard landings); once a
+// part is wrecked the pod is out for a moment, then put back in the middle of the corridor as a ghost that blinks and
+// cannot be hit for a few seconds.
 
 import { aiInput, type AiProfile } from './ai';
 import { NO_INPUT, newPodState, podHalfWidth, stepPod, type PodInput, type PodState } from './physics';
@@ -31,7 +34,25 @@ export interface Racer extends RacerSetup {
   progress: number;
   /** Current control input (player or AI), for animation. */
   input: PodInput;
+  /** Damage per part, 0..1: left engine, right engine, cockpit. A part at 1 wrecks the pod. */
+  damage: [number, number, number];
+  /** Seconds left lying wrecked (0 = flying), and seconds left as a ghost after the respawn. */
+  wrecked: number;
+  ghost: number;
+  /** Seconds before the next hit can do damage (one crash is one hit, not one per physics step). */
+  hurtCool: number;
 }
+
+/** Damage parts. */
+export const LEFT_ENGINE = 0;
+export const RIGHT_ENGINE = 1;
+export const COCKPIT = 2;
+/** Seconds a wrecked pod lies before it respawns, and seconds of ghosting after. */
+export const WRECK_TIME = 2.4;
+export const GHOST_TIME = 3;
+/** Damage per unit of impact above the threshold that a scrape stays under. */
+const HURT = 0.42;
+const HURT_MIN = 0.12;
 
 export type Phase = 'intro' | 'countdown' | 'racing' | 'finished';
 
@@ -40,6 +61,8 @@ export interface RaceEvents {
   onFinish?(r: Racer): void;
   onImpact?(r: Racer, strength: number): void;
   onPad?(r: Racer): void;
+  onWreck?(r: Racer): void;
+  onRespawn?(r: Racer): void;
   onCountdown?(n: number): void;
 }
 
@@ -72,7 +95,7 @@ export class Race {
       const col = i % 2 === 0 ? -1 : 1;
       const s = this.track.startS - 12 - row * 16 - (col > 0 ? 7 : 0);
       const x = col * Math.min(7, this.track.frameAt(s).width / 4);
-      return { ...r, state: newPodState(s, x), lap: -1, lapStart: 0, lapTimes: [], bestLap: Infinity, finish: null, position: i + 1, progress: 0, input: { ...NO_INPUT } };
+      return { ...r, state: newPodState(s, x), lap: -1, lapStart: 0, lapTimes: [], bestLap: Infinity, finish: null, position: i + 1, progress: 0, input: { ...NO_INPUT }, damage: [0, 0, 0], wrecked: 0, ghost: 0, hurtCool: 0 };
     });
     this.player = this.racers.find((r) => !r.ai) ?? this.racers[0];
     this.updateOrder();
@@ -124,11 +147,32 @@ export class Race {
         // Finished pods coast to a stop on the run-off.
         if (r.finish !== null) input = { ...input, throttle: 0, brake: 0.4, boost: false, roll: 0 };
       }
+      if (!live) {
+        r.input = input;
+        continue;
+      }
+      r.hurtCool = Math.max(0, r.hurtCool - dt);
+      r.ghost = Math.max(0, r.ghost - dt);
+      if (r.wrecked > 0) {
+        // Down: the wreck slides to a stop, then the pod is put back on the course.
+        r.input = { ...NO_INPUT };
+        const st = r.state;
+        st.v = Math.max(0, st.v - 60 * dt);
+        st.s = this.track.clamp(st.s + st.v * dt);
+        st.impact = 0;
+        st.boosting = false;
+        r.wrecked -= dt;
+        if (r.wrecked <= 0) this.respawn(r);
+        continue;
+      }
       r.input = input;
-      if (!live) continue;
       const prevS = r.state.s;
       stepPod(r.state, input, this.track, r.stats, dt);
-      if (r.state.impact > 0.02) this.events.onImpact?.(r, r.state.impact);
+      if (r.state.impact > 0.02) {
+        this.events.onImpact?.(r, r.state.impact);
+        const side = r.state.impactSide;
+        this.hurt(r, r.state.impact, side < 0 ? [LEFT_ENGINE] : side > 0 ? [RIGHT_ENGINE] : [COCKPIT]);
+      }
       if (r.state.padHit) this.events.onPad?.(r);
       // Crossing the start line, then the finish line.
       const line = r.lap < 0 ? this.track.startS : this.track.finishS;
@@ -162,6 +206,8 @@ export class Race {
   private contacts() {
     for (let i = 0; i < this.racers.length; i++) {
       for (let j = i + 1; j < this.racers.length; j++) {
+        // Ghosts and wrecks fly through everyone.
+        if (!this.solid(this.racers[i]) || !this.solid(this.racers[j])) continue;
         const a = this.racers[i].state;
         const b = this.racers[j].state;
         const ds = b.s - a.s;
@@ -188,6 +234,8 @@ export class Race {
             const hit = Math.min(1, overlapX / 2.5);
             this.bump(this.racers[i], hit * 0.5, side);
             this.bump(this.racers[j], hit * 0.5, -side);
+            this.hurt(this.racers[i], hit * 0.4, [side > 0 ? RIGHT_ENGINE : LEFT_ENGINE]);
+            this.hurt(this.racers[j], hit * 0.4, [side > 0 ? LEFT_ENGINE : RIGHT_ENGINE]);
           } else {
             // Nose to tail: the one behind loses speed, the one in front gains a little.
             const [back, front] = ds > 0 ? [a, b] : [b, a];
@@ -196,8 +244,12 @@ export class Race {
               back.v -= dv * 0.6;
               front.v += dv * 0.3;
               const hit = Math.min(1, dv / 15);
-              this.bump(back === a ? this.racers[i] : this.racers[j], hit, 0);
-              this.bump(front === a ? this.racers[i] : this.racers[j], hit * 0.6, 0);
+              const rb = back === a ? this.racers[i] : this.racers[j];
+              const rf = front === a ? this.racers[i] : this.racers[j];
+              this.bump(rb, hit, 0);
+              this.bump(rf, hit * 0.6, 0);
+              this.hurt(rb, hit * 0.6, [LEFT_ENGINE, RIGHT_ENGINE]);
+              this.hurt(rf, hit * 0.45, [COCKPIT]);
             }
             const sep = (overlapS / 2) * Math.sign(ds || 1);
             a.s = this.track.clamp(a.s - sep * 0.5);
@@ -206,6 +258,43 @@ export class Race {
         }
       }
     }
+  }
+
+  private solid(r: Racer) {
+    return r.wrecked <= 0 && r.ghost <= 0;
+  }
+
+  /** Damages `parts` (shared between them) for a hit of `strength`; a part reaching 1 wrecks the pod. */
+  private hurt(r: Racer, strength: number, parts: number[]) {
+    if (!this.solid(r) || r.finish !== null || r.hurtCool > 0 || strength < HURT_MIN) return;
+    r.hurtCool = 0.3;
+    const d = ((strength - HURT_MIN) * HURT) / parts.length;
+    for (const p of parts) r.damage[p] = Math.min(1, r.damage[p] + d);
+    if (r.damage.some((v) => v >= 1)) {
+      r.wrecked = WRECK_TIME;
+      r.state.boosting = false;
+      this.events.onWreck?.(r);
+    }
+  }
+
+  /** Back on the course where the pod went down, in the middle of the corridor (or the nearest lane clear of rocks). */
+  private respawn(r: Racer) {
+    const t = this.track;
+    const st = r.state;
+    const s = Math.max(t.startS + 5, Math.min(t.finishS - 5, st.s));
+    const clear = (x: number) => !t.obstacles.some((o) => o.s > s - 15 && o.s < s + 90 && Math.abs(o.x - x) < o.r + 5);
+    const hw = t.frameAt(s).width / 2 - 5;
+    let x = 0;
+    for (const c of [0, 6, -6, 12, -12, 18, -18, 24, -24]) {
+      if (Math.abs(c) <= hw && clear(c)) {
+        x = c;
+        break;
+      }
+    }
+    Object.assign(st, newPodState(s, x), { v: r.stats.topSpeed * 0.4, boost: st.boost });
+    r.damage = [0, 0, 0];
+    r.ghost = GHOST_TIME;
+    this.events.onRespawn?.(r);
   }
 
   /** Reports a pod-to-pod hit (physics resets impacts every step, so contacts raise theirs after it). */

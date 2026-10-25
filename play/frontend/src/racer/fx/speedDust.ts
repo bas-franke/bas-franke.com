@@ -20,6 +20,7 @@ uniform float uTime;
 uniform vec3 uCamVel;
 uniform float uShutter;
 uniform vec3 uSun;
+uniform vec2 uNear;
 varying vec2 vUv;
 varying vec2 vSph;
 varying vec2 vDir;
@@ -56,7 +57,7 @@ void main() {
   vDir = dir * flip;
   vec4 mvPosition = modelViewMatrix * vec4(wp, 1.0);
   // Puffs right in front of the lens fade out early, so the pack's dust never hides the course.
-  float near = smoothstep(4.0, 22.0, -mvPosition.z);
+  float near = smoothstep(uNear.x, uNear.y, -mvPosition.z);
   vAlpha = aM.z * smoothstep(0.0, 0.04, u) * (1.0 - smoothstep(0.25, 1.0, u)) * near * size / (size + sl * 0.7);
   vTone = fract(aM.x * 13.7);
   vSunV = normalize(mat3(viewMatrix) * uSun);
@@ -119,7 +120,11 @@ export class DustSystem {
   private readonly tex: THREE.DataTexture;
   private time = 0;
 
-  constructor(count: number, theme: Theme, sunDir: THREE.Vector3) {
+  /**
+   * `tint` replaces the sand colours (lit side, shade side), for smoke; `near` is the distance range over which puffs
+   * fade in from the camera (the pack's dust fades early so it never hides the course).
+   */
+  constructor(count: number, theme: Theme, sunDir: THREE.Vector3, tint?: { lit: THREE.Vector3; shade: THREE.Vector3 }, near: [number, number] = [4, 22]) {
     const { geo, attr } = quadGeometry(count, { aPos: 3, aNrm: 3, aVel: 3, aT: 4, aM: 4 });
     const t = attr.aT.array as Float32Array;
     for (let i = 0; i < count; i++) {
@@ -145,9 +150,10 @@ export class DustSystem {
         uCamVel: { value: new THREE.Vector3() },
         uShutter: { value: 0.03 },
         uSun: { value: sunDir.clone() },
+        uNear: { value: new THREE.Vector2(...near) },
         uTex: { value: null },
-        uLit: { value: lit },
-        uShade: { value: shade },
+        uLit: { value: tint?.lit ?? lit },
+        uShade: { value: tint?.shade ?? shade },
       },
     });
     this.mat.uniforms.uTex.value = this.tex;

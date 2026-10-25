@@ -3,3 +3,6 @@ body.racer-body { overflow: hidden; background: #120c0a; }
 .racer-screen { position: fixed; inset: 0; overflow: hidden; background: #120c0a; user-select: none; -webkit-user-select: none; }
 .racer-host { position: absolute; inset: 0; }
 .racer-canvas { display: block; width: 100%; height: 100%; }
+/* Name tags over nearby pods, placed by RaceView every frame. */
+.racer-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.racer-tag { position: absolute; left: 0; top: 0; opacity: 0; padding: 0.15em 0.55em; white-space: nowrap; font: italic 700 clamp(10px, 0.85vw, 15px) / 1.2 'Exo 2', 'Space Grotesk', system-ui, sans-serif; color: #fff; background: rgba(14, 10, 10, 0.55); border-left: 0.3em solid var(--tag-color, #fff); border-radius: 0.15em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); will-change: transform, opacity; }

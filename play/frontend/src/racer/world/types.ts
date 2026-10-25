@@ -53,6 +53,9 @@ export interface PodAnim {
   boosting: boolean;
   /** Seconds left on a boost-pad surge (> 0 = surging). */
   surge: number;
+  /** Damage 0..1 per part (left engine, right engine, cockpit), and whether the pod is lying wrecked. */
+  damage?: readonly number[];
+  wrecked?: boolean;
 }
 
 export interface PodVisual {
@@ -63,6 +66,8 @@ export interface PodVisual {
    * trails. Their -Z axis... is irrelevant: effects emit towards +Z (backwards) in the pod's frame.
    */
   nozzles: THREE.Object3D[];
+  /** Where smoke comes out of a damaged part (children of `object`): left engine, right engine, cockpit. */
+  damagePoints: THREE.Object3D[];
   update(anim: PodAnim): void;
   dispose(): void;
 }
@@ -87,6 +92,9 @@ export interface FxPod {
   impact: number;
   impactSide: number;
   padHit: boolean;
+  /** Damage 0..1 per part (left engine, right engine, cockpit), and whether the pod is lying wrecked. */
+  damage: readonly number[];
+  wrecked: boolean;
 }
 
 export interface FxView extends FrameView {

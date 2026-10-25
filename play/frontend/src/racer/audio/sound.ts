@@ -417,6 +417,14 @@ export class RaceAudio {
     }
   }
 
+  /** The player's pod wrecked: one big crunch, and a second as it hits the ground. */
+  wreck() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    crunch(ctx, this.cueBus, 1);
+    setTimeout(() => this.ctx && crunch(this.ctx, this.cueBus, 0.7), 260);
+  }
+
   pad(player: boolean) {
     if (!this.ctx || !player) return;
     padZap(this.ctx, this.cueBus);

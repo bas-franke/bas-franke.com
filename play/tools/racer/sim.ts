@@ -1,5 +1,5 @@
 // Headless race simulation: runs full races (no rendering) with the career fields and reports finishing times, wall hits,
-// rock hits, pod contacts, airtime, overtakes, stuck/backwards pods and the finishing spread. The player's pod is flown by the AI at a
+// rock hits, pod contacts, wrecks, airtime, overtakes, stuck/backwards pods and the finishing spread. The player's pod is flown by the AI at a
 // chosen skill, standing in for a beginner or a good player.
 //
 //   tsx tools/racer/sim.ts [--tracks redrock,falls] [--cup dust|mesa|canyon|sun|quick|all] [--player 0.3] [--runs 1]
@@ -55,8 +55,10 @@ for (const cup of cups) {
       const rocks = new Map<Racer, number>();
       const air = new Map<Racer, number>();
       const lastImpact = new Map<Racer, number>();
+      const wrecks = new Map<Racer, number>();
       let race!: Race;
       race = new Race(def, setups, {
+        onWreck: (r) => wrecks.set(r, (wrecks.get(r) ?? 0) + 1),
         onImpact: (r, k) => {
           if (k < 0.12) return;
           const prev = lastImpact.get(r) ?? -1;
@@ -97,7 +99,7 @@ for (const cup of cups) {
         if (race.time < 0) continue;
         for (const r of race.racers) {
           if (r.finish !== null) continue;
-          if (race.time > 6 && r.state.v < 25) stuck.set(r, (stuck.get(r) ?? 0) + dt);
+          if (race.time > 6 && r.state.v < 25 && r.wrecked <= 0) stuck.set(r, (stuck.get(r) ?? 0) + dt);
           if (r.state.h > 0.5) air.set(r, (air.get(r) ?? 0) + dt);
           if (Math.abs(r.state.psi) > 1.0) backwards.set(r, (backwards.get(r) ?? 0) + dt);
           if (r.position < prevPos.get(r)! && race.time > 3) overtakes.set(r, (overtakes.get(r) ?? 0) + 1);
@@ -114,12 +116,12 @@ for (const cup of cups) {
       const total = (m: Map<Racer, number>) => [...m.values()].reduce((a, b) => a + b, 0);
       console.log(
         `${id.padEnd(9)} L=${Math.round(race.track.raceLength)} player P${order.indexOf(p) + 1}/${order.length} ${fmt(p.finish ?? NaN)}s avg ${Math.round(speedSum / speedN)}m/s | ` +
-          `win ${fmt(first)} spread ${fmt(last - first)}s | walls ${total(wall)} rocks ${total(rocks)} air ${fmt(total(air) / race.racers.length)}s contacts ${total(contact)} (${rearEnds} nose-to-tail) passes ${total(overtakes)} stuck ${fmt(total(stuck))}s back ${fmt(total(backwards))}s`,
+          `win ${fmt(first)} spread ${fmt(last - first)}s | walls ${total(wall)} rocks ${total(rocks)} air ${fmt(total(air) / race.racers.length)}s contacts ${total(contact)} (${rearEnds} nose-to-tail) passes ${total(overtakes)} wrecks ${total(wrecks)} (player ${wrecks.get(p) ?? 0}) stuck ${fmt(total(stuck))}s back ${fmt(total(backwards))}s`,
       );
       if (verbose) {
         for (const r of order) {
           console.log(
-            `   ${(r.ai ? `${r.name} (${r.ai.skill.toFixed(2)})` : `PLAYER (${playerSkill})`).padEnd(24)} ${r.pod.id.padEnd(8)} ${fmt(r.finish ?? NaN).padStart(6)} walls ${wall.get(r) ?? 0} rocks ${rocks.get(r) ?? 0} contacts ${contact.get(r) ?? 0} passes ${overtakes.get(r) ?? 0} stuck ${fmt(stuck.get(r) ?? 0)}`,
+            `   ${(r.ai ? `${r.name} (${r.ai.skill.toFixed(2)})` : `PLAYER (${playerSkill})`).padEnd(24)} ${r.pod.id.padEnd(8)} ${fmt(r.finish ?? NaN).padStart(6)} walls ${wall.get(r) ?? 0} rocks ${rocks.get(r) ?? 0} contacts ${contact.get(r) ?? 0} passes ${overtakes.get(r) ?? 0} wrecks ${wrecks.get(r) ?? 0} stuck ${fmt(stuck.get(r) ?? 0)}`,
           );
         }
       }

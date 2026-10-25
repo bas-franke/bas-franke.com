@@ -96,6 +96,7 @@ export const Speedo = memo(function Speedo({ view }: P) {
         <span className="hud-speed-unit">KM/H</span>
       </div>
       <BoostBar view={view} />
+      <DamageBar view={view} />
     </div>
   );
 });
@@ -265,6 +266,45 @@ export const Countdown = memo(function Countdown({ view }: P) {
     <div className="hud-center">
       <div key={n} className={`hud-count${n === 0 ? ' go' : ''}`}>
         {n === 0 ? 'GO!' : n}
+      </div>
+    </div>
+  );
+});
+
+const PARTS = [
+  ['L', 'Left engine'],
+  ['C', 'Cockpit'],
+  ['R', 'Right engine'],
+] as const;
+const PART_INDEX = [0, 2, 1];
+
+/** Damage per part, left engine / cockpit / right engine as they sit on the pod: green, then amber, then red. */
+const DamageBar = memo(function DamageBar({ view }: P) {
+  const damage = useHud(view, (s) => s.damage);
+  return (
+    <div className="hud-damage">
+      <span className="hud-damage-label">HULL</span>
+      {PARTS.map(([k, title], i) => {
+        const d = damage[PART_INDEX[i]];
+        return (
+          <span key={k} className={`hud-damage-part${d > 0.7 ? ' critical' : d > 0.4 ? ' hurt' : ''}`} title={title}>
+            <b>{k}</b>
+            <i style={{ transform: `scaleX(${Math.max(0, 1 - d)})` }} />
+          </span>
+        );
+      })}
+    </div>
+  );
+});
+
+export const Wrecked = memo(function Wrecked({ view }: P) {
+  const left = useHud(view, (s) => Math.ceil(s.wrecked * 2) / 2);
+  if (left <= 0) return null;
+  return (
+    <div className="hud-center">
+      <div className="hud-wrecked">
+        <div className="hud-wrecked-title">WRECKED</div>
+        <div className="hud-wrecked-sub">Back on the course in {left.toFixed(1)}</div>
       </div>
     </div>
   );

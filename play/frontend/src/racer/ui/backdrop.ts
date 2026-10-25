@@ -186,6 +186,8 @@ export class Backdrop {
         impact: 0,
         impactSide: 0,
         padHit: false,
+        damage: [0, 0, 0],
+        wrecked: false,
       };
       // The hero leads; rivals chase in alternating lanes.
       this.pods.push({ design: d, visual, gap: i === 0 ? 0 : 14 + i * 16 + (i % 2) * 6, lane: i === 0 ? -0.1 : i % 2 ? 0.45 : -0.5, fx });

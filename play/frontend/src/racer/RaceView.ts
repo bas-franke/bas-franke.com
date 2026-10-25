@@ -1,5 +1,6 @@
 // Renders and runs one race: owns the renderer, scene, world, pod models, effects, camera, audio and controls, steps
-// the Race simulation every frame and publishes HUD state to a store the React HUD reads.
+// the Race simulation every frame and publishes HUD state to a store the React HUD reads. Name tags over the rival
+// pods near the player are plain DOM labels laid over the canvas.
 //
 // Debug URL parameters (handy for screenshots and the art labs):
 //   ?autopilot   the AI flies the player's pod      ?skipintro   start at the green light
@@ -11,7 +12,7 @@ import * as THREE from 'three';
 import { createStore, type Store } from '../games/types';
 import { RaceAudio } from './audio/sound';
 import { DISPLAY_KMH, type PodDesign } from './core/pods';
-import { INTRO, Race, type Phase, type RacerSetup } from './core/race';
+import { INTRO, Race, WRECK_TIME, type Phase, type RacerSetup } from './core/race';
 import { trackById } from './core/tracks';
 import { ChaseCamera } from './fx/camera';
 import { Controls } from './fx/controls';
@@ -24,6 +25,10 @@ import type { FxPod, FxView, PodVisual, PostFx, Quality, SpeedFx, WorldContext }
 /** Hover height of a pod's centre above the road. */
 export const HOVER = 1.5;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
+/** Name tags show within TAG_FAR metres of the camera, fully opaque inside TAG_NEAR. */
+const TAG_FAR = 140;
+const TAG_NEAR = 70;
+const tagPos = new THREE.Vector3();
 
 export interface MinimapPod {
   x: number;
@@ -56,6 +61,11 @@ export interface HudState {
   standings: { name: string; color: string; player: boolean; finished: boolean }[];
   wrongWay: boolean;
   paused: boolean;
+  /** The player's damage per part (left engine, right engine, cockpit), 0..1. */
+  damage: [number, number, number];
+  /** Seconds until the player's wreck is back on the course (0 = not wrecked), and seconds of ghosting left. */
+  wrecked: number;
+  ghost: number;
 }
 
 export interface RaceResult {
@@ -100,6 +110,8 @@ export class RaceView {
   private readonly observer: ResizeObserver;
   private readonly params = new URLSearchParams(location.search);
   private readonly frozen = this.params.has('freeze');
+  private readonly tagLayer = document.createElement('div');
+  private readonly tags: HTMLDivElement[] = [];
 
   constructor(private readonly container: HTMLElement, private readonly opts: RaceViewOptions) {
     const def = trackById(opts.trackId);
@@ -108,6 +120,9 @@ export class RaceView {
       onCountdown: (n) => this.audio.countdown(n),
       onImpact: (r, k) => this.audio.impact(k, r === this.race.player),
       onPad: (r) => this.audio.pad(r === this.race.player),
+      onWreck: (r) => {
+        if (r === this.race.player) this.audio.wreck();
+      },
       onFinish: (r) => {
         if (r === this.race.player) this.audio.finish(r.position);
       },
@@ -155,8 +170,18 @@ export class RaceView {
         impact: 0,
         impactSide: 0,
         padHit: false,
+        damage: r.damage,
+        wrecked: false,
       });
+      const tag = document.createElement('div');
+      tag.className = 'racer-tag';
+      tag.textContent = r.name;
+      tag.style.setProperty('--tag-color', podColor(r.pod));
+      this.tagLayer.appendChild(tag);
+      this.tags.push(tag);
     }
+    this.tagLayer.className = 'racer-tags';
+    container.appendChild(this.tagLayer);
     this.fx = createSpeedFx(this.ctx);
     this.scene.add(this.fx.object);
     this.post = createPostFx(this.ctx);
@@ -182,6 +207,9 @@ export class RaceView {
       standings: [],
       wrongWay: false,
       paused: false,
+      damage: [0, 0, 0],
+      wrecked: 0,
+      ghost: 0,
     });
 
     this.observer = new ResizeObserver(() => this.fit());
@@ -263,6 +291,7 @@ export class RaceView {
     this.fx.update(view);
     this.audio.update(dt, this.camera.position);
     this.post.render(view);
+    this.placeTags();
     this.publishHud(dt);
 
     if (race.phase === 'finished' && !this.finished) {
@@ -282,7 +311,9 @@ export class RaceView {
       const bob = Math.sin(this.time * 2.3 + i * 1.7) * 0.12 + Math.sin(this.time * 17 + i) * 0.03 * Math.min(1, st.v / 60);
       // On its side the lower engine would scrape the road: ride higher.
       const lift = Math.abs(st.roll) * 1.9;
-      const pos = f.pos.clone().addScaledVector(f.right, st.x).addScaledVector(f.up, HOVER + bob + lift);
+      // A wreck slumps onto the sand, nose down and listing.
+      const down = r.wrecked > 0 ? Math.min(1, (WRECK_TIME - r.wrecked) * 4) : 0;
+      const pos = f.pos.clone().addScaledVector(f.right, st.x).addScaledVector(f.up, (HOVER + bob + lift) * (1 - down * 0.6));
       pos.y += st.h;
       const forward = f.tangent.clone().multiplyScalar(Math.cos(st.psi)).addScaledVector(f.right, -Math.sin(st.psi)).normalize();
       const right = forward.clone().cross(f.up).normalize();
@@ -298,7 +329,10 @@ export class RaceView {
       if (r === race.player) this.camUp.set(0, 1, 0).applyQuaternion(v.object.quaternion);
       // Knife edge: Q rolls onto the left side, E onto the right.
       if (st.roll) v.object.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, (-st.roll * Math.PI) / 2));
+      if (down) v.object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.14 * down, 0, (i % 2 ? 0.32 : -0.32) * down)));
       v.object.position.copy(pos);
+      // A ghost after the respawn blinks.
+      v.object.visible = r.ghost <= 0 || Math.floor(r.ghost * 9) % 2 === 0;
 
       const fp = this.fxPods[i];
       if (dt > 0) fp.velocity.copy(pos).sub(this.prevPos[i]).divideScalar(dt);
@@ -313,8 +347,50 @@ export class RaceView {
       fp.impact = st.impact;
       fp.impactSide = st.impactSide;
       fp.padHit = st.padHit;
-      v.update({ dt, time: this.time, speed01: fp.speed01, throttle: r.input.throttle, steer: r.input.steer, boosting: st.boosting, surge: st.surge });
+      fp.damage = r.damage;
+      fp.wrecked = r.wrecked > 0;
+      v.update({ dt, time: this.time, speed01: fp.speed01, throttle: r.input.throttle, steer: r.input.steer, boosting: st.boosting, surge: st.surge, damage: r.damage, wrecked: fp.wrecked });
     });
+  }
+
+  /** Name tags over the other pods, fading in from TAG_FAR metres and fully shown inside TAG_NEAR. */
+  private placeTags() {
+    const race = this.race;
+    const cam = this.camera.position;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const show = race.phase === 'racing' || race.phase === 'finished';
+    // Nearest first; a tag that would cover a nearer one moves up above it, so a bunched pack stays readable.
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const order = race.racers.map((r, i) => ({ r, i, d: this.visuals[i].object.position.distanceTo(cam) })).sort((a, b) => a.d - b.d);
+    for (const { r, i, d } of order) {
+      const tag = this.tags[i];
+      const obj = this.visuals[i].object;
+      if (!show || r === race.player || d > TAG_FAR || !obj.visible) {
+        tag.style.opacity = '0';
+        continue;
+      }
+      tagPos.copy(obj.position).y += 4 + d * 0.012;
+      tagPos.project(this.camera);
+      if (tagPos.z > 1 || Math.abs(tagPos.x) > 1.1 || Math.abs(tagPos.y) > 1.1) {
+        tag.style.opacity = '0';
+        continue;
+      }
+      const a = Math.min(1, (TAG_FAR - d) / (TAG_FAR - TAG_NEAR));
+      const k = 0.75 + 0.25 * a;
+      const tw = tag.offsetWidth * k;
+      const th = tag.offsetHeight * k;
+      const x = ((tagPos.x + 1) / 2) * w;
+      let y = ((1 - tagPos.y) / 2) * h;
+      for (let n = 0; n < 8; n++) {
+        const hit = placed.find((p) => Math.abs(p.x - x) < (p.w + tw) / 2 && Math.abs(p.y - y) < (p.h + th) / 2);
+        if (!hit) break;
+        y = hit.y - (hit.h + th) / 2 - 2;
+      }
+      placed.push({ x, y, w: tw, h: th });
+      tag.style.opacity = a.toFixed(2);
+      tag.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%) scale(${k.toFixed(2)})`;
+    }
   }
 
   private publishHud(dt: number) {
@@ -332,8 +408,12 @@ export class RaceView {
       boost: p.state.boost,
       boosting: p.state.boosting,
       drafting: p.state.draft > 0,
-      wrongWay: Math.abs(p.state.psi) > 1.25 && p.state.v > 5,
+      wrongWay: Math.abs(p.state.psi) > 1.25 && p.state.v > 5 && p.wrecked <= 0,
+      wrecked: p.wrecked,
+      ghost: p.ghost,
     };
+    const hd = this.hud.get().damage;
+    if (hd.some((v, k) => Math.abs(v - p.damage[k]) > 0.005)) patch.damage = [...p.damage];
     if (this.hudAt <= 0) {
       this.hudAt = 1 / 12;
       const proj = race.track.minimap.project;
@@ -372,6 +452,7 @@ export class RaceView {
     this.fx.dispose();
     this.post.dispose();
     for (const v of this.visuals) v.dispose();
+    this.tagLayer.remove();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

@@ -2,6 +2,8 @@
 // profiled nacelles in banded livery, dark intakes ringed with teeth, a glowing intake ring, ribbed nozzles with
 // white-hot cores, claws, a raked top fin and a side flap), glowing energy binders tying them to a small armoured
 // cockpit that sits between the engines' tails, with a pilot under a glass canopy and an orange tail light.
+// Damage shows on the part that took it: scorched, dented plates appear one by one, then an engine loses its top fin,
+// its side flap hangs, the nacelle sags and shakes and its exhaust sputters. A wrecked pod's engines go dark.
 //
 // Draw calls per pod: 'high'/'medium' ~12 (each engine is its own group so it can vibrate, fins and flaps are hinged
 // for steering), 'low' 3 (everything merged, no hinges). Geometry is cached per design + quality and shared by every
@@ -572,6 +574,55 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
     nozzles.push(n);
   }
 
+  // Damage: scars (dark shards set into the skin, facing out) on each part, shown as its damage passes their
+  // threshold, and the points smoke rises from.
+  const damagePoints: THREE.Object3D[] = [];
+  const scars: { mesh: THREE.Mesh; part: number; at: number }[] = [];
+  const scarMat = scarMaterial();
+  const scarGeo = scarGeometry();
+  const nrm = new THREE.Vector3();
+  const addScar = (parent: THREE.Object3D, part: number, k: number, pos: THREE.Vector3, normal: THREE.Vector3, size: number) => {
+    const mesh = new THREE.Mesh(scarGeo, scarMat);
+    mesh.position.copy(pos);
+    mesh.quaternion.setFromUnitVectors(Z_AXIS, normal.normalize());
+    mesh.scale.set(size * (0.7 + Math.random() * 0.6), size * (0.6 + Math.random() * 0.5), size * 0.45);
+    mesh.visible = false;
+    parent.add(mesh);
+    scars.push({ mesh, part, at: 0.1 + (0.8 * k) / SCARS });
+  };
+  // The nacelle's cross-section (as buildEngine shapes it), so scars sit on its skin.
+  const w = design.shape.wedge;
+  const engSec: Section = { n: 2 + 2.6 * w, sx: 1, sy: 1 - 0.28 * w };
+  for (const [i, sgn] of [[0, -1], [1, 1]] as const) {
+    // Engine-local coordinates: inside the engine group when there is one (it is mirrored for the left engine), else
+    // offset (and mirrored by hand) in the root.
+    const g = engines[i];
+    const parent = g ?? root;
+    const toParent = (v: THREE.Vector3) => (g ? v : v.set(v.x * sgn + sgn * lay.xE, v.y, v.z + lay.zE));
+    for (let k = 0; k < SCARS; k++) {
+      // Mostly on the top and sides and towards the back, where the chase camera sees them.
+      const a = -0.2 * Math.PI + Math.random() * 1.4 * Math.PI;
+      const z = (-0.3 + Math.random() * 0.7) * lay.L;
+      const [sx, sy] = sectionPoint(a, lay.R * 1.03, engSec);
+      const pos = toParent(new THREE.Vector3(sx, sy, z));
+      nrm.set(Math.cos(a) * (g ? 1 : sgn), Math.sin(a), 0);
+      addScar(parent, i, k, pos, nrm, lay.R * 0.45);
+    }
+    const anchor = new THREE.Object3D();
+    anchor.position.copy(toParent(new THREE.Vector3(0, lay.R * 0.75, -lay.L * 0.1)));
+    parent.add(anchor);
+    damagePoints.push(anchor);
+  }
+  for (let k = 0; k < SCARS; k++) {
+    const a = 0.1 * Math.PI + Math.random() * 0.8 * Math.PI;
+    nrm.set(Math.cos(a) / lay.ca, Math.sin(a) / lay.cb, 0);
+    addScar(root, COCKPIT_PART, k, new THREE.Vector3(Math.cos(a) * lay.ca * 1.02, lay.yC + Math.sin(a) * lay.cb * 1.02, lay.zC + (Math.random() - 0.3) * lay.ca * 1.6), nrm, lay.ca * 0.4);
+  }
+  const cockpitSmoke = new THREE.Object3D();
+  cockpitSmoke.position.set(0, lay.yC + lay.cb, lay.zC);
+  root.add(cockpitSmoke);
+  damagePoints.push(cockpitSmoke);
+
   // Smoothed animation state.
   let thr = 0;
   let boost = 0;
@@ -584,6 +635,7 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
   return {
     object: root,
     nozzles,
+    damagePoints,
     update(anim: PodAnim) {
       const { dt, time } = anim;
       const k = 1 - Math.exp(-dt * 6);
@@ -593,12 +645,22 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
       surge += ((anim.surge > 0 ? 1 : 0) - surge) * (1 - Math.exp(-dt * 6));
       const sp = Math.min(1.4, Math.max(0, anim.speed01));
       const t = time + seed;
-      const power = 0.35 + 0.65 * thr + 0.6 * boost + 0.35 * surge;
+      const dmg = anim.damage ?? NO_DAMAGE;
+      const dead = anim.wrecked ? 1 : 0;
+      const power = (0.35 + 0.65 * thr + 0.6 * boost + 0.35 * surge) * (1 - dead);
       const flick = 1 + 0.05 * Math.sin(t * 41) + 0.03 * Math.sin(t * 67);
-      const len = lay.L * (0.45 + 0.75 * thr + 0.3 * sp) * (1 + 0.85 * boost + 0.45 * surge) * flick;
+      const len = lay.L * (0.45 + 0.75 * thr + 0.3 * sp) * (1 + 0.85 * boost + 0.45 * surge) * flick * (1 - 0.95 * dead);
+      // A badly hurt engine sputters: its flame drops out in short, irregular gaps.
+      const out = (i: number) => {
+        const d = dmg[i] ?? 0;
+        const cough = d > 0.4 && Math.sin(t * 23 + i * 5) * Math.sin(t * 7.3 + i * 2) > 0.75 - d * 0.6 ? 0.35 : 1;
+        return (1 - 0.3 * d) * cough;
+      };
+      const oL = out(0);
+      const oR = out(1);
       pu.uTime.value = t;
-      pu.uLen.value.set(len * (1 - steer * 0.08), len * (1 + steer * 0.08));
-      pu.uPower.value.set(power, power);
+      pu.uLen.value.set(len * (1 - steer * 0.08) * oL, len * (1 + steer * 0.08) * oR);
+      pu.uPower.value.set(power * oL, power * oR);
       pu.uHalo.value = lay.R * (2.2 + 1.2 * boost + 0.5 * surge);
       pu.uBoost.value = boost;
       gu.uTime.value = t;
@@ -608,12 +670,16 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
 
       if (engines.length) {
         // Engines shake against their binders at speed, each on its own rhythm.
-        const amp = 0.006 + 0.022 * sp + 0.02 * boost;
+        // A damaged engine shakes harder and sags nose-down on its binders.
+        const amp = (0.006 + 0.022 * sp + 0.02 * boost) * (1 - dead);
         engines.forEach((g, i) => {
           const s = i ? 1 : -1;
+          const d = dmg[i] ?? 0;
+          const a = amp * (1 + 3 * d);
           const ph = t * (57 + i * 6) + i * 2;
-          g.position.set(s * lay.xE + Math.sin(ph) * amp, Math.sin(ph * 1.31 + 1) * amp, lay.zE + Math.sin(ph * 0.7) * amp * 0.5);
-          g.rotation.z = Math.sin(ph * 0.53) * amp * 0.25;
+          g.position.set(s * lay.xE + Math.sin(ph) * a, Math.sin(ph * 1.31 + 1) * a - d * lay.R * 0.12, lay.zE + Math.sin(ph * 0.7) * a * 0.5);
+          g.rotation.z = Math.sin(ph * 0.53) * a * 0.25 + s * d * 0.06;
+          g.rotation.x = -d * 0.07 - dead * 0.12;
         });
         // Top fins lean into the turn; side flaps act as spoilers (inner one up) and air brakes off throttle.
         const brake = (1 - thr) * 0.35;
@@ -621,7 +687,14 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
         fins[1].rotation.z = -steer * 0.32;
         flaps[0].rotation.z = 0.1 + brake + Math.max(0, -steer) * 0.55 - Math.max(0, steer) * 0.15;
         flaps[1].rotation.z = 0.1 + brake + Math.max(0, steer) * 0.55 - Math.max(0, -steer) * 0.15;
+        // Torn off, and hanging loose.
+        for (let i = 0; i < 2; i++) {
+          const d = dmg[i] ?? 0;
+          fins[i].visible = d < 0.55;
+          if (d > 0.75) flaps[i].rotation.z = 1.1 + Math.sin(t * 9 + i) * 0.12;
+        }
       }
+      for (const sc of scars) sc.mesh.visible = (dmg[sc.part] ?? 0) > sc.at;
     },
     dispose() {
       glowMat.dispose();
@@ -630,4 +703,21 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
       releaseShared();
     },
   };
+}
+
+const SCARS = 7;
+const COCKPIT_PART = 2;
+const NO_DAMAGE = [0, 0, 0] as const;
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+let scarGeo: THREE.BufferGeometry | null = null;
+let scarMat: THREE.Material | null = null;
+
+/** A lumpy plate, shared by every pod (never disposed: it is tiny). */
+function scarGeometry() {
+  return (scarGeo ??= new THREE.DodecahedronGeometry(1, 0));
+}
+
+/** Scorched, buckled metal. */
+function scarMaterial() {
+  return (scarMat ??= new THREE.MeshStandardMaterial({ color: '#15100d', roughness: 0.95, metalness: 0.3, emissive: '#5a1804', emissiveIntensity: 0.9 }));
 }

@@ -80,6 +80,8 @@ export function mount(el: HTMLElement): () => void {
       impact: 0,
       impactSide: 0,
       padHit: false,
+      damage: [0, 0, 0],
+      wrecked: false,
     };
   });
   const s0 = Number(p.get('at') ?? 0.3) * track.length;
