@@ -24,7 +24,7 @@ import {
 } from './shared/protocol.js';
 import { mapById, RANDOM_MAP } from './shared/rockets/maps.js';
 import { MODES, TEAMS } from './shared/rockets/modes.js';
-import { randomLook, sanitizeLook } from './shared/rockets/cosmetics.js';
+import { botLook, sanitizeLook } from './shared/rockets/cosmetics.js';
 import { zmapById } from './shared/zombies/maps.js';
 import { isGMode } from './shared/garden/constants.js';
 import { gmapById } from './shared/garden/maps.js';
@@ -280,7 +280,7 @@ export class Room implements GameHost {
     while (bots.length < count) {
       const taken = new Set(bots.map((b) => b.name));
       const name = BOT_NAMES.find((n) => !taken.has(n)) ?? `Bot ${bots.length + 1}`;
-      const bot: Member = { id: randomId('b'), name, bot: true, color: this.freeColor(), look: randomLook(), ping: 0, joinedAt: Date.now() };
+      const bot: Member = { id: randomId('b'), name, bot: true, color: this.freeColor(), look: botLook(), ping: 0, joinedAt: Date.now() };
       if (this.teamMode()) bot.team = this.smallerTeam();
       this.members.set(bot.id, bot);
       bots.push(bot);

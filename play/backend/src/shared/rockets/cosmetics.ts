@@ -117,3 +117,10 @@ export function randomLook(rand: () => number = Math.random): Required<Look> {
     chest: any(CHESTS),
   };
 }
+
+/** A random look for a bot: like randomLook, but most bots wear jump jets, so rocket jumps fire their thruster flames. */
+export function botLook(rand: () => number = Math.random): Required<Look> {
+  const look = randomLook(rand);
+  if (rand() < 0.6) look.backpack = 'thrusters';
+  return look;
+}
