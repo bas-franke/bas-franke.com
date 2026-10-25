@@ -24,7 +24,7 @@ interface ClassFeel {
   yaw: number;
   cant: number;
   /** Support hand: offset (m) from where show() puts it and roll (rad, about the palm; - turns the fingers over the top). */
-  hand?: { x: number; z: number; roll: number };
+  hand?: { x: number; y?: number; z: number; roll: number };
   /** Eye to rear sight when aimed. */
   eye: number;
   /** Recoil: kick back (m), muzzle climb (rad), random roll (rad); spring stiffness and damping. */
@@ -47,12 +47,13 @@ const FEEL: Record<WeaponKind, ClassFeel> = {
 };
 
 /**
- * Per-gun overrides of the class feel. The MP5SD is fitted to the lobby reference shot: held further out and pointing
- * nearly straight ahead, canted a little to show its left flank; the muzzle lands at about 57% x, 58% y of the screen,
- * the red dot at 66% x, 56% y, the grip at 66% x, 96% y, the support hand under the rear of the suppressor.
+ * Per-gun overrides of the class feel. The MP5SD is fitted to the lobby reference shot (muzzle, red dot, rear drum and
+ * grip each within ~1% of the frame): pointing nearly straight ahead, the muzzle at about 56% x, 58% y of the screen,
+ * the red dot at 68% x, 57% y, the drum at 74% x, 69% y; the support hand cups the handguard from below just ahead of
+ * the receiver, thumb along the near side.
  */
 const GUN_FEEL: Partial<Record<WeaponId, Partial<ClassFeel>>> = {
-  mp7: { hip: new THREE.Vector3(0.0285, 0.0256, -0.0226), yaw: -0.0226, cant: -0.11, hand: { x: 0.02, z: 0.09, roll: -0.2 } },
+  mp7: { hip: new THREE.Vector3(0.0074, 0.0333, -0.0173), yaw: 0.0084, cant: -0.0164, hand: { x: 0.01, y: 0.02, z: 0.02, roll: 0 } },
 };
 const feelCache = new Map<WeaponId, ClassFeel>();
 const feelOf = (id: WeaponId): ClassFeel => {
@@ -296,6 +297,7 @@ export class Viewmodel {
       this.armLBase.copy(this.armLRot);
       if (hand && WEAPONS[id].kind !== 'pistol') {
         this.armL.position.x += hand.x;
+        this.armL.position.y += hand.y ?? 0;
         this.armL.position.z += hand.z;
         this.armLBase.z += hand.roll;
         const palm = PALM.clone().add(LEFT_PALM);

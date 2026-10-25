@@ -637,6 +637,32 @@ class Gun:
         self.sight = (0, 0, 0.09)
         # Long guns are drawn in their own coordinates; `shift` then moves the hand's grip point to the origin.
         self.shift = Vector((0, 0, 0))
+        # Optional length warp: (old y, new y) knots, piecewise linear, applied to everything but the magazine in done(),
+        # so a long gun can be shortened in its plain stretches while round details keep their shape.
+        self.warp = None
+
+    def warp_y(self, y):
+        k = self.warp
+        if y <= k[0][0]:
+            return y + k[0][1] - k[0][0]
+        for (a, a2), (b, b2) in zip(k, k[1:]):
+            if y <= b:
+                return a2 + (y - a) * (b2 - a2) / (b - a)
+        return y + k[-1][1] - k[-1][0]
+
+    def apply_warp(self):
+        bpy.context.view_layer.update()
+        for o in self.parts + [o for ps in self.partp.values() for o in ps]:
+            if o.type != "MESH":
+                continue
+            mw = o.matrix_world.copy()
+            inv = mw.inverted()
+            for v in o.data.vertices:
+                w = mw @ v.co
+                w.y = self.warp_y(w.y)
+                v.co = inv @ w
+        self.muzzle = (self.muzzle[0], self.warp_y(self.muzzle[1]), self.muzzle[2])
+        self.sight = (self.sight[0], self.warp_y(self.sight[1]), self.sight[2])
 
     def add(self, o, mag=False):
         if mag:
@@ -672,6 +698,8 @@ class Gun:
         return self.add(sphere(r, loc, mat, scale=scale), mag)
 
     def done(self):
+        if self.warp:
+            self.apply_warp()
         for o in self.parts + self.magp + [o for ps in self.partp.values() for o in ps]:
             o.location = o.location + self.shift
         self.muzzle = tuple(Vector(self.muzzle) + self.shift)
@@ -1320,16 +1348,18 @@ def g_mp7(M):
         ear = g.p(P((dy - 0.017, 0.108), (dy + 0.017, 0.108), (dy + 0.013, 0.131), (dy + 0.006, 0.137), (dy - 0.008, 0.137), (dy - 0.015, 0.128)), 0.0034, finish, x=sx * 0.0128, bev=0.0009)
         hollow_x(ear, 0.0032, sx * 0.0128, dy + 0.004, 0.118)
     g.b((0.029, 0.006, 0.006), (0, dy + 0.014, 0.112), finish, bev=0.0012)
-    # Claw mount / Picatinny rail on the receiver top, clamp knobs on the right.
+    # Claw mount / Picatinny rail on the rear of the receiver top, right in front of the drum, clamp knobs on the right;
+    # the red dot sits on its rear half, close over the drum like on a fielded SD3.
     rz = 0.127
-    g.add(sweep_y(P((-0.0125, 0.108), (0.0125, 0.108), (0.0125, rz - 0.006), (-0.0125, rz - 0.006)), -0.03, 0.09, finish, bev=0.0012))
-    for yy in (-0.018, 0.078):
+    r0, r1 = -0.131, -0.016
+    g.add(sweep_y(P((-0.0125, 0.108), (0.0125, 0.108), (0.0125, rz - 0.006), (-0.0125, rz - 0.006)), r0, r1, finish, bev=0.0012))
+    for yy in (r0 + 0.014, r1 - 0.012):
         g.b((0.05, 0.016, 0.009), (0, yy, 0.108), finish, bev=0.0015)
         g.cx(0.0055, 0.024, 0.031, yy, 0.108, finish, verts=18)
-    rail(g, finish, -0.03, 0.09, rz)
+    rail(g, finish, r0, r1, rz)
     for k in range(11):  # rail slot numbers as small white ticks
-        g.b((0.0011, 0.0012, 0.0006), (-0.0108, -0.024 + k * 0.01, rz - 0.0012), white, bev=0.0)
-    g.sight = mp5_optic(g, M, optic, 0.03, rz)
+        g.b((0.0011, 0.0012, 0.0006), (-0.0108, r0 + 0.006 + k * 0.01, rz - 0.0012), white, bev=0.0)
+    g.sight = mp5_optic(g, M, optic, -0.08, rz)
     # Cocking handle (left, folded forward at the front of the tube): the part that racks.
     g.part = "bolt"
     g.add(cyl_between((-0.009, 0.292, tz + 0.002), (-0.026, 0.286, tz + 0.008), 0.0034, finish, 12))
@@ -1386,6 +1416,9 @@ def g_mp7(M):
     for sx in (-1, 1):
         g.t([(sx * 0.024, 0.32, bz - 0.004), (sx * 0.034, 0.318, bz - 0.006), (sx * 0.034, 0.306, bz - 0.006), (sx * 0.024, 0.305, bz - 0.004)], 0.0016, M.steel)
     g.muzzle = (0, 0.549, bz)
+    # Real SD3 proportions: modelled long up front, so shorten the handguard and the suppressor (sight radius ~0.41 m,
+    # receiver end to muzzle ~0.6 m); the receiver, front sight block and the magazine keep their scale.
+    g.warp = [(0.118, 0.118), (0.3, 0.235), (0.338, 0.273), (0.549, 0.42)]
     return g.done()
 
 

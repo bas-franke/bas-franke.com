@@ -367,33 +367,32 @@ def handguard_curve(y, extra, R=0.031):
 
 
 def left_hand(mats):
-    """Left hand clamping a handguard from the left (rig space): the palm against its left side, the back of the hand
-    turned out towards the camera, fingers curled over the top, the thumb along the underside pointing forward."""
+    """Left hand cupping a handguard from below (rig space): the palm under it, the fingers curling up its far (right)
+    side, the thumb lying along the near (left, camera) side pointing forward, the wrist low on the left."""
     glove, palm_mat, armor = mats["glove"], mats["palm"], mats["armor"]
     C = ARM_PALM_L + Vector((0, 0, 0.042))
     parts = []
     joints = {}
-    for name, y in (("index", 0.036), ("middle", 0.013), ("ring", -0.01), ("little", -0.031)):
+    for name, y, psi in (("index", 0.034, 14), ("middle", 0.012, 10), ("ring", -0.01, 6), ("little", -0.03, 0)):
         lengths, r = FINGERS[name]
-        base = handguard_curve(y, r + 0.0012)
-        curve = lambda t, base=base: base(-t)  # t increasing = up the left side and over the top
-        mcp = handguard_curve(y - 0.003, 0.026)(math.radians(-118 + (0.036 - y) * 160))
-        js = finger_around(curve, mcp, lengths, math.radians(122 - (0.036 - y) * 160))
+        curve = handguard_curve(y, r + 0.0012)  # t increasing = from the bottom up the right side
+        mcp = handguard_curve(y - 0.002, 0.024)(math.radians(psi))
+        js = finger_around(curve, mcp, lengths, math.radians(psi + 22))
         joints[name] = (js, r)
-    # Thumb: from the heel of the hand under the handguard, pointing forward along its underside.
-    th = [handguard_curve(-0.034, 0.03)(math.radians(-48)), handguard_curve(-0.014, 0.017)(math.radians(-30)), handguard_curve(0.01, 0.0128)(math.radians(-12)),
-          handguard_curve(0.034, 0.0118)(math.radians(2)), handguard_curve(0.054, 0.011)(math.radians(8))]
+    # Thumb: from the ball of the thumb low on the left, forward along the left side of the handguard.
+    th = [handguard_curve(-0.03, 0.03)(math.radians(-62)), handguard_curve(-0.008, 0.019)(math.radians(-80)), handguard_curve(0.016, 0.0135)(math.radians(-92)),
+          handguard_curve(0.04, 0.0122)(math.radians(-98)), handguard_curve(0.06, 0.0112)(math.radians(-101))]
     pv = Volume("PalmL")
-    psi_p = -78
-    pc = handguard_curve(0.0, 0.018)(math.radians(psi_p))
-    pv.ball(pc, 1.0, scale=(0.048, 0.05, 0.021), rot=Quaternion(Vector((0, 1, 0)), math.radians(-(180 + psi_p))))
-    pv.ball(handguard_curve(-0.03, 0.021)(math.radians(-50)), 1.0, scale=(0.022, 0.021, 0.018))
-    pv.ball(handguard_curve(0.03, 0.02)(math.radians(-96)), 1.0, scale=(0.02, 0.018, 0.016))
-    wrist = C + Vector((-0.066, -0.06, -0.044))
+    psi_p = -28
+    pc = handguard_curve(-0.002, 0.017)(math.radians(psi_p))
+    pv.ball(pc, 1.0, scale=(0.044, 0.048, 0.02), rot=Quaternion(Vector((0, 1, 0)), math.radians(-(180 + psi_p))))
+    pv.ball(handguard_curve(-0.006, 0.022)(math.radians(-62)), 1.0, scale=(0.022, 0.024, 0.019))  # thenar
+    pv.ball(handguard_curve(-0.034, 0.021)(math.radians(-48)), 1.0, scale=(0.02, 0.02, 0.018))  # hypothenar heel
+    wrist = C + Vector((-0.062, -0.052, -0.03))
     for name in ("index", "middle", "ring", "little"):
         js, r = joints[name]
-        pv.capsule(pc.lerp(wrist, 0.25) + Vector((0, js[0].y - C.y, 0)) * 0.6, js[0], r * 0.95)
-    pv.ball(wrist + Vector((0.01, 0.012, 0.006)), 1.0, scale=(0.027, 0.023, 0.022))
+        pv.capsule(pc.lerp(wrist, 0.2) + Vector((0, js[0].y - pc.y, 0)) * 0.7, js[0], r * 0.95)
+    pv.ball(wrist + Vector((0.012, 0.012, 0.004)), 1.0, scale=(0.027, 0.023, 0.022))
     pv.capsule(th[0], th[1], 0.0135)
     parts.append(pv.mesh("palmL", glove, 0.14))
     for name in ("index", "middle", "ring", "little"):
@@ -407,7 +406,7 @@ def left_hand(mats):
             to_axis = Vector((C.x - c.x, 0, C.z - c.z))
             if to_axis.length > 1e-6 and poly.normal.dot(to_axis.normalized()) > 0.45:
                 poly.material_index = 1
-    # Knuckle guard and finger pads, outward from the handguard axis.
+    # Knuckle guard and finger pads, outward from the handguard axis (under and right of it, mostly out of view).
     knuckles = [joints[n][0][0] for n in ("index", "middle", "ring", "little")]
     out = (sum(knuckles, Vector()) / 4 - Vector((C.x, sum(k.y for k in knuckles) / 4, C.z))).normalized()
     guard = [k + out * (joints[n][1] + 0.0045) for k, n in zip(knuckles, ("index", "middle", "ring", "little"))]
