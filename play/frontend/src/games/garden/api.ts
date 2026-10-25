@@ -204,6 +204,8 @@ export interface Fx {
   boom(mid: number, at: P3, radius: number): void;
   /** Persistent fields per tower: slow flower field, shield bubble, beacon aura. Call on build/upgrade/sell. */
   field(tw: number, kind: 'slow' | 'shield' | 'beacon' | null, at: P3, radius: number, lv: Level): void;
+  /** Slow fields idle (rim only) until told an enemy is inside; ignored for other towers. Safe to call every frame. */
+  fieldActive?(tw: number, active: boolean): void;
   /** Shield pulse (zap) / a disruption the shield blocked (ripple at `hit`). */
   zap(tw: number): void;
   /** Disruptor bolt from an enemy to a tower; blocked bolts splash off the bubble. */
@@ -271,6 +273,14 @@ export interface GAudio {
 
 // ---- client.ts <-> Hud.tsx ------------------------------------------------------------------------------------------
 
+/** Versus: enemies queued at a board for its next wave (server BoardSnap.inc; sender known when one player sent that kind). */
+export interface HudIncoming {
+  kind: EnemyKind;
+  count: number;
+  from?: string;
+  fromColor?: number;
+}
+
 export interface HudBoard {
   b: number;
   /** Owner (versus) or null (co-op). */
@@ -281,6 +291,10 @@ export interface HudBoard {
   out: boolean;
   /** Finishing place once out (versus). */
   place?: number;
+  /** Versus: sends queued for this board's next wave (empty when none). Optional only for the lab mocks. */
+  incoming?: HudIncoming[];
+  /** Versus: sends between other players aimed at this board since the match started (not toasted; a quiet counter). */
+  sendsIn?: number;
 }
 
 export interface HudPlayer {
@@ -334,9 +348,15 @@ export interface GHudState {
   players: HudPlayer[];
   you: string;
   myBoard: number;
+  /** Towers you own (the Coach watches it for your first build). Always set by client.ts; optional for the lab mocks. */
+  myTowers?: number;
   /** Versus: watching a running match you are not part of (myBoard -1); no building, ready or sends. Always set by
    * client.ts (optional only so the lab mock states compile). */
   spectator?: boolean;
+  /** Versus: sends queued for your board's next wave (always set by client.ts; optional only for the lab mocks). */
+  incoming?: HudIncoming[];
+  /** Versus, out or spectating: the camera follows the action by itself (false once the player moves it). */
+  autoCam?: boolean;
   /** Board the camera is on (versus: you can look at others). */
   viewBoard: number;
   gold: number;

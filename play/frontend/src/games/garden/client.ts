@@ -30,6 +30,7 @@ import type {
   GardenActions,
   GardenModels,
   HudBoard,
+  HudIncoming,
   HudPlayer,
   HudSelected,
   P3,
@@ -82,6 +83,7 @@ const CLICK_SLOP = 6;
 const TOAST_LIFE = 4500;
 const BOSS_TOAST_LIFE = 7000;
 const COOP_COLOR = 0x7ec850;
+const LEAK_COLOR = 0xff5a4f;
 const v3 = (x = 0, y = 0, z = 0): P3 => ({ x, y, z });
 
 type InitMsg = Extract<GardenServerMsg, { k: 'init' }>;
@@ -129,12 +131,18 @@ const MAX_CORR = 2;
 const STALE_CLOCK = 0.2;
 /** Events this late (s) are replayed without effects; cosmetic ones are dropped. */
 const OVERDUE = 1;
+/** Versus auto-follow: seconds of no camera input before it takes over again, and between board switches. */
+const FOLLOW_IDLE = 25;
+const FOLLOW_SWITCH = 12;
 const COSMETIC = new Set<GEvent['k']>(['msl', 'boom', 'zap', 'ping', 'dis', 'shed']);
 /** Touch: pixels per cell to aim for at the home zoom. */
 const TOUCH_CELL_PX = 26;
 /** Portrait phones: CSS px the HUD covers at the top (status rows) and bottom (build cards). */
 const PORTRAIT_INSET_TOP = 170;
 const PORTRAIT_INSET_BOTTOM = 130;
+/** Desktop / landscape: the wave bar + next row at the top, the build cards at the bottom. */
+const DESK_INSET_TOP = 112;
+const DESK_INSET_BOTTOM = 125;
 
 interface EnemyMemo {
   kind: EnemyKind;
@@ -158,7 +166,10 @@ const emptyHud = (quality: Quality, you: string): GHudState => ({
   players: [],
   you,
   myBoard: 0,
+  myTowers: 0,
   spectator: false,
+  incoming: [],
+  autoCam: false,
   viewBoard: 0,
   gold: 0,
   income: 0,
@@ -181,7 +192,8 @@ const isTyping = (e: Event) => {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
 };
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const IRREGULAR: Record<string, string> = { life: 'lives' };
+const plural = (n: number, word: string) => `${n} ${n === 1 ? word : (IRREGULAR[word] ?? `${word}s`)}`;
 
 export class GardenClient implements GameClient {
   readonly store: Store<GHudState>;
@@ -201,6 +213,11 @@ export class GardenClient implements GameClient {
   private fx?: Fx;
   private audio?: GAudio;
   private ambience?: Ambience;
+  private labels?: BoardLabels;
+  /** performance.now() seconds the player last moved the camera (auto-follow waits after that). */
+  private manualAt = -Infinity;
+  private followAt = 0;
+  private followPickAt = 0;
   private built = false;
   private builtMap: string | null = null;
   private disposed = false;
@@ -298,7 +315,10 @@ export class GardenClient implements GameClient {
         this.send({ k: 'send', e: kind, to });
         this.audio?.play('click');
       },
-      viewBoard: (b) => this.viewBoard(b),
+      viewBoard: (b) => {
+        this.markManual();
+        this.viewBoard(b);
+      },
       setScoresOpen: (open) => this.store.set({ scoresOpen: open }),
       setQuality: (q) => this.setQuality(q),
       leave: () => this.ctx.leave(),
@@ -452,6 +472,7 @@ export class GardenClient implements GameClient {
     this.initBoard = m.myBoard;
     this.towers.clear();
     this.towerLive.clear();
+    this.fieldPos.clear();
     for (const t of m.towers) this.towers.set(t.id, { ...t });
     for (const id of this.builtIn.keys()) if (!this.towers.has(id)) this.builtIn.delete(id);
     this.timeline.reset();
@@ -461,6 +482,12 @@ export class GardenClient implements GameClient {
     this.gone.clear();
     this.sentView = -2;
     this.memo.clear();
+    if (!same) {
+      this.outPlaces.clear();
+      this.sendTally.clear();
+      this.sendsIn.clear();
+      this.manualAt = -Infinity;
+    }
     this.selectedId = null;
     this.lastWave = -1;
     this.store.set({
@@ -484,6 +511,7 @@ export class GardenClient implements GameClient {
     this.refreshBoards();
     this.refreshPlayers();
     this.refreshNext(m.wave);
+    this.refreshMyTowers();
   }
 
   /** Builds the scene once the engine is mounted, the models are loaded and init has arrived. */
@@ -509,6 +537,10 @@ export class GardenClient implements GameClient {
     this.builtMap = def.id;
     this.shownHealth.clear();
     this.shownOut.clear();
+    if (this.mode === 'vs' && this.origins.length > 1) {
+      this.labels = new BoardLabels(engine.scene, this.origins);
+      this.labels.update(this.store.get().boards);
+    }
     this.syncBoardViews(this.latest);
     this.portrait = this.isPortrait();
     this.bounds = { ...this.world.bounds };
@@ -528,6 +560,8 @@ export class GardenClient implements GameClient {
   private teardownScene() {
     this.ambience?.dispose?.();
     this.ambience = undefined;
+    this.labels?.dispose();
+    this.labels = undefined;
     this.fx?.dispose();
     this.units?.dispose();
     this.pipe?.dispose();
@@ -712,6 +746,7 @@ export class GardenClient implements GameClient {
         const ph = this.latest?.ph ?? this.store.get().phase;
         this.builtIn.set(e.t.id, ph === 'build' ? (this.latest?.wave ?? this.store.get().wave) : -1);
         this.addTowerView(e.t, !quiet);
+        this.refreshMyTowers();
         audio?.play('build', { at: this.towerPos(e.t), kind: e.t.k });
         return;
       }
@@ -740,6 +775,8 @@ export class GardenClient implements GameClient {
         this.towerLive.delete(e.id);
         this.muzzleTurn.delete(e.id);
         this.builtIn.delete(e.id);
+        this.fieldPos.delete(e.id);
+        this.refreshMyTowers();
         audio?.play('sell', { at });
         if (e.by === you && e.refund > 0) audio?.play('coin', { amount: 0.5 });
         if (this.selectedId === e.id) this.select(null);
@@ -832,6 +869,12 @@ export class GardenClient implements GameClient {
         this.gone.add(e.en);
         const goal = this.world?.goals[e.b] ?? this.boardCenter(e.b);
         fx?.leak(goal);
+        // Make the leak locatable: a red ping where it got through, and a pulse at the portal its route starts from.
+        if (e.x !== undefined && e.z !== undefined) fx?.ping(v3(e.x, 0.05, e.z), LEAK_COLOR);
+        const ltr = this.tracks.get(e.en);
+        const lg = ltr ? this.geoms[ltr.b]?.[ltr.r] : undefined;
+        const portal = lg ? this.world?.portals[ltr!.b]?.[lg.route.entry] : undefined;
+        if (portal) fx?.spawn(portal);
         this.setBoardHealth(e.b, e.lives);
         const mine = this.mode === 'coop' || e.b === this.myBoard();
         audio?.play('leak', { at: goal, amount: mine ? 1 : 0.4 });
@@ -873,6 +916,12 @@ export class GardenClient implements GameClient {
         audio?.play('waveClear');
         return;
       case 'send': {
+        // Who sent what where: BoardSnap.inc has the counts but not the sender.
+        let byKind = this.sendTally.get(e.to);
+        if (!byKind) this.sendTally.set(e.to, (byKind = new Map()));
+        let bySender = byKind.get(e.kind);
+        if (!bySender) byKind.set(e.kind, (bySender = new Map()));
+        bySender.set(e.from, (bySender.get(e.from) ?? 0) + e.n);
         const name = ENEMIES[e.kind].name;
         const what = `${e.n} ${name}${e.n === 1 ? '' : 's'}`;
         if (e.from === you) {
@@ -881,14 +930,25 @@ export class GardenClient implements GameClient {
         } else if (e.to === this.myBoard()) {
           this.toast(`${this.playerName(e.from)} sent ${what} at you!`, 'bad');
           audio?.play('incoming');
-        } else this.toast(`${this.playerName(e.from)} sent ${what} to ${this.boardName(e.to)}`, 'info');
+        } else {
+          // Sends between others are not toasted (bots send every few seconds); the gardens strip counts them.
+          this.sendsIn.set(e.to, (this.sendsIn.get(e.to) ?? 0) + 1);
+        }
+        this.refreshBoards();
         return;
       }
       case 'out': {
         this.setBoardOut(e.b);
         const own = this.boards[e.b]?.own;
         this.outPlaces.set(e.b, e.place);
-        if (own === you) this.toast(`Your garden has fallen. You finish ${ordinal(e.place)}.`, 'bad');
+        if (own === you) {
+          this.toast(`Your garden has fallen. You finish ${ordinal(e.place)}.`, 'bad');
+          // Nothing left to see on a wilted board: watch the leader instead.
+          this.manualAt = -Infinity;
+          this.followPickAt = performance.now() / 1000;
+          const lead = this.leadingBoard();
+          if (lead >= 0) this.flyTo(lead);
+        }
         else this.toast(`${this.boardName(e.b)} has fallen (${ordinal(e.place)})`, 'info');
         audio?.play('out');
         this.refreshBoards();
@@ -911,6 +971,28 @@ export class GardenClient implements GameClient {
   }
 
   private readonly outPlaces = new Map<number, number>();
+  /** Versus: board -> enemy kind -> sender -> count, from send events (to name who queued BoardSnap.inc). */
+  private readonly sendTally = new Map<number, Map<EnemyKind, Map<string, number>>>();
+  /** Versus: sends between other players per target board (not toasted). */
+  private readonly sendsIn = new Map<number, number>();
+
+  /** A board's queued sends for its next wave, with the sender when one player sent that kind. */
+  private incomingFor(b: number, inc: [EnemyKind, number][] | undefined): HudIncoming[] {
+    const tally = this.sendTally.get(b);
+    if (!inc || !inc.length) {
+      tally?.clear();
+      return [];
+    }
+    if (tally) for (const k of [...tally.keys()]) if (!inc.some(([kind]) => kind === k)) tally.delete(k);
+    return inc.map(([kind, count]) => {
+      const senders = tally?.get(kind);
+      if (senders && senders.size === 1) {
+        const from = senders.keys().next().value as string;
+        return { kind, count, from, fromColor: this.playerColor(from) };
+      }
+      return { kind, count };
+    });
+  }
 
   private setBoardHealth(b: number, lives: number) {
     const frac = Math.max(0, lives) / G.lives;
@@ -975,6 +1057,7 @@ export class GardenClient implements GameClient {
     this.timeline.sample(now);
     this.renderEnemies(dt);
     this.renderTowers();
+    this.updateFields();
 
     this.updatePlacement();
     this.updateCursor(now);
@@ -982,6 +1065,16 @@ export class GardenClient implements GameClient {
     this.units!.update(dt, engine.camera);
     this.fx!.update(dt, engine.camera);
     this.ambience?.update(dt, time, engine.camera);
+    if (this.labels) {
+      // Shown only well past any one board's home view (which ranges up to ~1.6x when turned), up to the full overview.
+      const { w, h } = this.boardSize();
+      const near = Math.max(this.fitDist(Math.max(w, h), Math.max(w, h)) * 1.15, this.maxDist * 0.45);
+      this.labels.frame(this.cam.dist, near, Math.max(near * 1.3, this.maxDist * 0.7));
+    }
+    if (now - this.followAt > 1) {
+      this.followAt = now;
+      this.follow(now);
+    }
     const target = v3(this.cam.x, 0, this.cam.z);
     this.pipe!.setFocus(target, this.cam.dist);
     this.audio?.listen(target, Math.max(0, Math.min(1, (this.cam.dist - MIN_DIST) / (this.maxDist - MIN_DIST))));
@@ -1053,6 +1146,37 @@ export class GardenClient implements GameClient {
       keep.clear();
       for (const e of list) keep.add(e.id);
       for (const id of this.memo.keys()) if (!keep.has(id)) this.memo.delete(id);
+    }
+  }
+
+  /** World x/z of slow towers (cached: the field check runs every frame). */
+  private readonly fieldPos = new Map<number, { x: number; z: number }>();
+
+  /** Slow flower fields animate only while an enemy is inside (fx idles them to the rim otherwise). */
+  private updateFields() {
+    const fx = this.fx;
+    if (!fx?.fieldActive) return;
+    const list = this.frameList;
+    for (const t of this.towers.values()) {
+      if (t.k !== 'slow') continue;
+      const r = TOWERS.slow.levels[t.lv - 1].range;
+      const r2 = r * r;
+      let p = this.fieldPos.get(t.id);
+      if (!p) {
+        const o = this.origins[t.b];
+        if (!o || !this.def) continue;
+        p = cellToWorld(this.def, o, t.x + 0.5, t.y + 0.5);
+        this.fieldPos.set(t.id, p);
+      }
+      let on = false;
+      for (let i = 0; i < list.length && !on; i++) {
+        const e = list[i];
+        if (e.b !== t.b) continue;
+        const dx = e.x - p.x;
+        const dz = e.z - p.z;
+        on = dx * dx + dz * dz <= r2;
+      }
+      fx.fieldActive(t.id, on);
     }
   }
 
@@ -1152,11 +1276,12 @@ export class GardenClient implements GameClient {
 
   /** Screen rows (CSS px) the HUD covers at the top and bottom, which framing keeps the board out of. */
   private insets() {
-    if (!this.portrait) return { top: 0, bottom: 0 };
     const { h } = this.viewSize();
+    const top = this.portrait ? PORTRAIT_INSET_TOP : DESK_INSET_TOP;
+    const bottom = this.portrait ? PORTRAIT_INSET_BOTTOM : DESK_INSET_BOTTOM;
     // Never let the insets eat more than 60% of a short screen.
-    const k = Math.min(1, (h * 0.6) / (PORTRAIT_INSET_TOP + PORTRAIT_INSET_BOTTOM));
-    return { top: PORTRAIT_INSET_TOP * k, bottom: PORTRAIT_INSET_BOTTOM * k };
+    const k = Math.min(1, (h * 0.6) / (top + bottom));
+    return { top: top * k, bottom: bottom * k, side: this.portrait ? 4 : 16 };
   }
 
   /** Camera distance at which one cell is `px` CSS pixels wide at the screen centre. */
@@ -1188,8 +1313,155 @@ export class GardenClient implements GameClient {
     this.flyTo(b, snap);
   }
 
-  private flyTo(b: number, snap = false) {
+  /**
+   * What the home view frames on board `b`: the route network (paths, portals, greenhouse) plus a cell of margin,
+   * not the whole board with its decorative border, so units read bigger at the default zoom.
+   */
+  private playBox(b: number) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
     const c = this.boardCenter(b);
+    const { w, h } = this.boardSize();
+    // Points that must stay on screen (each path vertex, greenhouse and portal padded by `r` along both axes).
+    const pts: number[] = [];
+    const add = (x: number, z: number, r: number) => {
+      const ax = Math.max(c.x - w / 2, x - r);
+      const bx = Math.min(c.x + w / 2, x + r);
+      const az = Math.max(c.z - h / 2, z - r);
+      const bz = Math.min(c.z + h / 2, z + r);
+      pts.push(ax, az, bx, az, ax, bz, bx, bz);
+      minX = Math.min(minX, ax);
+      maxX = Math.max(maxX, bx);
+      minZ = Math.min(minZ, az);
+      maxZ = Math.max(maxZ, bz);
+    };
+    for (const g of this.geoms[b] ?? []) for (let i = 0; i < g.xs.length; i++) add(g.xs[i], g.zs[i], g.half + G.cell * 0.6);
+    const goal = this.world?.goals[b];
+    if (goal) add(goal.x, goal.z, 2 * G.cell + G.cell * 0.25);
+    for (const p of this.world?.portals[b] ?? []) add(p.x, p.z, G.cell * 1.25);
+    if (!Number.isFinite(minX)) {
+      const hw = w / 2;
+      const hh = h / 2;
+      return { cx: c.x, cz: c.z, w, h, pts: [c.x - hw, c.z - hh, c.x + hw, c.z - hh, c.x - hw, c.z + hh, c.x + hw, c.z + hh] };
+    }
+    return { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: maxX - minX, h: maxZ - minZ, pts };
+  }
+
+  /** Home framing of board `b` at quarter turn `q`: camera target, distance and yaw. */
+  private homeFrame(b: number, q: number) {
+    const box = this.playBox(b);
+    const yaw = q * (Math.PI / 2);
+    const { w: vw, h: vh } = this.viewSize();
+    const ins = this.insets();
+    const safe = { x0: ins.side, x1: vw - ins.side, y0: ins.top, y1: vh - ins.bottom };
+    if (safe.y1 - safe.y0 < vh * 0.3) {
+      safe.y0 = vh * 0.35;
+      safe.y1 = vh * 0.65;
+    }
+    // Smallest distance at which the box, centred in the safe rect, fits it (fits only get easier further out).
+    let lo = MIN_DIST;
+    let hi = this.maxDist;
+    let fit = this.centreBox(box, yaw, hi, safe);
+    if (fit.fits) {
+      for (let i = 0; i < 18; i++) {
+        const mid = (lo + hi) / 2;
+        const f = this.centreBox(box, yaw, mid, safe);
+        if (f.fits) {
+          hi = mid;
+          fit = f;
+        } else lo = mid;
+      }
+    }
+    let dist = hi;
+    // Fingers need bigger cells than the whole board fitted on a phone gives: zoom in (the board then pans).
+    if (this.coarse()) {
+      const touch = Math.max(MIN_DIST, this.distForCellPx(TOUCH_CELL_PX));
+      if (touch < dist) {
+        dist = touch;
+        // Too big to fit now: put the middle of the play area in the middle of the free band (it pans from there).
+        fit = this.centreBox(box, yaw, dist, safe, true);
+      }
+    }
+    return { x: fit.x, z: fit.z, dist, yaw };
+  }
+
+  /**
+   * Camera target that centres `box` (ground rect) in the screen rect `safe` at distance `dist` and heading `yaw`, and
+   * whether it fits there. Projects with the same camera model as applyCamera (pitch PITCH, looking at the target).
+   */
+  private centreBox(
+    box: { cx: number; cz: number; pts: number[] },
+    yaw: number,
+    dist: number,
+    safe: { x0: number; x1: number; y0: number; y1: number },
+    /** Centre the box's middle point instead of its on-screen extent. */
+    byMiddle = false,
+  ) {
+    const { w: vw, h: vh } = this.viewSize();
+    const aspect = vw / vh;
+    const tanV = Math.tan(((FOV / 2) * Math.PI) / 180);
+    const sy = Math.sin(yaw);
+    const cy = Math.cos(yaw);
+    const sp = Math.sin(PITCH);
+    const cp = Math.cos(PITCH);
+    // Camera basis: forward f, right r, up u.
+    const fx = -sy * cp;
+    const fz = -cy * cp;
+    const rx = cy;
+    const rz = -sy;
+    const ux = -sy * sp;
+    const uz = -cy * sp;
+    const pts = byMiddle ? [box.cx, box.cz] : box.pts;
+    const bounds = (tx: number, tz: number) => {
+      let x0 = Infinity;
+      let x1 = -Infinity;
+      let y0 = Infinity;
+      let y1 = -Infinity;
+      for (let k = 0; k < pts.length; k += 2) {
+        const px = pts[k] - tx;
+        const pz = pts[k + 1] - tz;
+        const depth = px * fx + pz * fz + dist;
+        if (depth <= 0.1) return null;
+        const sx = ((px * rx + pz * rz) / (depth * tanV * aspect) + 1) * 0.5 * vw;
+        const syp = (1 - (px * ux + pz * uz) / (depth * tanV)) * 0.5 * vh;
+        x0 = Math.min(x0, sx);
+        x1 = Math.max(x1, sx);
+        y0 = Math.min(y0, syp);
+        y1 = Math.max(y1, syp);
+      }
+      return { x0, x1, y0, y1 };
+    };
+    // Screen-down on the ground and screen-right: move the target along them (secant steps) to centre the box.
+    const dX = sy;
+    const dZ = cy;
+    let a = 0; // metres along screen-right
+    let d = 0; // metres along screen-down
+    const midX = (safe.x0 + safe.x1) / 2;
+    const midY = (safe.y0 + safe.y1) / 2;
+    for (let it = 0; it < 4; it++) {
+      const tx = box.cx + rx * a + dX * d;
+      const tz = box.cz + rz * a + dZ * d;
+      const b0 = bounds(tx, tz);
+      const b1 = bounds(tx + rx, tz + rz);
+      const b2 = bounds(tx + dX, tz + dZ);
+      if (!b0 || !b1 || !b2) break;
+      const ex = (b0.x0 + b0.x1) / 2 - midX;
+      const ey = (b0.y0 + b0.y1) / 2 - midY;
+      const kx = (b1.x0 + b1.x1) / 2 - (b0.x0 + b0.x1) / 2;
+      const ky = (b2.y0 + b2.y1) / 2 - (b0.y0 + b0.y1) / 2;
+      if (Math.abs(kx) > 1e-6) a -= ex / kx;
+      if (Math.abs(ky) > 1e-6) d -= ey / ky;
+    }
+    const x = box.cx + rx * a + dX * d;
+    const z = box.cz + rz * a + dZ * d;
+    const fin = byMiddle ? null : bounds(x, z);
+    const fits = !!fin && fin.x1 - fin.x0 <= safe.x1 - safe.x0 && fin.y1 - fin.y0 <= safe.y1 - safe.y0;
+    return { x, z, fits };
+  }
+
+  private flyTo(b: number, snap = false) {
     const { w, h } = this.boardSize();
     const Q = Math.PI / 2;
     // Quarter turns: keep the player's heading, but run the board's long axis along the screen's long axis
@@ -1198,42 +1470,21 @@ export class GardenClient implements GameClient {
     const wantOdd = this.portrait !== h > w;
     // Even -> one turn left, odd -> back one turn: a phone turned there and back ends on the heading it started on.
     if ((((q % 2) + 2) % 2 === 1) !== wantOdd) q += wantOdd ? 1 : -1;
-    const yaw = q * Q;
-    const odd = (((q % 2) + 2) % 2) === 1;
-    const across = odd ? h : w;
-    const deep = odd ? w : h;
-    const { h: vh } = this.viewSize();
-    const ins = this.insets();
-    const vFrac = Math.max(0.3, (vh - ins.top - ins.bottom) / vh);
-    let dist = this.fitDist(across, deep, vFrac);
-    // Fingers need bigger cells than the whole board fitted on a phone gives: zoom in (the board then pans).
-    if (this.coarse()) dist = Math.min(dist, this.distForCellPx(TOUCH_CELL_PX));
-    dist = Math.min(this.maxDist, Math.max(MIN_DIST, dist));
-    // Screen-down on the ground (towards the camera) for this heading.
-    const downX = Math.sin(yaw);
-    const downZ = Math.cos(yaw);
-    let shift: number;
-    if (this.portrait) {
-      // Centre the board in the free band between the HUD rows: the ground point the band's centre shows sits
-      // `off` metres along the view direction from the target; move the target by the opposite.
-      const tanV = Math.tan(((FOV / 2) * Math.PI) / 180);
-      const yc = (ins.top + vh - ins.bottom) / 2;
-      const v = -(yc - vh / 2) / (vh / 2);
-      const ang = PITCH - Math.atan(v * tanV);
-      // Metres along the view direction (forward = screen-up) from the target to the ground the band centre shows.
-      const off = (Math.sin(PITCH) * dist) / Math.tan(ang) - Math.cos(PITCH) * dist;
-      // That point is target - down * off; make it the board centre.
-      shift = off;
-    } else {
-      // Nudge the target screen-down so the board's near edge clears the build bar at the bottom of the screen.
-      shift = deep * 0.05;
-    }
-    this.goal.x = c.x + downX * shift;
-    this.goal.z = c.z + downZ * shift;
-    this.goal.dist = dist;
-    this.goal.yaw = yaw;
+    Object.assign(this.goal, this.homeFrame(b, q));
     if (snap) Object.assign(this.cam, this.goal);
     this.store.set({ viewBoard: b });
+  }
+
+  /** Q / E: a quarter turn. From the home view it refits (the board's width and depth swap), otherwise keeps the zoom. */
+  private rotate(dir: 1 | -1) {
+    this.markManual();
+    const Q = Math.PI / 2;
+    const q = Math.round(this.goal.yaw / Q);
+    const b = Math.max(0, this.store.get().viewBoard);
+    const was = this.homeFrame(b, q);
+    const atHome = Math.abs(this.goal.dist - was.dist) < was.dist * 0.15 && Math.hypot(this.goal.x - was.x, this.goal.z - was.z) < was.dist * 0.15;
+    if (atHome) Object.assign(this.goal, this.homeFrame(b, q + dir));
+    else this.goal.yaw = (q + dir) * Q;
   }
 
   /** Versus: tell the server which board the camera is on (it then streams that board's enemies every snapshot). */
@@ -1246,6 +1497,61 @@ export class GardenClient implements GameClient {
   private viewBoard(b: number) {
     if (b < 0 || b >= this.origins.length) return;
     this.flyTo(b);
+  }
+
+  private markManual() {
+    this.manualAt = performance.now() / 1000;
+  }
+
+  /** Living board with the most lives (ties: the lower index), or -1. */
+  private leadingBoard() {
+    const s = this.latest;
+    let best = -1;
+    let lives = -1;
+    for (let i = 0; i < this.origins.length; i++) {
+      const bs = s?.bd.find((x) => x.b === i);
+      if (bs?.out || this.outPlaces.has(i) || this.boards[i]?.place !== undefined) continue;
+      const l = bs?.lives ?? G.lives;
+      if (l > lives) {
+        lives = l;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Versus, once your garden has fallen or while spectating: keep the camera on a living board (the leader when the
+   * watched one wilts, the busiest every ~12 s), until the player moves the camera; it resumes after 25 s idle.
+   */
+  private follow(now: number) {
+    const hud = this.store.get();
+    const mb = this.myBoard();
+    const watching = this.mode === 'vs' && hud.phase !== 'over' && (mb < 0 || !!hud.boards[mb]?.out);
+    const auto = watching && now - this.manualAt > FOLLOW_IDLE;
+    if (auto !== !!hud.autoCam) this.store.set({ autoCam: auto });
+    if (!auto) return;
+    const s = this.latest;
+    const v = hud.viewBoard;
+    const viewOut = !!hud.boards[v]?.out;
+    let pick = -1;
+    if (viewOut || v < 0) pick = this.leadingBoard();
+    else if (now - this.followPickAt > FOLLOW_SWITCH && s && s.ph === 'wave') {
+      // The busiest living board: most enemies left this wave, then fewest lives (a garden in trouble).
+      let score = -1;
+      for (const bs of s.bd) {
+        if (bs.out) continue;
+        const sc = (bs.rem ?? 0) * 100 + (G.lives - bs.lives);
+        if (sc > score) {
+          score = sc;
+          pick = bs.b;
+        }
+      }
+    }
+    if (pick >= 0 && pick !== v) {
+      this.followPickAt = now;
+      this.flyTo(pick);
+    } else if (pick >= 0) this.followPickAt = now;
   }
 
   lookAt(x: number, z: number, dist?: number, snap = true) {
@@ -1277,6 +1583,7 @@ export class GardenClient implements GameClient {
         else if (p.y > h - EDGE_PX) fz += 1;
       }
       if (fx || fz) {
+        this.markManual();
         const len = Math.hypot(fx, fz);
         const speed = this.goal.dist * 0.9 * dt;
         const sin = Math.sin(this.goal.yaw);
@@ -1439,6 +1746,7 @@ export class GardenClient implements GameClient {
 
   private dragTo(grab: THREE.Vector3 | null, x: number, y: number) {
     if (!grab) return;
+    this.markManual();
     const hit = this.groundAt(x, y, this.tmpV);
     if (!hit) return;
     const dx = grab.x - hit.x;
@@ -1494,6 +1802,7 @@ export class GardenClient implements GameClient {
     if (this.paused) return;
     const { x, y } = this.local(e);
     const delta = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;
+    this.markManual();
     const before = this.goal.dist;
     const next = Math.max(MIN_DIST, Math.min(this.maxDist, before * Math.exp(delta * 0.0013)));
     // Zoom towards the point under the cursor.
@@ -1775,10 +2084,10 @@ export class GardenClient implements GameClient {
     }
     switch (code) {
       case 'KeyQ':
-        this.goal.yaw += Math.PI / 2;
+        this.rotate(1);
         return;
       case 'KeyE':
-        this.goal.yaw -= Math.PI / 2;
+        this.rotate(-1);
         return;
       case 'Home':
       case 'Space':
@@ -1804,10 +2113,12 @@ export class GardenClient implements GameClient {
         return;
       case 'Equal':
       case 'NumpadAdd':
+        this.markManual();
         this.goal.dist = Math.max(MIN_DIST, this.goal.dist / 1.25);
         return;
       case 'Minus':
       case 'NumpadSubtract':
+        this.markManual();
         this.goal.dist = Math.min(this.maxDist, this.goal.dist * 1.25);
         return;
     }
@@ -1850,28 +2161,52 @@ export class GardenClient implements GameClient {
     const boards: HudBoard[] = this.boards.map((bi, i) => {
       const bs = s?.bd.find((x) => x.b === i);
       const own = bi.own;
+      const out = !!bs?.out || this.outPlaces.has(i) || bi.place !== undefined;
       return {
         b: i,
         own,
         name: this.mode === 'coop' ? 'The Garden' : own ? this.playerName(own) : `Garden ${i + 1}`,
         color: own ? this.playerColor(own) : COOP_COLOR,
         lives: bs?.lives ?? G.lives,
-        out: !!bs?.out || this.outPlaces.has(i),
-        // Late joiners never saw the `out` event: the score table knows the finishing place too.
-        place: this.outPlaces.get(i) ?? (bs?.out && own ? this.store.get().scores.find((sc) => sc.id === own)?.place : undefined),
+        out,
+        // Late joiners never saw the `out` event: init's board info (or the score table) knows the finishing place.
+        place:
+          this.outPlaces.get(i) ??
+          bi.place ??
+          (out && own ? this.store.get().scores.find((sc) => sc.id === own)?.place : undefined),
+        incoming: this.mode === 'vs' ? this.incomingFor(i, bs?.inc) : [],
+        sendsIn: this.sendsIn.get(i) ?? 0,
       };
     });
     const hud = this.store.get();
     const focus = this.mode === 'coop' ? 0 : hud.viewBoard;
     const lives = boards[focus]?.lives ?? G.lives;
+    const mine = this.myBoard();
+    const incoming = (mine >= 0 && boards[mine]?.incoming) || [];
+    const incKey = (l: HudIncoming[] | undefined) => (l ?? []).map((x) => `${x.kind}:${x.count}:${x.from ?? ''}`).join(',');
     const same =
       hud.boards.length === boards.length &&
       hud.boards.every((o, i) => {
         const n = boards[i];
-        return o.lives === n.lives && o.out === n.out && o.name === n.name && o.color === n.color && o.place === n.place;
+        return (
+          o.lives === n.lives &&
+          o.out === n.out &&
+          o.name === n.name &&
+          o.color === n.color &&
+          o.place === n.place &&
+          o.sendsIn === n.sendsIn &&
+          incKey(o.incoming) === incKey(n.incoming)
+        );
       });
-    if (same && hud.lives === lives) return;
-    this.store.set({ boards, lives, maxLives: G.lives });
+    if (same && hud.lives === lives && incKey(hud.incoming) === incKey(incoming)) return;
+    this.store.set({ boards, lives, maxLives: G.lives, incoming });
+    this.labels?.update(boards);
+  }
+
+  private refreshMyTowers() {
+    let n = 0;
+    for (const t of this.towers.values()) if (t.own === this.ctx.you) n++;
+    if (n !== this.store.get().myTowers) this.store.set({ myTowers: n });
   }
 
   private refreshPlayers() {
@@ -2011,3 +2346,100 @@ function ordinal(n: number) {
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 }
 
+
+// ---- versus board labels ----------------------------------------------------------------------------------------------
+
+/** Floating "name + lives" tags over each versus board, shown when the camera is zoomed out over several gardens. */
+class BoardLabels {
+  private readonly items: { sprite: THREE.Sprite; canvas: HTMLCanvasElement; tex: THREE.CanvasTexture; key: string }[] = [];
+  private readonly group = new THREE.Group();
+
+  constructor(
+    private readonly scene: THREE.Scene,
+    origins: BoardOrigin[],
+  ) {
+    for (const o of origins) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 128;
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, opacity: 0 });
+      const sprite = new THREE.Sprite(mat);
+      sprite.position.set(o.x, 7, o.z);
+      sprite.renderOrder = 999;
+      sprite.visible = false;
+      this.group.add(sprite);
+      this.items.push({ sprite, canvas, tex, key: '' });
+    }
+    scene.add(this.group);
+  }
+
+  update(boards: HudBoard[]) {
+    boards.forEach((bd, i) => {
+      const it = this.items[i];
+      if (!it) return;
+      const text = bd.out ? `${bd.place ? `${ordinal(bd.place)} · ` : ''}wilted` : `♥ ${bd.lives}`;
+      const key = `${bd.name}|${bd.color}|${text}|${bd.out}`;
+      if (key === it.key) return;
+      it.key = key;
+      const c = it.canvas.getContext('2d');
+      if (!c) return;
+      const W = it.canvas.width;
+      const H = it.canvas.height;
+      c.clearRect(0, 0, W, H);
+      const font = '700 46px "Nunito", "Segoe UI", system-ui, sans-serif';
+      c.font = font;
+      const nameW = c.measureText(bd.name).width;
+      c.font = '800 42px "Nunito", "Segoe UI", system-ui, sans-serif';
+      const livesW = c.measureText(text).width;
+      const pad = 26;
+      const dot = 26;
+      const total = Math.min(W - 8, pad + dot + 16 + nameW + 24 + livesW + pad);
+      const x0 = (W - total) / 2;
+      // Pill.
+      c.fillStyle = bd.out ? 'rgba(40,36,44,0.72)' : 'rgba(28,36,44,0.82)';
+      const r = 40;
+      c.beginPath();
+      c.moveTo(x0 + r, 20);
+      c.arcTo(x0 + total, 20, x0 + total, H - 20, r);
+      c.arcTo(x0 + total, H - 20, x0, H - 20, r);
+      c.arcTo(x0, H - 20, x0, 20, r);
+      c.arcTo(x0, 20, x0 + total, 20, r);
+      c.fill();
+      // Owner colour dot, name, lives.
+      c.fillStyle = `#${bd.color.toString(16).padStart(6, '0')}`;
+      c.beginPath();
+      c.arc(x0 + pad + dot / 2, H / 2, dot / 2, 0, Math.PI * 2);
+      c.fill();
+      c.textBaseline = 'middle';
+      c.font = font;
+      c.fillStyle = bd.out ? '#b9b2bf' : '#fdf6e8';
+      c.fillText(bd.name, x0 + pad + dot + 16, H / 2 + 2, W * 0.6);
+      c.font = '800 42px "Nunito", "Segoe UI", system-ui, sans-serif';
+      c.fillStyle = bd.out ? '#9a93a0' : bd.lives <= 5 ? '#ff8f8f' : '#ffb3c1';
+      c.fillText(text, x0 + total - pad - livesW, H / 2 + 2);
+      it.tex.needsUpdate = true;
+    });
+  }
+
+  /** Constant screen size; fades in from `near` to `far` camera distance. */
+  frame(dist: number, near: number, far: number) {
+    const a = Math.max(0, Math.min(1, (dist - near) / Math.max(1, far - near)));
+    const h = dist * 0.045;
+    for (const it of this.items) {
+      it.sprite.visible = a > 0.01;
+      (it.sprite.material as THREE.SpriteMaterial).opacity = a;
+      it.sprite.scale.set(h * 4, h, 1);
+    }
+  }
+
+  dispose() {
+    this.scene.remove(this.group);
+    for (const it of this.items) {
+      it.tex.dispose();
+      (it.sprite.material as THREE.SpriteMaterial).dispose();
+    }
+    this.items.length = 0;
+  }
+}

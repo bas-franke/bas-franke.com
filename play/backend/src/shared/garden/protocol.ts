@@ -115,6 +115,8 @@ export interface BoardInfo {
   b: number;
   /** Owner in versus; null in co-op. */
   own: string | null;
+  /** [added] Versus: finishing place of a board that is already out (1 = winner); missing while it is alive. */
+  place?: number;
 }
 
 export type GEvent =
