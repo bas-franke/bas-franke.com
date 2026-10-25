@@ -96,6 +96,8 @@ interface Remote {
   pose: CharacterState;
   /** Fire kick, 1 at a shot and decaying. */
   kick: number;
+  /** Metres flown since the last jet-trail puff (robots with jump jets). */
+  jet?: number;
   /** Ground flag and vertical speed from the latest snapshot, for landing dust. */
   ground: boolean;
   vy: number;
@@ -1807,6 +1809,17 @@ export class RocketsClient implements GameClient {
     s.dt = dt;
     s.firing = r.kick;
     animateCharacter(r.group, s);
+    // Jump jets firing on the climb leave a glowing streak, a trail puff every TRAIL_STEP metres flown.
+    const flame = (r.group.userData.rig as { flame?: THREE.Mesh } | undefined)?.flame;
+    if (flame?.visible && s.vy > 0.5 && this.effects) {
+      r.jet = (r.jet ?? 0) + Math.hypot(s.speed, s.vy) * dt;
+      if (r.jet >= TRAIL_STEP) {
+        r.jet %= TRAIL_STEP;
+        flame.getWorldPosition(scratchV);
+        scratchV.y -= 0.25;
+        this.effects.trail(scratchV, 0.8);
+      }
+    }
   }
 
   private updateRockets(dt: number, now: number) {
