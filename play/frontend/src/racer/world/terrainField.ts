@@ -317,7 +317,8 @@ export class TerrainField {
       const de = this.dEnd[si][i];
       y = lerp(y, this.openFar(i, d, x, z), smoothstep(Math.min(30, de * 0.5), de, d));
     }
-    return y;
+    // Kickers, ledges and tunnels.
+    return y + this.track.lift(this.track.frames[i].s, side * d);
   }
 
   /** Height of the far terrain (the heightfield) at (x, z); sets `rock`. */
@@ -372,7 +373,8 @@ export class TerrainField {
     this.rock = 0;
     let mesaMask: number;
     if (ad < this.x0[i]) {
-      y = this.posY[i] - Math.abs(this.slope[i]) * this.x0[i] - 3;
+      // Under the ribbon, and under a tunnel's floor.
+      y = this.posY[i] - Math.abs(this.slope[i]) * this.x0[i] - 3 + this.track.lowest(this.track.frames[i].s);
       mesaMask = 0;
     } else if (Number.isFinite(W)) {
       if (ad < W + this.back - 2) {

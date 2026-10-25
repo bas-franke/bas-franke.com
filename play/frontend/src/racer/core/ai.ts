@@ -2,10 +2,11 @@
 // chain of points) and every pilot a speed plan along it (what its pod can hold through each bend, with braking
 // zones worked backwards from the corners). A pilot follows the line with a pure-pursuit steer, rides the speed plan
 // with throttle and air brakes, steers round the rocks on the road, picks up boost pads, boosts on straights, pulls out
-// to pass slower pods and leans on neighbours if aggressive. Skill sets how close to the limit it drives and how clean its line is; a little rubber
+// to pass slower pods and leans on neighbours if aggressive. The better pilots take some of the shortcut lanes, and every
+// pilot rolls onto its side to thread a slot wall. Skill sets how close to the limit it drives and how clean its line is; a little rubber
 // banding keeps races close without being obvious.
 
-import { POD_HALF_WIDTH, gripRate, padPosition, turnBudget, type PodInput, type PodState } from './physics';
+import { POD_HALF_WIDTH, boostDuration, gripRate, turnBudget, type PodInput, type PodState } from './physics';
 import type { PodStats } from './pods';
 import type { Track } from './track';
 
@@ -26,6 +27,8 @@ export interface AiView {
   gapToPlayer: number;
   /** Track-space positions of other pods. */
   others: { s: number; x: number; v: number }[];
+  /** How battered the pod is, 0 (fine) .. 1 (about to fall apart): the worst of its damage summary. */
+  wear?: number;
 }
 
 /** Racing line samples: every LINE_STEP metres, the lateral offset and the line's own curvature (1/m, + = left). */
@@ -46,7 +49,8 @@ export function racingLine(track: Track): Line {
   const pz = new Float64Array(m);
   const rx = new Float64Array(m);
   const rz = new Float64Array(m);
-  const lim = new Float64Array(m);
+  const lo = new Float64Array(m);
+  const hi = new Float64Array(m);
   const x = new Float64Array(m);
   for (let i = 0; i < m; i++) {
     const f = track.frameAt(i * step);
@@ -55,7 +59,16 @@ export function racingLine(track: Track): Line {
     const l = Math.hypot(f.right.x, f.right.z);
     rx[i] = f.right.x / l;
     rz[i] = f.right.z / l;
-    lim[i] = f.width / 2 - POD_HALF_WIDTH - 3.2;
+    const lim = f.width / 2 - POD_HALF_WIDTH - 3.2;
+    lo[i] = -lim;
+    hi[i] = lim;
+    // Past a shortcut the line stays in the field, clear of the ridge.
+    for (const sc of track.shortcuts) {
+      if (i * step < sc.s0 - 10 || i * step > sc.s1 + 10) continue;
+      const inner = sc.xIn - 3.9 - POD_HALF_WIDTH - 3;
+      if (sc.side < 0) lo[i] = Math.max(lo[i], -inner);
+      else hi[i] = Math.min(hi[i], inner);
+    }
   }
   // The course is open: the two end points stay on the centreline, everything else relaxes.
   const c = (k: number) => Math.max(0, Math.min(m - 1, k));
@@ -79,7 +92,7 @@ export function racingLine(track: Track): Line {
           tz = (qz(a) + qz(b)) / 2;
         }
         const d = (tx - qx(i)) * rx[i] + (tz - qz(i)) * rz[i];
-        x[i] = Math.max(-lim[i], Math.min(lim[i], x[i] + d * 0.9));
+        x[i] = Math.max(lo[i], Math.min(hi[i], x[i] + d * 0.9));
       }
     }
   };
@@ -126,6 +139,9 @@ interface Pilot {
   plan: Float32Array;
   seed: number;
   stuck: number;
+  /** The slot wall the pilot is lining up for and the slot it picked. */
+  slotS?: number;
+  slotX?: number;
 }
 const pilots = new WeakMap<PodState, Pilot>();
 
@@ -185,22 +201,64 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
 
   // Boost pads close ahead and not far off the line: go and get them (the better pilots more reliably).
   if (skill > 0.3) {
-    for (const pad of track.def.boostPads) {
-      const pp = padPosition(track, pad);
+    for (const pp of track.pads) {
       const d = pp.s - st.s;
       if (d > 0 && d < 60 + st.v * 1.4 && Math.abs(pp.x - target) < 6 + 8 * skill) target = pp.x;
     }
   }
 
+  // Shortcuts: a pilot good enough takes some of them (the same ones every time), lining up for the lane well before
+  // its ridge starts; one that is not lined up by then stays out.
+  let laneLo = -half;
+  let laneHi = half;
+  let inLane = false;
+  for (const sc of track.shortcuts) {
+    if (st.s < sc.s0 - 380 || st.s > sc.s1) continue;
+    const u = st.x * sc.side;
+    // Not lined up by the time the ridge is close: stay in the field rather than hit its end.
+    if (st.s > sc.s0 - 30 && u < sc.xIn + 2) continue;
+    const takes = ((p.seed * 7 + sc.s0) % 100) / 100 < (skill - 0.35) * 1.4;
+    if (!takes && st.s < sc.s0 + 12) continue;
+    const a = sc.xIn + 3.9 + POD_HALF_WIDTH;
+    const b = Math.min(sc.xOut - POD_HALF_WIDTH - 0.8, half);
+    target = (sc.side * (a + b)) / 2;
+    if (st.s > sc.s0 + 12) {
+      inLane = true;
+      laneLo = sc.side > 0 ? a : -b;
+      laneHi = sc.side > 0 ? b : -a;
+    }
+  }
+
+  // Slot walls: aim for the slot nearest where the pod is heading, and roll onto the side to fit through it.
+  let roll = 0;
+  let slotSlow = false;
+  for (const w of track.slotWalls) {
+    const d = w.s - st.s;
+    if (d < -8 || d > 60 + st.v * 1.6) continue;
+    const kk = Math.max(0.3, Math.min(1, Math.max(0, d) / look));
+    // Pick a slot once (the one nearest the pod: the next wall can be close) and stick to it.
+    if (p.slotS !== w.s) {
+      let g = w.gaps[0];
+      for (const gg of w.gaps) if (Math.abs(gg - st.x) < Math.abs(g - st.x)) g = gg;
+      p.slotS = w.s;
+      p.slotX = g;
+    }
+    target = st.x + (p.slotX! - st.x) / kk;
+    if (d < 25 + st.v * 0.45) roll = p.seed > 50 ? 1 : -1;
+    slotSlow = true;
+    break;
+  }
+
   // Rocks: the nearest group ahead that is in the way (rocks side by side count as one blocked span) is passed on the
   // side nearer where the pod is heading, aiming so the path, not just the far target point, clears it. Weaker pilots see
-  // the rocks later and keep less room.
+  // the rocks later and keep less room; a badly damaged pod (one more knock could wreck it) keeps a little more.
   const seeRocks = 40 + st.v * (0.9 + 0.9 * skill);
-  const clearance = POD_HALF_WIDTH + 2 + 1.5 * skill;
+  const clearance = inLane ? POD_HALF_WIDTH + 1.2 : POD_HALF_WIDTH + 2 + 1.5 * skill + 2 * Math.max(0, (view.wear ?? 0) - 0.35);
   const groups: { d: number; ids: number[]; spans: [number, number][] }[] = [];
   for (const o of track.obstacles) {
     const d = o.s - st.s;
-    if (d < -o.r - 3 || d > seeRocks || st.h > o.h + 1) continue;
+    if (d < -o.r - 3 || d > seeRocks || o.kind === 'slot' || (inLane && o.kind === 'ridge')) continue;
+    if (st.h - track.lift(o.s, o.x) > o.h + 1) continue;
     // One formation is one group even when it leans along the course.
     const g = groups.find((gg) => gg.ids.includes(o.group) || Math.abs(gg.d - d) < 15);
     const span: [number, number] = [o.x - o.r - clearance, o.x + o.r + clearance];
@@ -212,7 +270,7 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
   }
   groups.sort((p, q) => p.d - q.d);
   let rockSlow = false;
-  let dodging = false;
+  let dodging = slotSlow;
   for (const { d, spans } of groups) {
     spans.sort((p, q) => p[0] - q[0]);
     const merged: [number, number][] = [];
@@ -226,8 +284,8 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
     const block = merged.find(([l, r]) => xAt > l && xAt < r);
     if (!block) continue;
     const [l, r] = block;
-    const leftOk = l > -half;
-    const rightOk = r < half;
+    const leftOk = l > laneLo;
+    const rightOk = r < laneHi;
     const want = leftOk && (!rightOk || xAt - l < r - xAt) ? l : rightOk ? r : xAt;
     target = st.x + (want - st.x) / k;
     dodging = true;
@@ -241,7 +299,9 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
   for (const o of view.others) {
     const d = o.s - st.s;
     const dx = o.x - st.x;
-    if (d > 2 && d < 30 + st.v * 0.45 && Math.abs(o.x - target) < 8 && o.v < st.v + 3) {
+    if (slotSlow) {
+      // Lined up for a slot: no pulling out.
+    } else if (d > 2 && d < 30 + st.v * 0.45 && Math.abs(o.x - target) < 8 && o.v < st.v + 3) {
       // Pass on the side with more room, staying inside the walls.
       const left = o.x - 8.5;
       const right = o.x + 8.5;
@@ -258,7 +318,7 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
     const closing = st.v - o.v;
     if (d > 0 && Math.abs(dx) < 7 && closing > 0 && d < 9 + closing * (1.1 - 0.5 * profile.aggression)) follow = Math.min(follow, o.v - 1);
   }
-  target = Math.max(-half, Math.min(half, target));
+  target = Math.max(laneLo, Math.min(laneHi, target));
 
   // Steering, in three stages: the velocity direction that reaches the target point (pure pursuit), the heading that
   // turns the velocity that way at the pod's grip rate, and the turn rate that gets the heading there; plus the turn
@@ -293,6 +353,8 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
   wantV = Math.min(wantV, follow);
   // A rock coming up with no room yet to get round it: ease off.
   if (rockSlow) wantV = Math.min(wantV, Math.max(45, st.v - 4));
+  // Threading a slot wall needs a steady hand.
+  if (slotSlow) wantV = Math.min(wantV, stats.topSpeed * (0.45 + 0.2 * skill));
   // Off the line with the stick already at full lock: scrub speed so the turn tightens.
   if (Math.abs(yawWant) > budget * 1.05 && Math.abs(target - st.x) > 3) wantV = Math.min(wantV, st.v - 3);
   let throttle = st.v < wantV - 0.5 ? 1 : st.v < wantV + 1.5 ? 0.5 : 0;
@@ -305,17 +367,16 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
     if (p.stuck > 1 && !st.onRock) steer = Math.max(-1, Math.min(1, st.psi * 2));
   } else p.stuck = 0;
 
-  // Boost when the plan says the road stays fast for a while and the meter is full enough for this pilot.
+  // Boost (one press, it then runs for a few seconds and takes BOOST_COOLDOWN to charge) when the plan says the course
+  // stays fast for the whole burn. Steering is heavy while boosting, so careful pilots want a longer clear run.
   let clear = true;
-  const reach = st.v * (st.boosting ? 1.2 : 2.2);
+  const reach = st.v * boostDuration(stats) * (0.8 + 0.5 * (1 - profile.aggression) + 0.3 * (1 - skill));
   for (let d = 0; d <= reach; d += 24) {
-    if (sample(p.plan, line.step, st.s + d) < stats.topSpeed * (st.boosting ? 1 : 1.05)) {
+    if (sample(p.plan, line.step, st.s + d) < stats.topSpeed * 1.05) {
       clear = false;
       break;
     }
   }
-  // Weak pilots hoard boost (they use it less, and later).
-  const threshold = 0.25 + 0.5 * (1 - profile.aggression) + 0.3 * (1 - skill) - (band > 0 ? 0.15 : 0);
-  const boost = st.boosting ? clear && brake === 0 : st.boost > threshold && clear && throttle === 1 && Math.abs(steer) < 0.5 && st.v > stats.topSpeed * 0.75;
-  return { throttle, brake, steer, boost, roll: 0 };
+  const boost = !st.boosting && st.boost >= 1 && clear && !dodging && throttle === 1 && Math.abs(steer) < 0.4 && st.v > stats.topSpeed * 0.75;
+  return { throttle, brake, steer, boost, roll };
 }

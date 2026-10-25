@@ -1,5 +1,6 @@
-// One-shot and state effects: sparks (wall scrapes and impacts), expanding glow rings (boost pads on the ground, the
-// boost kick behind a pod) and the translucent shock cone wrapped around a boosting pod. Three draw calls in total.
+// One-shot and state effects: sparks (wall scrapes and impacts, embers, paint flecks, electrical crackle and the
+// segments of binder arcs), expanding glow rings (boost pads on the ground, the boost kick behind a pod) and the
+// translucent shock cone wrapped around a boosting pod. Three draw calls in total.
 
 import * as THREE from 'three';
 import { ADDITIVE_FOG, InstanceRing, fxMaterial, quadGeometry } from './particles';
@@ -10,22 +11,36 @@ const SPARK_VERT = /* glsl */ `
 attribute vec3 aPos;
 attribute vec3 aVel;
 attribute vec4 aT; // spawn time, life, width, seed
+attribute vec4 aC; // colour (black = hot metal), gravity scale
+attribute vec3 aSeg; // non-zero: a straight segment (an arc's stroke) riding along at aVel instead of a flying spark
 uniform float uTime;
 uniform vec3 uCamVel;
 varying float vV;
 varying float vU;
 varying float vTail;
+varying vec3 vCol;
+varying float vSeg;
 void main() {
   float age = uTime - aT.x;
   float u = age / aT.y;
   if (u < 0.0 || u > 1.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
-  vec3 g = vec3(0.0, -16.0, 0.0);
-  float drag = exp(-1.5 * age);
-  vec3 p = aPos + aVel * (1.0 - drag) / 1.5 + 0.5 * g * age * age;
-  vec3 vel = aVel * drag + g * age;
-  vec3 streak = -(vel - uCamVel) * 0.022;
+  vec3 p;
+  vec3 streak;
+  vSeg = dot(aSeg, aSeg) > 0.0 ? 1.0 : 0.0;
+  if (vSeg > 0.5) {
+    // Arc strokes keep their shape and move with the pod they belong to, so a bolt stays on the binder at 150 m/s.
+    p = aPos + aVel * age;
+    streak = aSeg;
+  } else {
+    vec3 g = vec3(0.0, -16.0 * aC.w, 0.0);
+    float drag = exp(-1.5 * age);
+    p = aPos + aVel * (1.0 - drag) / 1.5 + 0.5 * g * age * age;
+    vec3 vel = aVel * drag + g * age;
+    streak = -(vel - uCamVel) * 0.022;
+    float l = length(streak);
+    if (l > 2.5) streak *= 2.5 / l;
+  }
   float sl = length(streak);
-  if (sl > 2.5) streak *= 2.5 / sl;
   vec3 a = p + (position.x > 0.0 ? streak : vec3(0.0));
   vec3 view = normalize(cameraPosition - a);
   vec3 sdir = sl > 1e-3 ? streak / max(sl, 1e-3) : vec3(0.0, 1.0, 0.0);
@@ -35,6 +50,7 @@ void main() {
   vV = position.y;
   vU = u;
   vTail = position.x > 0.0 ? 1.0 : 0.0;
+  vCol = aC.rgb;
   vec4 mvPosition = viewMatrix * vec4(a, 1.0);
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -47,10 +63,14 @@ const SPARK_FRAG = /* glsl */ `
 varying float vV;
 varying float vU;
 varying float vTail;
+varying vec3 vCol;
+varying float vSeg;
 void main() {
-  float a = (1.0 - vV * vV) * (1.0 - vU) * (1.0 - 0.9 * vTail);
+  float a = (1.0 - vV * vV) * mix((1.0 - vU) * (1.0 - 0.9 * vTail), 1.0 - vU * vU, vSeg);
   vec3 hot = mix(vec3(4.0, 3.2, 1.6), vec3(3.0, 0.9, 0.2), smoothstep(0.0, 0.6, vU + vTail * 0.3));
-  gl_FragColor = vec4(hot, a);
+  // Coloured sparks (paint flecks, binder crackle) keep their colour, with a white-hot core on arc strokes.
+  vec3 col = vCol.r + vCol.g + vCol.b > 0.0 ? mix(vCol, vec3(3.5), vSeg * (1.0 - vV * vV) * 0.45) : hot;
+  gl_FragColor = vec4(col, a);
   ${ADDITIVE_FOG}
 }
 `;
@@ -161,7 +181,7 @@ export class BurstSystem {
   private time = 0;
 
   constructor(sparkCount: number, ringCount: number, podCount: number) {
-    const s = quadGeometry(sparkCount, { aPos: 3, aVel: 3, aT: 4 });
+    const s = quadGeometry(sparkCount, { aPos: 3, aVel: 3, aT: 4, aC: 4, aSeg: 3 });
     const r = quadGeometry(ringCount, { aPos: 3, aAx: 3, aAy: 3, aT: 4, aCol: 3 });
     for (const [attr, n] of [[s.attr.aT, sparkCount], [r.attr.aT, ringCount]] as const) {
       for (let i = 0; i < n; i++) attr.setXY(i, -1e6, 1);
@@ -217,11 +237,29 @@ export class BurstSystem {
     this.mats[0].uniforms.uCamVel.value.copy(camVel);
   }
 
-  spark(pos: THREE.Vector3, vel: THREE.Vector3, life: number, width: number) {
+  /** A spark flying from `pos` at `vel`; `color` (linear, may exceed 1 to bloom) replaces the hot-metal ramp. */
+  spark(pos: THREE.Vector3, vel: THREE.Vector3, life: number, width: number, color?: THREE.Color, gravity = 1) {
     const i = this.sparkRing.next();
     this.sa.aPos.setXYZ(i, pos.x, pos.y, pos.z);
     this.sa.aVel.setXYZ(i, vel.x, vel.y, vel.z);
     this.sa.aT.setXYZW(i, this.time, life, width, Math.random());
+    if (color) this.sa.aC.setXYZW(i, color.r, color.g, color.b, gravity);
+    else this.sa.aC.setXYZW(i, 0, 0, 0, gravity);
+    this.sa.aSeg.setXYZ(i, 0, 0, 0);
+  }
+
+  /** One straight stroke of an electric arc from `a` to `b`, carried along at `vel` (the pod's velocity). */
+  stroke(a: THREE.Vector3, b: THREE.Vector3, vel: THREE.Vector3, life: number, width: number, color: THREE.Color) {
+    const i = this.sparkRing.next();
+    this.sa.aPos.setXYZ(i, a.x, a.y, a.z);
+    this.sa.aVel.setXYZ(i, vel.x, vel.y, vel.z);
+    this.sa.aT.setXYZW(i, this.time, life, width, Math.random());
+    this.sa.aC.setXYZW(i, color.r, color.g, color.b, 0);
+    // A zero-length stroke would read as a spark; nudge it.
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dz = b.z - a.z;
+    this.sa.aSeg.setXYZ(i, dx || 1e-3, dy, dz);
   }
 
   /** A ring centred on `pos` spanning the plane of `ax`/`ay` (unit vectors), growing to `radius`. */

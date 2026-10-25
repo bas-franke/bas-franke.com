@@ -1,8 +1,11 @@
-// The race HUD widgets: distance-to-go / position panels, timer, speedometer with boost bar, minimap and the centre-screen
-// messages (countdown, wrong way, finish). Each widget subscribes to its own slice of the HUD store so the
-// per-frame updates only touch the few DOM nodes that changed; the gauge is an SVG dash and the minimap a canvas.
+// The race HUD widgets: distance-to-go / position panels, timer, speedometer with boost bar, the pod damage diagram,
+// minimap and the centre-screen messages (countdown, wrong way, finish). Each widget subscribes to its own slice of the
+// HUD store so the per-frame updates only touch the few DOM nodes that changed; the gauge is an SVG dash, the damage
+// diagram an SVG schematic coloured per part and the minimap a canvas.
 
 import { memo, useEffect, useRef, useState } from 'react';
+import { PART_IDS, PARTS, podLayout, type PartId } from '../core/damage';
+import { PODS, type PodShape } from '../core/pods';
 import type { RaceView } from '../RaceView';
 import { fmtTime, ordinal, useHud } from './hudStore';
 
@@ -96,7 +99,7 @@ export const Speedo = memo(function Speedo({ view }: P) {
         <span className="hud-speed-unit">KM/H</span>
       </div>
       <BoostBar view={view} />
-      <DamageBar view={view} />
+      <Damage view={view} />
     </div>
   );
 });
@@ -271,12 +274,18 @@ export const Countdown = memo(function Countdown({ view }: P) {
   );
 });
 
-const PARTS = [
+const BAR_PARTS = [
   ['L', 'Left engine'],
   ['C', 'Cockpit'],
   ['R', 'Right engine'],
 ] as const;
 const PART_INDEX = [0, 2, 1];
+
+/** The pod's damage: the per-part diagram when the view publishes per-part health, else the old three HULL bars. */
+const Damage = memo(function Damage({ view }: P) {
+  const hasParts = useHud(view, (s) => !!s.parts);
+  return hasParts ? <DamageDiagram view={view} /> : <DamageBar view={view} />;
+});
 
 /** Damage per part, left engine / cockpit / right engine as they sit on the pod: green, then amber, then red. */
 const DamageBar = memo(function DamageBar({ view }: P) {
@@ -284,7 +293,7 @@ const DamageBar = memo(function DamageBar({ view }: P) {
   return (
     <div className="hud-damage">
       <span className="hud-damage-label">HULL</span>
-      {PARTS.map(([k, title], i) => {
+      {BAR_PARTS.map(([k, title], i) => {
         const d = damage[PART_INDEX[i]];
         return (
           <span key={k} className={`hud-damage-part${d > 0.7 ? ' critical' : d > 0.4 ? ' hurt' : ''}`} title={title}>
@@ -293,6 +302,148 @@ const DamageBar = memo(function DamageBar({ view }: P) {
           </span>
         );
       })}
+    </div>
+  );
+});
+
+/** One drawn piece of the schematic: a closed shape (filled by health) or a line (binders, cables). */
+interface Piece {
+  part: PartId;
+  d: string;
+  line?: boolean;
+}
+
+const f1 = (n: number) => n.toFixed(2);
+const poly = (pts: [number, number][]) => `M${pts.map(([x, y]) => `${f1(x)} ${f1(y)}`).join('L')}Z`;
+/** A box from z0 to z1, half width w, its corners rounded with radius r. */
+function capsule(x: number, z0: number, z1: number, w: number, r: number) {
+  const a = Math.min(r, w, (z1 - z0) / 2);
+  const [l, rt] = [f1(x - w), f1(x + w)];
+  return `M${l} ${f1(z0 + a)}Q${l} ${f1(z0)} ${f1(x - w + a)} ${f1(z0)}L${f1(x + w - a)} ${f1(z0)}Q${rt} ${f1(z0)} ${rt} ${f1(z0 + a)}`
+    + `L${rt} ${f1(z1 - a)}Q${rt} ${f1(z1)} ${f1(x + w - a)} ${f1(z1)}L${f1(x - w + a)} ${f1(z1)}Q${l} ${f1(z1)} ${l} ${f1(z1 - a)}Z`;
+}
+
+/**
+ * A top-down schematic of the pod in pod space (x right, z back, so the nose points up the screen), laid out like
+ * core/damage.ts's anchors so each piece sits where the part that takes the hit sits. Drawn once at module load from a
+ * stock pod shape: the HUD does not know the player's pod and the pods are close enough in proportion. Proportions are
+ * nudged (thicker binders, bigger canopy and fins) so it still reads at a few dozen pixels.
+ */
+function podSchematic(shape: PodShape) {
+  const { L, R, C, xE, zE, zC, ca } = podLayout(shape);
+  const pieces: Piece[] = [];
+  const front = zE - L / 2;
+  const back = zE + L / 2;
+  const cw = ca * 0.95;
+  const noseZ = zC - C / 2;
+  const hullZ0 = noseZ + C * 0.22;
+  const w = R * 0.82;
+  // Lines first, so the engines and the cockpit draw over their ends.
+  pieces.push({ part: 'binderMid', line: true, d: `M${f1(-xE + w)} ${f1(zE - L * 0.15)}L${f1(xE - w)} ${f1(zE - L * 0.15)}` });
+  for (const [s, k] of [[-1, 'L'], [1, 'R']] as const) {
+    const x = s * xE;
+    pieces.push({ part: `binder${k}`, line: true, d: `M${f1(s * cw)} ${f1(zC - C * 0.05)}L${f1(x - s * w)} ${f1(zE + 0.12 * L)}` });
+    pieces.push({ part: `cable${k}`, line: true, d: `M${f1(s * 0.25)} ${f1(noseZ - 0.2)}L${f1(x - s * w * 0.3)} ${f1(zE - L / 4)}` });
+  }
+  for (const [s, k] of [[-1, 'L'], [1, 'R']] as const) {
+    const x = s * xE;
+    pieces.push({ part: `flap${k}`, d: poly([[x + s * w * 0.9, zE - 0.08 * L], [x + s * (w + 0.95), zE + 0.02 * L], [x + s * (w + 0.95), zE + 0.3 * L], [x + s * w * 0.9, zE + 0.34 * L]]) });
+    pieces.push({ part: `nacelle${k}`, d: capsule(x, front + 0.13 * L, back - 0.15 * L, w, w * 0.5) });
+    pieces.push({ part: `intake${k}`, d: capsule(x, front + 0.01 * L, front + 0.15 * L, w * 1.08, w * 0.3) });
+    // Three claws: spikes ahead of the intake ring.
+    const cz = front + 0.02 * L;
+    const tip = front - 0.13 * L;
+    const claw = (cx: number, lean: number): [number, number][] => [[cx - 0.2, cz], [cx + lean, tip], [cx + 0.2, cz]];
+    pieces.push({ part: `claws${k}`, d: [claw(x - w * 0.7, -0.2), claw(x, 0), claw(x + w * 0.7, 0.2)].map(poly).join('') });
+    pieces.push({ part: `nozzle${k}`, d: poly([[x - w * 0.85, back - 0.16 * L], [x + w * 0.85, back - 0.16 * L], [x + w * 0.6, back], [x - w * 0.6, back]]) });
+    pieces.push({ part: `fin${k}`, d: poly([[x - 0.17, zE - 0.12 * L], [x + 0.17, zE - 0.12 * L], [x + 0.26, zE + 0.32 * L], [x - 0.26, zE + 0.32 * L]]) });
+  }
+  pieces.push({ part: 'hull', d: capsule(0, hullZ0, zC + C / 2 - 0.15, cw, cw * 0.6) });
+  pieces.push({ part: 'cockpitNose', d: `M${f1(-cw)} ${f1(hullZ0 + 0.3)}Q${f1(-cw)} ${f1(noseZ)} 0 ${f1(noseZ - 0.35)}Q${f1(cw)} ${f1(noseZ)} ${f1(cw)} ${f1(hullZ0 + 0.3)}Z` });
+  pieces.push({ part: 'canopy', d: capsule(0, zC - C * 0.3, zC + C * 0.12, cw * 0.55, cw * 0.5) });
+  for (const [s, k] of [[-1, 'L'], [1, 'R']] as const) {
+    pieces.push({ part: `stab${k}`, d: poly([[s * cw * 0.8, zC + C * 0.2], [s * (cw + 0.55), zC + C * 0.4], [s * (cw + 0.55), zC + C * 0.5], [s * cw * 0.8, zC + C * 0.42]]) });
+  }
+  pieces.push({ part: 'tail', d: capsule(0, zC + C / 2 - 0.3, zC + C / 2 + 0.25, cw * 0.6, 0.12) });
+  // An X over each critical part for when it is gone, so a lost engine or cockpit reads at a glance.
+  const cross = (x: number, z: number, hw: number, hh: number) =>
+    `M${f1(x - hw)} ${f1(z - hh)}L${f1(x + hw)} ${f1(z + hh)}M${f1(x + hw)} ${f1(z - hh)}L${f1(x - hw)} ${f1(z + hh)}`;
+  const crosses: Partial<Record<PartId, string>> = {
+    nacelleL: cross(-xE, zE, w, L * 0.36),
+    nacelleR: cross(xE, zE, w, L * 0.36),
+    hull: cross(0, zC + C * 0.05, cw, C * 0.4),
+  };
+  const x0 = -(xE + w + 1.25);
+  const z0 = front - 0.13 * L - 0.3;
+  const z1 = zC + C / 2 + 0.45;
+  return { pieces, crosses, viewBox: `${f1(x0)} ${f1(z0)} ${f1(-2 * x0)} ${f1(z1 - z0)}` };
+}
+
+const SCHEMATIC = podSchematic(PODS[0].shape);
+const CRITICAL = PART_IDS.filter((id) => PARTS[id].critical);
+
+/** Health colour: pale green-white when intact, through green and amber to red. */
+function healthColor(h: number) {
+  const k = Math.max(0, Math.min(1, (h - 0.12) / 0.88));
+  return `hsl(${Math.round(120 * k ** 0.9)} 85% ${Math.round(50 + 34 * h * h)}%)`;
+}
+
+/**
+ * Per-part damage: the pod schematic with each part filled by its health, a flash on every part that just lost health
+ * (diffed against the previous publish), the critical parts (engines, cockpit) outlined heavier and blinking when low,
+ * broken parts left as a dark dashed ghost, and the name of the last part lost under it for a moment.
+ */
+const DamageDiagram = memo(function DamageDiagram({ view }: P) {
+  const parts = useHud(view, (s) => s.parts);
+  const prev = useRef<Record<PartId, number> | undefined>(undefined);
+  // Per-part hit counters: a new count re-keys the piece, which restarts its flash animation.
+  const hits = useRef<Partial<Record<PartId, number>>>({});
+  const [lost, setLost] = useState<{ name: string; n: number } | null>(null);
+  const lostN = useRef(0);
+  const pending = useRef<PartId | null>(null);
+
+  // Diffed during render so the flash shows on the very render that brings the new health; the refs make it run
+  // once per published object (the view only publishes a new one when something changed).
+  if (parts && parts !== prev.current) {
+    const old = prev.current;
+    let broke: PartId | null = null;
+    if (old) {
+      for (const id of PART_IDS) {
+        if (parts[id] < old[id] - 0.005) hits.current[id] = (hits.current[id] ?? 0) + 1;
+        // One name per hit: a nacelle or the cockpit outranks the bits it takes with it.
+        if (parts[id] <= 0 && old[id] > 0 && (!broke || (PARTS[id].critical && !PARTS[broke].critical))) broke = id;
+      }
+    }
+    prev.current = parts;
+    if (broke) pending.current = broke;
+  }
+  useEffect(() => {
+    const id = pending.current;
+    pending.current = null;
+    if (id) setLost({ name: PARTS[id].name, n: ++lostN.current });
+  }, [parts]);
+  useEffect(() => {
+    if (!lost) return;
+    const t = setTimeout(() => setLost(null), 2200);
+    return () => clearTimeout(t);
+  }, [lost]);
+
+  if (!parts) return null;
+  return (
+    <div className="hud-pod">
+      <svg className="hud-pod-svg" viewBox={SCHEMATIC.viewBox} aria-hidden>
+        {SCHEMATIC.pieces.map(({ part, d, line }, i) => {
+          const h = Math.max(0, Math.min(1, parts[part] ?? 1));
+          const n = hits.current[part] ?? 0;
+          const state = h <= 0 ? ' broken' : h < 0.35 ? ' low' : '';
+          const cls = `hud-pod-part${line ? (part.startsWith('cable') ? ' line thin' : ' line') : ''}${PARTS[part].critical ? ' crit' : ''}${state}${n ? ' hit' : ''}`;
+          const c = healthColor(h);
+          return <path key={`${i}.${n}`} className={cls} d={d} style={h <= 0 ? undefined : line ? { stroke: c } : { fill: c }} />;
+        })}
+        {CRITICAL.map((id) => (parts[id] ?? 1) <= 0 && <path key={id} className="hud-pod-cross" d={SCHEMATIC.crosses[id]} />)}
+      </svg>
+      <span className="hud-pod-label">POD</span>
+      {lost && <span key={lost.n} className="hud-pod-lost">{lost.name} lost</span>}
     </div>
   );
 });

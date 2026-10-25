@@ -1,5 +1,5 @@
 // Race HUD, styled after the concept art: LAP / POS top left, TIME / BEST top right, speed arc and boost bar bottom
-// left with the damage readout under them, minimap bottom right, centre messages (countdown, wrong way, wrecked, finish), the pause menu and touch
+// left with the pod damage diagram beside them (or the HULL bars under them), minimap bottom right, centre messages (countdown, wrong way, wrecked, finish), the pause menu and touch
 // controls on phones. Widgets live in hudParts.tsx and subscribe to their own slices of the per-frame store.
 
 import { memo, useEffect, useState } from 'react';

@@ -1,5 +1,6 @@
 // One-shot race cues, all synthesized: countdown beeps, boost pad zap, impact crunches, lap chime, best-lap
-// flourish and the finish fanfare. Each call builds a few short-lived nodes that stop themselves (and are then
+// flourish, the finish fanfare and the part-break cues (metal tearing, an engine ripping off, glass, a shorting binder,
+// a snapping cable). Each call builds a few short-lived nodes that stop themselves (and are then
 // garbage collected), so nothing here needs disposing.
 
 import { noise } from './context';
@@ -132,5 +133,129 @@ export function fanfare(ctx: BaseAudioContext, dest: AudioNode, position: number
     // A plain resolved cadence: finished, not celebrated.
     brass(392, t, 0.3, 0.07);
     for (const f of [349, 440, 523]) brass(f, t + 0.3, 0.9, 0.055);
+  }
+}
+
+// ---------- part breaks (core/damage.ts) ----------
+// Each takes a strength k (0..1, how hard the hit that broke it was) and is scaled to it; `size` makes the same cue
+// read for a little stabiliser or a whole nose cone (0 = small, high and short; 1 = big, low and long).
+
+/** A panel tearing off and snapping: a sharp crack, a ripping noise sweep and a short ring of the freed piece. */
+export function metalTear(ctx: BaseAudioContext, dest: AudioNode, k: number, size = 0.5) {
+  const t = ctx.currentTime + 0.005;
+  const s = Math.min(1, Math.max(0.2, k));
+  const bank = noise(ctx);
+  burst(ctx, dest, t, 0.06, 1 * s, 'highpass', 2500 - 1200 * size, 0.8);
+  // The tear: crackle through a band that slides down as the rivets let go.
+  burst(ctx, dest, t + 0.01, 0.18 + 0.25 * size, 1 * s, 'bandpass', 3200 - 1400 * size, 3, 600 - 200 * size, bank.crackle);
+  burst(ctx, dest, t + 0.02, 0.12 + 0.2 * size, 0.5 * s, 'bandpass', 1800 - 600 * size, 6, 500);
+  const base = (900 - 550 * size) * (0.9 + Math.random() * 0.2);
+  for (const [r, a] of [[1, 0.14], [2.41, 0.08], [3.93, 0.045]] as const) tone(ctx, dest, base * r, t + 0.03, 0.25 + 0.35 * size, a * s, { to: base * r * 0.96 });
+}
+
+/** An engine nacelle ripping free: a deep double clang, a body thump and the whoosh of it tumbling away. */
+export function engineTearOff(ctx: BaseAudioContext, dest: AudioNode, k: number) {
+  const t = ctx.currentTime + 0.005;
+  const s = Math.min(1, Math.max(0.4, k));
+  tone(ctx, dest, 70, t, 0.9, 0.7 * s, { to: 30 });
+  burst(ctx, dest, t, 0.5, 0.8 * s, 'lowpass', 1600, 0.8, 200);
+  burst(ctx, dest, t, 0.35, 0.5 * s, 'bandpass', 2400, 2, 700, noise(ctx).crackle);
+  // Struck heavy plate: low inharmonic partials ringing long, struck twice as it twists free.
+  for (const [dt, base] of [[0, 150 + Math.random() * 30], [0.11, 118 + Math.random() * 20]] as const) {
+    for (const [r, a] of [[1, 0.14], [2.32, 0.09], [4.11, 0.05], [6.8, 0.025]] as const) tone(ctx, dest, base * r, t + dt, 1.4 - 0.12 * r, a * s);
+  }
+  // The whoosh: a noise band rising then falling as the engine tumbles past.
+  whoosh(ctx, dest, t + 0.12, 0.9, 0.4 * s, 350, 1900);
+}
+
+/** A band of noise that sweeps up to `peakF` and back down, swelling in and out (things flying past). */
+function whoosh(ctx: BaseAudioContext, dest: AudioNode, t0: number, dur: number, peak: number, f0: number, peakF: number) {
+  const src = ctx.createBufferSource();
+  src.buffer = noise(ctx).white;
+  const flt = ctx.createBiquadFilter();
+  flt.type = 'bandpass';
+  flt.Q.value = 1.4;
+  flt.frequency.setValueAtTime(f0, t0);
+  flt.frequency.exponentialRampToValueAtTime(peakF, t0 + dur * 0.4);
+  flt.frequency.exponentialRampToValueAtTime(f0 * 0.7, t0 + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(peak, t0 + dur * 0.4);
+  g.gain.linearRampToValueAtTime(0, t0 + dur);
+  src.connect(flt).connect(g).connect(dest);
+  src.start(t0, Math.random() * 1);
+  src.stop(t0 + dur + 0.05);
+}
+
+/** The canopy shattering: a hard crack, then a spray of tiny glassy tinkles falling away. */
+export function glassShatter(ctx: BaseAudioContext, dest: AudioNode, k: number) {
+  const t = ctx.currentTime + 0.005;
+  const s = Math.min(1, Math.max(0.3, k));
+  burst(ctx, dest, t, 0.05, 0.9 * s, 'highpass', 3000, 0.7);
+  burst(ctx, dest, t, 0.4, 0.3 * s, 'highpass', 5000, 0.8, 8000, noise(ctx).crackle);
+  for (let i = 0; i < 16; i++) {
+    const at = t + 0.01 + Math.random() ** 1.6 * 0.45;
+    const f = 2600 + Math.random() * 5200;
+    tone(ctx, dest, f, at, 0.04 + Math.random() * 0.12, (0.03 + Math.random() * 0.05) * s, { detune: Math.random() * 40 });
+  }
+}
+
+/** An energy binder shorting out: a buzzing arc that stutters and dies, with a crackle of sparks. */
+export function binderZap(ctx: BaseAudioContext, dest: AudioNode, k: number) {
+  const t = ctx.currentTime + 0.005;
+  const s = Math.min(1, Math.max(0.3, k));
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  const g = ctx.createGain();
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1400;
+  bp.Q.value = 1.2;
+  // The arc jumps between pitches and cuts in and out (a few scheduled steps, no per-frame work).
+  g.gain.setValueAtTime(0, t);
+  let at = t;
+  for (let i = 0; i < 9; i++) {
+    osc.frequency.setValueAtTime(90 + Math.random() * 260, at);
+    g.gain.setValueAtTime((Math.random() < 0.75 ? 0.45 : 0.04) * s * (1 - i / 11), at);
+    at += 0.02 + Math.random() * 0.04;
+  }
+  g.gain.setTargetAtTime(0, at, 0.03);
+  osc.connect(bp).connect(g).connect(dest);
+  osc.start(t);
+  osc.stop(at + 0.25);
+  burst(ctx, dest, t, 0.45, 0.9 * s, 'bandpass', 3800, 2, 1500, noise(ctx).crackle);
+  tone(ctx, dest, 1800, t, 0.25, 0.1 * s, { type: 'square', to: 300, lp: 5000 });
+}
+
+/** A steering cable snapping: a crack and a slack, wobbling twang dropping in pitch. */
+export function cableTwang(ctx: BaseAudioContext, dest: AudioNode, k: number) {
+  const t = ctx.currentTime + 0.005;
+  const s = Math.min(1, Math.max(0.3, k));
+  burst(ctx, dest, t, 0.04, 0.6 * s, 'highpass', 3500, 0.8);
+  const f = 210 + Math.random() * 60;
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(f, t);
+  osc.frequency.exponentialRampToValueAtTime(f * 0.45, t + 0.7);
+  // The wobble of the loose cable: a fast vibrato that slows with it.
+  const vib = ctx.createOscillator();
+  vib.frequency.setValueAtTime(22, t);
+  vib.frequency.linearRampToValueAtTime(7, t + 0.7);
+  const vibDepth = ctx.createGain();
+  vibDepth.gain.value = f * 0.06;
+  vib.connect(vibDepth).connect(osc.frequency);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(3500, t);
+  lp.frequency.exponentialRampToValueAtTime(500, t + 0.7);
+  lp.Q.value = 4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(0.16 * s, t + 0.004);
+  g.gain.setTargetAtTime(0, t + 0.004, 0.2);
+  osc.connect(lp).connect(g).connect(dest);
+  for (const o of [osc, vib]) {
+    o.start(t);
+    o.stop(t + 0.9);
   }
 }

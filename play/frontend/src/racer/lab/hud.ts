@@ -1,10 +1,12 @@
 // HUD lab (/race/lab/hud): the race HUD over a flat desert backdrop, driven by a fake view with scripted state, so
 // every HUD state can be screenshotted without a race. ?state=race|countdown|flash|final|finish|pause|wrongway|intro,
-// ?touch for the phone controls.
+// ?touch for the phone controls, ?damage for the old three HULL bars, ?parts=finL:0,canopy:0.3,nacelleL:0.4 for the
+// per-part damage diagram (unlisted parts intact; a bare ?parts is all intact), ?hits to knock random parts every second.
 
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createStore } from '../../games/types';
+import { PART_IDS, PARTS, type PartId } from '../core/damage';
 import type { HudState, RaceView } from '../RaceView';
 import { Hud } from '../ui/Hud';
 import '../ui/racer.css';
@@ -21,6 +23,7 @@ export function mount(el: HTMLElement) {
   }
   const colors = ['#ff8a2a', '#a040ff', '#ffc020', '#20c8b0', '#e83040', '#4080ff', '#ffffff', '#80e040'];
   const names = ['Bas', 'Vexa Moor', 'Sol Garrin', 'Teel Okk', 'Rook Darrow', 'Ilo Venn', 'Kass Brin', 'Mox Pell'];
+  const parts = parseParts(q);
   const hud = createStore<HudState>({
     phase: state === 'finish' ? 'finished' : state === 'countdown' ? 'countdown' : state === 'intro' ? 'intro' : 'racing',
     trackName: 'Redrock Run',
@@ -42,6 +45,7 @@ export function mount(el: HTMLElement) {
     damage: q.has('damage') ? [0.85, 0.3, 0.55] : [0, 0, 0],
     wrecked: state === 'wrecked' ? 1.6 : 0,
     ghost: 0,
+    parts,
   });
   const touch = { steer: 0, throttle: 0, brake: 0, boost: false, active: false };
   const view = { hud, touch, setPaused: (p: boolean) => hud.set({ paused: p }) } as unknown as RaceView;
@@ -61,6 +65,17 @@ export function mount(el: HTMLElement) {
       patch.speedKmh = Math.round(700 + Math.sin(t) * 120);
       patch.speed01 = patch.speedKmh / 960;
     }
+    // A knock every second: one part loses a chunk (it and whatever it carries break at 0), a fresh pod once it wrecks.
+    if (q.has('hits') && s.parts && Math.floor(t) !== Math.floor(t - 0.05)) {
+      const next = { ...s.parts };
+      if (PART_IDS.some((id) => PARTS[id].critical && next[id] <= 0)) for (const id of PART_IDS) next[id] = 1;
+      else {
+        const id = PART_IDS[Math.floor(Math.random() * PART_IDS.length)];
+        next[id] = Math.max(0, next[id] - 0.3 - Math.random() * 0.4);
+        if (next[id] <= 0) for (const c of PARTS[id].carries ?? []) next[c] = 0;
+      }
+      patch.parts = next;
+    }
     if (state === 'countdown' && t > 1) {
       t = 0;
       n = n <= 0 ? 3 : n - 1;
@@ -74,4 +89,17 @@ export function mount(el: HTMLElement) {
     clearInterval(timer);
     root.unmount();
   };
+}
+
+/** ?parts=finL:0,canopy:0.3 -> per-part health, the rest intact; undefined without ?parts (the HULL bar fallback). */
+function parseParts(q: URLSearchParams): Record<PartId, number> | undefined {
+  const spec = q.get('parts');
+  if (spec === null) return undefined;
+  const out = {} as Record<PartId, number>;
+  for (const id of PART_IDS) out[id] = 1;
+  for (const item of spec.split(',')) {
+    const [id, v] = item.split(':');
+    if (id in PARTS) out[id as PartId] = Math.max(0, Math.min(1, Number(v ?? 0) || 0));
+  }
+  return out;
 }

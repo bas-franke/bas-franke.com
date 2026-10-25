@@ -3,16 +3,19 @@
 //   - up to 3 rival engines (the nearest pods) in HRTF panners, with exaggerated doppler for the pass-by "neeyow",
 //   - wind rush rising with speed, rock-wall reflections per side (closer wall = louder, a whoosh when one appears),
 //   - a crowd bed near the start line and the grandstands, swelling at the finish,
-//   - cues (cues.ts): countdown beeps, pad zap, wall scrape and crunches, lap chime, best-lap flourish, fanfare.
+//   - cues (cues.ts): countdown beeps, pad zap, wall scrape and crunches, lap chime, best-lap flourish, fanfare,
+//   - part breaks (partBroken): a cue per kind of part, the player's panned to the part's side, rivals' positioned,
+//   - a damaged engine (setEngineHealth): the player's engine misses, roughens and sputters as its health drops.
 // Graph: voices -> buses -> compressor -> limiter -> master (volume x mute) -> speakers. The AudioContext is the
 // racer's shared one (context.ts), created after the first user gesture; dispose() stops this race's nodes only.
 
 import * as THREE from 'three';
 import { sfx } from '../../engine/audio';
+import { PARTS, type PartId } from '../core/damage';
 import type { Race } from '../core/race';
 import { zonesFor, type Zones } from '../world/zones';
 import { currentAudioContext, glide, loopNoise, noise, withAudioContext } from './context';
-import { bestFlourish, burst, countdownBeep, crunch, fanfare, lapChime, padZap } from './cues';
+import { bestFlourish, binderZap, burst, cableTwang, countdownBeep, crunch, engineTearOff, fanfare, glassShatter, lapChime, metalTear, padZap } from './cues';
 import { POS_TAU, PlayerEngine, RivalVoice } from './engine';
 
 /** Exaggerated speed of sound for doppler (real air, 343 m/s, is too subtle between pods doing similar speeds). */
@@ -31,6 +34,33 @@ export interface RaceAudioOptions {
 interface Bed {
   gain: GainNode;
   filter: BiquadFilterNode;
+}
+
+/** A part break waiting for the next update(), so the pieces a breaking nacelle or cockpit takes with it can be dropped. */
+interface Break {
+  part: PartId;
+  k: number;
+  /** Index in race.racers. */
+  i: number;
+}
+
+/** Which part takes each part with it when it breaks (core/damage.ts `carries`). */
+const CARRIER = {} as Partial<Record<PartId, PartId>>;
+for (const [id, info] of Object.entries(PARTS) as [PartId, (typeof PARTS)[PartId]][]) for (const c of info.carries ?? []) CARRIER[c] = id;
+
+/** Per-part break cue and its size (metalTear: 0 = a small high snap, 1 = a big low tear). */
+function playBreak(ctx: BaseAudioContext, dest: AudioNode, part: PartId, k: number) {
+  if (part === 'nacelleL' || part === 'nacelleR') engineTearOff(ctx, dest, k);
+  else if (part === 'hull') {
+    engineTearOff(ctx, dest, k * 0.8);
+    metalTear(ctx, dest, k, 1);
+  } else if (part === 'canopy') glassShatter(ctx, dest, k);
+  else if (part.startsWith('binder')) binderZap(ctx, dest, k);
+  else if (part.startsWith('cable')) cableTwang(ctx, dest, k);
+  else {
+    const size = part === 'cockpitNose' ? 0.85 : part.startsWith('intake') || part.startsWith('nozzle') ? 0.7 : part === 'tail' ? 0.6 : part.startsWith('flap') ? 0.4 : 0.2;
+    metalTear(ctx, dest, k, size);
+  }
 }
 
 export class RaceAudio {
@@ -52,6 +82,18 @@ export class RaceAudio {
   private crowdSwell!: GainNode;
   private scrape!: Bed;
   private scrapePan!: StereoPannerNode;
+  /** The player engine goes through this: misses dip it, the roughness LFO wobbles it. */
+  private engineDmg!: GainNode;
+  private rough!: OscillatorNode;
+  private roughDepth!: GainNode;
+  private sputter!: Bed;
+  private sputterPan!: StereoPannerNode;
+  /** Player part-break panners: left side, centre, right side. */
+  private breakPans: StereoPannerNode[] = [];
+  private readonly breaks: Break[] = [];
+  private engineL = 1;
+  private engineR = 1;
+  private nextMiss = 0;
 
   private readonly zones: Zones;
   private readonly pos: THREE.Vector3[];
@@ -135,7 +177,9 @@ export class RaceAudio {
     this.ambBus = sub(0.6 * (mix.ambience ?? 1));
     this.cueBus = sub(1.1 * (mix.cues ?? 1));
 
-    this.engine = new PlayerEngine(ctx, this.engineBus, 1);
+    this.engineDmg = ctx.createGain();
+    this.engineDmg.connect(this.engineBus);
+    this.engine = new PlayerEngine(ctx, this.engineDmg, 1);
     this.engine.setLevel(1, 0.6);
     const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     const n = this.opts.voices ?? (touch ? 2 : 3);
@@ -183,6 +227,25 @@ export class RaceAudio {
     this.scrape = this.bed(bank.crackle, 'bandpass', 2800, 2.5, this.scrapePan, 1.6);
     const grind = this.bed(bank.white, 'bandpass', 1300, 4, this.scrape.gain);
     grind.gain.gain.value = 0.5;
+    // Damaged engine: a square LFO wobbling the engine's level (an uneven, missing beat) and a sputter of crackle
+    // through a low band, panned to the worse engine. Both silent while the engines are healthy.
+    this.rough = ctx.createOscillator();
+    this.rough.type = 'square';
+    this.rough.frequency.value = 11;
+    this.roughDepth = ctx.createGain();
+    this.roughDepth.gain.value = 0;
+    this.rough.connect(this.roughDepth).connect(this.engineDmg.gain);
+    this.rough.start();
+    this.sources.push(this.rough);
+    this.sputterPan = ctx.createStereoPanner();
+    this.sputterPan.connect(this.engineBus);
+    this.sputter = this.bed(bank.crackle, 'bandpass', 520, 1.6, this.sputterPan, 0.7);
+    for (const pan of [-0.55, 0, 0.55]) {
+      const p = ctx.createStereoPanner();
+      p.pan.value = pan;
+      p.connect(this.cueBus);
+      this.breakPans.push(p);
+    }
 
     this.applyMaster(0.8);
   }
@@ -278,6 +341,7 @@ export class RaceAudio {
     const top = player.stats.topSpeed;
     const speed01 = ps.v / top;
     this.engine.update(dt, { speed01, throttle: player.input.throttle, brake: player.input.brake, boosting: ps.boosting, surge: ps.surge, rev: this.rev });
+    this.updateEngineDamage(t, speed01, player.input.throttle);
 
     // Wind.
     const w = Math.min(1.4, ps.v / 125);
@@ -332,7 +396,100 @@ export class RaceAudio {
     glide(this.scrapePan.pan, this.scrapeSide * 0.7, t, 0.05);
 
     this.updateRivals(dt, t, pi, onGrid);
+    this.flushBreaks(pi);
     this.first = false;
+  }
+
+  /** Misses, roughness and sputter from the engines' health (setEngineHealth); only scheduling, no allocation. */
+  private updateEngineDamage(t: number, speed01: number, throttle: number) {
+    // Healthy down to 0.75; fully rough at 0.
+    const badL = Math.max(0, Math.min(1, (0.75 - this.engineL) / 0.75));
+    const badR = Math.max(0, Math.min(1, (0.75 - this.engineR) / 0.75));
+    const bad = Math.max(badL, badR);
+    const load = 0.35 + 0.65 * throttle;
+    glide(this.roughDepth.gain, 0.32 * bad * load, t, 0.1);
+    // The wobble follows the engine's speed, like a misfiring cylinder would.
+    glide(this.rough.frequency, 7 + 14 * Math.min(1.2, speed01), t, 0.2);
+    glide(this.sputter.gain.gain, 0.9 * bad ** 1.5 * load, t, 0.08);
+    glide(this.sputterPan.pan, badL + badR > 0 ? ((badR - badL) / (badL + badR)) * 0.6 : 0, t, 0.2);
+    if (bad < 0.12) return;
+    if (this.time < this.nextMiss) return;
+    // A miss: the engine cuts out for a moment and coughs back in; more often the worse it gets.
+    this.nextMiss = this.time + (0.25 + Math.random() * 1.4) / (0.3 + 1.2 * bad);
+    const g = this.engineDmg.gain;
+    const dur = 0.05 + 0.1 * bad * Math.random();
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(0.12 + 0.3 * (1 - bad), t, 0.012);
+    g.setTargetAtTime(1, t + dur, 0.035);
+    burst(this.ctx!, this.sputterPan, t + dur, 0.14, 0.35 * bad * load, 'lowpass', 900, 1, 180, noise(this.ctx!).crackle);
+  }
+
+  /**
+   * The player's engine health, left and right (1 = fine .. 0 = gone), e.g. the worst of each engine's intake, nozzle
+   * and nacelle. Call every frame (cheap: it only stores the values; update() does the rest).
+   */
+  setEngineHealth(left: number, right: number) {
+    this.engineL = left;
+    this.engineR = right;
+  }
+
+  /**
+   * A part broke on a pod: `strength` is the hit's energy (0..1+), `racer` the pod's index in race.racers (rivals:
+   * positioned there; without it a rival's break plays quietly, unpositioned). Breaks are collected and played on the
+   * next update(), so a breaking nacelle or cockpit drowns out the pieces it takes with it and a pile-up of breaks
+   * plays at most a few cues per pod.
+   */
+  partBroken(part: PartId, strength: number, player: boolean, racer?: number) {
+    if (!this.ctx || this.breaks.length > 24) return;
+    const i = player ? this.race.racers.indexOf(this.race.player) : racer ?? -1;
+    this.breaks.push({ part, k: Math.min(1, Math.max(0.25, strength)), i });
+  }
+
+  private flushBreaks(pi: number) {
+    const ctx = this.ctx;
+    const list = this.breaks;
+    if (!ctx || !list.length) return;
+    // Critical parts first: they are the loudest, and they decide which of the rest to drop.
+    list.sort((a, b) => Number(PARTS[b.part].critical) - Number(PARTS[a.part].critical));
+    for (let n = 0; n < list.length; n++) {
+      const b = list[n];
+      const carrier = CARRIER[b.part];
+      if (carrier && list.some((o) => o.i === b.i && o.part === carrier)) {
+        b.k = -1;
+        continue;
+      }
+      let played = 0;
+      for (let m = 0; m < n; m++) if (list[m].i === b.i && list[m].k >= 0) played++;
+      if (played >= 3) {
+        b.k = -1;
+        continue;
+      }
+      if (b.i === pi) {
+        const side = b.part.endsWith('L') ? 0 : b.part.endsWith('R') ? 2 : 1;
+        playBreak(ctx, this.breakPans[side], b.part, b.k);
+        continue;
+      }
+      // A rival: through its engine voice's panner if it has one, else a panner of its own at the pod for this cue.
+      const voice = this.rivals.find((v) => v.owner === b.i);
+      if (voice) playBreak(ctx, voice.panner, b.part, b.k * 0.8);
+      else if (b.i >= 0 && b.i < this.pos.length) {
+        const p = this.pos[b.i];
+        const pan = ctx.createPanner();
+        pan.panningModel = 'equalpower';
+        pan.distanceModel = 'inverse';
+        pan.refDistance = 12;
+        pan.rolloffFactor = 1.1;
+        if (pan.positionX) {
+          pan.positionX.value = p.x;
+          pan.positionY.value = p.y;
+          pan.positionZ.value = p.z;
+        } else pan.setPosition(p.x, p.y, p.z);
+        pan.connect(this.rivalBus);
+        playBreak(ctx, pan, b.part, b.k * 0.8);
+        setTimeout(() => pan.disconnect(), 2500);
+      } else playBreak(ctx, this.breakPans[1], b.part, b.k * 0.3);
+    }
+    list.length = 0;
   }
 
   private updateRivals(dt: number, t: number, pi: number, onGrid: boolean) {
@@ -450,6 +607,7 @@ export class RaceAudio {
 
   dispose() {
     this.offVolume();
+    this.breaks.length = 0;
     this.cancelWait?.();
     this.cancelWait = null;
     const ctx = this.ctx;

@@ -33,7 +33,8 @@ export interface PodStats {
   /** Turn rate (rad/s) and grip (how fast the velocity follows the heading). */
   turn: number;
   grip: number;
-  /** Boost meter: seconds of boost when full, and refill per second. */
+  /** Boost: sets how long one burn lasts (boostDuration in physics.ts). The refill rate is unused since the boost
+   * charges on a fixed cooldown. */
   boostTime: number;
   boostRefill: number;
 }

@@ -13,7 +13,7 @@ const CATS: { key: Cat; label: string; hint: string }[] = [
   { key: 'thrust', label: 'Thrust', hint: 'Acceleration out of corners' },
   { key: 'topSpeed', label: 'Top speed', hint: 'Speed on the straights' },
   { key: 'handling', label: 'Handling', hint: 'Turn rate and grip' },
-  { key: 'boost', label: 'Boost', hint: 'Boost duration and refill' },
+  { key: 'boost', label: 'Boost', hint: 'Boost duration' },
 ];
 
 const MAXED: Upgrades = { thrust: MAX_UPGRADE, topSpeed: MAX_UPGRADE, handling: MAX_UPGRADE, boost: MAX_UPGRADE };

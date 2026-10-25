@@ -3,8 +3,11 @@
 //   /race/lab/pod                      turntable of all five designs (drag to orbit)
 //   /race/lab/pod?view=ref             the concept-art shot: camera close behind Ember, rivals ahead, flying
 //                                      (&cam=chase uses the game's chase camera instead)
-//   /race/lab/pod?view=single&pod=viper&cam=back|front|side|top|chase
+//   /race/lab/pod?view=single&pod=viper&cam=back|front|side|left|top|q|chase &zoom=0.5 (closer)
 // Extra: &quality=low|medium|high &throttle=0..1 &boost &steer=-1..1 (default: a slow weave) &nobloom &spin=0
+// Damage (every pod in the view): &dmg=finL,canopy,binderR (broken, with the parts they carry)
+//   &hurt=0.4 (health of every other part) or &hurt=intakeL:0.3,flapR:0.5 &dent=1..n (a few preset dents, n times; &dentd=0.1 their depth)
+//   &detach (break the broken parts off and lay them on the sand beside the pod)
 // `window.__lab` exposes { scene, camera, renderer, pods }.
 
 import * as THREE from 'three';
@@ -13,10 +16,54 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { PODS, podById } from '../core/pods';
+import { PARTS, PART_IDS, newPodDamage, podLayout, type PartId } from '../core/damage';
+import { PODS, podById, type PodDesign } from '../core/pods';
 import { ChaseCamera } from '../fx/camera';
 import { createPod } from '../vehicle/pod';
 import type { PodVisual, Quality } from '../world/types';
+
+/** Applies the URL's damage to a pod: broken and hurt parts, dents, and (with &detach) the broken parts laid out. */
+function applyDamage(v: PodVisual, design: PodDesign, p: URLSearchParams, scene: THREE.Scene, at: THREE.Vector3) {
+  const dmg = newPodDamage();
+  const hurt = p.get('hurt') ?? '';
+  for (const id of PART_IDS) if (/^[\d.]+$/.test(hurt)) dmg.health[id] = Number(hurt);
+  for (const pair of hurt.split(',')) {
+    const [id, h] = pair.split(':');
+    if (h !== undefined && id in PARTS) dmg.health[id as PartId] = Number(h);
+  }
+  const breakPart = (id: PartId) => {
+    dmg.broken.add(id);
+    dmg.health[id] = 0;
+    for (const c of PARTS[id].carries ?? []) breakPart(c);
+  };
+  for (const id of (p.get('dmg') ?? '').split(',')) if (id in PARTS) breakPart(id as PartId);
+  v.setPartHealth?.(dmg.health, dmg.broken);
+  // Dents in pod space: the left nacelle's outboard side and top front (the mirrored engine), the right nacelle's
+  // upper back, and the cockpit's right flank.
+  const { L, R, xE, zE, yC, zC, ca, cb } = podLayout(design.shape);
+  const dents: [number[], number[], number][] = [
+    [[-xE - R, 0.1, zE + 0.1 * L], [1, 0, 0], 0.3],
+    [[-xE, R, zE - 0.15 * L], [0, -1, 0], 0.25],
+    [[xE + 0.7 * R, 0.7 * R, zE + 0.25 * L], [-0.7, -0.7, 0], 0.3],
+    [[ca, yC + 0.3 * cb, zC], [-1, 0, 0], 0.22],
+  ];
+  for (let n = 0; n < Number(p.get('dent') ?? 0); n++) {
+    for (const [pt, dir, depth] of dents) {
+      v.dent?.(new THREE.Vector3(...pt), new THREE.Vector3(...dir).normalize(), Number(p.get('dentd') ?? depth));
+    }
+  }
+  if (!p.has('detach')) return;
+  v.object.position.copy(at);
+  v.object.updateMatrixWorld(true);
+  let x = 0;
+  for (const id of dmg.broken) {
+    const piece = v.breakOff?.(id);
+    if (!piece) continue;
+    piece.position.x += 9 + x;
+    x += 4;
+    scene.add(piece);
+  }
+}
 
 function skyEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
   // A gradient dome (blue zenith, pale horizon, orange sand below) plus a sun disc, prefiltered for reflections.
@@ -105,7 +152,9 @@ export function mount(el: HTMLElement): () => void {
   const add = (id: string, x: number, z: number) => {
     const v = createPod(podById(id), quality);
     scene.add(v.object);
-    pods.push({ v, offset: new THREE.Vector3(x, 0, z), phase: pods.length * 1.7 });
+    const offset = new THREE.Vector3(x, 0, z);
+    applyDamage(v, podById(id), p, scene, offset);
+    pods.push({ v, offset, phase: pods.length * 1.7 });
   };
   if (view === 'ref') {
     add('ember', 0, 0);
@@ -138,8 +187,8 @@ export function mount(el: HTMLElement): () => void {
     camera.position.set(22, 10, 26);
     controls.target.set(0, 0, 0);
   } else if (view === 'single') {
-    const at: Record<string, [number, number, number]> = { back: [4, 3.5, 13], front: [-5, 2.5, -12], side: [13, 2, 0], top: [0.1, 16, 2], q: [9, 5, 9] };
-    camera.position.set(...(at[cam] ?? at.back));
+    const at: Record<string, [number, number, number]> = { back: [4, 3.5, 13], front: [-5, 2.5, -12], side: [13, 2, 0], left: [-13, 2, 0], top: [0.1, 16, 2], q: [9, 5, 9] };
+    camera.position.set(...(at[cam] ?? at.back)).multiplyScalar(Number(p.get('zoom') ?? 1));
     controls.target.set(0, 0, 0);
   }
   controls.enabled = !flying;

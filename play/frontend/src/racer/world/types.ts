@@ -3,6 +3,7 @@
 // Keep to these signatures: the race view, the labs and the other modules depend on them.
 
 import type * as THREE from 'three';
+import type { HitKind, PartAnchor, PartId } from '../core/damage';
 import type { PodLivery } from '../core/pods';
 import type { Track } from '../core/track';
 import type { Theme } from '../core/tracks';
@@ -68,6 +69,19 @@ export interface PodVisual {
   nozzles: THREE.Object3D[];
   /** Where smoke comes out of a damaged part (children of `object`): left engine, right engine, cockpit. */
   damagePoints: THREE.Object3D[];
+  // --- Destruction (core/damage.ts). Optional so simple pods (menus, labs) need not implement it. ---
+  /** The object of each destructible part (a descendant of `object`); a part may be missing on 'low' quality. */
+  parts?: Partial<Record<PartId, THREE.Object3D>>;
+  /** Shows per-part health (1 intact .. 0 broken): scars, sagging, sputtering, flicker; broken parts are hidden. */
+  setPartHealth?(health: Readonly<Record<PartId, number>>, broken: ReadonlySet<PartId>): void;
+  /**
+   * Breaks a part off: takes its object out of the pod and returns it detached (no parent) with its current world
+   * transform baked into position/quaternion/scale, ready for the debris system; null if it has no separate object
+   * (it is then just hidden). Breaking a part also hides it in the pod.
+   */
+  breakOff?(part: PartId): THREE.Object3D | null;
+  /** Dents the skin near a pod-space point, pushing it in along the pod-space unit direction `dir` by up to `depth` m. */
+  dent?(point: THREE.Vector3, dir: THREE.Vector3, depth: number): void;
   update(anim: PodAnim): void;
   dispose(): void;
 }
@@ -95,10 +109,25 @@ export interface FxPod {
   /** Damage 0..1 per part (left engine, right engine, cockpit), and whether the pod is lying wrecked. */
   damage: readonly number[];
   wrecked: boolean;
+  /** The strongest contact this frame, in world space (point, unit push direction, energy), or null. */
+  hit?: { point: THREE.Vector3; dir: THREE.Vector3; energy: number; kind: HitKind } | null;
+  /** Per-part health (1 intact .. 0 broken) and the parts' pod-space anchors, for per-part smoke, fire and arcs. */
+  health?: Readonly<Record<PartId, number>>;
+  anchors?: Readonly<Record<PartId, PartAnchor>>;
+}
+
+/** Something smoking in the world that is not a pod (a piece of debris): the effects turn these into smoke and fire. */
+export interface SmokeSource {
+  pos: THREE.Vector3;
+  /** 0..1: how much smoke. */
+  amount: number;
+  burning: boolean;
 }
 
 export interface FxView extends FrameView {
   pods: FxPod[];
+  /** Smoking debris this frame (filled by the debris system). */
+  smokeSources?: SmokeSource[];
 }
 
 export interface SpeedFx {

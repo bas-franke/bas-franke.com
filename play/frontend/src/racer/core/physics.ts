@@ -11,6 +11,7 @@
 
 import type { Track } from './track';
 import type { PodStats } from './pods';
+import { toPodSpace, type Hit, type HitKind } from './damage';
 
 export interface PodInput {
   /** 0..1 */
@@ -37,9 +38,10 @@ export interface PodState {
   phi: number;
   /** Rate the heading is turning (rad/s, + left), for banking the model. */
   yawRate: number;
-  /** Boost meter 0..1 and whether the pod is boosting right now. */
+  /** Boost charge 0..1 (1 = ready: one press lights it), whether the pod is boosting and the seconds of it left. */
   boost: number;
   boosting: boolean;
+  boostLeft: number;
   /** Seconds left on a boost pad surge. */
   surge: number;
   /** Seconds left of a slipstream bonus. */
@@ -57,22 +59,40 @@ export interface PodState {
   scrape: number;
   /** Knife-edge roll, -1 (left side down) .. 1 (right side down), eased towards the input. */
   roll: number;
-  /** Height above the road (0 on the road), vertical speed (m/s, world up) and whether airborne. */
+  /**
+   * Height above the centreline's surface (on the ground that is track.lift: 0 on open sand, up on a kicker or a ledge,
+   * down in a tunnel), vertical speed (m/s, world up) and whether airborne.
+   */
   h: number;
   vy: number;
   air: boolean;
-  /** Nose against a rock last step (so the hit is only counted once). */
+  /** Nose against a rock last step (so the hit is only counted once), and that rock's formation. */
   onRock: boolean;
+  /** This step the nose went square into a rock at speed: the race wrecks the pod outright. */
+  headOn: boolean;
+  rockGroup: number;
+  /**
+   * Where and how hard the pod was touched this step (wall, rock or landing; pod space, see damage.ts), the strongest
+   * contact if there were several, or null. The race turns it into part damage.
+   */
+  hit: Hit | null;
 }
 
 export function newPodState(s: number, x: number): PodState {
-  return { s, x, v: 0, psi: 0, phi: 0, yawRate: 0, boost: 0.5, boosting: false, surge: 0, draft: 0, impact: 0, impactSide: 0, padHit: false, ds: 0, sinceBoost: 9, scrape: 0, roll: 0, h: 0, vy: 0, air: false, onRock: false };
+  return { s, x, v: 0, psi: 0, phi: 0, yawRate: 0, boost: 1, boosting: false, boostLeft: 0, surge: 0, draft: 0, impact: 0, impactSide: 0, padHit: false, ds: 0, sinceBoost: 9, scrape: 0, roll: 0, h: 0, vy: 0, air: false, onRock: false, rockGroup: -1, headOn: false, hit: null };
 }
 
 /** Half the pod's width, for wall and pod contacts. */
 export const POD_HALF_WIDTH = 3.4;
 /** Half width fully on its side. */
 const KNIFE_HALF_WIDTH = 1.5;
+/** The pod's outline for contact points (pod space, flat): half height, half length, and where the engines sit. */
+const POD_HALF_HEIGHT = 1.5;
+const POD_HALF_LENGTH = 3;
+const ENGINE_X = 2.7;
+/** A rock hit at least this square (0 glancing .. 1 dead centre) and this fast (m/s) is head-on: an instant wreck. */
+const HEAD_ON_SQUARE = 0.5;
+const HEAD_ON_SPEED = 25;
 
 /** Half width of a pod right now (narrower as it rolls onto its side). */
 export function podHalfWidth(st: PodState) {
@@ -87,7 +107,13 @@ const DRAG_OVER = 14;
 /** Boost: top speed and thrust multipliers, and the instant kick when it lights. */
 const BOOST_TOP = 1.28;
 const BOOST_THRUST = 2.2;
-const BOOST_KICK = 5;
+const BOOST_KICK = 8;
+/** Seconds for the boost to charge again after it burns out. */
+export const BOOST_COOLDOWN = 40;
+/** While boosting the pod is a handful: less turn, a slower answer to the stick and a looser slide. */
+const BOOST_TURN = 0.5;
+const BOOST_YAW = 0.55;
+const BOOST_GRIP = 0.55;
 /** Boost pad: top speed multiplier, duration and kick. */
 const SURGE_TOP = 1.2;
 const SURGE_TIME = 1.5;
@@ -110,6 +136,11 @@ const ROLL_SLOW = 0.07;
 /** How fast the pod rolls onto its side (full roll per second). */
 const ROLL_RATE = 5;
 
+/** Seconds one boost lasts (about 4; a little longer on pods and upgrades with more boost). */
+export function boostDuration(stats: PodStats) {
+  return stats.boostTime * 1.25;
+}
+
 /** Turn rate the pod can hold at speed v (rad/s), with the air brakes at `brake`. Also used by the AI. */
 export function turnBudget(stats: PodStats, v: number, brake = 0): number {
   const low = stats.turn * Math.min(1, 0.35 + v / 18) * (1 + 0.3 * brake);
@@ -122,19 +153,51 @@ export function gripRate(stats: PodStats, v: number, brake = 0): number {
   return stats.grip * (1.2 - 0.45 * Math.min(1.2, v / stats.topSpeed)) * (1 + 0.9 * brake);
 }
 
+/** The knife-edge roll as a pod-space roll angle (as the renderer turns the model: right side down is -PI/2). */
+export const knifeAngle = (st: PodState) => (-st.roll * Math.PI) / 2;
+
+/**
+ * A contact on the pod's side facing `side` (-1 left, 1 right, across the course): on the flank `along` metres back
+ * from the centre (pod space z, nose -3), on the belly or the back instead when the pod is rolled onto its side.
+ * The push is away from that side, turned into the pod's heading.
+ */
+export function sideHit(st: PodState, side: number, along: number, energy: number, kind: HitKind): Hit {
+  const knife = knifeAngle(st);
+  const [nx, ny] = toPodSpace(side, 0, 0, 0, 0, knife);
+  const z = Math.max(-POD_HALF_LENGTH, Math.min(POD_HALF_LENGTH, along));
+  return { point: [nx * POD_HALF_WIDTH, ny * POD_HALF_HEIGHT, z], dir: toPodSpace(-side, 0, 0, st.psi, 0, knife), energy: Math.min(2, energy), kind };
+}
+
+/** Keeps the stronger of the step's contacts. */
+function touch(st: PodState, hit: Hit) {
+  if (!st.hit || hit.energy > st.hit.energy) st.hit = hit;
+}
+
 export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodStats, dt: number) {
   st.impact = 0;
+  st.headOn = false;
   st.padHit = false;
+  st.hit = null;
 
-  // Boost: drains the meter while held, refills slowly the rest of the time (faster in a slipstream).
-  const wasBoosting = st.boosting;
-  st.boosting = input.boost && input.throttle > 0 && st.boost > (wasBoosting ? 0 : 0.08);
+  // Boost: one press when it is charged lights it for boostDuration (holding the button changes nothing), then it
+  // charges again over BOOST_COOLDOWN.
+  if (!st.boosting && input.boost && st.boost >= 1) {
+    st.boosting = true;
+    st.boostLeft = boostDuration(stats);
+    st.boost = 0;
+    st.v += BOOST_KICK;
+  }
   if (st.boosting) {
-    st.boost = Math.max(0, st.boost - dt / stats.boostTime);
-    if (!wasBoosting) st.v += BOOST_KICK * Math.min(1, st.sinceBoost / 2);
+    st.boostLeft -= dt;
     st.sinceBoost = 0;
-  } else st.boost = Math.min(1, st.boost + stats.boostRefill * dt * (st.draft > 0 ? 2.5 : 1));
-  if (!st.boosting) st.sinceBoost += dt;
+    if (st.boostLeft <= 0) {
+      st.boosting = false;
+      st.boostLeft = 0;
+    }
+  } else {
+    st.boost = Math.min(1, st.boost + dt / BOOST_COOLDOWN);
+    st.sinceBoost += dt;
+  }
   st.surge = Math.max(0, st.surge - dt);
   st.draft = Math.max(0, st.draft - dt);
 
@@ -157,13 +220,14 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
 
   // Steering: a turn-rate target within the lateral-g budget; the actual rate eases towards it.
   // In the air the pod only half answers the stick.
-  const budget = turnBudget(stats, st.v, input.brake) * (st.air ? 0.5 : 1);
+  // Boosting, it turns less, answers later and slides more.
+  const budget = turnBudget(stats, st.v, input.brake) * (st.air ? 0.5 : 1) * (st.boosting ? BOOST_TURN : 1);
   const want = -input.steer * budget;
-  st.yawRate += (want - st.yawRate) * (1 - Math.exp(-YAW_RESPONSE * (1 + input.brake * 0.6) * dt));
+  st.yawRate += (want - st.yawRate) * (1 - Math.exp(-YAW_RESPONSE * (1 + input.brake * 0.6) * (st.boosting ? BOOST_YAW : 1) * dt));
   st.psi += st.yawRate * dt;
 
   // The velocity follows the heading: loosely at speed (slide), tightly on the air brakes (carve).
-  const grip = gripRate(stats, st.v, input.brake);
+  const grip = gripRate(stats, st.v, input.brake) * (st.boosting ? BOOST_GRIP : 1);
   st.phi += (st.psi - st.phi) * (1 - Math.exp(-grip * dt));
   const slip = st.psi - st.phi;
   st.v -= st.v * slip * slip * SLIP_DRAG * dt;
@@ -172,6 +236,8 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
   const sdot = (st.v * Math.cos(st.phi)) / Math.max(0.3, 1 + f.kappa * st.x);
   const xdot = -st.v * Math.sin(st.phi);
   st.ds = sdot * dt;
+  const s0 = st.s;
+  const x0 = st.x;
   st.s = track.clamp(st.s + st.ds);
   // The end of the run-off: the pod parks.
   if (st.s > track.length - 3) {
@@ -185,35 +251,40 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
   st.psi = Math.max(-1.3, Math.min(1.3, st.psi));
   st.phi = Math.max(-1.2, Math.min(1.2, st.phi));
 
-  // Height: on the road the pod follows it; if the road falls away faster than gravity could pull it down (a crest,
-  // a jump's lip) it flies, and lands when it meets the road again. Heights are the centreline's, so sideways moves
-  // over the banking (or being shoved by a wall, a rock or a pod) never launch anyone.
-  const y0 = f.pos.y;
-  const y1 = track.frameAt(st.s).pos.y;
-  const roadVy = (y1 - y0) / dt;
+  // Height: on the ground the pod follows it; if the ground falls away faster than gravity could pull it down (a crest,
+  // a jump's lip, a ledge's edge) it flies, and lands when it meets the ground again. Heights are the centreline's
+  // plus the lift of kickers and lanes, so sideways moves over the banking (or being shoved by a wall, a rock or a pod)
+  // never launch anyone, but flying off the side of a kicker does.
+  const c0 = f.pos.y;
+  const c1 = track.frameAt(st.s).pos.y;
+  const g1 = track.lift(st.s, st.x);
+  const roadVy = (c1 + g1 - c0 - track.lift(s0, x0)) / dt;
   if (!st.air) {
-    const ballistic = y0 + st.vy * dt - 0.5 * AIR_GRAVITY * dt * dt;
-    if (ballistic > y1 + 0.004 && st.v > 15) {
+    const ballistic = st.h + st.vy * dt - 0.5 * AIR_GRAVITY * dt * dt + c0 - c1;
+    if (ballistic > g1 + 0.004 && st.v > 15) {
       st.air = true;
-      st.h = ballistic - y1;
+      st.h = ballistic;
       st.vy -= AIR_GRAVITY * dt;
     } else {
-      st.h = 0;
+      st.h = g1;
       st.vy = roadVy;
     }
   } else {
     st.vy -= AIR_GRAVITY * dt;
-    st.h = y0 + st.h + st.vy * dt - y1;
-    if (st.h <= 0) {
+    st.h = c0 + st.h + st.vy * dt - c1;
+    if (st.h <= g1) {
       // Touchdown: a hard landing costs a little speed.
       const hard = Math.max(0, roadVy - st.vy - 8);
       if (hard > 0) {
         st.v *= 1 - Math.min(0.15, hard * 0.012);
         st.impact = Math.min(1, hard * 0.06);
         st.impactSide = 0;
+        // Under the pod, or under its lower side when it comes down knife-edge.
+        const [tx, ty, tz] = toPodSpace(0, -1, 0, st.psi, 0, knifeAngle(st));
+        touch(st, { point: [tx * POD_HALF_WIDTH, ty * 1.1, tz], dir: [-tx, -ty, -tz], energy: Math.min(2, hard / 30), kind: 'landing' });
       }
       st.air = false;
-      st.h = 0;
+      st.h = g1;
       st.vy = roadVy;
     }
   }
@@ -226,6 +297,12 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
     st.x = side * limit;
     // Fraction of the velocity going into the wall: how square the hit was.
     const into = Math.max(0, -Math.sin(st.phi) * side);
+    // The nose turned towards the wall touches it further forward: a scrape lands on the flank by the flap, a square
+    // hit on the intake's front corner. Energy is the speed into the wall.
+    const noseIn = Math.max(0, -st.psi * side);
+    const square = Math.min(1, (into + noseIn) / 0.6);
+    if (into > 0.05) touch(st, sideHit(st, side, 0.3 - 3.3 * square, 0.05 + (st.v * into) / 65, 'wall'));
+    else touch(st, sideHit(st, side, 0.3 - 3.3 * square, 0.03 + st.v * 0.0006, 'wall'));
     if (into > 0.05) {
       // A real hit: lose speed by how square it was (a glancing touch costs a few percent, head-on about half),
       // bounce off, and the nose is knocked back towards the wall's direction.
@@ -249,23 +326,39 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
   // nearer side; brushing past one is a scrape. Each contact is pushed out along the shallower overlap, so a pod
   // too wide for a gap is held back instead of wedged between the two rocks.
   const wasOnRock = st.onRock;
+  const pinGroup = wasOnRock ? st.rockGroup : -1;
   st.onRock = false;
   for (const o of track.obstacles) {
     const reachS = o.r + 3;
     const ds = st.s - o.s;
-    if (Math.abs(ds) >= reachS || st.h > o.h) continue;
+    if (Math.abs(ds) >= reachS || st.h - track.lift(o.s, o.x) > o.h) continue;
     const dx = st.x - o.x;
-    const reachX = o.r + hw - 0.3;
+    // Turned across the course, the nose and tail corners stick out past the flank.
+    const reachX = o.r + hw + Math.abs(Math.sin(st.psi)) * (POD_HALF_LENGTH - 1) - 0.3;
     if (Math.abs(dx) >= reachX) continue;
     const side = dx >= 0 ? 1 : -1;
+    // The rock's centre in pod space, and where its circle meets the pod's outline (the nearest point of the box).
+    const [cx, cy, cz] = toPodSpace(-dx, 0, ds, st.psi, 0, knifeAngle(st));
+    const clampTo = (v: number, m: number) => Math.max(-m, Math.min(m, v));
+    let px = clampTo(cx, POD_HALF_WIDTH);
+    const py = clampTo(cy, POD_HALF_HEIGHT);
+    const pz = clampTo(cz, POD_HALF_LENGTH);
+    const cl = Math.hypot(cx, cy, cz) || 1;
+    const away: [number, number, number] = [-cx / cl, -cy / cl, -cz / cl];
+    const vIn = st.v;
     if (ds < 0 && reachS + ds < reachX - Math.abs(dx)) {
       const fresh = !wasOnRock;
+      // Nose-on, the engines stick out in front: the one on the rock's side takes it on its intake and claws.
+      if (Math.abs(px) < ENGINE_X) px = (cx < 0 || (cx === 0 && side > 0) ? -1 : 1) * ENGINE_X;
+      const square = 1 - Math.abs(dx) / reachX;
+      touch(st, { point: [px, py, pz], dir: away, energy: fresh ? Math.min(2, (vIn / 100) * (0.5 + 1.2 * square)) : 0.05, kind: 'rock' });
       st.onRock = true;
+      st.rockGroup = o.group;
       st.s = o.s - reachS;
       if (fresh) {
-        const square = 1 - Math.abs(dx) / reachX;
         st.v *= 1 - Math.min(0.6, 0.15 + square * 0.5);
         st.impact = Math.min(1, 0.35 + square);
+        st.headOn = square > HEAD_ON_SQUARE && vIn > HEAD_ON_SPEED;
       } else {
         st.v = Math.min(st.v, 14);
         st.impact = Math.max(st.impact, 0.05);
@@ -289,6 +382,10 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
       st.psi = st.psi * 0.5 + st.phi * 0.5;
       st.yawRate *= 0.3;
     } else {
+      // Brushing past: the flank (the flap) against the rock. Not while sliding along the face of its formation: the
+      // next rock along would push the pod straight back.
+      if (o.group === pinGroup) continue;
+      touch(st, { point: [px, py, pz], dir: away, energy: 0.04 + vIn * 0.0006, kind: 'rock' });
       st.x = o.x + side * reachX;
       st.v = Math.max(0, st.v - SCRAPE * dt);
       if (st.phi * side > 0) st.phi = 0;
@@ -298,14 +395,11 @@ export function stepPod(st: PodState, input: PodInput, track: Track, stats: PodS
   }
 
   // Boost pads.
-  const pads = track.def.boostPads;
-  for (const [frac, lat] of pads) {
-    const ps = track.raceS(frac);
-    const d = st.s - ps;
-    if (st.h < 1 && d >= 0 && d < st.ds + 0.01 && Math.abs(st.x - lat * (f.width / 2 - 6)) < 5.5) {
+  for (const pad of track.pads) {
+    const d = st.s - pad.s;
+    if (st.h - track.lift(st.s, st.x) < 1 && d >= 0 && d < st.ds + 0.01 && Math.abs(st.x - pad.x) < 5.5) {
       st.surge = SURGE_TIME;
       st.v = Math.min(st.v + PAD_KICK, stats.topSpeed * SURGE_TOP * 1.08);
-      st.boost = Math.min(1, st.boost + 0.15);
       st.padHit = true;
     }
   }

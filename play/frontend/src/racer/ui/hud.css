@@ -125,6 +125,25 @@
 .hud-damage-part i { flex: 1; height: 0.55em; transform-origin: left center; transform: skewX(var(--hud-skew)); background: #6ee36a; box-shadow: 0 0 0.4em rgba(110, 227, 106, 0.5); transition: transform 0.15s; }
 .hud-damage-part.hurt i { background: #ffb21a; box-shadow: 0 0 0.4em rgba(255, 178, 26, 0.55); }
 .hud-damage-part.critical i { background: #ff3b24; box-shadow: 0 0 0.5em rgba(255, 59, 36, 0.7); animation: hud-blink 0.45s steps(2) infinite; }
+/* Pod damage diagram: right of the speed arc, its foot level with the boost bar. The SVG works in pod metres, so the
+   stroke widths below are metres too (the schematic is ~10 m across). */
+.hud-pod { position: absolute; left: 23.2em; top: 4.4em; width: 11.4em; height: 9.2em; isolation: isolate; }
+.hud-pod::before { content: ''; position: absolute; inset: 0; z-index: -1; transform: skewX(var(--hud-skew)); background: linear-gradient(180deg, rgba(16, 16, 22, 0.42), rgba(16, 16, 22, 0.72)); border: 0.1em solid rgba(255, 255, 255, 0.24); border-radius: 0.15em; }
+.hud-pod-svg { position: absolute; left: 0.5em; right: 0.5em; top: 0.5em; bottom: 0.4em; width: calc(100% - 1em); height: calc(100% - 0.9em); overflow: visible; filter: drop-shadow(0 0.06em 0.1em rgba(0, 0, 0, 0.5)); }
+.hud-pod-label { position: absolute; left: 0.5em; top: 0.35em; font-size: 0.72em; font-weight: 800; letter-spacing: 0.06em; opacity: 0.7; }
+.hud-pod-part { stroke: rgba(8, 8, 14, 0.85); stroke-width: 0.09; stroke-linejoin: round; transition: fill 0.25s, stroke 0.25s; }
+.hud-pod-part.crit { stroke: rgba(255, 255, 255, 0.85); stroke-width: 0.16; }
+.hud-pod-part.line { fill: none; stroke-width: 0.26; stroke-linecap: round; }
+.hud-pod-part.line.thin { stroke-width: 0.13; stroke-dasharray: 0.3 0.18; }
+.hud-pod-part.broken { fill: rgba(14, 10, 12, 0.78); stroke: rgba(255, 86, 60, 0.6); stroke-width: 0.1; stroke-dasharray: 0.22 0.16; }
+.hud-pod-part.line.broken { fill: none; stroke: rgba(255, 86, 60, 0.7); stroke-width: 0.14; stroke-dasharray: 0.16 0.3; }
+.hud-pod-part.crit.low { animation: hud-blink 0.45s steps(2) infinite; }
+.hud-pod-part.hit { animation: hud-pod-hit 0.55s ease-out; }
+.hud-pod-part.crit.low.hit { animation: hud-pod-hit 0.55s ease-out, hud-blink 0.45s 0.55s steps(2) infinite; }
+@keyframes hud-pod-hit { 0%, 30% { fill: #fff; stroke: #fff; stroke-width: 0.3; } }
+.hud-pod-cross { fill: none; stroke: #ff3b24; stroke-width: 0.32; stroke-linecap: round; filter: drop-shadow(0 0 0.15px rgba(255, 59, 36, 0.8)); }
+.hud-pod-lost { position: absolute; left: 0.2em; top: -1.6em; font-size: 0.85em; font-weight: 800; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.03em; color: #fff; background: rgba(200, 40, 24, 0.9); padding: 0.18em 0.6em; transform: skewX(var(--hud-skew)); text-shadow: none; animation: hud-pod-lost 2.2s ease-out forwards; }
+@keyframes hud-pod-lost { 0% { opacity: 0; transform: skewX(var(--hud-skew)) translateY(0.5em); } 8% { opacity: 1; transform: skewX(var(--hud-skew)); } 80% { opacity: 1; } 100% { opacity: 0; } }
 .hud-wrecked { text-align: center; transform: skewX(var(--hud-skew)); padding: 0.6em 2.4em 0.8em; background: rgba(20, 8, 6, 0.78); border: 0.12em solid rgba(255, 70, 40, 0.8); box-shadow: 0 0 2em rgba(255, 60, 20, 0.4); }
 .hud-wrecked-title { font-size: 4em; font-weight: 900; letter-spacing: 0.08em; color: #ff5a32; }
 .hud-wrecked-sub { margin-top: 0.4em; font-size: 1.2em; font-weight: 600; opacity: 0.9; }

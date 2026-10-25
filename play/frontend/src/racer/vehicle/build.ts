@@ -41,19 +41,27 @@ export interface Band {
 /**
  * Lathe around the z axis with a superellipse section. Each band is a separate strip (hard edge between bands) painted
  * per face, so stripes come out sharp. The seam sits underneath. UVs are in metres (u around, v along the profile).
+ * With `maxStep`, profile segments longer than that are split into more rings (so the skin can be dented smoothly).
  */
-export function lathe(bands: Band[], segs: number, s: Section): THREE.BufferGeometry {
+export function lathe(bands: Band[], segs: number, s: Section, maxStep = 0): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   let vAcc = 0;
   for (const band of bands) {
-    const rings = band.pts.length;
+    const pts: [number, number][] = [band.pts[0]];
+    for (let j = 1; j < band.pts.length; j++) {
+      const [z0, r0] = band.pts[j - 1];
+      const [z1, r1] = band.pts[j];
+      const n = maxStep > 0 ? Math.max(1, Math.ceil(Math.hypot(z1 - z0, r1 - r0) / maxStep)) : 1;
+      for (let k = 1; k <= n; k++) pts.push([z0 + ((z1 - z0) * k) / n, r0 + ((r1 - r0) * k) / n]);
+    }
+    const rings = pts.length;
     const pos: number[] = [];
     const uv: number[] = [];
     const idx: number[] = [];
     for (let j = 0; j < rings; j++) {
-      const [z, r] = band.pts[j];
+      const [z, r] = pts[j];
       if (j > 0) {
-        const [pz, pr] = band.pts[j - 1];
+        const [pz, pr] = pts[j - 1];
         vAcc += Math.hypot(z - pz, r - pr);
       }
       for (let i = 0; i <= segs; i++) {

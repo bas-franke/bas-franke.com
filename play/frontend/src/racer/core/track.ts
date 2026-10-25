@@ -7,6 +7,10 @@
 // passes, and `width` is the distance between those walls. The track also owns what is in the corridor: jump ramps
 // (sand ridges built into the ground's height), caves the course runs through, and the rock formations to steer round,
 // which all grow out of the walls (spurs, rockfalls, and gates and barriers that leave one or two gaps).
+// On top of that come the set pieces: kickers (tall ramps across part of the corridor only), shortcuts (a lane on the
+// inside of a bend behind a rock ridge, raised on a ledge or sunk into a tunnel, with rocks to weave round) and slot
+// walls (barriers whose gaps only a pod rolled onto its side, Q/E, fits through). Kickers and shortcut lanes change the
+// ground's height across the course: `lift(s, x)` is that height above the centreline's banked surface.
 
 import * as THREE from 'three';
 import type { TrackDef } from './tracks';
@@ -21,6 +25,29 @@ export const RAMP_HEIGHT = 3.2;
 export const RAMP_DROP = 12;
 /** Corridor width inside a cave, metres. */
 export const CAVE_WIDTH = 38;
+/** Kicker: run-up length to the lip, height, drop behind the lip, half width of its top and the taper at its sides. */
+export const KICKER_LEN = 36;
+export const KICKER_HEIGHT = 6.5;
+export const KICKER_DROP = 12;
+export const KICKER_HALF = 10;
+export const KICKER_TAPER = 5;
+/** Shortcuts: corridor width there (times def.width), lane width, and the ledge's and tunnel's profiles. */
+export const SHORTCUT_WIDTH = 2.1;
+export const LANE_WIDTH = 18;
+export const LEDGE_RISE = 7;
+export const LEDGE_UP = 45;
+export const LEDGE_DROP = 8;
+export const TUNNEL_DEPTH = 5;
+export const TUNNEL_DROP = 14;
+export const TUNNEL_UP = 50;
+/** Underside of a tunnel's roof above the corridor's surface, metres. */
+export const ROOF_CLEAR = 2.5;
+/** Slot walls: the gap between two rocks (a flat pod needs 6.2 m, one on its side 2.4 m: at 5 m it has to be rolled
+ * well over) and the corridor width. */
+export const SLOT_GAP = 5;
+export const SLOT_WIDTH = 1.3;
+/** Distance between the walls of one run, metres. */
+export const SLOT_APART = 75;
 
 export interface Frame {
   /** Distance from the start of the centreline, metres. */
@@ -41,7 +68,7 @@ export interface Frame {
 }
 
 /** What a rock formation looks like: a ridge of blocks out of a wall, a fallen boulder, a hoodoo pillar, a butte. */
-export type ObstacleKind = 'spur' | 'boulder' | 'pillar' | 'island';
+export type ObstacleKind = 'spur' | 'boulder' | 'pillar' | 'island' | 'ridge' | 'slot';
 
 /**
  * One collision circle of a rock formation: centre in track space, radius and height above the ground (pods in the
@@ -71,6 +98,36 @@ export interface Jump {
   s1: number;
 }
 
+/** A tall ramp across part of the corridor: foot, lip, bottom of the drop, and the lateral centre of its top. */
+export interface Kicker {
+  s0: number;
+  lip: number;
+  s1: number;
+  x: number;
+}
+
+/**
+ * A shortcut lane on the inside of a bend, between the corridor wall on `side` and a rock ridge at |x| = xIn: from s0
+ * it climbs onto a ledge (and flies off its lip at s1) or drops into a tunnel (roofed from roof0 to roof1, climbing
+ * back out by s1). xOut is the corridor's half width there.
+ */
+export interface Shortcut {
+  kind: 'ledge' | 'tunnel';
+  side: -1 | 1;
+  s0: number;
+  s1: number;
+  xIn: number;
+  xOut: number;
+  roof0: number;
+  roof1: number;
+}
+
+/** A barrier right across the corridor with narrow slots (centres `gaps`) that only a pod on its side gets through. */
+export interface SlotWall {
+  s: number;
+  gaps: number[];
+}
+
 export class Track {
   readonly frames: Frame[] = [];
   readonly length: number;
@@ -82,6 +139,11 @@ export class Track {
   readonly obstacles: Obstacle[];
   /** Caves the course runs through: the corridor narrows and a rock roof closes over it. */
   readonly caves: Span[];
+  readonly kickers: Kicker[] = [];
+  readonly shortcuts: Shortcut[];
+  readonly slotWalls: SlotWall[];
+  /** Boost pad centres in track space: the course's own (def.boostPads) and one in each shortcut lane. */
+  readonly pads: { s: number; x: number }[];
   /** Middle of the gorge bridge (themes with waterfalls), or null. Kept clear of jumps and rocks. */
   readonly gorgeS: number | null;
   /** 2D outline for the minimap, normalised to a 0..1 square (x right, y down), one point per ~10 m. */
@@ -122,7 +184,7 @@ export class Track {
       for (let d = -RAMP_LEN - 40; d <= 140; d += 4) k = Math.max(k, Math.abs(kappa[Math.max(0, Math.min(last, Math.round((lip + d) / step)))]));
       return k;
     };
-    this.jumps = def.jumps.map((f) => {
+    const ramps = def.jumps.map((f) => {
       let lip = this.raceS(f);
       let best = Infinity;
       for (let g = Math.max(0.05, f - 0.06); g <= Math.min(0.95, f + 0.06); g += 0.004) {
@@ -134,6 +196,14 @@ export class Track {
       }
       return { s0: lip - RAMP_LEN, lip, s1: lip + RAMP_DROP };
     });
+    // Every second jump is a kicker instead: higher, and only across part of the corridor (beside it pods race on).
+    this.jumps = ramps.filter((_, i) => i % 2 === 0);
+    const kr = rng(def.seed * 29 + 11);
+    const kickRoom = Math.max(0, def.width * 0.7 - KICKER_HALF - KICKER_TAPER - 6);
+    for (const j of ramps.filter((_, i) => i % 2 === 1)) {
+      const lip = j.lip + RAMP_LEN - KICKER_LEN;
+      this.kickers.push({ s0: lip - KICKER_LEN, lip, s1: lip + KICKER_DROP, x: (kr() * 2 - 1) * kickRoom });
+    }
     spaced.forEach((p, i) => (p.y += this.rampHeight(i * step)));
     const tangents = spaced.map((_, i) => spaced[Math.min(last, i + 1)].clone().sub(spaced[Math.max(0, i - 1)]).normalize());
     // Openness along the course: a few slow waves with seeded phases, from narrow passes to wide sandy basins.
@@ -170,6 +240,10 @@ export class Track {
     ];
     if (this.gorgeS !== null) fixed.push([this.gorgeS - 130, this.gorgeS + 130, def.width]);
     for (const c of this.caves) fixed.push([c.s0 - 10, c.s1 + 10, CAVE_WIDTH]);
+    this.shortcuts = this.pickShortcuts();
+    for (const c of this.shortcuts) fixed.push([c.s0 - 30, c.s1 + 30, def.width * SHORTCUT_WIDTH]);
+    this.slotWalls = this.pickSlotWalls();
+    for (const w of this.slotWalls) fixed.push([w.s - 30, w.s + 30, def.width * SLOT_WIDTH]);
     for (const f of this.frames) {
       let w = f.width;
       for (const [a, b, fw] of fixed) {
@@ -178,6 +252,14 @@ export class Track {
       }
       f.width = w;
     }
+    this.pads = def.boostPads.map(([frac, lat]) => {
+      const s = this.raceS(frac);
+      return { s, x: lat * (this.frameAt(s).width / 2 - 6) };
+    });
+    // The lane's pad is the shortcut's reward: on the ledge's top, or where pods land in the tunnel.
+    for (const c of this.shortcuts) this.pads.push({ s: c.kind === 'ledge' ? c.s0 + LEDGE_UP + 6 : c.roof0 + 4, x: c.side * (c.xIn + LANE_WIDTH / 2 + 1.5) });
+    this.kickers.push(...this.pickKickers());
+    this.kickers.sort((a, b) => a.lip - b.lip);
     this.obstacles = this.placeObstacles();
 
     const size = this.bounds.getSize(new THREE.Vector3());
@@ -214,6 +296,53 @@ export class Track {
     return 0;
   }
 
+  /**
+   * Height of the ground above the centreline's banked surface at (s, x): kickers and shortcut lanes (a ledge is
+   * higher, a tunnel lower), 0 everywhere else. Physics, the terrain and everything placed on the ground use it.
+   */
+  lift(s: number, x: number): number {
+    let y = 0;
+    for (const k of this.kickers) {
+      if (s <= k.s0 || s >= k.s1) continue;
+      const a = s <= k.lip ? ((s - k.s0) / (k.lip - k.s0)) ** 1.6 : (1 - (s - k.lip) / (k.s1 - k.lip)) ** 2;
+      y += KICKER_HEIGHT * a * (1 - smoothstep01((Math.abs(x - k.x) - KICKER_HALF) / KICKER_TAPER));
+    }
+    for (const c of this.shortcuts) {
+      const ledge = c.kind === 'ledge';
+      if (s <= c.s0 || s >= c.s1 + (ledge ? LEDGE_DROP : 0)) continue;
+      const u = x * c.side;
+      // Under the ridge it blends to the field; beyond the corridor wall it fades into the sand.
+      const across = smoothstep01((u - c.xIn + 2) / 3) * (1 - smoothstep01((u - c.xOut - 2) / 10));
+      if (across <= 0) continue;
+      y += this.laneProfile(c, s) * across;
+    }
+    return y;
+  }
+
+  /** A shortcut lane's height along it: up onto the ledge and off its lip, or down into the tunnel and back up. */
+  laneProfile(c: Shortcut, s: number): number {
+    if (c.kind === 'ledge') {
+      if (s < c.s0 + LEDGE_UP) return LEDGE_RISE * smoothstep01((s - c.s0) / LEDGE_UP);
+      if (s <= c.s1) return LEDGE_RISE;
+      return LEDGE_RISE * Math.max(0, 1 - (s - c.s1) / LEDGE_DROP) ** 2;
+    }
+    if (s < c.s0 + TUNNEL_DROP) return -TUNNEL_DEPTH * (1 - (1 - Math.max(0, s - c.s0) / TUNNEL_DROP) ** 2);
+    if (s > c.s1 - TUNNEL_UP) return -TUNNEL_DEPTH * (1 - smoothstep01((s - c.s1 + TUNNEL_UP) / TUNNEL_UP));
+    return -TUNNEL_DEPTH;
+  }
+
+  /** The lowest the ground goes at s (a tunnel floor), for what has to stay under it. */
+  lowest(s: number): number {
+    let y = 0;
+    for (const c of this.shortcuts) if (c.kind === 'tunnel' && s > c.s0 && s < c.s1) y = Math.min(y, this.laneProfile(c, s));
+    return y;
+  }
+
+  /** The shortcut whose lane (s, x) is in, if any. */
+  shortcutAt(s: number, x: number): Shortcut | undefined {
+    return this.shortcuts.find((c) => s > c.s0 && s < c.s1 && x * c.side > c.xIn);
+  }
+
   /** Interpolated frame at distance s (clamped to the track). Reuses `out` if given. */
   frameAt(s: number, out?: Frame): Frame {
     const n = this.frames.length;
@@ -237,7 +366,7 @@ export class Track {
   /** World position of track-space (s, x) at height h above the road surface. */
   toWorld(s: number, x: number, h = 0, out = new THREE.Vector3()): THREE.Vector3 {
     const f = this.frameAt(s, scratch);
-    return out.copy(f.pos).addScaledVector(f.right, x).addScaledVector(f.up, h);
+    return out.copy(f.pos).addScaledVector(f.right, x).addScaledVector(f.up, h).setY(out.y + this.lift(s, x));
   }
 
   /** Nearest track-space coordinates of a world point, searching around `hint` (an s) if given. */
@@ -307,6 +436,139 @@ export class Track {
     return out;
   }
 
+  /** Mean curvature over [s0, s1] (signed, + = turning left). */
+  private meanCurvature(s0: number, s1: number) {
+    let k = 0;
+    let n = 0;
+    for (let s = s0; s <= s1; s += SAMPLE_STEP * 2, n++) k += this.frameAt(s, scratch).kappa;
+    return n ? k / n : 0;
+  }
+
+  /** True if [a, b] comes within `margin` of a jump, the gorge, a cave or a boost pad. */
+  private busy(a: number, b: number, margin: number) {
+    const near = (s0: number, s1: number, m = margin) => s1 > a - m && s0 < b + m;
+    return (
+      this.jumps.some((j) => near(j.s0, j.s1 + 140)) ||
+      this.kickers.some((k) => near(k.s0, k.s1 + 220)) ||
+      (this.gorgeS !== null && near(this.gorgeS - 170, this.gorgeS + 170)) ||
+      this.caves.some((c) => near(c.s0, c.s1)) ||
+      this.def.boostPads.some(([f]) => near(this.raceS(f) - 20, this.raceS(f) + 20, 30))
+    );
+  }
+
+  /**
+   * Shortcut lanes on the insides of the most sustained bends: two, three on long courses, ledges and tunnels in turn.
+   * The lane hugs the inside, so it is shorter than the racing line round the outside of the field.
+   */
+  private pickShortcuts(): Shortcut[] {
+    const r = rng(this.def.seed * 17 + 3);
+    const count = this.raceLength > 4500 ? 3 : 2;
+    const cands: { s0: number; s1: number; k: number }[] = [];
+    for (let f = 0.1; f <= 0.9; f += 0.005) {
+      const len = 250;
+      const mid = this.raceS(f);
+      const s0 = mid - len / 2;
+      const s1 = mid + len / 2;
+      if (s0 < this.startS + 260 || s1 > this.finishS - 300 || this.busy(s0, s1 + 120, 30)) continue;
+      cands.push({ s0, s1, k: this.meanCurvature(s0, s1) });
+    }
+    cands.sort((a, b) => Math.abs(b.k) - Math.abs(a.k));
+    const picked: typeof cands = [];
+    for (const c of cands) {
+      if (picked.length >= count) break;
+      if (picked.some((p) => c.s1 + 250 > p.s0 && c.s0 - 250 < p.s1)) continue;
+      picked.push(c);
+    }
+    picked.sort((a, b) => a.s0 - b.s0);
+    const hw = (this.def.width * SHORTCUT_WIDTH) / 2;
+    const first = r() < 0.5 ? 0 : 1;
+    return picked.map((c, i): Shortcut => {
+      const kind = (i + first) % 2 === 0 ? 'ledge' : 'tunnel';
+      // The tunnel is a little longer: pods fly the first stretch after dropping in, so the roof starts later.
+      const s1 = kind === 'tunnel' ? c.s1 + 30 : c.s1;
+      return {
+        kind,
+        side: c.k > 0 ? -1 : 1,
+        s0: c.s0,
+        s1,
+        xIn: hw - LANE_WIDTH,
+        xOut: hw,
+        roof0: c.s0 + 62,
+        roof1: s1 - TUNNEL_UP + 6,
+      };
+    });
+  }
+
+  /** Slot walls on straight stretches, in pairs or threes SLOT_APART apart: two runs of them, three on long courses. */
+  private pickSlotWalls(): SlotWall[] {
+    const r = rng(this.def.seed * 23 + 9);
+    const runs = this.raceLength > 5200 ? 3 : 2;
+    const out: SlotWall[] = [];
+    const taken: [number, number][] = this.shortcuts.map((c) => [c.s0 - 150, c.s1 + 250]);
+    const windows = runs === 3 ? [[0.2, 0.4], [0.45, 0.65], [0.7, 0.88]] : [[0.25, 0.48], [0.58, 0.85]];
+    for (const [a, b] of windows) {
+      const n = r() < 0.5 ? 2 : 3;
+      const len = (n - 1) * SLOT_APART;
+      let best: number | null = null;
+      let bestK = Infinity;
+      for (let f = a; f <= b; f += 0.005) {
+        const s0 = this.raceS(f);
+        const s1 = s0 + len;
+        if (this.busy(s0, s1, 70) || taken.some(([t0, t1]) => s1 + 60 > t0 && s0 - 60 < t1)) continue;
+        const k = this.maxCurvature(s0 - 80, len + 120);
+        if (k < bestK) {
+          bestK = k;
+          best = s0;
+        }
+      }
+      if (best === null) continue;
+      taken.push([best - 100, best + len + 100]);
+      // Two slots per wall, well apart, and the next wall's never straight behind them: weave and roll.
+      const hw = (this.def.width * SLOT_WIDTH) / 2;
+      let prev: number[] = [];
+      for (let k = 0; k < n; k++) {
+        let gaps: number[] = [];
+        for (let tries = 0; tries < 12; tries++) {
+          const g1 = -hw + 8 + r() * (hw - 12);
+          const g2 = Math.min(hw - 8, g1 + 16 + r() * (hw - 12));
+          gaps = [g1, g2];
+          if (!prev.some((p) => gaps.some((g) => Math.abs(g - p) < 7))) break;
+        }
+        prev = gaps;
+        out.push({ s: best + k * SLOT_APART, gaps });
+      }
+    }
+    return out.sort((a, b) => a.s - b.s);
+  }
+
+  /** Extra kickers on straight stretches clear of everything else (one, two on long courses), off to one side or the middle. */
+  private pickKickers(): Kicker[] {
+    const r = rng(this.def.seed * 31 + 5);
+    const count = this.raceLength > 5200 ? 2 : 1;
+    const out: Kicker[] = [];
+    const taken: [number, number][] = [
+      ...this.shortcuts.map((c): [number, number] => [c.s0 - 150, c.s1 + 250]),
+      ...this.slotWalls.map((w): [number, number] => [w.s - 150, w.s + 150]),
+    ];
+    const cands: { lip: number; k: number }[] = [];
+    for (let f = 0.1; f <= 0.9; f += 0.005) {
+      const lip = this.raceS(f);
+      const s0 = lip - KICKER_LEN;
+      if (s0 < this.startS + 250 || lip + 300 > this.finishS || this.busy(s0, lip + 220, 30)) continue;
+      if (taken.some(([t0, t1]) => lip + 240 > t0 && s0 - 40 < t1)) continue;
+      cands.push({ lip, k: this.maxCurvature(s0 - 60, KICKER_LEN + 340) });
+    }
+    cands.sort((a, b) => a.k - b.k);
+    for (const c of cands) {
+      if (out.length >= count) break;
+      if ([...out, ...this.kickers].some((k) => Math.abs(k.lip - c.lip) < 500)) continue;
+      const hw = this.frameAt(c.lip).width / 2;
+      const room = Math.max(0, hw - KICKER_HALF - KICKER_TAPER - 9);
+      out.push({ s0: c.lip - KICKER_LEN, lip: c.lip, s1: c.lip + KICKER_DROP, x: (r() * 2 - 1) * room });
+    }
+    return out.sort((a, b) => a.lip - b.lip);
+  }
+
   /** True inside a cave, or within `margin` metres of one. */
   inCave(s: number, margin = 0) {
     return this.caves.some((c) => s > c.s0 - margin && s < c.s1 + margin);
@@ -325,6 +587,9 @@ export class Track {
     const pads = this.def.boostPads.map(([f]) => this.raceS(f));
     const blocked = (s: number) =>
       this.jumps.some((j) => s > j.s0 - 60 && s < j.s1 + 110) ||
+      this.kickers.some((k) => s > k.s0 - 60 && s < k.lip + 280) ||
+      this.shortcuts.some((c) => s > c.s0 - 90 && s < c.s1 + (c.kind === 'ledge' ? 200 : 60)) ||
+      this.slotWalls.some((w) => s > w.s - 90 && s < w.s + 90) ||
       pads.some((p) => Math.abs(p - s) < 45) ||
       (this.gorgeS !== null && Math.abs(this.gorgeS - s) < 170) ||
       this.inCave(s, 70);
@@ -359,6 +624,43 @@ export class Track {
       }
       group++;
     };
+    // Shortcuts: the ridge between the lane and the field, and rocks to weave round in the lane (boulders on a ledge,
+    // pillars holding up a tunnel's roof).
+    for (const c of this.shortcuts) {
+      const ledge = c.kind === 'ledge';
+      const a = c.s0 + (ledge ? 14 : 10);
+      const b = ledge ? c.s1 : c.s1 - 8;
+      for (let ss = a; ss <= b; ss += 4.5) rock(ss, c.side * (c.xIn - 0.5), 3.4, 12, 'ridge', 0, (ss - a) / (b - a));
+      group++;
+      const lane = (u: number) => c.side * (c.xIn + u);
+      const from = ledge ? c.s0 + LEDGE_UP + 20 : c.roof0 + 14;
+      const to = ledge ? c.s1 - 30 : c.roof1 - 14;
+      const n = Math.max(2, Math.floor((to - from) / 30));
+      for (let k = 0; k <= n; k++) {
+        const ss = from + ((to - from) * k) / n + (r() - 0.5) * 6;
+        const u = k % 2 ? 13.5 : 5.5;
+        if (ledge) rock(ss, lane(u), 2.4 + r() * 0.4, 3.4, 'boulder', 0, 0);
+        else rock(ss, lane(u), 2.2, TUNNEL_DEPTH + ROOF_CLEAR + 0.5, 'pillar', 0, 0);
+        group++;
+      }
+    }
+    // Slot walls: rocks edge to edge across the corridor except for the slots, each SLOT_GAP wide. Each stretch of wall
+    // between two slots is its own formation, so a pod pinned against it slides off towards the nearer slot.
+    for (const w of this.slotWalls) {
+      const hw = this.frameAt(w.s).width / 2;
+      const edges = [-hw - 2, ...[...w.gaps].sort((p, q) => p - q).flatMap((g) => [g - SLOT_GAP / 2, g + SLOT_GAP / 2]), hw + 2];
+      for (let k = 0; k < edges.length; k += 2) {
+        const a = edges[k];
+        const b = edges[k + 1];
+        const rad = Math.max(1.4, Math.min(4.2, (b - a) / 2));
+        const n = Math.max(1, Math.round((b - a - 2 * rad) / 6) + 1);
+        for (let j = 0; j < n; j++) {
+          const x = n === 1 ? (a + b) / 2 : a + rad + ((b - a - 2 * rad) * j) / (n - 1);
+          rock(w.s, x, rad, 13, 'slot', 0, 0);
+        }
+        group++;
+      }
+    }
     let s = this.startS + 320;
     while (s < this.finishS - 220) {
       if (blocked(s) || blocked(s + 120)) {

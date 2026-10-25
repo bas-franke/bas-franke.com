@@ -90,8 +90,16 @@ type AddMesh = (b: GeoBuilder, name: string, cast: boolean) => void;
 /** Ground ribbons and canyon walls, chunked along the track. */
 function buildTrackChunks(field: TerrainField, strata: Strata, S: Settings, length: number, addMesh: AddMesh) {
   const n = field.n;
+  const track = field.track;
+  // Kickers and shortcut lanes shape the ground across the corridor: there every frame is a column, and the ribbon
+  // gets extra rows across the corridor so ramps, ledges and the tunnel's drop keep their edges.
+  const dense = (i: number) => {
+    const s = track.frames[i].s;
+    return track.kickers.some((k) => s > k.s0 - 6 && s < k.s1 + 6) || track.shortcuts.some((c) => s > c.s0 - 6 && s < c.s1 + 14);
+  };
+  const EXTRA = Math.round(S.ribbon * 3.5);
   const cols: number[] = [];
-  for (let c = 0; c < n; c += S.stride) cols.push(c);
+  for (let c = 0; c < n; c++) if (c % S.stride === 0 || dense(c)) cols.push(c);
   if (cols[cols.length - 1] !== n - 1) cols.push(n - 1); // the open end of the course
   const step = length / n;
   const edgeOf = (i: number): Gorge | undefined => field.gorges.find((g) => g.edge0 === i || g.edge1 === i);
@@ -104,35 +112,55 @@ function buildTrackChunks(field: TerrainField, strata: Strata, S: Settings, leng
       const si = side < 0 ? 0 : 1;
       // Ground ribbon, in runs of columns outside the gorges.
       let run: number[] = [];
+      let runDense = false;
       const flushRibbon = () => {
+        const R = runDense ? N + EXTRA : N;
         if (run.length >= 2) {
-          const p = new Float32Array(run.length * N * 3);
-          const sh = new Float32Array(run.length * N);
+          const p = new Float32Array(run.length * R * 3);
+          const sh = new Float32Array(run.length * R);
           run.forEach((cc, k) => {
             const i = cc % n;
             const g = edgeOf(i);
             const rx = (g ? g.rx : field.rx[i]) * side;
             const rz = (g ? g.rz : field.rz[i]) * side;
             const dEnd = field.dEnd[si][i];
-            for (let j = 0; j < N; j++) {
-              // From the centreline out: the race surface is part of the sand, there is no separate road.
-              const d = dEnd * Math.pow(j / (N - 1), 1.4);
-              sh[k * N + j] = field.caveShade[i];
+            // From the centreline out: the race surface is part of the sand, there is no separate road. Dense columns
+            // keep every usual row (so they meet ordinary ones) plus even rows out to just past the corridor.
+            const ds: number[] = [];
+            for (let j = 0; j < N; j++) ds.push(dEnd * Math.pow(j / (N - 1), 1.4));
+            if (runDense) {
+              const D = Math.min(dEnd, field.x0[i] + 14);
+              for (let j = 1; j <= EXTRA; j++) ds.push((D * j) / (EXTRA + 1));
+              ds.sort((a, b) => a - b);
+            }
+            for (let j = 0; j < R; j++) {
+              const d = ds[j];
+              sh[k * R + j] = field.caveShade[i];
               const x = field.posX[i] + rx * d;
               const z = field.posZ[i] + rz * d;
-              const q = (k * N + j) * 3;
+              const q = (k * R + j) * 3;
               p[q] = x;
               p[q + 1] = field.groundY(i, side, d, x, z);
               p[q + 2] = z;
             }
           });
-          b.addGrid(p, run.length, N, side < 0 ? 1 : -1, 0, sh);
+          b.addGrid(p, run.length, R, side < 0 ? 1 : -1, 0, sh);
         }
         run = [];
       };
       for (const cc of chunk) {
-        if (field.gorgeAtFrame(cc % n)) flushRibbon();
-        else run.push(cc);
+        if (field.gorgeAtFrame(cc % n)) {
+          flushRibbon();
+          continue;
+        }
+        // Switching between ordinary and dense columns: this column closes one run and opens the next.
+        const dn = dense(cc % n);
+        if (run.length && dn !== runDense) {
+          run.push(cc);
+          flushRibbon();
+        }
+        runDense = dn;
+        run.push(cc);
       }
       flushRibbon();
 

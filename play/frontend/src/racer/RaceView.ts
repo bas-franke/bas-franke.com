@@ -1,6 +1,8 @@
 // Renders and runs one race: owns the renderer, scene, world, pod models, effects, camera, audio and controls, steps
 // the Race simulation every frame and publishes HUD state to a store the React HUD reads. Name tags over the rival
-// pods near the player are plain DOM labels laid over the canvas.
+// pods near the player are plain DOM labels laid over the canvas. Pod destruction: the simulation reports each
+// contact's damage in pod space (onParts); after the pods are placed this frame the view dents the model where it was
+// hit, sprays shrapnel, and breaks the broken parts off into the debris system, which flies them across the course.
 //
 // Debug URL parameters (handy for screenshots and the art labs):
 //   ?autopilot   the AI flies the player's pod      ?skipintro   start at the green light
@@ -8,9 +10,11 @@
 //   ?quality=low|medium|high
 // `window.__racer` exposes { race, view } in dev builds.
 
+import { boostDuration } from './core/physics';
 import * as THREE from 'three';
 import { createStore, type Store } from '../games/types';
 import { RaceAudio } from './audio/sound';
+import { PARTS, type Hit, type PartHit, type PartId } from './core/damage';
 import { DISPLAY_KMH, type PodDesign } from './core/pods';
 import { INTRO, Race, type Phase, type RacerSetup } from './core/race';
 import { trackById } from './core/tracks';
@@ -19,11 +23,12 @@ import { Controls } from './fx/controls';
 import { createPostFx } from './fx/post';
 import { createSpeedFx } from './fx/speed';
 import { createPod } from './vehicle/pod';
+import { DebrisSystem } from './world/debris';
 import { buildWorld, type World } from './world';
 import type { FxPod, FxView, PodVisual, PostFx, Quality, SpeedFx, WorldContext } from './world/types';
 
 /** Hover height of a pod's centre above the road. */
-export const HOVER = 1.5;
+export const HOVER = 2.1;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 /** Height of a wreck's centre above the ground when it lies on the sand. */
 const WRECK_REST = 1;
@@ -68,6 +73,8 @@ export interface HudState {
   /** Seconds until the player's wreck is back on the course (0 = not wrecked), and seconds of ghosting left. */
   wrecked: number;
   ghost: number;
+  /** The player's per-part health (1 intact .. 0 broken), see core/damage.ts. */
+  parts?: Record<PartId, number>;
 }
 
 export interface RaceResult {
@@ -114,16 +121,35 @@ export class RaceView {
   private readonly frozen = this.params.has('freeze');
   private readonly tagLayer = document.createElement('div');
   private readonly tags: HTMLDivElement[] = [];
+  private readonly debris: DebrisSystem;
+  /** Contacts reported by the simulation since the last frame, per racer, applied to the models in placePods. */
+  private readonly pendingHits: { hits: PartHit[]; hit: Hit }[][] = [];
+  /** Racers to rebuild a fresh model for (respawned: their broken-off parts are lying on the course). */
+  private readonly rebuild = new Set<number>();
+  /** Bumped whenever the player's parts change, so the HUD gets a new `parts` object only then. */
+  private partsVersion = 0;
+  private partsPublished = -1;
+  private readonly quality: Quality;
 
   constructor(private readonly container: HTMLElement, private readonly opts: RaceViewOptions) {
     const def = trackById(opts.trackId);
     const quality = (this.params.get('quality') as Quality | null) ?? opts.quality ?? defaultQuality();
+    this.quality = quality;
     this.race = new Race(def, opts.racers, {
       onCountdown: (n) => this.audio.countdown(n),
       onImpact: (r, k) => this.audio.impact(k, r === this.race.player),
       onPad: (r) => this.audio.pad(r === this.race.player),
       onWreck: (r) => {
         if (r === this.race.player) this.audio.wreck();
+      },
+      onParts: (r, hits, hit) => {
+        const i = this.race.racers.indexOf(r);
+        (this.pendingHits[i] ??= []).push({ hits, hit });
+        if (r === this.race.player) this.partsVersion++;
+      },
+      onRespawn: (r) => {
+        this.rebuild.add(this.race.racers.indexOf(r));
+        if (r === this.race.player) this.partsVersion++;
       },
       onFinish: (r) => {
         if (r === this.race.player) this.audio.finish(r.position);
@@ -153,6 +179,8 @@ export class RaceView {
 
     this.ctx = { track: this.race.track, theme: def.theme, renderer: this.renderer, scene: this.scene, camera: this.camera, quality };
     this.world = buildWorld(this.ctx);
+    this.debris = new DebrisSystem(this.ctx);
+    this.scene.add(this.debris.object);
     for (const r of this.race.racers) {
       const v = createPod(r.pod, quality);
       this.scene.add(v.object);
@@ -174,6 +202,9 @@ export class RaceView {
         padHit: false,
         damage: r.damage,
         wrecked: false,
+        hit: null,
+        health: r.parts.health,
+        anchors: r.anchors,
       });
       const tag = document.createElement('div');
       tag.className = 'racer-tag';
@@ -290,8 +321,11 @@ export class RaceView {
       playerS: player.state.s,
       pods: this.fxPods,
     };
+    view.smokeSources = this.debris.update(view);
     this.world.update(view);
     this.fx.update(view);
+    const h = player.parts.health;
+    this.audio.setEngineHealth(Math.min(h.intakeL, h.nozzleL, h.nacelleL), Math.min(h.intakeR, h.nozzleR, h.nacelleR));
     this.audio.update(dt, this.camera.position);
     this.post.render(view);
     this.placeTags();
@@ -307,13 +341,28 @@ export class RaceView {
   private placePods(dt: number) {
     const race = this.race;
     const track = race.track;
+    // A respawned pod gets a whole new model: the old one's broken parts are debris now.
+    for (const i of this.rebuild) {
+      const old = this.visuals[i];
+      const v = createPod(race.racers[i].pod, this.quality);
+      v.object.position.copy(old.object.position);
+      v.object.quaternion.copy(old.object.quaternion);
+      this.scene.remove(old.object);
+      old.dispose();
+      this.scene.add(v.object);
+      this.visuals[i] = v;
+      this.fxPods[i].visual = v;
+    }
+    this.rebuild.clear();
     race.racers.forEach((r, i) => {
       const st = r.state;
       const v = this.visuals[i];
       const f = track.frameAt(st.s);
       const bob = Math.sin(this.time * 2.3 + i * 1.7) * 0.12 + Math.sin(this.time * 17 + i) * 0.03 * Math.min(1, st.v / 60);
-      // On its side the lower engine would scrape the road: ride higher.
-      const lift = Math.abs(st.roll) * 1.9;
+      // Leaning into a turn (roll, below) the inner engine dips by about its reach times the lean, and on its side the
+      // lower engine would scrape the road: ride higher for both.
+      const roll = THREE.MathUtils.clamp(st.yawRate * 0.45 + (st.psi - st.phi) * 0.6, -0.6, 0.6);
+      const lift = Math.abs(st.roll) * 1.9 + Math.abs(Math.sin(roll)) * 2.4;
       // A wreck tumbles through the air and comes to rest on the sand (its centre about a metre up).
       const wrecked = r.wrecked > 0;
       const pos = f.pos.clone().addScaledVector(f.right, st.x).addScaledVector(f.up, wrecked ? WRECK_REST : HOVER + bob + lift);
@@ -325,7 +374,6 @@ export class RaceView {
       v.object.quaternion.setFromRotationMatrix(m);
       // Lean into turns, nose up a touch under thrust.
       // Lean into turns, nose up a touch under thrust; in the air the nose follows the flight path.
-      const roll = THREE.MathUtils.clamp(st.yawRate * 0.45 + (st.psi - st.phi) * 0.6, -0.6, 0.6);
       let pitch = (r.input.throttle - r.input.brake) * 0.03 + (st.boosting ? 0.03 : 0);
       if (st.air) pitch += THREE.MathUtils.clamp(Math.atan2(st.vy, Math.max(10, st.v)) - Math.asin(THREE.MathUtils.clamp(f.tangent.y, -1, 1)), -0.5, 0.5);
       v.object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, roll, 'ZXY')));
@@ -348,6 +396,7 @@ export class RaceView {
       fp.boosting = st.boosting;
       fp.surge = st.surge;
       fp.ground.copy(f.pos).addScaledVector(f.right, st.x);
+      fp.ground.y += track.lift(st.s, st.x);
       fp.groundNormal.copy(f.up);
       // Impacts are reported per physics step; keep the strongest of this frame.
       fp.impact = st.impact;
@@ -355,8 +404,58 @@ export class RaceView {
       fp.padHit = st.padHit;
       fp.damage = r.damage;
       fp.wrecked = r.wrecked > 0;
+      fp.health = r.parts.health;
+      fp.anchors = r.anchors;
+      fp.hit = null;
+      const pending = this.pendingHits[i];
+      if (pending?.length) {
+        v.object.updateMatrixWorld();
+        for (const { hits, hit } of pending) this.applyHit(i, hits, hit);
+        pending.length = 0;
+        v.setPartHealth?.(r.parts.health, r.parts.broken);
+      }
       v.update({ dt, time: this.time, speed01: fp.speed01, throttle: r.input.throttle, steer: r.input.steer, boosting: st.boosting, surge: st.surge, damage: r.damage, wrecked: fp.wrecked });
     });
+  }
+
+  /**
+   * One contact on racer i's model (its transform is current): dent the skin at the pod-space point, spray shrapnel
+   * from it, and break the broken parts off into the debris, thrown with the pod's velocity plus a kick along the push
+   * and a spin as hard as the hit. A broken part that carries others (a nacelle with its fin, flap and nozzle) goes as
+   * one piece, so its passengers are skipped.
+   */
+  private applyHit(i: number, hits: PartHit[], hit: Hit) {
+    const r = this.race.racers[i];
+    const v = this.visuals[i];
+    const fp = this.fxPods[i];
+    const m = v.object.matrixWorld;
+    const point = new THREE.Vector3(...hit.point);
+    const dir = new THREE.Vector3(...hit.dir).normalize();
+    const e = Math.min(2, hit.energy);
+    v.dent?.(point, dir, Math.min(0.45, 0.06 + 0.22 * e));
+    const wp = point.clone().applyMatrix4(m);
+    const wd = dir.clone().transformDirection(m);
+    // The strongest contact this frame feeds the effects (sparks at the real point).
+    if (!fp.hit || e > fp.hit.energy) fp.hit = { point: wp, dir: wd, energy: e, kind: hit.kind };
+    this.debris.shrapnel(wp, wd.clone().negate().add(fp.velocity.clone().multiplyScalar(0.01)).normalize(), Math.round(3 + 18 * e), 6 + 14 * e, new THREE.Color(r.pod.livery.primary));
+    const broke = hits.filter((h) => h.broke);
+    if (!broke.length) return;
+    const gone = new Set<PartId>();
+    // Carriers first, so what they carry leaves with them.
+    broke.sort((a, b) => (PARTS[b.part].carries ? 1 : 0) - (PARTS[a.part].carries ? 1 : 0));
+    for (const h of broke) {
+      if (gone.has(h.part)) continue;
+      for (const c of PARTS[h.part].carries ?? []) gone.add(c);
+      gone.add(h.part);
+      this.audio.partBroken(h.part, e, r === this.race.player, i);
+      const piece = PARTS[h.part].detaches ? v.breakOff?.(h.part) : (v.breakOff?.(h.part), null);
+      if (!piece) continue;
+      const big = h.part.startsWith('nacelle') || h.part === 'hull';
+      const vel = fp.velocity.clone().multiplyScalar(0.85).addScaledVector(wd, (big ? 4 : 7) * (0.5 + e)).add(new THREE.Vector3(0, 2 + Math.random() * (big ? 4 : 7), 0));
+      const k = (big ? 3 : 8) * (0.4 + e);
+      const spin = new THREE.Vector3((Math.random() - 0.5) * k, (Math.random() - 0.5) * k, (Math.random() - 0.5) * k);
+      this.debris.spawn(piece, vel, spin, { smoke: big ? 1 : 0.35, burning: big });
+    }
   }
 
   /** Name tags over the other pods, fading in from TAG_FAR metres and fully shown inside TAG_NEAR. */
@@ -411,7 +510,8 @@ export class RaceView {
       position: p.position,
       speedKmh: Math.round(p.state.v * DISPLAY_KMH),
       speed01: p.state.v / p.stats.topSpeed,
-      boost: p.state.boost,
+      // Burning down while it runs, charging back up the rest of the time.
+      boost: p.state.boosting ? p.state.boostLeft / boostDuration(p.stats) : p.state.boost,
       boosting: p.state.boosting,
       drafting: p.state.draft > 0,
       wrongWay: Math.abs(p.state.psi) > 1.25 && p.state.v > 5 && p.wrecked <= 0,
@@ -420,6 +520,11 @@ export class RaceView {
     };
     const hd = this.hud.get().damage;
     if (hd.some((v, k) => Math.abs(v - p.damage[k]) > 0.005)) patch.damage = [...p.damage];
+    // A new parts object only when they changed: the diagram flashes the parts whose health dropped since the last one.
+    if (this.partsPublished !== this.partsVersion) {
+      this.partsPublished = this.partsVersion;
+      patch.parts = { ...p.parts.health };
+    }
     if (this.hudAt <= 0) {
       this.hudAt = 1 / 12;
       const proj = race.track.minimap.project;
@@ -456,6 +561,7 @@ export class RaceView {
     this.audio.dispose();
     this.world.dispose();
     this.fx.dispose();
+    this.debris.dispose();
     this.post.dispose();
     for (const v of this.visuals) v.dispose();
     this.tagLayer.remove();

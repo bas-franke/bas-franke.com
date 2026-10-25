@@ -1,9 +1,8 @@
-// Boost pads at track.def.boostPads (placed with padPosition, the same centre the physics uses): a dark grated plate
+// Boost pads at track.pads (the same centres the physics uses, the course's own and the shortcut lanes'): a dark grated plate
 // with glowing orange chevrons that scroll forward and pulse, set in a raised steel frame, plus a soft additive glow
 // on the dirt around it. All pads share one mesh per material.
 
 import * as THREE from 'three';
-import { padPosition } from '../core/physics';
 import type { Track } from '../core/track';
 import { GeoBuilder, type UV } from './trackGeo';
 import { padTextures } from './trackTextures';
@@ -17,8 +16,7 @@ export function buildPads(track: Track, frameGeo: GeoBuilder, anisotropy: number
   const glow = new GeoBuilder(true, false);
   const steel = new THREE.Color('#4a4440');
   const W = (s: number, x: number, h: number) => track.toWorld(s, x, h, new THREE.Vector3());
-  for (const pad of track.def.boostPads) {
-    const { s, x } = padPosition(track, pad);
+  for (const { s, x } of track.pads) {
     const steps = 8;
     for (let i = 0; i < steps; i++) {
       const s0 = s - HALF_L + (2 * HALF_L * i) / steps;

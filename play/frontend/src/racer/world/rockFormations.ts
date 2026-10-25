@@ -3,11 +3,13 @@
 //   now and then a hoodoo or a spire, bigger and more crowded in the narrow passes, low in front of the grandstands;
 // - the formations on the course (track.obstacles, the same circles physics and the AI use): blocky ridges that grow
 //   out of the walls, boulder heaps, hoodoo pillars with cap rocks, and buttes topped with a spire;
-// - the caves: a rock hill the course runs through, with a rough mouth at each end and a dim inside.
+// - the caves: a rock hill the course runs through, with a rough mouth at each end and a dim inside, and the same over
+//   each tunnel shortcut's lane only;
+// - the shortcut ridges and the slot walls, laid square to the course so their gaps look as narrow as they are.
 // Rocks are a handful of instanced shapes (one draw call each); each cave is one mesh.
 
 import * as THREE from 'three';
-import { rng, type Track } from '../core/track';
+import { ROOF_CLEAR, TUNNEL_DEPTH, rng, type Shortcut, type Track } from '../core/track';
 import type { TerrainField } from './terrainField';
 import { GeoBuilder } from './terrainGeo';
 import { noise1, noise2 } from './terrainNoise';
@@ -177,12 +179,32 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
     }
   }
 
+  /** A block turned square to the course: `across` and `along` are half sizes (the shape is about 1.17 at its base). */
+  const square = (p: THREE.Vector3, s: number, across: number, along: number, h: number) => {
+    const t = track.frameAt(s).tangent;
+    e.set((r() - 0.5) * 0.04, Math.atan2(t.x, t.z), (r() - 0.5) * 0.04);
+    q.setFromEuler(e);
+    (lists[`${cls}-block`] ??= []).push(m.compose(p, q, sc.set(across / 1.17, h, along)).clone());
+  };
+
   // Formations on the course.
   cls = 'course';
   for (const o of track.obstacles) {
     track.toWorld(o.s, o.x, -0.5, pos);
     const rad = o.r * 1.12;
-    if (o.kind === 'spur') {
+    if (o.kind === 'ridge' || o.kind === 'slot') {
+      // Standing on the lower ground beside it (the field next to a ledge, the floor beside a tunnel), so it never
+      // floats; the slot rocks no wider than their circles, so a slot looks as tight as it is.
+      const low = Math.min(track.lift(o.s, o.x - o.r), track.lift(o.s, o.x + o.r));
+      const drop = track.lift(o.s, o.x) - low;
+      pos.y -= drop;
+      if (o.kind === 'ridge') {
+        square(pos, o.s, o.r * 1.05, 3.4 + r() * 0.8, o.h + drop + r() * 3);
+        if (r() < 0.3) place('boulder', pos.clone().setY(pos.y + o.h + drop - 0.5), o.r * 0.5, o.r * 0.45, 0.5);
+      } else {
+        square(pos, o.s, o.r * 0.97, 3 + r() * 1.5, o.h + r() * 4);
+      }
+    } else if (o.kind === 'spur') {
       place('block', pos, rad, o.h + 0.5);
       // Rubble at its foot, and near the wall an extra tower so the ridge reads as part of the wall.
       if (r() < 0.6) place('boulder', track.toWorld(o.s + (r() - 0.5) * o.r * 2, o.x + (r() - 0.5) * o.r, -0.4, new THREE.Vector3()), o.r * 0.45, o.r * 0.4, 0.5);
@@ -201,8 +223,10 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
   const geos: THREE.BufferGeometry[] = [];
   cls = 'edge';
   const lamps: THREE.Matrix4[] = [];
-  for (const cave of track.caves) {
-    const g = caveGeometry(track, field, cave.s0, cave.s1, (p, rad) => place('block', p, rad, rad * (0.8 + r() * 1.4), 0.3), (p) => lamps.push(m.compose(p, q.identity(), sc.set(1, 1, 1)).clone()));
+  const tunnels = track.shortcuts.filter((c) => c.kind === 'tunnel');
+  const roofs: [number, number, Shortcut | undefined][] = [...track.caves.map((c): [number, number, undefined] => [c.s0, c.s1, undefined]), ...tunnels.map((c): [number, number, Shortcut] => [c.roof0, c.roof1, c])];
+  for (const [s0, s1, lane] of roofs) {
+    const g = caveGeometry(track, field, s0, s1, (p, rad) => place('block', p, rad, rad * (0.8 + r() * 1.4), 0.3), (p) => lamps.push(m.compose(p, q.identity(), sc.set(1, 1, 1)).clone()), lane);
     geos.push(g);
     const mesh = new THREE.Mesh(g, mat);
     mesh.name = 'cave';
@@ -256,7 +280,8 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
 /**
  * A cave from s0 to s1: an arched rock tube over the corridor inside, a hill of rock over it outside, and at each end
  * a rough mouth face joining the two. Cross sections use the frame's flat right and world up, so banking does not tilt
- * them.
+ * them. With `lane` it is a tunnel shortcut's roof instead: a lower arch over just the sunken lane, from its ridge to
+ * past the corridor wall.
  */
 function caveGeometry(
   track: Track,
@@ -265,6 +290,7 @@ function caveGeometry(
   s1: number,
   onTop: (p: THREE.Vector3, rad: number) => void,
   onLamp: (p: THREE.Vector3) => void,
+  lane?: Shortcut,
 ): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const ROWS = 23;
@@ -279,15 +305,26 @@ function caveGeometry(
     const i = Math.max(0, Math.min(field.n - 1, Math.round(s / step)));
     const hw = track.frameAt(s).width / 2;
     const th = (j / (ROWS - 1)) * Math.PI;
-    const a = outside ? hw + 30 + noise1(s * 0.02, 5) * 8 : hw + 3;
-    const h = outside ? 46 + noise1(s * 0.015, 9) * 16 : 17 + noise1(s * 0.03, 2) * 5;
+    let a = outside ? hw + 30 + noise1(s * 0.02, 5) * 8 : hw + 3;
+    let h = outside ? 46 + noise1(s * 0.015, 9) * 16 : 17 + noise1(s * 0.03, 2) * 5;
+    let mid = 0;
+    let floor = 0;
+    if (lane) {
+      // Inner arch from the ridge's face to the wall, its crown a metre over the field; the hill over it is low.
+      const u0 = outside ? lane.xIn - 5 : lane.xIn + 2;
+      const u1 = outside ? lane.xOut + 14 : lane.xOut + 3;
+      mid = (lane.side * (u0 + u1)) / 2;
+      a = (u1 - u0) / 2;
+      floor = -TUNNEL_DEPTH;
+      h = outside ? TUNNEL_DEPTH + ROOF_CLEAR + 6 + noise1(s * 0.02, 9) * 3 : TUNNEL_DEPTH + ROOF_CLEAR + 1 + noise1(s * 0.03, 2) * 0.8;
+    }
     // Lumpy rock: broad bulges plus finer ribs and pockets.
     const k = outside
       ? 1 + (noise2(s * 0.03, th * 2.7 + 11) - 0.5) * 0.3 + (noise2(s * 0.11, th * 8 + 3) - 0.5) * 0.12
       : 1 + (noise2(s * 0.07, th * 2.7) - 0.5) * 0.24 + (noise2(s * 0.3, th * 11) - 0.5) * 0.1;
     // Feet a little under the sand so the rock grows out of it.
-    const x = Math.cos(th) * a * k;
-    const y = Math.sin(th) * h * k - 1.2;
+    const x = mid + Math.cos(th) * a * k;
+    const y = floor + Math.sin(th) * h * (lane && !outside ? Math.min(1, k) : k) - 1.2;
     out[o] = field.posX[i] + field.rx[i] * x;
     out[o + 1] = field.posY[i] + y;
     out[o + 2] = field.posZ[i] + field.rz[i] * x;
