@@ -414,7 +414,7 @@ uniform sampler2D tSSR;
 uniform sampler2D tHalf;
 uniform sampler2D tQuarter;
 uniform vec2 blurTexel;
-uniform vec3 glow; // transmittance floor for bright far things, (unused), halo strength
+uniform vec3 glow; // transmittance floor for bright far things, smear of fogged pixels, halo strength
 uniform vec2 fogRes;
 uniform vec2 res;
 uniform float near;
@@ -538,7 +538,7 @@ void main() {
     wsumB += wb;
   }
   wide /= wsumB;
-  col = mix(col, wide, smoothstep(0.55, 0.95, fogged) * 0.7);
+  col = mix(col, wide, smoothstep(0.55, 0.95, fogged) * glow.y);
   // Bright far things (the city's lit windows, lamp heads) glow through fog that would swallow them: a transmittance
   // floor that only bright pixels reach, so dark towers stay lost in the murk. Never for the sky.
   // Gated by how fogged the pixel is (not by its own depth), so leaf cards and the windows seen between them get the
@@ -668,6 +668,8 @@ uniform float downed;
 uniform float grain;
 uniform vec3 tone; // cold shadows, sodium highlights, black lift
 uniform vec2 res;
+uniform float sharpen;
+uniform float contrast;
 ${exposureGlsl}
 varying vec2 vUv;
 // ACES fitted (Stephen Hill), so the look does not depend on the renderer's tone mapping setting.
@@ -681,7 +683,24 @@ vec3 acesFit(vec3 c) {
 }
 float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 void main() {
-  vec3 col = texture2D(tSrc, vUv).rgb * autoExposure();
+  vec3 col = texture2D(tSrc, vUv).rgb;
+  if (sharpen > 0.0) {
+    // Contrast-adaptive sharpening on a compressed copy (x / (1 + x)), so bright lamps don't ring: unsharp mask
+    // against the 4 neighbours, held inside their range.
+    vec2 tx = 1.0 / res;
+    vec3 a = texture2D(tSrc, vUv + vec2(tx.x, 0.0)).rgb;
+    vec3 b = texture2D(tSrc, vUv - vec2(tx.x, 0.0)).rgb;
+    vec3 cN = texture2D(tSrc, vUv + vec2(0.0, tx.y)).rgb;
+    vec3 d = texture2D(tSrc, vUv - vec2(0.0, tx.y)).rgb;
+    vec3 c0 = col / (1.0 + col);
+    a /= 1.0 + a; b /= 1.0 + b; cN /= 1.0 + cN; d /= 1.0 + d;
+    vec3 mn = min(c0, min(min(a, b), min(cN, d)));
+    vec3 mx = max(c0, max(max(a, b), max(cN, d)));
+    vec3 s = clamp(c0 + (c0 - (a + b + cN + d) * 0.25) * sharpen * 2.0, mn, mx);
+    s = min(s, vec3(0.995));
+    col = s / (1.0 - s);
+  }
+  col *= autoExposure();
   col += texture2D(tBloom, vUv).rgb * bloom;
   // Night grade in exposed linear HDR before the tone curve: split toning, cold blue-grey shadows and sodium-orange
   // highlights, a little less saturation in the dark, and a faint cold floor so the murk never crushes to pure black.
@@ -705,6 +724,8 @@ void main() {
   col += vec3(0.25, 0.0, 0.01) * hv * hv * hurt * pulse;
   col *= 1.0 - downed * 0.4;
   col = acesFit(col);
+  // A gentle S-curve in display space: deeper blacks, the highlights kept.
+  col = mix(col, col * col * (3.0 - 2.0 * col), contrast);
   // Display-encoded into an 8-bit target: the AA pass works on what the eye sees, and adds the grain after.
   gl_FragColor = sRGBTransferOETF(vec4(max(col, 0.0), 1.0));
 }
@@ -894,23 +915,23 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     sunColor: { value: new THREE.Color() },
     // Faint cold moonlight, if the world has any left.
     shaftTint: { value: new THREE.Color(0.8, 0.9, 1.0) },
-    // Fog lit by nothing in particular: inside the dark lobby, and the night outside (a little sodium city glow in the
-    // blue-grey), which is also the colour the far fog settles to.
+    // Fog lit by nothing in particular: inside the dark lobby, and the night outside (warm amber from the sodium-lit
+    // city), which is also the colour the far fog settles to.
     ambient: { value: new THREE.Color(0.0016, 0.0019, 0.0024) },
-    ambientOut: { value: new THREE.Color(0.018, 0.021, 0.027) },
+    ambientOut: { value: new THREE.Color(0.022, 0.015, 0.008) },
     interior: { value: new THREE.Vector4(ib.minX, ib.maxX, ib.minZ, ib.maxZ) },
     ceiling: { value: world.height },
     dust: { value: wext.dust ?? 1 },
     // lamps, flashlights, sun, density
     gain: { value: new THREE.Vector4(6, 0.6, 4, 1) },
-    // outside density (1/m, ~5 m visibility), inside density, fog creep behind the glass (m), street-light gain
-    night: { value: new THREE.Vector4(0.22, 0.036, 3.5, 0.08) },
+    // outside density (1/m, ~20 m visibility: the city stays crisp behind the glass), inside density, fog creep behind the glass (m), street-light gain
+    night: { value: new THREE.Vector4(0.05, 0.036, 3.5, 0.08) },
     // The shafts in the thin lobby haze would be far fainter than the lamp-lit fog outside; lift them so the lobby
     // reads as lit by the street.
-    inBoost: { value: 22 },
+    inBoost: { value: 14 },
     dbg: { value: 0 },
     cookieOut: { value: 0.5 },
-    cityGlow: { value: new THREE.Color(0.016, 0.014, 0.013) },
+    cityGlow: { value: new THREE.Color(0.02, 0.013, 0.007) },
     slCount: { value: 0 },
     slShadows: { value: 0 },
     slShafts: { value: 0 },
@@ -951,7 +972,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     quarterTexel: { value: new THREE.Vector2() },
     floorMeters: { value: 4 },
     floorRough: { value: 0.18 },
-    strength: { value: 0.9 },
+    strength: { value: 1.0 },
     near: { value: 0.05 },
     far: { value: 300 },
     camPos: { value: new THREE.Vector3() },
@@ -972,7 +993,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     tSSR: { value: ssrRT.texture },
     tHalf: { value: halfRT.texture },
     tQuarter: { value: quarterRT.texture },
-    glow: { value: new THREE.Vector3(0.05, 14, 0.5) },
+    glow: { value: new THREE.Vector3(0.05, 0.25, 0.2) },
     blurTexel: { value: new THREE.Vector2() },
     fogRes: { value: new THREE.Vector2() },
     near: { value: 0.05 },
@@ -993,11 +1014,11 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     tLum: { value: lumRTs[0].texture },
     // key (target average luminance after exposure), min, max
     // Night: a low key and a tight max, so a dark view stays dark instead of being lifted to day.
-    expo: { value: new THREE.Vector3(0.11, 0.2, 2.5) },
+    expo: { value: new THREE.Vector3(0.09, 0.2, 2.5) },
     exposure: { value: 1 },
   });
   const lum = pass(lumFrag, { tSrc: { value: combineRT.texture }, tPrev: { value: null }, adapt: { value: 1 } });
-  const prefilter = pass(prefilterFrag, { tSrc: { value: combineRT.texture }, texel: { value: new THREE.Vector2() }, threshold: { value: new THREE.Vector2(0.7, 0.45) }, ...expoUniforms() });
+  const prefilter = pass(prefilterFrag, { tSrc: { value: combineRT.texture }, texel: { value: new THREE.Vector2() }, threshold: { value: new THREE.Vector2(1.2, 0.5) }, ...expoUniforms() });
   const down = pass(downFrag, { tSrc: { value: null }, texel: { value: new THREE.Vector2() } });
   const up = pass(upFrag, { tSrc: { value: null }, texel: { value: new THREE.Vector2() } }, {
     blending: THREE.CustomBlending,
@@ -1009,14 +1030,17 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
   const final = pass(finalFrag, {
     tSrc: { value: combineRT.texture },
     tBloom: { value: null },
-    bloom: { value: 0.22 },
+    // Bloom only on the light sources (high threshold), a touch stronger there.
+    bloom: { value: 0.18 },
     time: { value: 0 },
     hurt: { value: 0 },
     hit: { value: 0 },
     downed: { value: 0 },
     grain: { value: 0.018 },
-    tone: { value: new THREE.Vector3(1, 1, 1) },
+    tone: { value: new THREE.Vector3(0, 1, 0) },
     res: { value: new THREE.Vector2() },
+    sharpen: { value: 0.5 },
+    contrast: { value: 0.2 },
     ...expoUniforms(),
   });
   // The lab tunes exposure on the final pass; the prefilter follows it.
@@ -1154,7 +1178,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     profile: boolean;
     times: PassTimes;
   } = {
-    debug: { fog: fogUniforms, ssr: ssrUniforms, combine: combine.uniforms, final: final.uniforms, aa: aa.uniforms },
+    debug: { fog: fogUniforms, ssr: ssrUniforms, combine: combine.uniforms, final: final.uniforms, bloom: prefilter.uniforms, aa: aa.uniforms },
     flags,
     get profile() {
       return profiling;
@@ -1348,7 +1372,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       c.frame.value = frame % 64;
       c.projInv.value.copy(camera.projectionMatrixInverse);
       c.proj.value.copy(camera.projectionMatrix);
-      c.ca.value = 0.0012 + p.hit * 0.008 + (p.downed ? 0.006 : 0);
+      c.ca.value = 0.0005 + p.hit * 0.008 + (p.downed ? 0.006 : 0);
       draw(combine, combineRT);
       mark('combine');
 
