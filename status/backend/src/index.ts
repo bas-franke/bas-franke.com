@@ -1,9 +1,11 @@
 import express, { type ErrorRequestHandler } from 'express';
-import { analyticsReport, collect, cors, RANGES } from './analytics.js';
+import { analyticsReport, collect, cors, RANGES, siteReport } from './analytics.js';
 import { login, logout, me, requireLogin } from './auth.js';
+import { isProject, latestChanges, projectChanges } from './changes.js';
 import { config } from './config.js';
 import { dbEnabled, migrate } from './db.js';
 import { runAll } from './runner.js';
+import { screenshotsRouter } from './screenshots.js';
 import type { Report } from './types.js';
 import { errorMessage } from './util.js';
 
@@ -45,6 +47,25 @@ app.post('/api/page', cors, express.text({ type: '*/*', limit: '2kb' }), collect
 app.get('/api/analytics', requireLogin, async (req, res) => {
   const days = Number(req.query.days);
   res.set('Cache-Control', 'no-store').json(await analyticsReport(RANGES.includes(days) ? days : 30));
+});
+app.get('/api/analytics/:site', requireLogin, async (req, res) => {
+  const days = Number(req.query.days);
+  const report = await siteReport(String(req.params.site), RANGES.includes(days) ? days : 30);
+  if (!report) return res.status(404).json({ error: 'Unknown site' });
+  res.set('Cache-Control', 'no-store').json(report);
+});
+
+// Screenshots of design changes: Claude uploads them with status/tools/upload-screenshot.mjs. See README "Screenshots".
+app.use('/api/screenshots', screenshotsRouter);
+
+// Change history: the commits that touched each project's folder, from the GitHub API.
+app.get('/api/changes', requireLogin, async (_req, res) => {
+  res.set('Cache-Control', 'no-store').json(await latestChanges());
+});
+app.get('/api/changes/:site', requireLogin, async (req, res) => {
+  const site = String(req.params.site);
+  if (!isProject(site)) return res.status(404).json({ error: 'Unknown site' });
+  res.set('Cache-Control', 'no-store').json(await projectChanges(site));
 });
 
 app.use('/api', (_req, res) => {

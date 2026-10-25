@@ -15,25 +15,67 @@ Checks run every 60 seconds; **Check now** forces a run. Projects are listed in
 
 ## Visitor analytics
 
-The page also shows how many people visit each site: visitors and page views per day and per month, the most-read
-pages, referrers and device types, for the last 7, 30, 90 or 365 days. Project blocks are ordered by visitors and
-each block header shows the headline numbers; open a block for the graphs.
+The page also shows how many people visit each site, for the last 7, 30, 90 or 365 days: an overview with each
+project's headline numbers (visitors, page views, average engaged time, bounce rate, views per visit, visitors right
+now, all with the change against the previous period) and a page per project with daily and monthly graphs, a
+weekday × hour heatmap, top/entry/exit pages, traffic channels, referrers, campaigns, countries, languages, devices,
+browsers, operating systems and an engaged-time distribution.
 
 It is first-party and cookie-free. Every frontend has the same small `src/analytics.ts`, called once from `main.tsx`,
 which posts each page view (including route changes inside the single-page apps) to
-`https://status.bas-franke.com/api/page`. The status backend keeps the path, the external referrer, the device class
-and a visitor hash of salt + day + IP address + user agent, so the hash changes every day and the IP itself is never
-stored. "Visitors" are therefore unique per day; monthly visitors add up the daily uniques. Requests from hosts that
-are not in `projects.ts` are dropped, as are known bots, so local builds cannot pollute the numbers; the snippet also
-sends nothing from localhost.
+`https://status.bas-franke.com/api/page`. The status backend keeps per page view:
+
+- the path, the external referrer host and the device class (from the viewport width);
+- a visitor hash of salt + day + IP address + user agent, so the hash changes every day and the IP itself is never
+  stored. "Visitors" are therefore unique per day, and a *visit* is one visitor on one day; monthly visitors add up
+  the daily uniques. A visit that saw one page is a bounce;
+- the browser and OS family parsed from the user agent (no versions);
+- the country guessed from the browser's time zone (`Europe/Amsterdam` → NL, see `backend/src/tzcountry.ts`; no IP
+  geolocation) and the primary language subtag of `navigator.language`;
+- the traffic channel (direct, search, social, email, referral, campaign) from the referrer host and, on the landing
+  page, `utm_source`/`utm_medium` (the `utm_source` is kept as the campaign);
+- the engaged time: how long the page was visible, the window focused and used within the last 2 minutes, sent when
+  the page view ends (route change, tab hidden, page closed) and capped at 30 minutes. It is matched to its page view by
+  a random id that only lives in the page's memory, never in storage.
+
+Requests from hosts that are not in `projects.ts` are dropped, as are known bots, and each IP is rate limited, so
+local builds cannot pollute the numbers; the snippet also sends nothing from localhost or automated browsers.
 
 To turn it on, the status project needs its own database (the **Visitor analytics** check shows the exact steps):
 create the `status` database and user in RDS and put `DATABASE_URL` in `/srv/apps/status/.env`. The table is created
 automatically at startup. New projects need nothing beyond their registration in `projects.ts`.
 
 
+## Change history
+
+Each project page has a **Changes** tab with the commits on `master` that touched the project's folder, newest first and
+grouped by day (merge commits left out; click a change for its full message). The overview cards show when the latest
+change was and its one-line summary. The list comes from the GitHub commits API (`backend/src/changes.ts`), is cached
+for 10 minutes per project and keeps the last good list when GitHub fails. Without `GITHUB_TOKEN` it shares the
+60-requests-per-hour anonymous limit with the deploy checks, so set the token.
+
 The page has slots for custom illustrations (mascot, state scenes, icons). The prompts, sizes and filenames are in
 [ART.md](ART.md); finished PNGs go in `frontend/public/art/`. Missing images are simply left out.
+
+### Screenshots
+
+Claude uploads a screenshot after every finished design change in any project (rule in `.claude/CLAUDE.md`):
+
+```bash
+node status/tools/upload-screenshot.mjs --project play --title "Lobby redesign" [--note "..."] [--source agent] shot.png
+```
+
+`POST /api/screenshots?project=&title=&note=&source=` takes the raw PNG/JPEG/WebP bytes (max 8 MB) with
+`Authorization: Bearer <SCREENSHOT_TOKEN>` (or a logged-in session). Images are stored in the `status` database, and
+each upload deletes that project's screenshots beyond the newest 20. `GET /api/screenshots[?project=]` lists them
+newest first; `GET /api/screenshots/<id>/image` serves one; `DELETE /api/screenshots/<id>` removes one.
+
+Setup (the **Screenshot uploads enabled** check shows the same steps):
+
+1. Put a random token in the git-ignored `.env.screenshots` in the repo root: `STATUS_SCREENSHOT_TOKEN=<token>`
+   (optional `STATUS_URL=http://127.0.0.1:3002` to upload to a local backend).
+2. Add the same value as repository secret `STATUS_SCREENSHOT_TOKEN` in GitHub.
+3. Run the **Deploy status** workflow; it writes `SCREENSHOT_TOKEN` to `/srv/apps/status/.env` before restarting.
 
 ### Configuration: `/srv/apps/status/.env` on the server
 
@@ -46,6 +88,7 @@ The page has slots for custom illustrations (mascot, state scenes, icons). The p
 | `DATABASE_URL`    | for analytics | `postgres://status:<password>@<rds-endpoint>:5432/status?sslmode=require`; without it page views are dropped |
 | `ANALYTICS_SALT`  | optional | Salt for the daily visitor hashes (defaults to a value derived from `STATUS_PASSWORD`) |
 | `ANALYTICS_TZ`    | optional | Time zone for day and month boundaries, default `Europe/Amsterdam`              |
+| `SCREENSHOT_TOKEN` | for screenshots | Bearer token for screenshot uploads; written by the deploy workflow from the GitHub secret `STATUS_SCREENSHOT_TOKEN` |
 
 After editing: `pm2 restart status --update-env`.
 

@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { referrerChannelSql } from './channel.js';
 import { config } from './config.js';
 
 let pool: pg.Pool | undefined;
@@ -36,6 +37,45 @@ const migrations: { name: string; sql: string }[] = [
         device    text NOT NULL DEFAULT 'desktop'
       );
       CREATE INDEX page_views_site_ts ON page_views (site, ts);
+    `,
+  },
+  {
+    // Richer analytics. Rows from before this migration keep NULL in the new columns (the reports treat that as
+    // unknown), except the channel, which follows from the referrer. view_id lets the engagement pings (sent when a
+    // page view ends) find their page view.
+    name: '002_page_view_details',
+    sql: `
+      ALTER TABLE page_views
+        ADD COLUMN view_id    text,
+        ADD COLUMN engaged_ms int,
+        ADD COLUMN country    text,
+        ADD COLUMN lang       text,
+        ADD COLUMN browser    text,
+        ADD COLUMN os         text,
+        ADD COLUMN channel    text,
+        ADD COLUMN campaign   text;
+      CREATE INDEX page_views_view_id ON page_views (view_id) WHERE view_id IS NOT NULL;
+      UPDATE page_views SET channel = ${referrerChannelSql('referrer')};
+    `,
+  },
+  {
+    // Screenshots of design changes (see screenshots.ts); only the newest 20 per project are kept.
+    name: '003_screenshots',
+    sql: `
+      CREATE TABLE screenshots (
+        id           bigserial PRIMARY KEY,
+        created_at   timestamptz NOT NULL DEFAULT now(),
+        project      text NOT NULL,
+        title        text NOT NULL,
+        note         text,
+        source       text,
+        content_type text NOT NULL,
+        width        int,
+        height       int,
+        bytes        int NOT NULL,
+        image        bytea NOT NULL
+      );
+      CREATE INDEX screenshots_project_created ON screenshots (project, created_at DESC);
     `,
   },
 ];
