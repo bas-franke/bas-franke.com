@@ -57,6 +57,8 @@ export class Engine {
   private raf = 0;
   private last = 0;
   private onFrame?: (dt: number, now: number) => void;
+  /** Replaces the plain `renderer.render(scene, camera)` each frame (a game's own post-processing chain). */
+  renderHook?: () => void;
   private readonly resize = () => this.fit();
   private readonly observer?: ResizeObserver;
   private quality: number;
@@ -282,7 +284,8 @@ export class Engine {
       this.onFrame?.(dt, now / 1000);
       const t1 = performance.now();
       this.shadows(dt);
-      this.renderer.render(this.scene, this.camera);
+      if (this.renderHook) this.renderHook();
+      else this.renderer.render(this.scene, this.camera);
       const t2 = performance.now();
       stats.lastUpdateMs = t1 - t0;
       stats.lastRenderMs = t2 - t1;

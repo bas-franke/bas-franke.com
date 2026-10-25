@@ -1,9 +1,9 @@
-// Takes the screenshots the lobby shows for each game: a few Rockets maps and every Ruckus minigame, captured from
+// Takes the screenshots the lobby shows for each game: a few Rockets maps, every Ruckus minigame and every Last Light map, captured from
 // a real match against bots in a headless browser, and a few Dustrunners tracks mid-race with the AI flying. Starts its own backend and dev server on spare ports, so a dev
 // server you have open is left alone.
 //
 //   npm run screenshots                          everything
-//   npm run screenshots -- --only rockets        one game (rockets, ruckus, dustrunners)
+//   npm run screenshots -- --only rockets        one game (rockets, ruckus, zombies, dustrunners)
 //   npm run screenshots -- --maps foundry,orbit  which Rockets maps (default below)
 //   npm run screenshots -- --browser msedge      chrome | msedge | chromium (default: first one that starts)
 //   npm run screenshots -- --headful --verbose   watch it happen / see server output
@@ -19,6 +19,7 @@ import { type Browser, type BrowserContext, type Page, chromium } from 'playwrig
 import { GAME_IDS, GAMES, SOLO_GAME_IDS, SOLO_GAMES, type GameId, type SoloGameId } from '../../backend/src/shared/protocol.js';
 import { MAP_LIST } from '../../backend/src/shared/rockets/maps.js';
 import { MINIGAME_IDS, MINIGAMES, type MinigameId } from '../../backend/src/shared/ruckus/world.js';
+import { ZMAP_LIST } from '../../backend/src/shared/zombies/maps.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const outDir = path.join(root, 'frontend/public/screenshots');
@@ -117,7 +118,7 @@ async function createRoom(game: GameId, map?: string): Promise<string> {
   const res = await fetch(`${api}/api/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: `${GAMES[game].name} screenshots`, game, maxPlayers: 8, bots: BOTS, botDifficulty: 'normal', map }),
+    body: JSON.stringify({ name: `${GAMES[game].name} screenshots`, game, maxPlayers: GAMES[game].maxPlayers, bots: game === 'zombies' ? 3 : BOTS, botDifficulty: 'normal', map }),
   });
   if (!res.ok) fail(`Creating a ${game} room failed: HTTP ${res.status} ${await res.text()}`);
   const { room } = (await res.json()) as { room: { code: string } };
@@ -267,9 +268,38 @@ async function shootDustrunners(context: BrowserContext): Promise<Shot[]> {
   return shots;
 }
 
+/** Last Light: every map once the first wave is in, looking at the nearest window from the middle of the room. */
+async function shootZombies(context: BrowserContext): Promise<Shot[]> {
+  const shots: Shot[] = [];
+  for (const m of ZMAP_LIST) {
+    log(`Last Light · ${m.name}`);
+    const page = await startMatch(context, await createRoom('zombies', m.id));
+    // First wave after 6 s; give it time to rise and reach the boards.
+    await sleep(17_000);
+    await page.evaluate(() => {
+      interface Dev {
+        world: { windows: { inside: { x: number; z: number } }[] };
+        me: { yaw: number; pitch: number; body: { pos: { x: number; z: number } } };
+      }
+      const c = (window as unknown as { __zombies: Dev }).__zombies;
+      const p = c.me.body.pos;
+      const w = [...c.world.windows].sort((a, b) => Math.hypot(a.inside.x - p.x, a.inside.z - p.z) - Math.hypot(b.inside.x - p.x, b.inside.z - p.z))[0];
+      c.me.yaw = Math.atan2(-(w.inside.x - p.x), -(w.inside.z - p.z));
+      c.me.pitch = 0.02;
+    });
+    await sleep(900);
+    const file = `zombies-${m.id}.jpg`;
+    await screenshot(page, file);
+    shots.push({ file, caption: m.name });
+    await page.close();
+  }
+  return shots;
+}
+
 const shooters: Record<AnyGame, (context: BrowserContext) => Promise<Shot[]>> = {
   rockets: shootRockets,
   ruckus: shootRuckus,
+  zombies: shootZombies,
   dustrunners: shootDustrunners,
 };
 

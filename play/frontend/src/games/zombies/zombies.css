@@ -1,0 +1,474 @@
+/* Last Light HUD: sparse, dirty, red chalk. Everything sits on the dark scene, so text gets a soft shadow, not a box. */
+@import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Oswald:wght@400;600&display=swap');
+
+.hud.ll {
+  --ll-red: #c8463a;
+  --ll-bone: #e6dccb;
+  --ll-dim: rgba(230, 220, 203, 0.55);
+  font-family: Oswald, 'Space Grotesk', system-ui, sans-serif;
+  color: var(--ll-bone);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.hud.ll button,
+.hud.ll input,
+.hud.ll .overlay-center {
+  pointer-events: auto;
+}
+
+.ll-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #000;
+  font: 22px 'Special Elite', monospace;
+  letter-spacing: 0.08em;
+  color: var(--ll-dim);
+}
+
+/* Crosshair */
+.ll-cross {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+.ll-cross i {
+  position: absolute;
+  background: rgba(240, 232, 220, 0.85);
+  box-shadow: 0 0 2px #000;
+}
+.ll-cross .t,
+.ll-cross .b {
+  width: 2px;
+  height: 8px;
+  left: -1px;
+}
+.ll-cross .l,
+.ll-cross .r {
+  width: 8px;
+  height: 2px;
+  top: -1px;
+}
+.ll-cross .t {
+  bottom: var(--gap);
+}
+.ll-cross .b {
+  top: var(--gap);
+}
+.ll-cross .l {
+  right: var(--gap);
+}
+.ll-cross .r {
+  left: var(--gap);
+}
+
+/* Sniper scope: a round lens in black, thin crosshair, a little vignette inside the glass */
+.ll-scope {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, transparent 0, transparent min(36vh, 36vw), rgba(0, 0, 0, 0.55) calc(min(36vh, 36vw) + 1px), #000 calc(min(36vh, 36vw) + 8px));
+}
+.ll-scope::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(min(72vh, 72vw));
+  height: calc(min(72vh, 72vw));
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  box-shadow: inset 0 0 60px 20px rgba(0, 0, 0, 0.7);
+}
+.ll-scope i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(10, 10, 10, 0.9);
+}
+.ll-scope .h {
+  width: calc(min(72vh, 72vw));
+  height: 1px;
+  transform: translateX(-50%);
+}
+.ll-scope .v {
+  width: 1px;
+  height: calc(min(72vh, 72vw));
+  transform: translateY(-50%);
+}
+.ll-scope .dot {
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #c8463a;
+  box-shadow: 0 0 4px #c8463a;
+}
+
+/* Hit marker: an X; red on kills, bigger on headshots */
+.ll-hit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+}
+.ll-hit::before,
+.ll-hit::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  margin-left: -1px;
+  background: linear-gradient(#fff 0 30%, transparent 30% 70%, #fff 70%);
+  transform: rotate(45deg);
+}
+.ll-hit::after {
+  transform: rotate(-45deg);
+}
+.ll-hit.kill::before,
+.ll-hit.kill::after {
+  background: linear-gradient(var(--ll-red) 0 34%, transparent 34% 66%, var(--ll-red) 66%);
+}
+.ll-hit.head {
+  width: 36px;
+  height: 36px;
+}
+
+/* Direction of incoming damage */
+.ll-hurt {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 220px;
+  height: 220px;
+}
+.ll-hurt i {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 70px;
+  height: 18px;
+  margin-left: -35px;
+  border-radius: 50% 50% 0 0;
+  background: radial-gradient(ellipse at 50% 100%, rgba(200, 20, 10, 0.85), transparent 70%);
+}
+
+/* Wave tally, bottom left */
+.ll-wave {
+  position: absolute;
+  left: 32px;
+  bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.ll-tally {
+  display: flex;
+  gap: 9px;
+  height: 64px;
+  align-items: flex-end;
+  position: relative;
+  filter: drop-shadow(0 0 6px rgba(140, 10, 0, 0.6));
+}
+.ll-tally i {
+  display: block;
+  width: 7px;
+  height: 62px;
+  border-radius: 3px 2px 4px 2px;
+  background: linear-gradient(180deg, #9e1d14, #6d0f0a 60%, #8a1810);
+  -webkit-mask: repeating-linear-gradient(170deg, #000 0 5px, rgba(0, 0, 0, 0.75) 5px 7px);
+  mask: repeating-linear-gradient(170deg, #000 0 5px, rgba(0, 0, 0, 0.75) 5px 7px);
+}
+.ll-tally i.cross {
+  position: absolute;
+  left: -8px;
+  bottom: 26px;
+  width: 78px;
+  height: 7px;
+  transform: rotate(-24deg) !important;
+}
+.ll-tally.num {
+  font: 400 76px/1 'Special Elite', monospace;
+  color: #a51c12;
+  text-shadow: 0 0 14px rgba(150, 10, 0, 0.7), 0 2px 3px #000;
+}
+.ll-tally.empty {
+  color: transparent;
+}
+.ll-sub {
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ll-dim);
+}
+
+/* Points, right side above the ammo */
+.ll-points {
+  position: absolute;
+  right: 34px;
+  bottom: 168px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.ll-pts {
+  font: 600 34px/1 Oswald, sans-serif;
+  color: #f1d48a;
+  letter-spacing: 0.02em;
+}
+.ll-popups {
+  position: relative;
+  height: 0;
+  width: 100%;
+}
+.ll-pop {
+  position: absolute;
+  right: 0;
+  top: -58px;
+  font: 600 18px Oswald, sans-serif;
+  color: #f1d48a;
+  white-space: nowrap;
+}
+.ll-pop.head,
+.ll-pop.knife {
+  color: #ff9a6a;
+}
+.ll-team {
+  margin-top: 8px;
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--ll-dim);
+  text-align: right;
+}
+.ll-team div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.ll-team i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.ll-team b {
+  color: var(--ll-bone);
+  font-weight: 600;
+  min-width: 46px;
+}
+.ll-team .down {
+  color: #ff6b5a;
+}
+
+/* Health: a thin bar bottom centre */
+.ll-health {
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  width: 260px;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 4px;
+}
+.ll-bar {
+  height: 5px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ll-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #b9b2a2, #e6dccb);
+  transition: width 0.2s;
+}
+.ll-bar i.low {
+  background: linear-gradient(90deg, #8b120b, #d23a2c);
+}
+.ll-bar.armor i {
+  background: linear-gradient(90deg, #4f6a86, #8fb2d6);
+}
+
+/* Ammo, bottom right */
+.ll-ammo {
+  position: absolute;
+  right: 34px;
+  bottom: 26px;
+  text-align: right;
+}
+.ll-gun {
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ll-dim);
+}
+.ll-era {
+  margin-left: 8px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid rgba(230, 220, 203, 0.3);
+  border-radius: 3px;
+}
+.ll-count {
+  font: 600 52px/1 Oswald, sans-serif;
+}
+.ll-count span {
+  font-size: 22px;
+  color: var(--ll-dim);
+  margin-left: 6px;
+}
+.ll-count.low {
+  color: #ff7a5c;
+}
+.ll-gear {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ll-dim);
+}
+.ll-gear i {
+  display: inline-block;
+  width: 9px;
+  height: 11px;
+  margin-left: 3px;
+  border-radius: 4px 4px 3px 3px;
+  border: 1px solid rgba(230, 220, 203, 0.4);
+}
+.ll-gear i.on {
+  background: #7d8a5a;
+  border-color: #a9b77c;
+}
+.ll-reload {
+  margin-top: 6px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ffcf8a;
+}
+
+/* Use prompt */
+.ll-prompt {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  transform: translateX(-50%);
+  font: 20px 'Special Elite', monospace;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+}
+.ll-progress {
+  margin: 8px auto 0;
+  width: 220px;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.ll-progress i {
+  display: block;
+  height: 100%;
+  background: var(--ll-bone);
+}
+.ll-deny {
+  position: absolute;
+  left: 50%;
+  top: 67%;
+  transform: translateX(-50%);
+  color: #ff7a5c;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ll-feed {
+  position: absolute;
+  left: 32px;
+  top: 24px;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--ll-dim);
+}
+
+.ll-banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26%;
+  text-align: center;
+}
+.ll-banner h2 {
+  margin: 0;
+  font: 400 64px/1 'Special Elite', monospace;
+  color: #b3241a;
+  text-shadow: 0 0 22px rgba(150, 10, 0, 0.7), 0 3px 4px #000;
+  letter-spacing: 0.04em;
+}
+.ll-banner p {
+  margin: 10px 0 0;
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ll-dim);
+}
+
+.ll-downed {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translateX(-50%);
+  font: 22px 'Special Elite', monospace;
+  color: #ff5a48;
+  white-space: nowrap;
+}
+.ll-downed.dead {
+  color: var(--ll-dim);
+}
+
+.ll-board {
+  font-family: Oswald, 'Space Grotesk', sans-serif;
+}
+.ll-board h2 {
+  font-family: 'Special Elite', monospace;
+}
+.ll-settings {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  text-shadow: none;
+}
+.ll-settings label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ll-settings .segmented button {
+  text-transform: capitalize;
+}
+
+@media (max-width: 700px) {
+  .ll-wave {
+    left: 14px;
+    bottom: 14px;
+  }
+  .ll-ammo,
+  .ll-points {
+    right: 14px;
+  }
+  .ll-prompt,
+  .ll-downed {
+    font-size: 15px;
+    white-space: normal;
+    width: 90%;
+  }
+}

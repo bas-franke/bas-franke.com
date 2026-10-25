@@ -4,8 +4,9 @@
 import type { Look } from './rockets/cosmetics.js';
 import type { RocketsClientMsg, RocketsServerMsg } from './rockets/protocol.js';
 import type { RuckusClientMsg, RuckusServerMsg } from './ruckus/protocol.js';
+import type { ZombiesClientMsg, ZombiesServerMsg } from './zombies/protocol.js';
 
-export type GameId = 'rockets' | 'ruckus';
+export type GameId = 'rockets' | 'ruckus' | 'zombies';
 export type BotDifficulty = 'easy' | 'normal' | 'hard';
 export type RoomState = 'waiting' | 'playing';
 /** Rockets game modes; rules live in shared/rockets/modes.ts. Other games ignore the mode. */
@@ -60,6 +61,27 @@ export const GAMES: Record<GameId, GameMeta> = {
       { keys: 'W A S D', does: 'Move' },
       { keys: 'Space / Left click', does: 'Dash (shoves nearby players)' },
       { keys: 'Tab', does: 'Scores' },
+    ],
+  },
+  zombies: {
+    id: 'zombies',
+    name: 'Last Light',
+    tagline: 'Board up the windows. They keep coming.',
+    description:
+      'Co-op zombie survival in one dark, fully destructible room. Endless waves rise outside, one by one, tear the ' +
+      'boards off the windows and shamble in. Earn points for every hit to buy guns old and new, ammo, grenades and ' +
+      'armor from the lockers, rebuild the barricades and revive each other. Bullets chip the walls; grenades blow ' +
+      'holes in them, and the dead can come through those too.',
+    minPlayers: 1,
+    maxPlayers: 10,
+    accent: '#c8463a',
+    controls: [
+      { keys: 'W A S D', does: 'Move (Shift: sprint)' },
+      { keys: 'Mouse', does: 'Look, left click fires, right click aims' },
+      { keys: 'E (hold)', does: 'Rebuild boards, buy, revive' },
+      { keys: 'R / 1 2 / wheel', does: 'Reload, switch weapon' },
+      { keys: 'G / V', does: 'Throw grenade, knife' },
+      { keys: 'F / Tab', does: 'Flashlight, scores' },
     ],
   },
 };
@@ -118,7 +140,7 @@ export interface RoomSettings {
   maxPlayers: number;
   bots: number;
   botDifficulty: BotDifficulty;
-  /** Rockets map id, or 'random' for a different one every match. Other games ignore it. */
+  /** Map id of the room's game (Rockets, Last Light), or 'random' for a different one every match. Other games ignore it. */
   map: string;
   /** Rockets game mode. Other games ignore it. */
   mode: GameMode;
@@ -163,8 +185,8 @@ export interface RoomView {
   players: PlayerInfo[];
 }
 
-export type GameClientMsg = RocketsClientMsg | RuckusClientMsg;
-export type GameServerMsg = RocketsServerMsg | RuckusServerMsg;
+export type GameClientMsg = RocketsClientMsg | RuckusClientMsg | ZombiesClientMsg;
+export type GameServerMsg = RocketsServerMsg | RuckusServerMsg | ZombiesServerMsg;
 
 export type ClientMsg =
   | { t: 'setBots'; count: number; difficulty?: BotDifficulty }

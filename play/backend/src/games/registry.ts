@@ -4,8 +4,10 @@ import type { GameId } from '../shared/protocol.js';
 import { createRocketsGame } from './rockets/server.js';
 import { createRuckusGame } from './ruckus/server.js';
 import type { GameFactory } from './types.js';
+import { createZombiesGame } from './zombies/server.js';
 
 export const gameFactories: Record<GameId, GameFactory> = {
   rockets: createRocketsGame,
   ruckus: createRuckusGame,
+  zombies: createZombiesGame,
 };

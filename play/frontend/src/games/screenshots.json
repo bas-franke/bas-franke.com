@@ -39,6 +39,20 @@
       "caption": "Sumo"
     }
   ],
+  "zombies": [
+    {
+      "file": "zombies-storage.jpg",
+      "caption": "Cold Storage"
+    },
+    {
+      "file": "zombies-chapel.jpg",
+      "caption": "St. Agnes Chapel"
+    },
+    {
+      "file": "zombies-station.jpg",
+      "caption": "Pumping Station"
+    }
+  ],
   "dustrunners": [
     {
       "file": "dustrunners-falls.jpg",

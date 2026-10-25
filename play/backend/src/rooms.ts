@@ -12,6 +12,7 @@ import {
   PLAYER_COLORS,
   type BotDifficulty,
   type ClientMsg,
+  type GameId,
   type GameServerMsg,
   type PlayerInfo,
   type RoomSettings,
@@ -24,6 +25,7 @@ import {
 import { mapById, RANDOM_MAP } from './shared/rockets/maps.js';
 import { MODES, TEAMS } from './shared/rockets/modes.js';
 import { randomLook, sanitizeLook } from './shared/rockets/cosmetics.js';
+import { zmapById } from './shared/zombies/maps.js';
 import type { GameMode, Team } from './shared/protocol.js';
 
 export class RoomError extends Error {
@@ -330,7 +332,7 @@ export class Room implements GameHost {
       }
       case 'setMap':
         this.requireHost(member);
-        if (msg.map === RANDOM_MAP || mapById(String(msg.map))) this.settings.map = msg.map;
+        if (msg.map === RANDOM_MAP || validMap(this.settings.game, String(msg.map))) this.settings.map = msg.map;
         this.broadcastRoom();
         return;
       case 'setMode':
@@ -430,6 +432,9 @@ export class Room implements GameHost {
   }
 }
 
+/** Whether `id` is one of the maps of `game` (games without maps have none). */
+const validMap = (game: GameId, id: string) => (game === 'rockets' ? !!mapById(id) : game === 'zombies' ? !!zmapById(id) : false);
+
 export class RoomManager {
   readonly rooms = new Map<string, Room>();
 
@@ -447,7 +452,7 @@ export class RoomManager {
       maxPlayers,
       bots,
       botDifficulty,
-      map: typeof raw.map === 'string' && mapById(raw.map) ? raw.map : RANDOM_MAP,
+      map: typeof raw.map === 'string' && validMap(game, raw.map) ? raw.map : RANDOM_MAP,
       mode: typeof raw.mode === 'string' && raw.mode in MODES ? (raw.mode as GameMode) : 'ffa',
     };
     let code = randomCode();

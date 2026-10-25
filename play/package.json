@@ -7,6 +7,7 @@
     "dev": "concurrently -n api,web -c blue,green \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
     "models": "node tools/blender/run.mjs",
+    "models:zombies": "node tools/blender/run_zombies.mjs",
     "screenshots": "node backend/node_modules/tsx/dist/cli.mjs tools/screenshots/capture.mts"
   },
   "devDependencies": {

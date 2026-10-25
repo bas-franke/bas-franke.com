@@ -2,6 +2,7 @@ import { type FormEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type GameServerMsg, type PlayerInfo, type RoomView, type Team, colorHex } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
+import { ZMAP_LIST } from '@shared/zombies/maps';
 import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
 import { DIFFICULTIES, type QuickStart, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
 import { sfx } from '../engine/audio';
@@ -314,15 +315,18 @@ function WaitingRoom({
   const setTeam = (team: Team) => socket.send({ t: 'setTeam', team });
   const start = () => (sfx.unlock(), socket.send({ t: 'start' }));
   const hasMaps = room.game === 'rockets';
-  const mapName = MAP_LIST.find((m) => m.id === room.map)?.name ?? 'Random map';
+  const zombies = room.game === 'zombies';
+  const mapName = (zombies ? ZMAP_LIST : MAP_LIST).find((m) => m.id === room.map)?.name ?? 'Random map';
   const difficulty = DIFFICULTIES.find((d) => d.id === room.botDifficulty) ?? DIFFICULTIES[1];
   const botsLabel = `${bots} ${difficulty.label.toLowerCase()} ${bots === 1 ? 'bot' : 'bots'}`;
   const rules = hasMaps ? MODES[room.mode ?? 'ffa'] : null;
   const teamMode = !!rules?.teams;
-  const onMap = hasMaps ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : '';
+  const onMap = hasMaps || zombies ? ` on ${room.map === RANDOM_MAP ? 'a random map' : mapName}` : '';
   const lineup = teamMode
     ? `${rules!.name}: ${teamCount(room.players, 0)} vs ${teamCount(room.players, 1)}${onMap}, first to ${rules!.limit} ${GOAL_WORDS[rules!.goal]}`
-    : `${rules ? `${rules.name}: ` : ''}${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${onMap}${rules ? `, first to ${rules.limit} frags` : ''}`;
+    : zombies
+      ? `${humans} ${humans === 1 ? 'survivor' : 'survivors'}${bots ? ` and ${botsLabel}` : ''}${onMap}, endless waves`
+      : `${rules ? `${rules.name}: ` : ''}${humans} ${humans === 1 ? 'player' : 'players'} vs ${botsLabel}${onMap}${rules ? `, first to ${rules.limit} frags` : ''}`;
   const myTeam = room.players.find((p) => p.id === you)?.team;
   const playerRow = (p: PlayerInfo) => (
     <li key={p.id} className={!p.connected ? 'offline' : ''}>
@@ -356,7 +360,7 @@ function WaitingRoom({
           <span className="slots">
             {humans} {humans === 1 ? 'player' : 'players'}
             {bots ? ` + ${botsLabel}` : ''} · {room.maxPlayers} seats
-            {hasMaps && ` · ${mapName}`}
+            {(hasMaps || zombies) && ` · ${mapName}`}
           </span>
         </div>
         <div className="room-code-box" title="Share this code">
@@ -524,6 +528,44 @@ function WaitingRoom({
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {zombies && (
+            <div className="panel">
+              <div className="section-head">
+                <h2>Map</h2>
+                <span className="slots">
+                  {mapName}
+                  {!isHost && ' · the host picks'}
+                </span>
+              </div>
+              {isHost && (
+                <select className="visually-hidden" data-testid="map-select" aria-label="Map" value={room.map} onChange={(e) => setMap(e.target.value)}>
+                  <option value={RANDOM_MAP}>Random map</option>
+                  {ZMAP_LIST.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="mode-cards" role="radiogroup" aria-label="Map">
+                {[{ id: RANDOM_MAP, name: 'Random', blurb: 'A different building every match.' }, ...ZMAP_LIST].map((m) => (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={m.id === room.map}
+                    key={m.id}
+                    className={`mode-card${m.id === room.map ? ' active' : ''}`}
+                    disabled={!isHost}
+                    onClick={() => setMap(m.id)}
+                  >
+                    <b>{m.name}</b>
+                    <span>{m.blurb}</span>
+                  </button>
+                ))}
               </div>
             </div>
           )}

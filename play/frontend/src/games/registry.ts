@@ -7,6 +7,8 @@ import { RocketsHud } from './rockets/Hud';
 import { RuckusClient } from './ruckus/client';
 import { RuckusHud } from './ruckus/Hud';
 import type { ClientContext, GameClient } from './types';
+import { ZombiesClient } from './zombies/client';
+import { ZombiesHud } from './zombies/Hud';
 
 export interface GameModule<C extends GameClient = GameClient> {
   create(ctx: ClientContext): C;
@@ -17,4 +19,5 @@ export interface GameModule<C extends GameClient = GameClient> {
 export const gameModules: Record<GameId, GameModule<any>> = {
   rockets: { create: (ctx) => new RocketsClient(ctx), Hud: RocketsHud },
   ruckus: { create: (ctx) => new RuckusClient(ctx), Hud: RuckusHud },
+  zombies: { create: (ctx) => new ZombiesClient(ctx), Hud: ZombiesHud },
 };

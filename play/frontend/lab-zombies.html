@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Last Light graphics lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      /* Other modules being edited elsewhere must not cover the lab. */
+      vite-error-overlay { display: none !important; }
+      #app { position: fixed; inset: 0; }
+      #app canvas { width: 100%; height: 100%; display: block; }
+      #info { position: fixed; left: 8px; top: 8px; z-index: 5; color: #cfe; font: 12px ui-monospace, Consolas, monospace; background: rgba(0,0,0,.55); padding: 4px 8px; border-radius: 4px; pointer-events: none; }
+      #help { position: fixed; left: 8px; bottom: 8px; z-index: 5; color: #9ab; font: 11px ui-monospace, Consolas, monospace; background: rgba(0,0,0,.45); padding: 4px 8px; border-radius: 4px; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="info">loading…</div>
+    <div id="help">WASD fly (Shift fast, Z/X down/up), drag look · B break · N blast · 0-6 boards · P puff · L light · H hurt · 7/8/9 quality · M map</div>
+    <script type="module" src="/src/games/zombies/lab.ts"></script>
+  </body>
+</html>

@@ -1,6 +1,7 @@
 import { type FormEvent, useMemo, useState } from 'react';
 import { GAME_IDS, GAMES, LIMITS, type BotDifficulty, type GameId } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
+import { ZMAP_LIST } from '@shared/zombies/maps';
 import { createRoom, saveName, savedName } from '../api';
 import { GameCover } from '../ui/GameCover';
 import { Modal } from '../ui/Modal';
@@ -117,7 +118,8 @@ function Settings({
   const [map, setMap] = useState(RANDOM_MAP);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const hasMaps = game === 'rockets';
+  const maps = game === 'rockets' ? MAP_LIST : game === 'zombies' ? ZMAP_LIST : [];
+  const hasMaps = maps.length > 0;
   const botCount = Math.min(bots, maxPlayers - 1);
 
   const submit = async (e: FormEvent) => {
@@ -207,7 +209,7 @@ function Settings({
             Map
             <select value={map} onChange={(e) => setMap(e.target.value)}>
               <option value={RANDOM_MAP}>Random every match</option>
-              {MAP_LIST.map((m) => (
+              {maps.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                 </option>
