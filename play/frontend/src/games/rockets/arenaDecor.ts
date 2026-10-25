@@ -655,10 +655,14 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, fade: Bucket, rand:
       const yaw = Math.atan2(nx, nz);
       const w = Math.min(half * 0.7, 1.4);
       solid.add(at(box(w + 0.6, slotH + 0.6, 0.12), x, cy, z, yaw), 0x2a2634);
-      glow.add(at(box(w, slotH, 0.16), x, cy, z, yaw), 0xff6a14);
-      glow.add(at(box(w * 0.32, slotH, 0.18), x, cy, z, yaw), 0xffe6a0);
+      // A half-round glass tube of furnace light standing proud of the face, a hot core line down it, dark rings.
+      const r = w / 2;
+      const tubeGeo = (rad: number, h: number) => new THREE.CylinderGeometry(rad, rad, h, 12, 1, false, -Math.PI / 2, Math.PI);
+      glow.add(at(tubeGeo(r, slotH), x, cy, z, yaw), 0xff6a14);
+      glow.add(at(tubeGeo(r * 0.35, slotH).translate(0, 0, r * 0.62), x, cy, z, yaw), 0xffe6a0);
       streak(x + nx * 0.1, foot, z + nz * 0.1, nx, nz, w * 1.4, 5, 0xff8a2a, 0.9);
-      for (let y = cy - slotH / 2 + 1; y < cy + slotH / 2 - 0.3; y += 1.6) solid.add(at(box(w + 0.1, 0.12, 0.2), x, y, z, yaw), 0x2a2634);
+      for (let y = cy - slotH / 2 + 1; y < cy + slotH / 2 - 0.3; y += 1.6) solid.add(at(tubeGeo(r + 0.07, 0.14), x, y, z, yaw), 0x2a2634);
+      for (const y of [cy - slotH / 2, cy + slotH / 2]) solid.add(at(tubeGeo(r + 0.12, 0.3), x, y, z, yaw), 0x34303e);
     }
     for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
       const ph = core.max.y - foot - 0.3;
