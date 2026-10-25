@@ -3,10 +3,12 @@
 //
 // Tips: build (wave 1 build phase), upgrade (after the first build), early (gold to spare while the build timer runs),
 // roster (first time each enemy kind shows up), send (versus), leak (first enemy reaching the greenhouse).
-// The overlay is pointer-events: none; only the cards take clicks. It never covers the bottom build bar or the
-// middle of the 3D view: build tip sits just above the bar, the rest along the left edge, the leak tip up top.
+// The overlay is pointer-events: none; only the cards take clicks. Desktop: every card sits centred just above the
+// build bar (clear of the portals at the map edges, the toasts and the NEXT strip up top). Phones: a slim card docked
+// under the wave block (portrait) or bottom-left (landscape), hidden while a sheet or drawer is open (garden.css).
+// On touch screens (pointer: coarse) the wording switches to taps and the key badges go away.
 
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { ENEMIES, type EnemyKind } from '@shared/garden/enemies';
 import { TOWERS, TOWER_KINDS } from '@shared/garden/towers';
 import type { GardenActions, GHudState } from './api';
@@ -46,13 +48,33 @@ function save(s: Saved) {
 /** Cheapest level 1 tower: "can afford something". */
 const CHEAPEST = Math.min(...TOWER_KINDS.map((k) => TOWERS[k].levels[0].cost));
 
+// Checked against towers.ts / enemies.ts: lasers (and shields, flowers) ignore armour (pierce 1), missiles do not
+// (pierce 0); brutes have 50% armour, the colossus 40%, disruptors 10%, runners and skitters none.
 const COUNTER: Record<EnemyKind, string> = {
   runner: 'Quick but fragile. Lasers melt them, and Slow Flowers keep them in range.',
-  skitter: 'They come in packs of five. Missile Pod splash pops a whole pack at once.',
+  skitter: 'They come in packs. Missile Pod splash pops a whole pack at once.',
   disruptor: 'Zaps your towers offline. Bubble Shields block the bolts and protect nearby towers.',
-  brute: 'Thick crystal armour shrugs off lasers. Missiles punch right through it.',
-  colossus: 'Throw everything at it, and watch out: it sheds skitters every time it cracks.',
+  brute: 'Thick crystal armour halves missile damage. Lasers burn straight through it, and Slow Flowers keep it in the beam.',
+  colossus: 'Lasers ignore its armour. It sheds skitters every time it cracks: keep a Missile Pod near the path to pop them.',
 };
+
+// ---- touch detection ------------------------------------------------------------------------------------------------
+
+const COARSE = '(pointer: coarse)';
+const subscribeCoarse = (cb: () => void) => {
+  if (typeof matchMedia !== 'function') return () => {};
+  const m = matchMedia(COARSE);
+  m.addEventListener?.('change', cb);
+  return () => m.removeEventListener?.('change', cb);
+};
+const coarseNow = () => typeof matchMedia === 'function' && matchMedia(COARSE).matches;
+
+/** True on touch-first screens (phones, tablets): tap wording, no key badges. */
+export function useCoarse(): boolean {
+  return useSyncExternalStore(subscribeCoarse, coarseNow, () => false);
+}
+
+const bossFirst = (r: EnemyKind[]) => (r.includes('colossus') ? ['colossus' as EnemyKind, ...r.filter((k) => k !== 'colossus')] : r);
 
 const TAG_CLASS: Record<string, string> = { Fast: 'fast', Swarm: 'swarm', Support: 'support', Armored: 'armored', Boss: 'boss' };
 
@@ -223,58 +245,83 @@ interface Card {
   ttl?: number;
 }
 
-const TEXT: Record<TipId, Omit<Card, 'key'>> = {
+type TipText = Omit<Card, 'key' | 'body'> & { body: (touch: boolean) => JSX.Element };
+
+const TEXT: Record<TipId, TipText> = {
   build: {
     where: 'bar',
     title: 'Plant your first sentinel',
-    body: (
-      <>
-        Pick a tower below (or press <Kbd>1</Kbd>–<Kbd>5</Kbd>), then click a grass tile next to the path.
-      </>
-    ),
+    body: (touch) =>
+      touch ? (
+        <>Tap a tower card, then tap a grass tile next to the path to preview it. Tap the same tile again to plant.</>
+      ) : (
+        <>
+          Pick a tower below (or press <Kbd>1</Kbd>–<Kbd>5</Kbd>), then click a grass tile next to the path.
+        </>
+      ),
   },
   upgrade: {
     where: 'side',
     title: 'Nicely done!',
-    body: (
-      <>
-        Click a tower to upgrade (<Kbd>U</Kbd>) or sell (<Kbd>X</Kbd>) it. Level 3 towers are <b>Masterworks</b>.
-      </>
-    ),
+    body: (touch) =>
+      touch ? (
+        <>
+          Tap a tower to upgrade or sell it. Level 3 towers are <b>Masterworks</b>.
+        </>
+      ) : (
+        <>
+          Click a tower to upgrade (<Kbd>U</Kbd>) or sell (<Kbd>X</Kbd>) it. Level 3 towers are <b>Masterworks</b>.
+        </>
+      ),
     ttl: 14,
   },
   early: {
     where: 'side',
     title: 'Ready?',
-    body: (
-      <>
-        Press <Kbd>R</Kbd> to call the wave early for bonus gold.
-      </>
-    ),
+    body: (touch) =>
+      touch ? (
+        <>
+          Tap <b>Call wave</b> at the top to start early for bonus gold.
+        </>
+      ) : (
+        <>
+          Press <Kbd>R</Kbd> or click <b>Call wave</b> to start early for bonus gold.
+        </>
+      ),
   },
   send: {
     where: 'side',
     title: 'Versus',
-    body: <>Send enemies at your rivals from the Send panel. Sending raises your income every wave.</>,
+    body: (touch) =>
+      touch ? (
+        <>Tap the little runner at the top right to send enemies at your rivals. Sending raises your income every wave.</>
+      ) : (
+        <>Send enemies at your rivals from the Send panel. Sending raises your income every wave.</>
+      ),
     ttl: 16,
   },
   leak: {
     where: 'top',
     tone: 'bad',
     title: 'Oh no, a leak!',
-    body: <>An enemy reached the greenhouse! Cover every entrance.</>,
+    body: () => <>An enemy reached the greenhouse! Strengthen the path near the greenhouse or cover the entrance it came from.</>,
     ttl: 9,
   },
 };
 
 export function GardenCoach({ state, actions }: { state: GHudState; actions: GardenActions }) {
   void actions;
+  const touch = useCoarse();
+  // client.ts reports how many towers you own; older builds did not (then a gold drop right after placing counts).
+  const myTowers = state.myTowers;
   const [saved, setSaved] = useState<Saved>(load);
   // Tips currently wanted (transient conditions), and the enemy roster queue.
   const [built, setBuilt] = useState(false);
   const [leaked, setLeaked] = useState(false);
   const [roster, setRoster] = useState<EnemyKind[]>([]);
   const prev = useRef<{ gold: number; lives: number; phase: string; placing: boolean; wave: number } | null>(null);
+  /** When placing last ended: the build is confirmed (gold drops) a tick after the client leaves placing mode. */
+  const placingEnded = useRef(0);
   const lastNext = useRef<EnemyKind[]>([]);
 
   const update = (f: (s: Saved) => Saved) =>
@@ -297,22 +344,26 @@ export function GardenCoach({ state, actions }: { state: GHudState; actions: Gar
     const p = prev.current;
     const placing = state.placing != null;
     if (state.phase === 'build' && state.next.length) lastNext.current = state.next.map((n) => n.kind);
+    if (p && p.placing && !placing) placingEnded.current = performance.now();
+    if (!built && myTowers !== undefined && myTowers > 0) setBuilt(true);
     if (p) {
-      if (!built && ((state.gold < p.gold && (p.placing || placing)) || state.selected?.mine)) setBuilt(true);
+      const justPlaced = p.placing || placing || performance.now() - placingEnded.current < 1500;
+      if (!built && myTowers === undefined && ((state.gold < p.gold && justPlaced) || state.selected?.mine)) setBuilt(true);
       if (state.lives < p.lives && state.phase !== 'over') setLeaked(true);
       if (state.phase === 'wave' && (p.phase !== 'wave' || p.wave !== state.wave)) {
         const kinds = lastNext.current.length ? lastNext.current : state.next.map((n) => n.kind);
         const fresh = kinds.filter((k, i) => kinds.indexOf(k) === i && !saved.kinds.includes(k));
-        if (fresh.length) setRoster((r) => [...r, ...fresh.filter((k) => !r.includes(k))]);
+        // The boss goes first: its card matters more than any lesser arrival.
+        if (fresh.length) setRoster((r) => bossFirst([...r, ...fresh.filter((k) => !r.includes(k))]));
         lastNext.current = [];
       }
     } else if (state.phase === 'wave' && state.next.length) {
       // Joined mid-wave: best guess at what is on the path.
       const fresh = state.next.map((n) => n.kind).filter((k) => !saved.kinds.includes(k));
-      if (fresh.length) setRoster(fresh);
+      if (fresh.length) setRoster(bossFirst(fresh));
     }
     prev.current = { gold: state.gold, lives: state.lives, phase: state.phase, placing, wave: state.wave };
-  }, [state, built, saved.kinds]);
+  }, [state, built, saved.kinds, myTowers]);
 
   // Once the first build happened the build tip is done for good.
   useEffect(() => {
@@ -324,14 +375,13 @@ export function GardenCoach({ state, actions }: { state: GHudState; actions: Gar
   const hidden = !state.ready || saved.off || !!state.end || state.paused || state.scoresOpen || state.phase === 'over';
 
   let card: Card | null = null;
-  const pick = (id: TipId) => ({ key: id, ...TEXT[id] });
+  const pick = (id: TipId): Card => ({ key: id, ...TEXT[id], body: TEXT[id].body(touch) });
+  const rosterCard = (k: EnemyKind): Card => ({ key: `kind-${k}`, where: 'side', title: ENEMIES[k].name, kind: k, body: <>{COUNTER[k]}</>, ttl: 14 });
   if (!hidden) {
-    if (leaked && !seen('leak')) card = pick('leak');
-    else if (roster.length) {
-      const k = roster[0];
-      const d = ENEMIES[k];
-      card = { key: `kind-${k}`, where: 'side', title: d.name, kind: k, body: <>{COUNTER[k]}</>, ttl: 14 };
-    } else if (!seen('build') && !built && state.phase === 'build' && state.wave <= 1) card = pick('build');
+    if (roster[0] === 'colossus') card = rosterCard('colossus');
+    else if (leaked && !seen('leak')) card = pick('leak');
+    else if (roster.length) card = rosterCard(roster[0]);
+    else if (!seen('build') && !built && state.phase === 'build' && state.wave <= 1) card = pick('build');
     else if (built && !seen('upgrade')) card = pick('upgrade');
     else if (state.mode === 'vs' && !seen('send') && seen('build') && state.wave >= 1) card = pick('send');
     else if (!seen('early') && seen('build') && state.phase === 'build' && state.left > 3 && state.gold >= CHEAPEST && !state.placing)
@@ -374,7 +424,7 @@ export function GardenCoach({ state, actions }: { state: GHudState; actions: Gar
     <div className="gsc-layer">
       <div
         key={card.key}
-        className={`gsc-card gsc-at-${card.where}${card.tone ? ` gsc-${card.tone}` : ''}${d ? ' gsc-roster' : ''}`}
+        className={`gsc-card gsc-at-${card.where}${touch ? ' gsc-touch' : ''}${card.tone ? ` gsc-${card.tone}` : ''}${d ? ' gsc-roster' : ''}`}
         role="status"
         aria-live="polite"
       >

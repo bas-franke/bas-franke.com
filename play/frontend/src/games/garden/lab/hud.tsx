@@ -6,6 +6,10 @@
 //   &phase=wave                   wave phase (enemies left, progress)
 //   &place=laser                  placing a tower
 //   &scores=1  &menu=1  &boss=1  &poor=1  &view=2 (versus: watching another board)  &loading=1  &live=1 (ticking)
+//   &spectator=1                  versus spectator (no cards, sends, gold; "Spectating" tag)
+//   &incoming=1                   versus: sends queued at you and at other gardens (NEXT strip + gardens strip)
+//   &bossbanner=1                 the build phase before a boss wave turns into the wave after 0.6 s (boss banner)
+//   &coach=build|upgrade|early|send|leak|colossus|runner   force that coach tip (the rest marked seen)
 import { createRoot } from 'react-dom/client';
 import type { RoomView } from '@shared/protocol';
 import { G } from '@shared/garden/constants';
@@ -13,7 +17,7 @@ import type { EnemyKind } from '@shared/garden/enemies';
 import type { GScore } from '@shared/garden/protocol';
 import { TOWERS, spentUpTo, type Level, type TowerKind } from '@shared/garden/towers';
 import { createStore, type ClientContext } from '../../types';
-import type { GardenActions, GHudState, HudBoard, HudPlayer, Toast } from '../api';
+import type { GardenActions, GHudState, HudBoard, HudIncoming, HudPlayer, Toast } from '../api';
 import { GardenHud } from '../Hud';
 import '../../../styles.css';
 
@@ -21,7 +25,9 @@ const q = new URLSearchParams(location.search);
 const vs = q.get('mode') === 'vs';
 const sel = Number(q.get('sel') ?? 0) as 0 | 1 | 2 | 3;
 const phase = q.get('phase') === 'wave' ? 'wave' : 'build';
-const boss = q.has('boss');
+const boss = q.has('boss') || q.has('bossbanner');
+const spectator = vs && q.has('spectator');
+const coach = q.get('coach');
 
 const PEOPLE: [string, string, number, boolean][] = [
   ['me', 'Bas', 0x2eb3ff, false],
@@ -40,8 +46,28 @@ const players: HudPlayer[] = PEOPLE.map(([id, name, color, bot], i) => ({
   ready: [false, true, true, false, false][i],
   b: vs ? i : 0,
 }));
+const INC: HudIncoming[][] = [
+  [
+    { kind: 'runner', count: 6, from: 'p3', fromColor: 0xffa940 },
+    { kind: 'brute', count: 1, from: 'p2', fromColor: 0xff7ab6 },
+  ],
+  [{ kind: 'skitter', count: 2, from: 'me', fromColor: 0x2eb3ff }],
+  [{ kind: 'disruptor', count: 1 }],
+  [],
+  [],
+];
 const boards: HudBoard[] = vs
-  ? players.map((p, i) => ({ b: i, own: p.id, name: p.name, color: p.color, lives: [17, 20, 6, 0, 0][i], out: i >= 3, place: i === 3 ? 4 : i === 4 ? 5 : undefined }))
+  ? players.map((p, i) => ({
+      b: i,
+      own: p.id,
+      name: p.name,
+      color: p.color,
+      lives: [17, 20, 6, 0, 0][i],
+      out: i >= 3,
+      place: i === 3 ? 4 : i === 4 ? 5 : undefined,
+      incoming: q.has('incoming') ? INC[i] : [],
+      sendsIn: q.has('incoming') ? [0, 3, 5, 0, 0][i] : 0,
+    }))
   : [{ b: 0, own: null, name: 'Garden', color: 0x6baf4b, lives: 14, out: false }];
 
 const scores: GScore[] = players.map((p, i) => ({
@@ -66,13 +92,14 @@ const toasts: Toast[] = [
 ];
 
 const endParam = q.get('end');
+const coachWave = coach === 'build' ? 0 : coach ? 2 : null;
 const initial: GHudState = {
   ready: !q.has('loading'),
   mode: vs ? 'vs' : 'coop',
   mapName: 'Moonpetal Meadow',
-  wave: boss ? 9 : 11,
+  wave: coachWave ?? (boss ? 9 : 11),
   maxWave: vs ? 0 : G.coopWaves,
-  phase: endParam !== null ? 'over' : phase,
+  phase: endParam !== null ? 'over' : coach === 'colossus' || coach === 'runner' || q.has('bossbanner') ? 'build' : phase,
   left: phase === 'wave' ? 37 : 14,
   progress: 0.42,
   lives: vs ? boards[Number(q.get('view') ?? 0)].lives : 14,
@@ -80,7 +107,11 @@ const initial: GHudState = {
   boards,
   players,
   you: 'me',
-  myBoard: 0,
+  myBoard: spectator ? -1 : 0,
+  spectator,
+  autoCam: spectator,
+  incoming: q.has('incoming') && !spectator ? INC[0] : [],
+  myTowers: coach && coach !== 'build' ? 2 : 0,
   viewBoard: vs ? Number(q.get('view') ?? 0) : 0,
   gold: q.has('poor') ? 95 : 340,
   income: vs ? 64 : 0,
@@ -96,7 +127,9 @@ const initial: GHudState = {
         flags: sel === 3 ? 2 | 4 : 0,
       }
     : null,
-  next: boss
+  next: coach === 'runner'
+    ? [{ kind: 'runner', count: 7 }]
+    : boss || coach === 'colossus'
     ? [
         { kind: 'runner', count: 18 },
         { kind: 'skitter', count: 5 },
@@ -110,7 +143,7 @@ const initial: GHudState = {
         { kind: 'disruptor', count: 2 },
         { kind: 'brute', count: 2 },
       ],
-  bossNext: boss,
+  bossNext: boss || coach === 'colossus',
   toasts,
   scoresOpen: q.has('scores'),
   scores,
@@ -123,7 +156,7 @@ const store = createStore<GHudState>(initial);
 const toast = (text: string, tone: Toast['tone']) => store.set((s) => ({ toasts: [...s.toasts.slice(-5), { key: toastKey++, text, tone, at: performance.now() }] }));
 
 const actions: GardenActions = {
-  place: (kind) => store.set({ placing: kind, selected: null }),
+  place: (kind) => store.set((s) => ({ placing: kind && s.placing === kind ? null : kind, selected: null })),
   upgrade: (id) =>
     store.set((s) => {
       const c = s.selected;
@@ -238,6 +271,21 @@ function Lab() {
     </div>
   );
 }
+
+// Coach: seed localStorage so only the asked-for tip is due, then nudge the store so the coach sees transitions.
+if (coach) {
+  const all = ['build', 'upgrade', 'early', 'send', 'leak'];
+  const kinds = ['runner', 'skitter', 'disruptor', 'brute', 'colossus'];
+  const roster = coach === 'colossus' || coach === 'runner';
+  localStorage.setItem(
+    'garden.coach.v1',
+    JSON.stringify({ seen: roster ? all : all.filter((x) => x !== coach && !(coach === 'upgrade' && x === 'build')), kinds: roster ? kinds.filter((k) => k !== coach && !(coach === 'colossus' && k === 'runner')) : kinds, off: false }),
+  );
+  setTimeout(() => store.set((s) => ({ left: s.left - 1 })), 300);
+  if (roster) setTimeout(() => store.set((s) => ({ phase: 'wave', wave: s.wave + 1, left: 30 })), 600);
+  if (coach === 'leak') setTimeout(() => store.set((s) => ({ lives: s.lives - 2 })), 600);
+}
+if (q.has('bossbanner')) setTimeout(() => store.set((s) => ({ phase: 'wave', wave: s.wave + 1, left: 30, bossNext: false })), 600);
 
 createRoot(document.getElementById('root')!).render(<Lab />);
 if (q.has('menu')) setTimeout(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape' })), 300);

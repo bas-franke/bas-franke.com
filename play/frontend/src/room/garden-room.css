@@ -120,16 +120,39 @@
   pointer-events: none;
 }
 
-@media (max-width: 420px) {
+/* Phones: a compact two-column map grid. Titles small enough to fit (the site's condensed display font is huge at full size),
+   blurbs hidden, stats small. Doubled class selectors beat the shared .mode-card rules in styles.css. */
+@media (max-width: 560px) {
   .mode-cards.gsr-maps {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
-  .gsr-map > span:not(.gsr-thumb) {
+  .mode-card.gsr-map {
+    padding: 6px 6px 8px;
+    gap: 2px;
+  }
+  .mode-card.gsr-map > span:not(.gsr-thumb) {
     display: none;
   }
-  .gsr-map > b {
-    font-size: 17px;
+  .mode-card.gsr-map > b {
+    font-size: 15px;
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+    margin-top: 2px;
+  }
+  .mode-card.gsr-map > em {
+    font-size: 9.5px;
+    letter-spacing: 0.03em;
+    padding-top: 2px;
+  }
+  .gsr-stats {
+    gap: 2px 8px;
+  }
+  .gsr-chip {
+    top: 4px;
+    right: 4px;
+    font-size: 9px;
+    padding: 1px 5px 2px;
   }
   .gsr-q {
     font-size: 34px;

@@ -308,6 +308,7 @@
 }
 .gs-list-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5em;
   padding: 0.28em 0.45em;
@@ -553,6 +554,55 @@
 .gs-chip-colossus {
   background: linear-gradient(90deg, #f3e6ff, #dffcf9);
 }
+.gs-next-sent {
+  margin-left: 0.35em;
+  padding-left: 0.5em;
+  border-left: 0.1em solid rgba(43, 52, 64, 0.2);
+  color: #b03a4a;
+}
+.gs-chip-inc {
+  background: #fff;
+  box-shadow: 0 0 0 0.14em var(--gs-from, #ff6f7d);
+  margin: 0 0.1em;
+}
+.gs-chip-inc.small {
+  font-size: 0.78em;
+  padding: 0 0.35em 0 0.1em;
+  color: var(--gs-ink);
+}
+.gs-chip-inc.small .gs-enemy-icon {
+  width: 1.25em;
+  height: 1.25em;
+}
+.gs-sends-in {
+  font-size: 0.75em;
+  font-weight: 800;
+  padding: 0 0.4em;
+  border-radius: 0.6em;
+  background: rgba(255, 111, 125, 0.18);
+  color: #ffb3bb;
+}
+.gs-autocam {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(0.8em, env(safe-area-inset-bottom)) + 4.6em);
+  transform: translateX(-50%);
+  padding: 0.3em 0.9em;
+  border-radius: 1em;
+  background: rgba(40, 50, 62, 0.82);
+  color: #f6efe6;
+  font-size: 0.85em;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.gs-board-inc {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+  padding: 0.15em 0 0.1em 1.25em;
+}
 .gs-boss-tag {
   font: 700 0.8em var(--gs-display);
   letter-spacing: 0.08em;
@@ -751,6 +801,86 @@
   height: 0.75em;
   border-radius: 50%;
 }
+.gs-spectating-tag {
+  cursor: default;
+  box-shadow: 0 0 0 0.12em var(--gs-violet);
+}
+.gs-spectating-tag > b {
+  font: 700 0.95em var(--gs-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e2c9ff;
+}
+.gs-spectating-tag .gs-viewing-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding-right: 0.3em;
+}
+.gs-spec-eye svg {
+  display: block;
+  width: 1.2em;
+  height: 1.2em;
+  color: #e2c9ff;
+}
+.gs-boss-banner {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1em;
+  padding: 0.6em 2.4em 0.75em;
+  border-radius: 1.4em;
+  background: linear-gradient(180deg, rgba(74, 36, 70, 0.96), rgba(46, 24, 52, 0.96));
+  color: #fff;
+  pointer-events: none;
+  z-index: 6;
+  box-shadow:
+    0 0 0 0.16em #ff5b6e,
+    0 0 2.4em rgba(255, 91, 110, 0.65),
+    0 1.4em 2.4em -1em rgba(0, 0, 0, 0.6);
+  animation: gs-boss-in 3.6s cubic-bezier(0.3, 1.4, 0.5, 1) forwards;
+  white-space: nowrap;
+}
+.gs-boss-banner-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font: 700 1em var(--gs-display);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #ff9aa6;
+}
+.gs-boss-banner b {
+  font: 700 2.4em/1.05 var(--gs-display);
+  letter-spacing: 0.03em;
+  background: linear-gradient(90deg, #d9b8ff, #8fd8ff, #8ff5ec, #ffd08a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@keyframes gs-boss-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+  20%,
+  85% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -60%) scale(0.98);
+  }
+}
 .gs-viewing-back {
   padding: 0.1em 0.55em;
   border-radius: 0.7em;
@@ -774,13 +904,37 @@
 }
 .gs-placing-hint {
   pointer-events: none;
-  padding: 0.35em 0.9em;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.3em 0.35em 0.3em 0.9em;
   border-radius: 1em;
   background: rgba(40, 50, 62, 0.9);
   color: #f6efe6;
   font-weight: 700;
   font-size: 0.9em;
   white-space: nowrap;
+}
+.gs-cancel {
+  pointer-events: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.2em 0.65em 0.2em 0.5em;
+  border-radius: 0.8em;
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff !important;
+  font-weight: 800 !important;
+  cursor: pointer;
+}
+.gs-cancel:hover {
+  background: rgba(255, 111, 125, 0.45);
+}
+.gs-cancel svg {
+  width: 0.85em;
+  height: 0.85em;
 }
 .gs-placing-hint b {
   color: var(--gs-mint);
@@ -850,11 +1004,13 @@
   aspect-ratio: 1.12;
   border-radius: 0.7em;
   overflow: hidden;
+  /* Warm dark backdrop like the portraits (rendered on a dark warm stage), with a soft key light and a thin rim. */
   background:
-    radial-gradient(ellipse 70% 45% at 50% 22%, rgba(255, 246, 214, 0.9), transparent 70%),
-    radial-gradient(circle at 15% 85%, #4f8f3a 0 20%, transparent 21%),
-    radial-gradient(circle at 88% 80%, #5a9c42 0 18%, transparent 19%),
-    linear-gradient(180deg, #bfe3f2 0%, #d9efd0 52%, #7cb75a 53%, #5e9c44 100%);
+    radial-gradient(ellipse 75% 55% at 50% 30%, rgba(255, 196, 120, 0.28), transparent 70%),
+    linear-gradient(180deg, #3b3027 0%, #2a2420 60%, #1f1c1a 100%);
+  box-shadow:
+    inset 0 0 0 0.08em rgba(255, 222, 176, 0.22),
+    inset 0 -0.6em 0.9em -0.6em rgba(0, 0, 0, 0.5);
 }
 .gs-portrait {
   display: block;
@@ -872,6 +1028,9 @@
 .gs .gsc-layer {
   --gsc-top: calc(10.2 * clamp(13px, calc(0.38vw + 0.38vh + 4px), 28px));
   --gsc-bar-h: calc(10.2 * clamp(13px, calc(0.38vw + 0.38vh + 4px), 28px));
+}
+.gs.gs-is-placing .gsc-layer {
+  --gsc-bar-h: calc(12.8 * clamp(13px, calc(0.38vw + 0.38vh + 4px), 28px));
 }
 .gs-tcard-art .gs-tower-icon {
   position: absolute;
@@ -896,14 +1055,22 @@
   gap: 0.3em;
   font: 700 1.05em/1 var(--gs-display);
 }
-.gs-tcard.poor {
-  filter: saturate(0.35);
+.gs-tcard-cost {
+  padding: 0.1em 0.4em;
+  border-radius: 0.7em;
+  transition:
+    background 0.2s,
+    color 0.2s;
 }
-.gs-tcard.poor .gs-tcard-art {
-  opacity: 0.7;
+.gs-tcard.poor {
+  filter: saturate(0.75);
 }
 .gs-tcard.poor .gs-tcard-cost {
-  color: #ff9a9a;
+  color: #ffc2c2;
+  background: rgba(214, 64, 82, 0.42);
+}
+.gs-tcard.poor .gs-tcard-cost .gs-glyph {
+  opacity: 0.7;
 }
 .gs-tip {
   position: absolute;
@@ -1036,11 +1203,16 @@
   width: 4.2em;
   height: 4.2em;
   border-radius: 0.9em;
+  overflow: hidden;
   background:
-    radial-gradient(ellipse 70% 45% at 50% 22%, rgba(255, 246, 214, 0.9), transparent 70%),
-    linear-gradient(180deg, #bfe3f2 0%, #d9efd0 52%, #7cb75a 53%, #5e9c44 100%);
+    radial-gradient(ellipse 75% 55% at 50% 30%, rgba(255, 196, 120, 0.3), transparent 70%),
+    linear-gradient(180deg, #3b3027 0%, #2a2420 60%, #1f1c1a 100%);
   padding: 0.15em;
   box-shadow: inset 0 0 0 0.14em var(--gs-owner, #fff);
+}
+.gs-panel-art .gs-portrait {
+  border-radius: 0.75em;
+  object-fit: cover;
 }
 .gs-panel-art .gs-tower-icon {
   width: 100%;
@@ -1411,6 +1583,7 @@
   border-bottom-color: rgba(0, 0, 0, 0.4);
   text-shadow: none;
 }
+.gs-spectating .gs-hint,
 .gs-coop .gs-panel ~ .gs-hint,
 .gs-vs .gs-panel ~ .gs-hint {
   display: none;
@@ -1549,6 +1722,26 @@
 }
 .gs-setting .volume-control button {
   color: var(--gs-ink) !important;
+  border-color: rgba(43, 52, 64, 0.25);
+  background: #fff;
+}
+.gs-setting .volume-val {
+  color: var(--gs-ink);
+  font-weight: 700;
+}
+.gs-setting .volume-control input[type='range'] {
+  accent-color: #e08a1e;
+}
+.gs-gesture {
+  font: 700 0.9em var(--gs-display);
+  padding: 0.15em 0.55em;
+  border-radius: 0.6em;
+  background: rgba(43, 52, 64, 0.1);
+  justify-self: start;
+  white-space: nowrap;
+}
+.gs-controls-touch li {
+  grid-template-columns: 7em 1fr;
 }
 .gs-controls {
   list-style: none;
@@ -1622,6 +1815,20 @@
 
 /* ---- responsive ------------------------------------------------------------------------------------------------ */
 
+/* Touch screens: key badges mean nothing; the hint line goes too. */
+@media (pointer: coarse) {
+  .gs kbd,
+  .gs .gs-key,
+  .gs-hint {
+    display: none;
+  }
+}
+.gs.gs-touch kbd,
+.gs.gs-touch .gs-key,
+.gs.gs-touch .gs-hint {
+  display: none;
+}
+
 /* Short or narrow desktop windows: tuck the hint away and give the wave block room. */
 @media (max-width: 1100px) {
   .gs-hint {
@@ -1629,9 +1836,10 @@
   }
 }
 
-/* Phones and small tablets: wave card on top; resources and the round buttons share the second row; next-wave
-   chips and the call button below; cards scroll sideways; the tower panel is a bottom sheet; lists are drawers. */
-@media (max-width: 760px) {
+/* Phones and small tablets (and any short or touch-first window, landscape phones included; the landscape block below
+   then rearranges it): wave card on top; resources and the round buttons share the second row; next-wave chips and
+   the call button below; the five cards fit the width; the tower panel is a bottom sheet; lists are drawers. */
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) and (max-width: 1000px) {
   .hud.gs {
     font-size: 13px;
     --gs-row2: calc(var(--gs-pad) + 4em);
@@ -1640,7 +1848,7 @@
     display: grid;
   }
   .gs .gsc-layer {
-    --gsc-top: 172px;
+    --gsc-top: 184px;
     --gsc-bar-h: 124px;
   }
   .gs-tc {
@@ -1714,9 +1922,16 @@
   .gs-people.open {
     display: block;
   }
+  /* Drawers open below the top rows (wave card, resources, next / call wave), never over Call wave. */
+  .gs-people.open {
+    position: absolute;
+    top: calc(2.6em + 3.6em);
+    left: 0;
+    z-index: 5;
+  }
   .gs-people.open .gs-list {
     width: 15em;
-    max-height: 48vh;
+    max-height: calc(100vh - var(--gs-row2) - 7em - 140px);
   }
   .gs-tr {
     top: var(--gs-row2);
@@ -1756,21 +1971,35 @@
   .gs-placing-hint kbd {
     display: none;
   }
+  /* All five cards fit (about 68 px each at 390 px); below ~330 px they scroll with a fade on the right edge. */
   .gs-cards {
-    max-width: calc(100vw - 1em);
+    width: calc(100vw - 1em);
+    max-width: 34em;
     overflow-x: auto;
     scroll-snap-type: x proximity;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    gap: 0.4em;
-    padding: 0.4em;
+    gap: 0.3em;
+    padding: 0.35em;
   }
   .gs-cards::-webkit-scrollbar {
     display: none;
   }
   .gs-tcard {
-    width: 5.8em;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 4.6em;
+    padding: 0.25em 0.25em 0.35em;
     scroll-snap-align: start;
+  }
+  .gs-tcard-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.72em;
+  }
+  .gs-tcard-cost {
+    font-size: 0.98em;
   }
   .gs-tcard:hover,
   .gs-tcard.active {
@@ -1798,9 +2027,12 @@
     display: none;
     left: auto;
     right: var(--gs-side);
-    top: calc(var(--gs-row2) + 3.1em);
+    top: calc(var(--gs-row2) + 6.4em);
     bottom: auto;
-    z-index: 3;
+    z-index: 5;
+    max-height: calc(100vh - var(--gs-row2) - 7em - 140px);
+    overflow-y: auto;
+    border-radius: 1.1em;
   }
   .gs-send-wrap.open {
     display: block;
@@ -1810,6 +2042,214 @@
   }
   .gs-sheet h2 {
     font-size: 1.45em;
+  }
+  .gs-boss-banner {
+    top: 40%;
+    padding: 0.5em 1.4em 0.6em;
+  }
+  .gs-boss-banner b {
+    font-size: 1.8em;
+  }
+  .gs-placing-hint {
+    justify-content: center;
+    padding: 0.3em 0.35em 0.3em 0.8em;
+    text-align: left;
+  }
+  .gs-placing-hint > span {
+    white-space: normal;
+  }
+  .gs-next {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .gs-spectating .gs-viewing {
+    bottom: max(0.8em, env(safe-area-inset-bottom));
+  }
+
+  /* Tap targets: 44 px for everything a thumb presses (close buttons 40 px). */
+  .gs-icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .gs-close {
+    width: 40px;
+    height: 40px;
+    top: 0.2em;
+    right: 0.2em;
+  }
+  .gs-call,
+  .gs-btn,
+  .gs-seg button,
+  .gs-send-btn,
+  .gs-send-to button,
+  .gs-board,
+  .gs-cancel,
+  .gs-viewing {
+    min-height: 44px;
+  }
+  .gs-seg.small button {
+    padding: 0.25em 0.75em;
+  }
+  .gs-call {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .gs-panel-name {
+    padding-right: 2.6em;
+  }
+}
+
+/* End table: drop Damage and Sent on the narrowest phones so the rest fits. */
+@media (max-width: 420px) {
+  .gs-col-dmg,
+  .gs-col-sent {
+    display: none;
+  }
+  .gs-table td,
+  .gs-table th {
+    padding-left: 0.5em;
+    padding-right: 0.5em;
+  }
+}
+
+/* Landscape phones (short and wide): one slim top row (resources, wave card, round buttons) with next / call wave
+   under the wave card; the cards become a vertical rail on the right; the tower panel and the drawers slide in on
+   the left. The bottom of the view stays free for the map. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .hud.gs {
+    font-size: 12px;
+    --gs-pad: max(0.5em, env(safe-area-inset-top));
+    --gs-row2: var(--gs-pad);
+    --gs-rail: 9.8em;
+    --gs-top-h: 3.4em;
+  }
+  .gs .gsc-layer {
+    --gsc-top: 92px;
+    --gsc-bar-h: 0px;
+  }
+  .gs-tc {
+    width: min(26em, calc(100vw - 2 * var(--gs-side) - 2 * 15em));
+    gap: 0.3em;
+  }
+  .gs-wave {
+    height: var(--gs-top-h);
+    width: 100%;
+    padding: 0.2em 0.8em;
+  }
+  .gs-wave-row {
+    margin-top: 0;
+    flex-wrap: nowrap;
+  }
+  .gs-tl {
+    top: var(--gs-pad);
+  }
+  .gs-res {
+    height: var(--gs-top-h);
+  }
+  .gs-tr {
+    top: var(--gs-pad);
+  }
+  .gs-people.open {
+    top: calc(var(--gs-top-h) + 0.4em);
+  }
+  .gs-people.open .gs-list,
+  .gs-send-wrap {
+    max-height: calc(100vh - var(--gs-pad) - var(--gs-top-h) - 1.4em);
+  }
+  .gs-send-wrap {
+    left: var(--gs-side);
+    right: auto;
+    top: calc(var(--gs-pad) + var(--gs-top-h) + 0.4em);
+  }
+  /* Card rail on the right, under the round buttons. */
+  .gs-bottom {
+    left: auto;
+    right: var(--gs-side);
+    top: calc(var(--gs-pad) + 44px + 0.5em);
+    bottom: max(0.5em, env(safe-area-inset-bottom));
+    justify-content: flex-end;
+    align-items: flex-end;
+  }
+  .gs-cards {
+    flex-direction: column;
+    width: var(--gs-rail);
+    max-width: none;
+    max-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-snap-type: y proximity;
+    padding: 0.3em;
+    gap: 0.3em;
+  }
+  .gs-tcard {
+    flex: none;
+    min-width: 0;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 2.9em 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 0.4em;
+    row-gap: 0.05em;
+    align-items: center;
+    justify-items: start;
+    padding: 0.2em 0.4em 0.2em 0.2em;
+    min-height: 44px;
+  }
+  .gs-tcard-art {
+    grid-row: span 2;
+    width: 2.9em;
+    aspect-ratio: 1;
+    border-radius: 0.55em;
+  }
+  .gs-tcard-name {
+    font-size: 0.72em;
+    width: 100%;
+  }
+  .gs-tcard-cost {
+    font-size: 0.92em;
+    padding: 0.05em 0.35em;
+    margin-left: -0.35em;
+  }
+  .gs-placing-hint {
+    position: absolute;
+    right: calc(100% + 0.5em);
+    bottom: 0;
+    margin: 0;
+    width: max-content;
+    max-width: min(30em, calc(100vw - var(--gs-rail) - 4 * var(--gs-side)));
+  }
+  .gs-out-note {
+    max-width: 16em;
+  }
+  /* Tower panel: a drawer on the left, from under the resources to the bottom, scrolling when tall. */
+  .gs-panel {
+    left: var(--gs-side);
+    right: auto;
+    top: calc(var(--gs-pad) + var(--gs-top-h) + 0.4em);
+    bottom: max(0.5em, env(safe-area-inset-bottom));
+    width: min(21em, calc(100vw - var(--gs-rail) - 4 * var(--gs-side)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    gap: 0.4em;
+    padding: 0.6em 0.7em 0.7em;
+  }
+  .gs-stats {
+    grid-template-columns: 1fr auto 4.4em;
+  }
+  .gs-viewing {
+    top: auto;
+    bottom: max(0.5em, env(safe-area-inset-bottom));
+    left: calc(50% - var(--gs-rail) / 2);
+  }
+  .gs-boss-banner {
+    top: 46%;
+    left: calc(50% - var(--gs-rail) / 2);
+  }
+  .gs-overlay {
+    place-items: start center;
+  }
+  .gs-sheet {
+    width: min(40em, 100%);
   }
 }
 

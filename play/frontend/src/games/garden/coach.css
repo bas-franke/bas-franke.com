@@ -37,13 +37,18 @@
   animation: gsc-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-/* Just above the tower bar, centred, with a little arrow pointing down at it. */
-.gsc-at-bar {
+/* Every card sits just above the tower bar, centred: clear of the portals at the map edges, the toasts and NEXT
+   strip up top and the send panel bottom-left. The build tip adds a little arrow pointing down at the cards. */
+.gsc-at-bar,
+.gsc-at-side,
+.gsc-at-top {
   left: 50%;
   bottom: calc(var(--gsc-bar-h) + 18px);
   transform: translateX(-50%);
-  overflow: visible;
   animation-name: gsc-pop-centre;
+}
+.gsc-at-bar {
+  overflow: visible;
 }
 .gsc-at-bar::after {
   content: '';
@@ -63,19 +68,6 @@
   border-radius: 0 0 16px 16px;
 }
 
-/* Bottom-left, above the bar: out of the centre of the view. */
-.gsc-at-side {
-  left: 16px;
-  bottom: calc(var(--gsc-bar-h) + 18px);
-}
-
-/* Leak: top centre, below the wave bar. */
-.gsc-at-top {
-  left: 50%;
-  top: var(--gsc-top);
-  transform: translateX(-50%);
-  animation-name: gsc-pop-centre;
-}
 
 .gsc-bad {
   box-shadow:
@@ -252,23 +244,77 @@
   to { transform: scaleX(0); }
 }
 
-@media (max-width: 600px) {
+/* Phones, short windows, touch tablets (same query as the HUD's compact layout): a slim card docked under the wave
+   block, so it never covers the cards, the tower sheet, the placing hint or Call wave. Hidden while a sheet or a
+   drawer is open (the HUD root carries gs-has-sheet / gs-has-drawer). */
+@media (max-width: 760px), (max-height: 500px), (pointer: coarse) and (max-width: 1000px) {
   .gsc-layer {
     --gsc-bar-h: 118px;
-    --gsc-top: 76px;
+    --gsc-top: 172px;
   }
-  .gsc-card {
-    width: calc(100vw - 24px);
+  .gs-has-sheet .gsc-layer,
+  .gs-has-drawer .gsc-layer {
+    display: none;
+  }
+  .gsc-card.gsc-card {
+    left: 50%;
+    top: var(--gsc-top);
+    bottom: auto;
+    width: min(420px, calc(100vw - 24px));
+    transform: translateX(-50%);
+    animation-name: gsc-pop-centre;
     font-size: 13px;
-    padding: 10px 12px 8px;
+    line-height: 1.35;
+    padding: 8px 12px 4px;
+    overflow: hidden;
   }
-  .gsc-at-side {
-    left: 12px;
+  .gsc-at-bar::after {
+    display: none;
+  }
+  .gsc-title {
+    font-size: 14px;
+    margin-bottom: 2px;
+  }
+  .gsc-body {
+    margin-bottom: 2px;
+  }
+  .gsc-roster-head {
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+  .gsc-roster-head .gsc-title {
+    font-size: 15px;
   }
   .gsc-portrait {
-    width: 52px;
-    height: 52px;
+    width: 44px;
+    height: 44px;
+    border-radius: 11px;
   }
+  .gsc-ok,
+  .gsc-mute {
+    min-height: 44px;
+  }
+  .gsc-ok {
+    padding: 0 20px;
+  }
+}
+
+/* Landscape phones: bottom-left, where the HUD leaves the view free (cards are a rail on the right). */
+@media (max-height: 500px) and (orientation: landscape) {
+  .gsc-card.gsc-card {
+    left: max(12px, env(safe-area-inset-left));
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: min(290px, 38vw);
+    transform: none;
+    animation-name: gsc-pop;
+    font-size: 12px;
+  }
+}
+
+/* Touch: key badges mean nothing. */
+.gsc-touch .gsc-kbd {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

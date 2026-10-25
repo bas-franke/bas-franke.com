@@ -13,8 +13,8 @@ import { TFlag, type GScore } from '@shared/garden/protocol';
 import { TARGET_MODES, TOWER_KINDS, TOWERS, type Level, type TargetMode, type TowerKind } from '@shared/garden/towers';
 import { VolumeControl } from '../../ui/VolumeControl';
 import { type ClientContext, type Store, useStore } from '../types';
-import type { GardenActions, GHudState, HudSelected, Quality, Toast } from './api';
-import { GardenCoach } from './Coach';
+import type { GardenActions, GHudState, HudIncoming, HudSelected, Quality, Toast } from './api';
+import { GardenCoach, useCoarse } from './Coach';
 import { EnemyIcon, Heart, IncomeArrow, Leaf, Portrait, Skull, TowerIcon, Trophy } from './hudIcons';
 import './garden.css';
 
@@ -28,6 +28,10 @@ export interface GardenHudClient {
 const LEVEL_NAMES: Record<Level, string> = { 1: 'Basic', 2: 'Enhanced', 3: 'Masterwork' };
 const TARGET_LABELS = ['First', 'Last', 'Strong', 'Close'];
 const TOAST_MS = { info: 3600, good: 3600, bad: 4200, boss: 5600 } as const;
+/** Quick refusals ("Not enough gold") fade sooner than real news. */
+const SHORT_TOAST_MS = 1800;
+const isShortToast = (t: Toast) => /^not enough|^can'?t |^cannot /i.test(t.text);
+const BOSS_BANNER_MS = 3600;
 const hex = (c: number) => colorHex(c & 0xffffff);
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 
@@ -67,6 +71,21 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
     client.setPaused?.(menu);
   }, [menu, client]);
 
+  const touch = useCoarse();
+  const boss = useBossBanner(s);
+
+  // Drawers (phones) close on any tap outside them; the tap still reaches the map.
+  useEffect(() => {
+    if (drawer === 'none') return;
+    const down = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (t?.closest?.('.gs-people, .gs-send-wrap, .gs-tr')) return;
+      setDrawer('none');
+    };
+    window.addEventListener('pointerdown', down, true);
+    return () => window.removeEventListener('pointerdown', down, true);
+  }, [drawer]);
+
   const room = ctx.room();
   const isHost = room.hostId === ctx.you;
   const nameOf = (id: string) => s.players.find((p) => p.id === id)?.name ?? room.players.find((p) => p.id === id)?.name ?? '…';
@@ -76,14 +95,28 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
   };
 
   const vs = s.mode === 'vs';
+  const spectator = vs && !!s.spectator;
   const myBoard = s.boards.find((b) => b.b === s.myBoard);
-  const imOut = vs && !!myBoard?.out;
+  const imOut = vs && !spectator && !!myBoard?.out;
+  /** Can build, ready up and send (not out, not watching). */
+  const playing = !imOut && !spectator;
   const viewing = s.boards.find((b) => b.b === s.viewBoard);
-  const onOther = vs && s.viewBoard !== s.myBoard;
+  const onOther = vs && !spectator && s.viewBoard !== s.myBoard;
   const over = s.phase === 'over' || !!s.end;
+  const rootClass = [
+    'hud gs',
+    vs ? 'gs-vs' : 'gs-coop',
+    s.placing ? 'gs-is-placing' : '',
+    s.selected ? 'gs-has-sheet' : '',
+    drawer !== 'none' ? 'gs-has-drawer' : '',
+    spectator ? 'gs-spectating' : '',
+    touch ? 'gs-touch' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <div className={`hud gs ${vs ? 'gs-vs' : 'gs-coop'} ${s.placing ? 'gs-is-placing' : ''}`}>
+    <div className={rootClass}>
       {!s.ready && (
         <div className="gs-loading">
           <div className="gs-loading-card">
@@ -95,7 +128,7 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
 
       {/* ---- top left: resources + people ---- */}
       <div className="gs-tl">
-        <Resources s={s} imOut={imOut} viewingName={onOther ? viewing?.name : undefined} />
+        <Resources s={s} imOut={imOut} spectator={spectator} viewingName={onOther || spectator ? viewing?.name : undefined} />
         <div className={`gs-people ${drawer === 'people' ? 'open' : ''}`}>
           {vs ? <Boards s={s} onView={a.viewBoard} /> : <Players s={s} />}
         </div>
@@ -106,12 +139,21 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
         <WaveBar s={s} />
         {!over && (
           <div className="gs-wave-row">
-            <NextWave s={s} />
-            {s.phase === 'build' && !imOut && <CallWave s={s} onReady={a.ready} />}
+            <NextWave s={s} incoming={spectator ? viewing?.incoming : s.incoming} />
+            {s.phase === 'build' && playing && <CallWave s={s} onReady={a.ready} touch={touch} />}
           </div>
         )}
         <Toasts toasts={s.toasts} />
       </div>
+
+      {boss > 0 && (
+        <div className="gs-boss-banner" key={boss} role="status">
+          <span className="gs-boss-banner-eyebrow">
+            <Skull /> Boss wave
+          </span>
+          <b>{ENEMIES.colossus.name}</b>
+        </div>
+      )}
 
       {/* ---- top right: menu + scores ---- */}
       <div className="gs-tr">
@@ -129,6 +171,7 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
           type="button"
           className={`gs-icon-btn gs-only-narrow ${drawer === 'people' ? 'on' : ''}`}
           aria-label={vs ? 'Gardens' : 'Players'}
+          aria-expanded={drawer === 'people'}
           onClick={() => setDrawer((d) => (d === 'people' ? 'none' : 'people'))}
         >
           <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -137,39 +180,81 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
             <path d="M1.5 17 C2 12.5 4.5 11 7 11 C9.5 11 12 12.5 12.5 17 Z M12 17 C12.4 13.6 13.4 12.4 14.5 12.4 C16.4 12.4 18 13.6 18.5 17 Z" fill="currentColor" />
           </svg>
         </button>
-        {vs && !imOut && (
-          <button type="button" className={`gs-icon-btn gs-only-narrow ${drawer === 'send' ? 'on' : ''}`} aria-label="Send enemies" onClick={() => setDrawer((d) => (d === 'send' ? 'none' : 'send'))}>
+        {vs && playing && (
+          <button
+            type="button"
+            className={`gs-icon-btn gs-only-narrow ${drawer === 'send' ? 'on' : ''}`}
+            aria-label="Send enemies"
+            aria-expanded={drawer === 'send'}
+            onClick={() => setDrawer((d) => (d === 'send' ? 'none' : 'send'))}
+          >
             <EnemyIcon kind="runner" />
           </button>
         )}
       </div>
 
-      {onOther && viewing && (
-        <button type="button" className="gs-viewing" onClick={() => a.viewBoard(s.myBoard)}>
-          <i style={{ background: hex(viewing.color) }} />
-          <span className="gs-viewing-text">
-            Watching <b>{viewing.name}</b>’s garden
+      {spectator ? (
+        <div className="gs-viewing gs-spectating-tag" role="status">
+          <span className="gs-spec-eye" aria-hidden="true">
+            <svg viewBox="0 0 20 20">
+              <path d="M1.5 10 C4 5.5 7 4 10 4 C13 4 16 5.5 18.5 10 C16 14.5 13 16 10 16 C7 16 4 14.5 1.5 10 Z" fill="currentColor" opacity="0.35" />
+              <circle cx="10" cy="10" r="3.2" fill="currentColor" />
+            </svg>
           </span>
-          <span className="gs-viewing-back">Back to yours</span>
-        </button>
+          <b>Spectating</b>
+          {viewing && (
+            <span className="gs-viewing-text">
+              <i style={{ background: hex(viewing.color) }} />
+              {viewing.name}’s garden
+            </span>
+          )}
+        </div>
+      ) : (
+        onOther &&
+        viewing && (
+          <button type="button" className="gs-viewing" onClick={() => a.viewBoard(s.myBoard)}>
+            <i style={{ background: hex(viewing.color) }} />
+            <span className="gs-viewing-text">
+              Watching <b>{viewing.name}</b>’s garden
+            </span>
+            {!imOut && <span className="gs-viewing-back">Back to yours</span>}
+          </button>
+        )
       )}
 
+      {s.autoCam && (imOut || spectator) && !over && <div className="gs-autocam">Following the action · move the camera to take over</div>}
+
       {/* ---- right: selected tower ---- */}
-      {s.selected && <TowerPanel s={s} sel={s.selected} a={a} />}
+      {s.selected && <TowerPanel s={s} sel={s.selected} a={a} spectator={spectator} />}
 
       {/* ---- bottom left (versus): sends ---- */}
-      {vs && !imOut && !over && (
+      {vs && playing && !over && (
         <div className={`gs-send-wrap ${drawer === 'send' ? 'open' : ''}`}>
           <SendPanel s={s} a={a} to={sendTo} setTo={setSendTo} />
         </div>
       )}
 
       {/* ---- bottom: build cards ---- */}
-      {!over && !imOut && (
+      {!over && playing && (
         <div className="gs-bottom">
           {s.placing && (
             <div className="gs-placing-hint">
-              Placing <b>{TOWERS[s.placing].name}</b> · click a free tile · <kbd>Esc</kbd> or right-click to cancel
+              <span>
+                Placing <b>{TOWERS[s.placing].name}</b> ·{' '}
+                {touch ? (
+                  'tap a tile to preview, tap again to plant'
+                ) : (
+                  <>
+                    click a free tile · <kbd>Esc</kbd> or right-click to cancel
+                  </>
+                )}
+              </span>
+              <button type="button" className="gs-cancel" onClick={() => a.place(null)} aria-label="Cancel placing">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M5 5 L15 15 M15 5 L5 15" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+                </svg>
+                Cancel
+              </button>
             </div>
           )}
           <BuildCards s={s} onPlace={a.place} />
@@ -181,7 +266,7 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
         </div>
       )}
 
-      <GardenCoach state={menu && !s.paused ? { ...s, paused: true } : s} actions={a} />
+      {playing && <GardenCoach state={menu && !s.paused ? { ...s, paused: true } : s} actions={a} />}
 
       <div className="gs-hint">
         <kbd>1</kbd>–<kbd>5</kbd> build · <kbd>R</kbd> call wave · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>Tab</kbd> scores · <kbd>Esc</kbd> menu
@@ -226,36 +311,7 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
               </div>
             </div>
             <h3>Controls</h3>
-            <ul className="gs-controls">
-              <li>
-                <span className="gs-keys"><kbd>1</kbd>–<kbd>5</kbd></span>
-                <span>pick a tower, click a tile to plant it</span>
-              </li>
-              <li>
-                <span className="gs-keys"><kbd>R</kbd></span>
-                <span>call the next wave early (bonus gold)</span>
-              </li>
-              <li>
-                <span className="gs-keys"><kbd>U</kbd> <kbd>X</kbd></span>
-                <span>upgrade / sell the selected tower</span>
-              </li>
-              <li>
-                <span className="gs-keys"><kbd>Tab</kbd></span>
-                <span>scores</span>
-              </li>
-              <li>
-                <span className="gs-keys"><kbd>WASD</kbd> drag</span>
-                <span>pan the camera</span>
-              </li>
-              <li>
-                <span className="gs-keys"><kbd>Wheel</kbd> pinch</span>
-                <span>zoom</span>
-              </li>
-              <li>
-                <span className="gs-keys"><kbd>Esc</kbd> right-click</span>
-                <span>cancel placing, deselect</span>
-              </li>
-            </ul>
+            {touch ? <TouchControls /> : <KeyControls />}
             <div className="gs-actions">
               {isHost && (
                 <button type="button" className="gs-btn danger" onClick={() => ctx.socket.send({ t: 'stop' })}>
@@ -274,6 +330,82 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
       )}
     </div>
   );
+}
+
+const KEY_CONTROLS: [string[], string, string][] = [
+  [['1', '5'], '', 'pick a tower, click a tile to plant it'],
+  [['R'], '', 'call the next wave early (bonus gold)'],
+  [['U', 'X'], '', 'upgrade / sell the selected tower'],
+  [['Tab'], '', 'scores'],
+  [['WASD'], 'drag', 'pan the camera'],
+  [['Wheel'], '', 'zoom'],
+  [['Q', 'E'], '', 'rotate the camera'],
+  [['Space', 'F'], '', 'recentre on your garden'],
+  [['Alt'], 'click', 'ping a spot for everyone'],
+  [['Esc'], 'right-click', 'cancel placing, deselect'],
+];
+
+function KeyControls() {
+  return (
+    <ul className="gs-controls">
+      {KEY_CONTROLS.map(([keys, extra, text]) => (
+        <li key={text}>
+          <span className="gs-keys">
+            {keys[0] === '1' ? (
+              <>
+                <kbd>1</kbd>–<kbd>5</kbd>
+              </>
+            ) : (
+              keys.map((k) => <kbd key={k}>{k}</kbd>)
+            )}
+            {extra && ` ${extra}`}
+          </span>
+          <span>{text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const TOUCH_CONTROLS: [string, string][] = [
+  ['Tap a card', 'pick a tower (tap it again to put it back)'],
+  ['Tap a tile', 'preview there; tap the same tile again to plant'],
+  ['Tap a tower', 'upgrade, sell or change its target'],
+  ['Drag', 'pan the camera'],
+  ['Pinch', 'zoom in and out'],
+  ['Call wave', 'start the next wave early for bonus gold'],
+];
+
+function TouchControls() {
+  return (
+    <ul className="gs-controls gs-controls-touch">
+      {TOUCH_CONTROLS.map(([g, text]) => (
+        <li key={g}>
+          <span className="gs-gesture">{g}</span>
+          <span>{text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** A big "Boss wave" banner for a few seconds when a wave with the Colossus starts. Returns a key while showing. */
+function useBossBanner(s: GHudState): number {
+  const prev = useRef<{ phase: string; wave: number; bossNext: boolean } | null>(null);
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    const p = prev.current;
+    if (p && s.ready && s.phase === 'wave' && (p.phase !== 'wave' || p.wave !== s.wave) && (p.bossNext || (s.wave > 0 && s.wave % 10 === 0 && s.mode === 'coop'))) {
+      setShown(performance.now());
+    }
+    prev.current = { phase: s.phase, wave: s.wave, bossNext: s.phase === 'build' && s.bossNext };
+  }, [s.phase, s.wave, s.bossNext, s.ready, s.mode]);
+  useEffect(() => {
+    if (!shown) return;
+    const t = window.setTimeout(() => setShown(0), BOSS_BANNER_MS);
+    return () => window.clearTimeout(t);
+  }, [shown]);
+  return shown;
 }
 
 // ---- resources ---------------------------------------------------------------------------------------------------
@@ -325,7 +457,7 @@ function useDeltas(value: number) {
   return list;
 }
 
-function Resources({ s, imOut, viewingName }: { s: GHudState; imOut: boolean; viewingName?: string }) {
+function Resources({ s, imOut, spectator, viewingName }: { s: GHudState; imOut: boolean; spectator: boolean; viewingName?: string }) {
   const gold = useTween(s.gold);
   const deltas = useDeltas(s.gold);
   const lifeDeltas = useDeltas(s.lives);
@@ -333,6 +465,7 @@ function Resources({ s, imOut, viewingName }: { s: GHudState; imOut: boolean; vi
   const lifeFrac = s.maxLives > 0 ? Math.max(0, Math.min(1, s.lives / s.maxLives)) : 0;
   return (
     <div className="gs-res gs-card-cream">
+      {!spectator && (
       <div className="gs-res-row gs-gold" title="Gold">
         <Leaf />
         <b key={lastGain?.key ?? 0} className={`gs-num ${lastGain ? (lastGain.d > 0 ? 'up' : 'down') : ''}`}>
@@ -347,6 +480,7 @@ function Resources({ s, imOut, viewingName }: { s: GHudState; imOut: boolean; vi
           ))}
         </span>
       </div>
+      )}
       <div className={`gs-res-row gs-lives ${lifeFrac <= 0.25 ? 'low' : ''}`} title={viewingName ? `${viewingName}’s lives` : 'Greenhouse lives'}>
         <Heart />
         <b key={lifeDeltas[lifeDeltas.length - 1]?.key ?? 0} className={`gs-num ${lifeDeltas.length ? 'hurt' : ''}`}>
@@ -356,7 +490,7 @@ function Resources({ s, imOut, viewingName }: { s: GHudState; imOut: boolean; vi
           <i style={{ width: `${lifeFrac * 100}%` }} />
         </span>
       </div>
-      {s.mode === 'vs' && !imOut && (
+      {s.mode === 'vs' && !imOut && !spectator && (
         <div className="gs-res-row gs-income" title="Income paid at the start of every wave. Sends raise it.">
           <IncomeArrow />
           <b className="gs-num">+{fmt(s.income)}</b>
@@ -415,6 +549,18 @@ function Boards({ s, onView }: { s: GHudState; onView: (b: number) => void }) {
             <span className="gs-mini-lives">
               <Heart />
               {b.lives}
+            </span>
+          )}
+          {!b.out && !!b.sendsIn && b.b !== s.myBoard && (
+            <span className="gs-sends-in" title={`Enemies sent at ${b.name} by other gardens this match`}>
+              ⇢{b.sendsIn}
+            </span>
+          )}
+          {!b.out && !!b.incoming?.length && (
+            <span className="gs-board-inc" title={`Sent at ${b.name} for the next wave`}>
+              {b.incoming.map((g) => (
+                <IncomingChip key={g.kind} g={g} small />
+              ))}
             </span>
           )}
         </button>
@@ -477,8 +623,9 @@ function WaveBar({ s }: { s: GHudState }) {
   );
 }
 
-function NextWave({ s }: { s: GHudState }) {
-  if (!s.next.length) return null;
+function NextWave({ s, incoming }: { s: GHudState; incoming?: HudIncoming[] }) {
+  const inc = s.mode === 'vs' ? (incoming ?? []) : [];
+  if (!s.next.length && !inc.length) return null;
   return (
     <div className={`gs-next ${s.bossNext ? 'boss' : ''}`}>
       <span className="gs-next-label">Next</span>
@@ -489,11 +636,34 @@ function NextWave({ s }: { s: GHudState }) {
         </span>
       ))}
       {s.bossNext && <span className="gs-boss-tag">BOSS</span>}
+      {inc.length > 0 && (
+        <>
+          <span className="gs-next-label gs-next-sent">Sent</span>
+          {inc.map((g) => (
+            <IncomingChip key={g.kind} g={g} />
+          ))}
+        </>
+      )}
     </div>
   );
 }
 
-function CallWave({ s, onReady }: { s: GHudState; onReady: () => void }) {
+/** A queued send: the enemy with a ring in the sender's colour. */
+function IncomingChip({ g, small }: { g: HudIncoming; small?: boolean }) {
+  const ring = g.fromColor !== undefined ? hex(g.fromColor) : '#ff6f7d';
+  return (
+    <span
+      className={`gs-chip gs-chip-inc ${small ? 'small' : ''}`}
+      style={{ ['--gs-from' as string]: ring } as CSSProperties}
+      title={`${g.count} × ${ENEMIES[g.kind].name}${g.from ? ' (sent)' : ''} coming next wave`}
+    >
+      <EnemyIcon kind={g.kind} />
+      <b className="gs-num">×{g.count}</b>
+    </span>
+  );
+}
+
+function CallWave({ s, onReady, touch }: { s: GHudState; onReady: () => void; touch: boolean }) {
   const humans = s.players.filter((p) => !p.bot);
   const ready = humans.filter((p) => p.ready).length;
   const me = s.players.find((p) => p.id === s.you);
@@ -501,7 +671,7 @@ function CallWave({ s, onReady }: { s: GHudState; onReady: () => void }) {
   return (
     <button type="button" className={`gs-call ${me?.ready ? 'on' : ''}`} onClick={onReady} title="Start the next wave early once everyone is ready; bonus gold for every second skipped.">
       <span className="gs-call-main">
-        {me?.ready ? 'Ready!' : 'Call wave'} <kbd>R</kbd>
+        {me?.ready ? 'Ready!' : 'Call wave'} {!touch && <kbd>R</kbd>}
       </span>
       {humans.length > 1 && (
         <span className="gs-call-count gs-num">
@@ -526,7 +696,10 @@ function Toasts({ toasts }: { toasts: Toast[] }) {
   const [, setTick] = useState(0);
   const now = performance.now();
   for (const t of toasts) if (!seen.current.has(t.key)) seen.current.set(t.key, now);
-  const live = toasts.filter((t) => now - (seen.current.get(t.key) ?? now) < TOAST_MS[t.tone]).slice(-4);
+  const life = (t: Toast) => (isShortToast(t) ? SHORT_TOAST_MS : TOAST_MS[t.tone]);
+  // Repeats of the same text collapse into the newest one (spamming a card at 0 gold shows one toast, not four).
+  const fresh = toasts.filter((t) => now - (seen.current.get(t.key) ?? now) < life(t));
+  const live = fresh.filter((t, i) => !fresh.some((o, j) => j > i && o.text === t.text)).slice(-4);
   useEffect(() => {
     if (!live.length) return;
     const id = window.setInterval(() => setTick((n) => n + 1), 250);
@@ -540,7 +713,7 @@ function Toasts({ toasts }: { toasts: Toast[] }) {
     <div className="gs-toasts" aria-live="polite">
       {live.map((t) => {
         const age = now - (seen.current.get(t.key) ?? now);
-        const leaving = age > TOAST_MS[t.tone] - 400;
+        const leaving = age > life(t) - 400;
         return (
           <div key={t.key} className={`gs-toast ${t.tone} ${leaving ? 'leaving' : ''}`}>
             {t.tone === 'boss' && <Skull />}
@@ -664,12 +837,12 @@ function statsOf(k: TowerKind, lv: Level): Stat[] {
 
 const statText = (st: Stat) => (st.pct ? `+${Math.round(st.v)}%` : `${Math.round(st.v * 10) / 10}${st.unit ?? ''}`);
 
-function TowerPanel({ s, sel, a }: { s: GHudState; sel: HudSelected; a: GardenActions }) {
+function TowerPanel({ s, sel, a, spectator }: { s: GHudState; sel: HudSelected; a: GardenActions; spectator: boolean }) {
   const t = sel.tower;
   const d = TOWERS[t.k];
   const now = statsOf(t.k, t.lv);
   const next = t.lv < 3 ? statsOf(t.k, (t.lv + 1) as Level) : null;
-  const canUp = sel.mine || s.mode === 'coop';
+  const canUp = !spectator && (sel.mine || s.mode === 'coop');
   const poor = sel.upCost !== null && s.gold < sel.upCost;
   const team = hex(sel.ownerColor);
   const badges: [string, string][] = [];
@@ -773,7 +946,8 @@ function SendPanel({ s, a, to, setTo }: { s: GHudState; a: GardenActions; to: nu
       </div>
       <div className="gs-send-grid">
         {SENDS.map((d) => {
-          const locked = s.wave < d.from;
+          // A send joins the NEXT wave (wave + 1), and the server checks that wave against `from`.
+          const locked = s.wave + 1 < d.from;
           const poor = s.gold < d.cost;
           return (
             <button
@@ -787,7 +961,7 @@ function SendPanel({ s, a, to, setTo }: { s: GHudState; a: GardenActions; to: nu
               <EnemyIcon kind={d.kind} />
               <span className="gs-send-count gs-num">×{d.count}</span>
               {locked ? (
-                <span className="gs-send-lock">Wave {d.from}</span>
+                <span className="gs-send-lock">From wave {d.from}</span>
               ) : (
                 <>
                   <span className="gs-send-cost gs-num">
@@ -832,9 +1006,15 @@ function ScoreTable({ scores, vs, you, nameOf, colorOf }: { scores: GScore[]; vs
             <th>Gardener</th>
             <th className="num">Points</th>
             <th className="num">Kills</th>
-            <th className="num">Damage</th>
-            <th className="num">Built</th>
-            {vs && <th className="num">Sent</th>}
+            <th className="num gs-col-dmg">Damage</th>
+            <th className="num" title="Gold spent on towers">
+              Built <Leaf />
+            </th>
+            {vs && (
+              <th className="num gs-col-sent" title="Gold spent on sends">
+                Sent <Leaf />
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -847,9 +1027,9 @@ function ScoreTable({ scores, vs, you, nameOf, colorOf }: { scores: GScore[]; vs
               </td>
               <td className="num">{fmt(r.points)}</td>
               <td className="num">{fmt(r.kills)}</td>
-              <td className="num">{fmt(r.dmg)}</td>
+              <td className="num gs-col-dmg">{fmt(r.dmg)}</td>
               <td className="num">{fmt(r.built)}</td>
-              {vs && <td className="num">{fmt(r.sent)}</td>}
+              {vs && <td className="num gs-col-sent">{fmt(r.sent)}</td>}
             </tr>
           ))}
         </tbody>
