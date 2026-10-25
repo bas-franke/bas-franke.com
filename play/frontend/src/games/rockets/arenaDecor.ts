@@ -234,6 +234,8 @@ export interface PropBuckets {
   fade: Bucket;
   /** Where the billboards' lettering goes (neon themes print real signs there instead of flat bars). */
   signs?: { x: number; y: number; z: number; yaw: number }[];
+  /** Where big stencilled block numbers go (neon themes). */
+  numbers?: { x: number; y: number; z: number; yaw: number; size: number; n: number }[];
 }
 
 const cyl = (r: number, h: number, seg = 8) => new THREE.CylinderGeometry(r, r, h, seg);
@@ -412,7 +414,7 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
     }
   }
 
-  if (theme.neon) neonTrim(map, solid, glow, rand);
+  if (theme.neon) neonTrim(map, solid, glow, rand, out.numbers);
 
   if (theme.lava) {
     // A lava lake far down the pit: falling in is what kills you, so make it look like it.
@@ -433,10 +435,12 @@ const blockedAt = (boxes: MapBox[], self: MapBox, x: number, y: number, z: numbe
   boxes.some((o) => o !== self && o.kind !== 'clip' && x >= o.min.x && x <= o.max.x && y >= o.min.y && y <= o.max.y && z >= o.min.z && z <= o.max.z);
 
 /**
- * Neon light bars down the open sides of the big blocks (pink, some cyan), a short strip under each top edge, and a
- * glowing furnace core in the tallest block at the centre: vertical slots in a dark frame on every face.
+ * Neon light bars down the open sides of the big blocks (pink, some cyan), a short strip under each top edge, vent
+ * grilles and spots for stencilled numbers on the big faces, and a glowing furnace core in the tallest block at the
+ * centre: vertical slots in a dark frame on every face.
  */
-function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number) {
+function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number, numbers?: PropBuckets['numbers']) {
+  let stencil = 0;
   const pink = 0xff5ac8;
   const cyan = 0x56f2ff;
   let core: MapBox | null = null;
@@ -481,6 +485,28 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number)
         if (!blockedAt(map.boxes, b, ox, y, oz)) {
           const [x, z] = pt(mid, 0.035);
           glow.add(at(box(Math.min(len * 0.4, 3), 0.09, 0.07), x, y, z, yaw), color);
+        }
+      }
+      // A vent grille right of centre, low down: a dark frame with slats.
+      if (len >= 4 && h >= 2.5) {
+        const a = (a0 + a1) / 2 + len * 0.18;
+        const y = b.min.y + Math.min(h * 0.35, 1.6);
+        const [ox, oz] = pt(a, 0.3);
+        if (!blockedAt(map.boxes, b, ox, y, oz)) {
+          const [x, z] = pt(a, 0.03);
+          const gw = Math.min(1.6, len * 0.25);
+          solid.add(at(box(gw, 0.95, 0.06), x, y, z, yaw), 0x2a2634);
+          for (let i = 0; i < 4; i++) solid.add(at(box(gw - 0.12, 0.07, 0.1), x, y - 0.33 + i * 0.22, z, yaw), 0x5a4e6a);
+        }
+      }
+      // A big stencilled number left of centre on the tall faces.
+      if (numbers && len >= 5 && h >= 3.5) {
+        const a = (a0 + a1) / 2 - len * 0.16;
+        const y = b.min.y + h * 0.5;
+        const [ox, oz] = pt(a, 0.3);
+        if (!blockedAt(map.boxes, b, ox, y, oz)) {
+          const [x, z] = pt(a, 0.02);
+          numbers.push({ x, y, z, yaw: Math.atan2(alongX ? 0 : out, alongX ? out : 0), size: Math.min(h * 0.5, 2.4), n: (stencil++ % 4) + 1 });
         }
       }
     }

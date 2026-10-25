@@ -182,6 +182,55 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
     }
   }
 
+  // ---- neon city: hover cars drifting round the skyline, steam rising off the wall pipes ----
+  if (theme.skyline === 'neon') {
+    const cars = new Bucket();
+    for (let i = 0; i < 14; i++) {
+      const a = rand() * Math.PI * 2;
+      const d = 70 + rand() * 70;
+      const y = 22 + rand() * 30;
+      const s = 1 + rand() * 0.6;
+      // Built along local z (the direction of travel round the ring), then turned and placed like the skyline.
+      const parts: [THREE.BufferGeometry, number][] = [
+        [new THREE.BoxGeometry(1.7 * s, 0.6 * s, 3.6 * s), 0x2a2638],
+        [new THREE.BoxGeometry(1.3 * s, 0.45 * s, 1.6 * s).translate(0, 0.5 * s, 0.2 * s), 0x3a3450],
+        [new THREE.BoxGeometry(1.5 * s, 0.08, 3.2 * s).translate(0, -0.34 * s, 0), rand() < 0.5 ? 0x56f2ff : 0xff5ac8],
+        [new THREE.BoxGeometry(1.4 * s, 0.14 * s, 0.06).translate(0, 0.05, 1.82 * s), 0xff3a3a],
+        [new THREE.BoxGeometry(1.2 * s, 0.12 * s, 0.06).translate(0, 0.05, -1.82 * s), 0xfff2d0],
+      ];
+      for (const [g, color] of parts) cars.add(at(g, Math.cos(a) * d, y, Math.sin(a) * d, -a), color);
+    }
+    const carGeo = cars.build();
+    if (carGeo) {
+      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, toneMapped: false });
+      const traffic = new THREE.Mesh(carGeo, mat);
+      traffic.frustumCulled = false;
+      // The whole stream turns slowly round the arena.
+      traffic.onBeforeRender = () => {
+        traffic.rotation.y = (performance.now() / 1000) * 0.012;
+        traffic.updateMatrixWorld();
+      };
+      sky.add(traffic);
+      disposables.push(carGeo, mat);
+    }
+    const puffTex = radialGlow();
+    const puffMat = new THREE.SpriteMaterial({ map: puffTex, color: 0xe6d2f4, transparent: true, opacity: 0.24, depthWrite: false });
+    const wall = map.half + 0.5;
+    for (let i = 0; i < 10; i++) {
+      const t = (rand() - 0.5) * map.half * 1.6;
+      const side = Math.floor(rand() * 4);
+      const [x, z] = side === 0 ? [t, -wall] : side === 1 ? [wall, t] : side === 2 ? [t, wall] : [-wall, t];
+      for (let k = 0; k < 3; k++) {
+        const puff = new THREE.Sprite(puffMat);
+        const s = 4 + k * 3 + rand() * 2;
+        puff.scale.set(s, s, 1);
+        puff.position.set(x * (1 + k * 0.02), 11 + k * 3.2, z * (1 + k * 0.02));
+        sky.add(puff);
+      }
+    }
+    disposables.push(puffTex, puffMat);
+  }
+
   // ---- space: stars, a ringed planet and a moon ----
   if (theme.stars) {
     const pts = new Float32Array(theme.stars * 3);

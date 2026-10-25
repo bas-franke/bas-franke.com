@@ -10,7 +10,7 @@ import type { MapBox, MapData } from '@shared/rockets/map';
 import { INK, hullGeometry, inkLineMaterial, inkMaterial, toonRamp } from '../../engine/toon';
 import { BASE_SURFACES, Bucket, type Surface, type Visible, at, buildProps, edgeHazards, themeOf } from './arenaDecor';
 import { buildSky, sunDirOf } from './arenaSky';
-import { buildSigns } from './arenaSigns';
+import { buildNumbers, buildSigns } from './arenaSigns';
 import { TEX_SIZE, type TexKey, arenaTexture, mulberry } from './arenaTextures';
 
 /** Comic defaults; maps override per kind through `tint`. */
@@ -267,10 +267,15 @@ export function buildArena(map: MapData): ArenaView {
   const fade = new Bucket();
   const decal = new Bucket();
   const signs = theme.neon ? [] : undefined;
-  buildProps(map, theme, { solid, glow, fade, signs });
+  const numbers = theme.neon ? [] : undefined;
+  buildProps(map, theme, { solid, glow, fade, signs, numbers });
   if (signs) {
     const lettering = buildSigns(map, signs, disposables);
     if (lettering) group.add(lettering);
+  }
+  if (numbers) {
+    const stencils = buildNumbers(numbers, toonRamp(), disposables);
+    if (stencils) group.add(stencils);
   }
   const hazards = edgeHazards(map, fade);
   if (hazards.stripes) {
