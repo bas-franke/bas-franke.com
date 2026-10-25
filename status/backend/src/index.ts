@@ -1,7 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { analyticsReport, collect, cors, RANGES, siteReport } from './analytics.js';
 import { login, logout, me, requireLogin } from './auth.js';
-import { isProject, latestChanges, projectChanges } from './changes.js';
+import { isProject, latestChanges, projectChanges, SYNC_INTERVAL_MS, syncChanges } from './changes.js';
 import { config } from './config.js';
 import { dbEnabled, migrate } from './db.js';
 import { runAll } from './runner.js';
@@ -58,7 +58,7 @@ app.get('/api/analytics/:site', requireLogin, async (req, res) => {
 // Screenshots of design changes: Claude uploads them with status/tools/upload-screenshot.mjs. See README "Screenshots".
 app.use('/api/screenshots', screenshotsRouter);
 
-// Change history: the commits that touched each project's folder, from the GitHub API.
+// Change history: the commits that touched each project's folder, stored in the database by syncChanges().
 app.get('/api/changes', requireLogin, async (_req, res) => {
   res.set('Cache-Control', 'no-store').json(await latestChanges());
 });
@@ -80,7 +80,14 @@ app.use('/api', onError);
 
 app.listen(config.port, config.host, () => {
   console.log(`status backend listening on http://${config.host}:${config.port}`);
-  if (dbEnabled()) migrate().catch((err) => console.error('database migration failed; analytics will not work', err));
+  if (dbEnabled()) {
+    migrate()
+      .then(() => {
+        syncChanges();
+        setInterval(syncChanges, SYNC_INTERVAL_MS);
+      })
+      .catch((err) => console.error('database migration failed; analytics will not work', err));
+  }
   else console.log('DATABASE_URL is not set: page views are dropped and the analytics are disabled');
   refresh().catch((err) => console.error('initial status run failed', err));
   setInterval(() => refresh().catch((err) => console.error('status run failed', err)), config.refreshIntervalMs);

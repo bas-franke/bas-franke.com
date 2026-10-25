@@ -78,6 +78,24 @@ const migrations: { name: string; sql: string }[] = [
       CREATE INDEX screenshots_project_created ON screenshots (project, created_at DESC);
     `,
   },
+  {
+    // Change history: commits that touched each project's folder, copied from GitHub by changes.ts.
+    name: '004_changes',
+    sql: `
+      CREATE TABLE changes (
+        project      text NOT NULL,
+        sha          text NOT NULL,
+        summary      text NOT NULL,
+        body         text NOT NULL DEFAULT '',
+        author       text NOT NULL,
+        committed_at timestamptz NOT NULL,
+        url          text NOT NULL,
+        stored_at    timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (project, sha)
+      );
+      CREATE INDEX changes_project_committed ON changes (project, committed_at DESC);
+    `,
+  },
 ];
 
 export async function migrate() {

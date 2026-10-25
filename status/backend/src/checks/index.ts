@@ -3,6 +3,7 @@ import { projects } from '../projects.js';
 import { ok, warn, type CheckDef, type Project } from '../types.js';
 import { analyticsCheck } from './analytics.js';
 import { screenshotsCheck } from './screenshots.js';
+import { changesCheck } from './changes.js';
 import { databaseCheck, rdsCheck } from './database.js';
 import { dnsCheck, expectedIpCheck } from './dns.js';
 import { ec2InstanceCheck, elasticIpCheck, resourcesCheck } from './ec2.js';
@@ -54,6 +55,7 @@ export const sharedChecks: CheckDef[] = [
   accessCheck,
   analyticsCheck,
   screenshotsCheck,
+  changesCheck,
 ];
 
 export function projectChecks(project: Project): CheckDef[] {

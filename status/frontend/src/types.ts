@@ -134,7 +134,8 @@ export interface SiteReport extends SiteSummary {
   fix?: Fix;
 }
 
-// Change history (see backend/src/changes.ts): commits on the deploy branch that touched the project's folder.
+// Change history (see backend/src/changes.ts): commits on the deploy branch that touched the project's folder,
+// copied from GitHub into the status database.
 export interface Change {
   sha: string;
   summary: string;
@@ -146,12 +147,19 @@ export interface Change {
 
 export interface ChangeList {
   site: string;
+  /** False while the status backend has no database; `detail` says why. */
+  enabled: boolean;
+  detail?: string;
   changes: Change[];
+  /** Stored changes in all; `changes` holds the newest few hundred. */
+  total: number;
   historyUrl: string;
-  fetchedAt?: string;
+  syncedAt?: string;
+  /** The latest sync from GitHub failed; the stored history is still shown. */
   error?: string;
 }
 
 export interface LatestChanges {
-  sites: Record<string, { latest: Change | null; error?: string }>;
+  enabled: boolean;
+  sites: Record<string, { latest: Change }>;
 }

@@ -50,9 +50,13 @@ automatically at startup. New projects need nothing beyond their registration in
 
 Each project page has a **Changes** tab with the commits on `master` that touched the project's folder, newest first and
 grouped by day (merge commits left out; click a change for its full message). The overview cards show when the latest
-change was and its one-line summary. The list comes from the GitHub commits API (`backend/src/changes.ts`), is cached
-for 10 minutes per project and keeps the last good list when GitHub fails. Without `GITHUB_TOKEN` it shares the
-60-requests-per-hour anonymous limit with the deploy checks, so set the token.
+change was and its one-line summary.
+
+The history is stored in the `changes` table of the status database (migration `004_changes`): at startup and every
+10 minutes the backend copies new commits per project folder from the GitHub commits API into it (the full history the
+first time, then only what is new; `backend/src/changes.ts`). The page only reads the table, so the history stays up when
+GitHub is down or rate limited. The **Change history syncing** check shows whether the copy works. Set `GITHUB_TOKEN`:
+without it the sync shares GitHub's 60-requests-per-hour anonymous limit with the deploy checks.
 
 The page has slots for custom illustrations (mascot, state scenes, icons). The prompts, sizes and filenames are in
 [ART.md](ART.md); finished PNGs go in `frontend/public/art/`. Missing images are simply left out.

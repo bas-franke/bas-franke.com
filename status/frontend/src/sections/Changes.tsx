@@ -1,5 +1,7 @@
 import { usePoll, useTicker } from '../api';
 import { Skeleton, StateCard } from '../ui';
+import { timeAgo } from '../format';
+import { Link, projectPath } from '../router';
 import type { Change, ChangeList } from '../types';
 
 /** "just now", "12 min ago", "5 h ago", "yesterday", "3 days ago", then a date. */
@@ -67,10 +69,26 @@ export default function Changes({ site }: { site: string }) {
       </div>
     );
   }
+  if (!data.enabled) {
+    return (
+      <StateCard art="state-warn" title="The change history is off">
+        <p className="muted">{data.detail}</p>
+        <p className="muted small">
+          The <Link to={projectPath('shared', 'health')}>Change history syncing</Link> check shows how to set it up.
+        </p>
+      </StateCard>
+    );
+  }
   if (!data.changes.length) {
     return (
-      <StateCard art="state-warn" title="No changes found">
-        <p className="muted">{data.error ?? `GitHub has no commits that touch the ${site}/ folder.`}</p>
+      <StateCard art="state-warn" title="No changes stored yet">
+        <p className="muted">
+          {data.error
+            ? `Copying the history from GitHub failed: ${data.error}`
+            : data.syncedAt
+              ? `GitHub has no commits that touch the ${site}/ folder.`
+              : 'The first copy from GitHub is still running.'}
+        </p>
       </StateCard>
     );
   }
@@ -84,7 +102,7 @@ export default function Changes({ site }: { site: string }) {
 
   return (
     <div className="changes">
-      {data.error && <p className="muted small">Showing earlier history; the last refresh failed: {data.error}</p>}
+      {data.error && <p className="muted small">The last sync from GitHub failed, so newer changes may be missing: {data.error}</p>}
       {days.map((day) => (
         <section className="panel change-day" key={day.key} aria-label={day.heading}>
           <h2 className="change-day-title">
@@ -101,7 +119,9 @@ export default function Changes({ site }: { site: string }) {
         </section>
       ))}
       <p className="muted small analytics-note">
-        The latest {data.changes.length} commits on GitHub that touched <code>{site}/</code>, merge commits left out.{' '}
+        {data.changes.length < data.total ? `The newest ${data.changes.length} of ${data.total}` : `All ${data.total}`} stored commits that touched{' '}
+        <code>{site}/</code>, merge commits left out; copied from GitHub every 10 minutes
+        {data.syncedAt && <>, last {timeAgo(data.syncedAt)}</>}.{' '}
         <a href={data.historyUrl} target="_blank" rel="noreferrer">
           Full history on GitHub ↗
         </a>
