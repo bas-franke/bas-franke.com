@@ -70,7 +70,7 @@ export const LEFT_ENGINE = 0;
 export const RIGHT_ENGINE = 1;
 export const COCKPIT = 2;
 /** Seconds a wrecked pod lies before it respawns, and seconds of ghosting after. */
-export const WRECK_TIME = 3;
+export const WRECK_TIME = 0.5;
 /** Gravity on a tumbling wreck, and how much of its vertical speed survives a bounce. */
 const WRECK_GRAVITY = 24;
 const WRECK_BOUNCE = 0.45;
