@@ -265,61 +265,14 @@ body.in-feed {
   color: var(--on-ink);
 }
 
-.nav-blurb,
-.nav-foot {
-  display: none;
-}
-
 @media (min-width: 1100px) {
-  .nav,
-  .site-feed .nav,
-  .site-page .nav {
-    top: 0;
-    bottom: 0;
-    right: auto;
-    width: 240px;
-    height: auto;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 22px;
-    padding: 30px 26px;
-    background: var(--paper);
-    border-right: 1px solid var(--line);
-    border-bottom: none;
+  .nav {
+    height: 64px;
+    padding: 0 28px;
   }
 
   .nav .brand {
-    font-size: 2rem;
-  }
-
-  .nav-links {
-    flex-direction: column;
-    margin-left: 0;
-    width: 100%;
-  }
-
-  .nav-links a {
-    padding: 8px 12px;
-    border-radius: 9px;
-  }
-
-  .nav-blurb {
-    display: block;
-    margin: 0;
-    font-size: 0.9rem;
-    color: var(--muted);
-  }
-
-  .nav-foot {
-    display: block;
-    margin: auto 0 0;
-    font-size: 0.7rem;
-    line-height: 1.7;
-    color: var(--muted);
-  }
-
-  .nav-foot a {
-    color: inherit;
+    font-size: 1.8rem;
   }
 }
 
@@ -362,19 +315,25 @@ body.in-feed {
 }
 
 @media (min-width: 1100px) {
-  .feed {
-    padding-left: 240px;
-    padding-right: 300px;
-  }
-
   .story,
   .feed-topic-mode .story {
-    padding: 56px 32px;
+    padding: 112px 32px 80px;
   }
 
-  /* The right rail shows the same links. */
-  .story .deeper {
-    display: none;
+  .story-inner {
+    max-width: 660px;
+  }
+}
+
+/* With a mouse or trackpad a mandatory snap jumps a whole story per wheel notch; let the reader scroll freely and
+   only settle onto a story when it is already close. Touch screens keep the one-swipe-one-story feel. */
+@media (hover: hover) and (pointer: fine) {
+  .feed {
+    scroll-snap-type: y proximity;
+  }
+
+  .story {
+    scroll-snap-stop: normal;
   }
 }
 
@@ -449,73 +408,145 @@ body.in-feed {
 }
 
 @media (min-width: 1100px) {
-  .mode-bar,
-  .before-pill {
-    left: calc(240px + (100% - 240px - 300px) / 2);
-  }
-
   .mode-bar {
-    top: 14px;
+    top: 66px;
   }
 
   .before-pill {
-    top: 14px;
+    top: 68px;
   }
 
   .feed-topic-mode .before-pill {
-    top: 56px;
+    top: 108px;
   }
 }
 
-/* Right rail: the active story's topic, progress and "go deeper" links (desktop only). */
-.rail-right {
+/* Bottom bar: the active story's topic and progress (desktop only; phones get the same from the story itself). */
+.feed-bar {
   display: none;
 }
 
 @media (min-width: 1100px) {
-  .rail-right {
+  .feed-bar {
     position: fixed;
-    top: 0;
+    left: 0;
     right: 0;
     bottom: 0;
-    width: 300px;
+    z-index: 24;
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 18px;
-    padding: 32px 26px;
-    border-left: 1px solid var(--line);
-    background: var(--paper);
-    overflow-y: auto;
+    height: 52px;
+    padding: 8px 28px 0;
+    background: linear-gradient(to top, var(--paper) 60%, color-mix(in srgb, var(--paper), transparent 100%));
+    font-size: 0.82rem;
+    pointer-events: none;
+  }
+
+  .feed-bar > * {
+    pointer-events: auto;
   }
 }
 
-.rail-topic {
-  display: flex;
-  gap: 12px;
+.feed-bar-topic {
+  display: inline-flex;
   align-items: center;
-  text-decoration: none;
+  gap: 8px;
+  min-width: 0;
   color: var(--ink);
+  text-decoration: none;
 }
 
-.rail-topic-icon {
-  width: 36px;
-  height: 36px;
+.feed-bar-topic .topic-icon {
+  width: 20px;
+  height: 20px;
   flex: none;
 }
 
-.rail-topic-kind {
-  display: block;
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.feed-bar-topic strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.feed-bar-topic .flame {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.feed-bar-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.7rem;
   color: var(--muted);
 }
 
-.rail-topic strong {
-  font-family: var(--serif);
-  font-size: 1.25rem;
-  font-weight: 500;
-  line-height: 1.1;
+.feed-bar-progress .rail-progress-bar {
+  width: 80px;
+  margin: 0;
+}
+
+.feed-bar-action {
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.feed-bar-action:hover {
+  color: var(--accent);
+}
+
+.feed-bar-hint {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Credits: the foot of every page; in the feed they share the bottom bar on desktop and are hidden on phones. */
+.site-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+  padding: 0 20px 28px;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.site-foot a {
+  color: inherit;
+}
+
+.site-feed .site-foot {
+  display: none;
+}
+
+@media (min-width: 1100px) {
+  .site-feed .site-foot {
+    position: fixed;
+    right: 28px;
+    bottom: 0;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    height: 44px;
+    padding: 0;
+  }
+
+  /* The keyboard hint makes way for the credits, and only shows when there is room for both. */
+  .feed-bar-hint {
+    margin-right: 450px;
+  }
+}
+
+@media (max-width: 1399px) {
+  .feed-bar-hint {
+    display: none;
+  }
 }
 
 .rail-progress-bar {
@@ -533,46 +564,12 @@ body.in-feed {
   transition: width 0.3s;
 }
 
-.rail-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.rail-label,
 .deeper-label,
 .takeaway-label {
   font-size: 0.66rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
-}
-
-.rail-link {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  font-size: 0.88rem;
-  line-height: 1.3;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.rail-link:hover {
-  border-color: var(--accent);
-}
-
-.rail-link small {
-  font-size: 0.7rem;
-}
-
-.rail-hint {
-  margin: auto 0 0;
-  font-size: 0.68rem;
 }
 
 /* ---------- A story ---------- */
@@ -941,10 +938,8 @@ body.in-feed {
 
 @media (min-width: 1100px) {
   .page {
-    max-width: none;
-    width: min(960px, calc(100% - 240px));
-    margin: 0 auto 0 240px;
-    padding: 52px 48px 72px;
+    max-width: 960px;
+    padding: 96px 48px 72px;
   }
 }
 
@@ -1992,70 +1987,18 @@ fieldset.panel {
 }
 
 @media (min-width: 1100px) {
-  /* On wide screens the rail lists the hot topics instead. */
   .trend-strip {
-    display: none;
+    top: 64px;
+    justify-content: center;
+    mask-image: none;
+    -webkit-mask-image: none;
   }
 
   .feed-has-strip .story {
-    padding-top: 56px;
+    padding-top: 112px;
   }
 }
 
-.nav-trending {
-  display: none;
-}
-
-@media (min-width: 1100px) {
-  .nav-trending {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    width: 100%;
-  }
-
-  .nav-trending .rail-label {
-    margin-bottom: 6px;
-  }
-
-  .nav-trend {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    margin: 0 -8px;
-    border-radius: 8px;
-    font-size: 0.86rem;
-    line-height: 1.25;
-    color: var(--ink);
-    text-decoration: none;
-  }
-
-  .nav-trend:hover {
-    background: var(--paper-2);
-  }
-}
-
-.rail-hot {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  font-size: 0.84rem;
-  line-height: 1.4;
-  color: var(--ink-2);
-}
-
-.rail-hot .flame {
-  margin-top: 3px;
-}
-
-.rail-hot strong {
-  color: var(--accent);
-}
 
 .topic-group-hot .section-label {
   display: flex;
@@ -2157,8 +2100,6 @@ fieldset.panel {
 .story-why,
 .story-takeaway,
 .deeper-link,
-.rail-hot,
-.rail-link,
 .hub-intro,
 .hot-banner,
 .tcard-intro,
@@ -2167,8 +2108,7 @@ fieldset.panel {
 .story-row,
 .hub-section-head p,
 .coming li,
-.trend-list li,
-.nav-trend {
+.trend-list li {
   overflow-wrap: anywhere;
 }
 
@@ -2195,8 +2135,9 @@ fieldset.panel {
 
 @media (min-width: 1100px) {
   .feed-has-strip .before-pill {
-    top: 14px;
+    top: 106px;
   }
+}
 }
 
 /* The "newer stories" pill floats over the top of the first story: give that story room for it, and fade the pill
@@ -2221,11 +2162,8 @@ fieldset.panel {
 
 @media (min-width: 1100px) {
   .feed-has-before .story:first-of-type,
-  .feed-has-before.feed-has-strip .story:first-of-type {
-    padding-top: 56px;
-  }
-
+  .feed-has-before.feed-has-strip .story:first-of-type,
   .feed-has-before.feed-topic-mode .story:first-of-type {
-    padding-top: 100px;
+    padding-top: 152px;
   }
 }

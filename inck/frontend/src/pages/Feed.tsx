@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ApiError, api, readLabel, timeUntil } from '../api';
+import { ApiError, api, timeUntil } from '../api';
 import Art, { CategoryIcon, Flame } from '../components/Art';
 import StoryCard, { storyPath } from '../components/StoryCard';
 import type { FeedPage, Site, Story } from '../types';
@@ -279,58 +279,34 @@ export default function Feed({ site }: { site: Site | null }) {
         )}
       </div>
 
-      <aside className="rail rail-right" aria-label="About this story">
-        {current && (
-          <>
-            <Link to={`/t/${current.topic.slug}`} className="rail-topic">
-              <CategoryIcon category={current.topic.category} className="rail-topic-icon" />
-              <span>
-                <span className="rail-topic-kind mono">{current.topic.kind === 'event' ? 'world event' : 'topic'}</span>
-                <strong>{current.topic.name}</strong>
-              </span>
+      {/* Desktop: the active story's topic, progress and the keyboard hint sit in a slim bar along the bottom. */}
+      {current && (
+        <div className="feed-bar" aria-label="About this story">
+          <Link to={`/t/${current.topic.slug}`} className="feed-bar-topic" title={current.topic.heat > 0 ? current.topic.heat_reason : undefined}>
+            <CategoryIcon category={current.topic.category} />
+            <strong>{current.topic.name}</strong>
+            {current.topic.heat > 0 && <Flame className={`flame heat-${current.topic.heat}`} />}
+          </Link>
+          <span className="feed-bar-progress">
+            <span className="rail-progress-bar">
+              <span style={{ width: `${((current.position + 1) / Math.max(1, current.topic.stories)) * 100}%` }} />
+            </span>
+            <span className="mono">
+              {current.position + 1}/{current.topic.stories}
+            </span>
+          </span>
+          {topic ? (
+            <Link to={`/s/${current.slug}`} className="feed-bar-action">
+              ← All stories
             </Link>
-            {current.topic.heat > 0 && (
-              <p className="rail-hot">
-                <Flame className={`flame heat-${current.topic.heat}`} />
-                <span>
-                  <strong>Trending now.</strong> {current.topic.heat_reason}
-                </span>
-              </p>
-            )}
-            <div className="rail-progress">
-              <div className="rail-progress-bar">
-                <span style={{ width: `${((current.position + 1) / Math.max(1, current.topic.stories)) * 100}%` }} />
-              </div>
-              <span className="mono small muted">
-                story {current.position + 1} of {current.topic.stories} · {current.section_name || 'Latest'}
-              </span>
-            </div>
-            {topic ? (
-              <Link to={`/s/${current.slug}`} className="btn btn-small">
-                ← Back to all stories
-              </Link>
-            ) : (
-              <Link to={storyPath(current.slug, current.topic.slug)} className="btn btn-small">
-                Follow this topic →
-              </Link>
-            )}
-            {current.related.length > 0 && (
-              <div className="rail-section">
-                <span className="rail-label mono">go deeper</span>
-                {current.related.map((r) => (
-                  <Link key={r.slug} to={storyPath(r.slug, r.topic_slug)} className="rail-link">
-                    <span>{r.title}</span>
-                    <small className="muted">
-                      {r.topic_name} · {readLabel(r.read_seconds)}
-                    </small>
-                  </Link>
-                ))}
-              </div>
-            )}
-            <p className="rail-hint mono muted">↑ ↓ or J K to move · space for next</p>
-          </>
-        )}
-      </aside>
+          ) : (
+            <Link to={storyPath(current.slug, current.topic.slug)} className="feed-bar-action">
+              Follow this topic →
+            </Link>
+          )}
+          <span className="feed-bar-hint mono">↑ ↓ or J K to move · space for next</span>
+        </div>
+      )}
     </div>
   );
 }
