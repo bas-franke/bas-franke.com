@@ -20,6 +20,11 @@ export const PALM = new THREE.Vector3(0.12, -0.21, -0.33);
 interface ClassFeel {
   /** Hip offset from the palm. */
   hip: THREE.Vector3;
+  /** Hip yaw (rad, + swings the muzzle left toward the screen centre and shows the gun's left flank) and cant (rad). */
+  yaw: number;
+  cant: number;
+  /** Support hand: offset (m) from where show() puts it and roll (rad, about the palm; - turns the fingers over the top). */
+  hand?: { x: number; z: number; roll: number };
   /** Eye to rear sight when aimed. */
   eye: number;
   /** Recoil: kick back (m), muzzle climb (rad), random roll (rad); spring stiffness and damping. */
@@ -30,14 +35,34 @@ interface ClassFeel {
   c: number;
 }
 
+// Long guns sit low and to the right, the receiver near the camera's right edge and the barrel reaching in toward the
+// centre at a slight angle.
 const FEEL: Record<WeaponKind, ClassFeel> = {
-  pistol: { hip: new THREE.Vector3(0.01, 0.075, -0.03), eye: 0.3, back: 0.03, climb: 0.16, roll: 0.03, k: 520, c: 30 },
-  smg: { hip: new THREE.Vector3(0.0, 0.06, 0.02), eye: 0.22, back: 0.018, climb: 0.035, roll: 0.02, k: 700, c: 38 },
-  rifle: { hip: new THREE.Vector3(0.0, 0.06, 0.03), eye: 0.22, back: 0.026, climb: 0.05, roll: 0.025, k: 600, c: 34 },
-  lmg: { hip: new THREE.Vector3(0.0, 0.05, 0.05), eye: 0.27, back: 0.024, climb: 0.04, roll: 0.03, k: 560, c: 32 },
-  shotgun: { hip: new THREE.Vector3(0.0, 0.055, 0.04), eye: 0.24, back: 0.075, climb: 0.22, roll: 0.06, k: 300, c: 20 },
-  sniper: { hip: new THREE.Vector3(0.0, 0.055, 0.05), eye: 0.2, back: 0.085, climb: 0.26, roll: 0.05, k: 260, c: 18 },
+  pistol: { hip: new THREE.Vector3(0.01, 0.075, -0.03), yaw: 0, cant: 0, eye: 0.3, back: 0.03, climb: 0.16, roll: 0.03, k: 520, c: 30 },
+  smg: { hip: new THREE.Vector3(0.04, 0.03, 0.03), yaw: 0.1, cant: 0.04, eye: 0.22, back: 0.018, climb: 0.035, roll: 0.02, k: 700, c: 38 },
+  rifle: { hip: new THREE.Vector3(0.04, 0.03, 0.04), yaw: 0.09, cant: 0.04, eye: 0.22, back: 0.026, climb: 0.05, roll: 0.025, k: 600, c: 34 },
+  lmg: { hip: new THREE.Vector3(0.04, 0.02, 0.06), yaw: 0.07, cant: 0.04, eye: 0.27, back: 0.024, climb: 0.04, roll: 0.03, k: 560, c: 32 },
+  shotgun: { hip: new THREE.Vector3(0.04, 0.025, 0.05), yaw: 0.07, cant: 0.04, eye: 0.24, back: 0.075, climb: 0.22, roll: 0.06, k: 300, c: 20 },
+  sniper: { hip: new THREE.Vector3(0.04, 0.025, 0.06), yaw: 0.07, cant: 0.04, eye: 0.2, back: 0.085, climb: 0.26, roll: 0.05, k: 260, c: 18 },
 };
+
+/**
+ * Per-gun overrides of the class feel. The MP5SD is fitted to the lobby reference shot: held further out and pointing
+ * nearly straight ahead, canted a little to show its left flank; the muzzle lands at about 57% x, 58% y of the screen,
+ * the red dot at 66% x, 56% y, the grip at 66% x, 96% y, the support hand under the rear of the suppressor.
+ */
+const GUN_FEEL: Partial<Record<WeaponId, Partial<ClassFeel>>> = {
+  mp7: { hip: new THREE.Vector3(0.0285, 0.0256, -0.0226), yaw: -0.0226, cant: -0.11, hand: { x: 0.02, z: 0.09, roll: -0.2 } },
+};
+const feelCache = new Map<WeaponId, ClassFeel>();
+const feelOf = (id: WeaponId): ClassFeel => {
+  let f = feelCache.get(id);
+  if (!f) feelCache.set(id, (f = { ...FEEL[WEAPONS[id].kind], ...GUN_FEEL[id] }));
+  return f;
+};
+
+/** Guns whose `_sight` marker (weapons.glb) is the optic's axis rather than the top of an iron sight. */
+const OPTIC_AXIS = new Set<WeaponId>(['mp7']);
 
 const ease = (t: number) => t * t * (3 - 2 * t);
 const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
@@ -98,8 +123,21 @@ export interface VmFrame {
   visible: boolean;
 }
 
+/** Viewmodel key light: full strength, and how fast the probed world light reaches it; fill = FILL_MIN + key * share. */
+const KEY_MAX = 16;
+const KEY_GAIN = 1;
+const FILL_MIN = 1.5;
+const FILL_SHARE = 0.125;
+/** World lights reaching this far (m) are huge distant shafts (facade, moon): they light the viewmodel only through the key. */
+const FAR_LIGHT = 40;
+
 export class Viewmodel {
+  /** Camera-space holder for the viewmodel and its lights. */
+  private readonly lens = new THREE.Group();
   readonly group = new THREE.Group();
+  /** A key and a fill only the viewmodel sees, steered by probe(). */
+  private readonly key = new THREE.DirectionalLight(0xffc48a, 0);
+  private readonly hemi = new THREE.HemisphereLight(0xffcf9a, 0x1a1410, 0);
   private arms: THREE.Object3D | null = null;
   private armL: THREE.Object3D | null = null;
   private armLRest = new THREE.Vector3();
@@ -137,7 +175,17 @@ export class Viewmodel {
     private readonly models: Models,
     camera: THREE.Camera,
   ) {
-    camera.add(this.group);
+    this.lens.add(this.group);
+    camera.add(this.lens);
+    // post.ts puts every light on all layers except those flagged `worldOnly`; the flag keeps these on the viewmodel's.
+    this.key.layers.set(VIEWMODEL_LAYER);
+    this.key.userData.worldOnly = true;
+    this.key.position.set(-1, 1.2, 0.4);
+    this.key.target.position.set(0.1, -0.15, -0.5);
+    this.lens.add(this.key, this.key.target);
+    this.hemi.layers.set(VIEWMODEL_LAYER);
+    this.hemi.userData.worldOnly = true;
+    this.lens.add(this.hemi);
   }
 
   /** Call once the GLBs are loaded. */
@@ -237,13 +285,28 @@ export class Viewmodel {
       this.armL.position.copy(this.armLRest);
       if (WEAPONS[id].kind === 'pistol') this.armL.position.add(new THREE.Vector3(0.1, -0.122, 0.22));
       else {
-        const support = new THREE.Vector3(0, 0.043, Math.max(-0.46, Math.min(-0.14, this.gun.front * 0.47)));
+        // A little behind the middle and slightly under and left of the bore, so on the MP5SD it cradles the
+        // suppressor's rear half from below with the back of the glove toward the camera.
+        const support = new THREE.Vector3(-0.01, 0.023, Math.max(-0.4, Math.min(-0.12, this.gun.front * 0.47 + 0.08)));
         this.armL.position.add(support.sub(LEFT_PALM));
+      }
+      // Per-gun hand tweak (GUN_FEEL): shift, then roll about the left palm (the rig's origin is the camera, so the roll is
+      // paired with the shift that keeps the palm in place).
+      const hand = feelOf(id).hand;
+      this.armLBase.copy(this.armLRot);
+      if (hand && WEAPONS[id].kind !== 'pistol') {
+        this.armL.position.x += hand.x;
+        this.armL.position.z += hand.z;
+        this.armLBase.z += hand.roll;
+        const palm = PALM.clone().add(LEFT_PALM);
+        this.armL.position.add(palm.clone().applyEuler(this.armLRot).sub(palm.applyEuler(this.armLBase)));
       }
       this.armLRest2.copy(this.armL.position);
     }
   }
   private readonly armLRest2 = new THREE.Vector3();
+  /** The support arm's rotation for the current gun (armLRot plus the class roll). */
+  private readonly armLBase = new THREE.Euler();
 
   /** Lower the current gun, swap, raise the new one. `instant` skips the animation (first equip, server resync). */
   equip(id: WeaponId, instant = false) {
@@ -263,7 +326,7 @@ export class Viewmodel {
     const g = this.gun;
     if (!g) return;
     const w = WEAPONS[g.id];
-    const f = FEEL[w.kind];
+    const f = feelOf(g.id);
     const r = 0.8 + Math.random() * 0.4;
     this.kickZ.v += f.back * 60 * r;
     this.kickX.v += f.climb * 60 * r;
@@ -311,7 +374,7 @@ export class Viewmodel {
     if (!g) return;
     const dt = f.dt;
     const w = WEAPONS[g.id];
-    const feel = FEEL[w.kind];
+    const feel = feelOf(g.id);
 
     // Springs.
     this.kickZ.step(dt, feel.k, feel.c);
@@ -329,10 +392,15 @@ export class Viewmodel {
     // Base pose: hip or aimed.
     const a = f.ads * (1 - this.sprintK);
     const hip = PALM.clone().add(feel.hip);
-    // The sight's top edge just under the eye line, so the target stays visible above it.
-    const aim = new THREE.Vector3(-g.sight.x, -g.sight.y - 0.006, -feel.eye - g.sight.z);
+    // Iron sights: the sight's top edge just under the eye line, so the target stays visible above it. Optics whose
+    // `_sight` marker is the optical axis itself (OPTIC_AXIS) sit exactly on the eye line so the dot is centred.
+    const lift = OPTIC_AXIS.has(g.id) ? 0 : 0.006;
+    const aim = new THREE.Vector3(-g.sight.x, -g.sight.y - lift, -feel.eye - g.sight.z);
     const pos = hip.lerp(aim, ease(a));
     const rot = new THREE.Euler(0, 0, 0, 'YXZ');
+    // Hip yaw and cant, gone when aimed.
+    rot.y += feel.yaw * (1 - a);
+    rot.z += feel.cant * (1 - a);
 
     // Bob (much less when aimed) and idle breathing.
     const bobAmt = f.onGround ? f.move * (1 - a * 0.85) : 0;
@@ -371,7 +439,7 @@ export class Viewmodel {
     // ---- timelines ----
     let armLOff = new THREE.Vector3();
     let armLPitch = 0;
-    if (this.armL) this.armL.rotation.copy(this.armLRot);
+    if (this.armL) this.armL.rotation.copy(this.armLBase);
 
     // Reload.
     if (this.reloadT >= 0) {
@@ -519,12 +587,117 @@ export class Viewmodel {
 
     if (this.armL) {
       this.armL.position.copy(this.armLRest2).add(armLOff);
-      this.armL.rotation.x = this.armLRot.x + armLPitch;
+      this.armL.rotation.x = this.armLBase.x + armLPitch;
     }
     this.group.position.copy(pos);
     this.group.rotation.copy(rot);
+    this.probe(dt, a);
+  }
+
+  // ---- light probe ---------------------------------------------------------------------------------------------
+  // The hands and gun are lit by the world's lights too, but at night those are a few far lamps and the gun reads as
+  // a black cut-out. A key and a fill only the viewmodel sees follow the light around the player: every few frames
+  // the world's lights are weighed at the camera (inverse square, range window, spot cone), and the key turns toward
+  // the strongest, takes on their colour and scales with how bright the spot is; the fill is a share of it.
+  private lights: THREE.Light[] = [];
+  private lightsAge = Infinity;
+  private probeAge = Infinity;
+  private readonly keyDir = new THREE.Vector3(-0.5, 0.75, 0.4);
+  private readonly keyCol = new THREE.Color(0xffc48a);
+  private keyLevel = 0;
+  /** Last probe reading, for tuning (dev). */
+  probeLum = 0;
+
+  private probe(dt: number, ads: number) {
+    const cam = this.lens.parent;
+    if (!cam) return;
+    this.lightsAge += dt;
+    this.probeAge += dt;
+    if (this.lightsAge > 2) {
+      this.lightsAge = 0;
+      let root: THREE.Object3D = cam;
+      while (root.parent) root = root.parent;
+      this.lights.length = 0;
+      root.traverse((o) => {
+        const l = o as THREE.Light;
+        if (!l.isLight || l === this.key || l === this.hemi || !((l as THREE.PointLight).isPointLight || (l as THREE.SpotLight).isSpotLight)) return;
+        // A shaft meant to light the atrium from 30 m away floods the gun's top faces right next to the eye; keep it on
+        // the world layer (post.ts honours worldOnly) and let the key stand in for it.
+        if (!l.userData.worldOnly && (l as THREE.PointLight).distance >= FAR_LIGHT) {
+          l.userData.worldOnly = true;
+          l.userData.vmKey = true;
+          l.layers.set(0);
+        }
+        if (!l.userData.worldOnly || l.userData.vmKey) this.lights.push(l);
+      });
+    }
+    if (this.probeAge >= 0.1) {
+      this.probeAge = 0;
+      const eye = cam.getWorldPosition(_v);
+      const dir = _d.set(0, 0, 0);
+      const r = { r: 0, g: 0, b: 0 };
+      let lum = 0;
+      for (const l of this.lights) {
+        if (!l.visible || l.intensity <= 0) continue;
+        const p = l.getWorldPosition(_w).sub(eye);
+        const d2 = Math.max(0.25, p.lengthSq());
+        const d = Math.sqrt(d2);
+        const range = (l as THREE.PointLight).distance;
+        if (range > 0 && d > range) continue;
+        let w = l.intensity / d2;
+        if (range > 0) {
+          const x = d / range;
+          w *= (1 - x * x * x * x) ** 2;
+        }
+        const spot = l as THREE.SpotLight;
+        if (spot.isSpotLight) {
+          // Cosine between the spot's axis and the way to the eye; soft falloff outside the cone (bounce off the floor).
+          const axis = spot.target.getWorldPosition(_a).sub(spot.getWorldPosition(_b)).normalize();
+          const c = -axis.dot(p) / d;
+          const cosOuter = Math.cos(spot.angle);
+          w *= c >= cosOuter ? 1 : 0.12;
+        }
+        const y = w * (0.3 * l.color.r + 0.6 * l.color.g + 0.1 * l.color.b);
+        if (y <= 0) continue;
+        lum += y;
+        dir.addScaledVector(p, y / d);
+        r.r += l.color.r * y;
+        r.g += l.color.g * y;
+        r.b += l.color.b * y;
+      }
+      this.probeLum = lum;
+      if (lum > 0) {
+        // Into camera space; keep the key a little above, ahead or behind, and from the left, so it rakes the left
+        // flank the camera sees and rims the top edges.
+        cam.getWorldQuaternion(_q).invert();
+        dir.normalize().applyQuaternion(_q);
+        dir.x = Math.min(dir.x, -0.35);
+        dir.y = Math.max(dir.y, 0.5);
+        dir.z = Math.max(dir.z, -0.6);
+        this.keyDir.lerp(dir.normalize(), 0.5);
+        const m = Math.max(r.r, r.g, r.b);
+        this.keyCol.lerp(_c.setRGB(r.r / m, r.g / m, r.b / m), 0.5);
+      }
+    }
+    // Soft knee: dark corners keep a little, bright spots saturate.
+    const want = KEY_MAX * (1 - Math.exp(-this.probeLum * KEY_GAIN));
+    this.keyLevel += (want - this.keyLevel) * (1 - Math.exp(-dt * 4));
+    this.key.position.copy(this.keyDir).multiplyScalar(2).add(this.key.target.position);
+    this.key.color.copy(this.keyCol);
+    // Aimed, the rear of the gun is right at the eye: half the key so it does not glare.
+    this.key.intensity = this.keyLevel * (1 - 0.5 * ads);
+    this.hemi.color.copy(this.keyCol);
+    this.hemi.intensity = FILL_MIN + this.keyLevel * FILL_SHARE;
   }
 }
+
+const _v = new THREE.Vector3();
+const _w = new THREE.Vector3();
+const _d = new THREE.Vector3();
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _c = new THREE.Color();
 
 function setLayer(o: THREE.Object3D, layer: number) {
   o.traverse((c) => c.layers.set(layer));
