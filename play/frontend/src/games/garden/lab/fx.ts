@@ -1,6 +1,7 @@
 // Garden FX lab: /lab-garden-fx.html. A small garden board with stand-in towers and dummy enemies looping every
 // effect of fx.ts through the real post pipeline (post.ts).
 //   ?stress=1        six boards, many more lasers, enemies and deaths (versus worst case)
+//   ?fields=1        wave-5 field clutter: 10 slow, 2 beacon, 4 shield fields overlapping on every board
 //   ?q=low|medium|high   fx + post quality (keys 1/2/3 too)
 //   ?t=<s>           fast-forward the loop before the first frame (for screenshots)
 //   ?focus=x,z,dist  camera target and distance; ?yaw=<rad> ?pitch=<deg>
@@ -24,6 +25,7 @@ import { createPipeline } from '../post';
 const params = new URLSearchParams(location.search);
 const hud = document.getElementById('hud')!;
 const stress = params.get('stress') === '1';
+const fieldsMode = params.get('fields') === '1';
 let quality = (params.get('q') as Quality) || 'high';
 
 const engine = new Engine(document.getElementById('app')!, { fov: 35, near: 0.5, far: 600, shadows: false });
@@ -164,6 +166,7 @@ class Board {
   missile!: Tower;
   protectedLaser!: Tower;
   buildSpot: Tower;
+  extraFields: Tower[] = [];
   t = { zap: 0.5, disrupt: 1.2, death: 0.8, ping: 2, cycle: 0, fieldLv: 0, blocked: false };
   constructor(
     readonly ox: number,
@@ -215,6 +218,17 @@ class Board {
     this.buildSpot = add('laser', 1, 10, -7.5);
     this.buildSpot.mesh.visible = false;
     this.towers.pop();
+    if (fieldsMode) {
+      const spots: [TowerKind, number, number][] = [
+        ['slow', -6, 0], ['slow', -2, 3], ['slow', 2, 3], ['slow', -2, -4], ['slow', 6, -1], ['slow', 2, -1], ['slow', -10, 0], ['slow', 10, -5], ['slow', 6, 7],
+        ['beacon', -2, 7], ['shield', -10, -4], ['shield', 2, -8], ['shield', 6, 1],
+      ];
+      for (const [k, x, z] of spots) {
+        const t = add(k, ((Math.abs(x + z) % 3) + 1) as Level, x, z);
+        this.extraFields.push(t);
+        fx.field(t.id, k as 'slow', this.at(t, 0), TOWERS[k].levels[t.lv - 1].range, t.lv);
+      }
+    }
     for (const t of [this.shield, this.slow, this.beacon]) fx.field(t.id, t.kind as 'shield', this.at(t, 0), TOWERS[t.kind].levels[t.lv - 1].range, t.lv);
 
     const count = stress ? 22 : 8;
@@ -278,6 +292,13 @@ class Board {
       }
       this.place(e);
     }
+    // Slow fields light up only while an enemy is inside (optional Fx.fieldActive).
+    const fa = (fx as { fieldActive?: (tw: number, active: boolean) => void }).fieldActive;
+    if (fa)
+      for (const t of [this.slow, ...this.extraFields]) {
+        if (t.kind !== 'slow') continue;
+        fa(t.id, !!this.nearest(t.x, t.z, TOWERS.slow.levels[t.lv - 1].range));
+      }
     // Lasers.
     for (const t of this.towers) {
       if (t.kind !== 'laser') continue;

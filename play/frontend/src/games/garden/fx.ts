@@ -17,6 +17,15 @@ import type { EnemyKind } from '@shared/garden/enemies';
 import type { Level } from '@shared/garden/towers';
 import type { CreateFx, Fx, P3, Quality } from './api';
 
+/**
+ * Optional extra on top of Fx (api.ts): a slow field plays its rings / fill / motes only while an enemy is inside its
+ * radius. Call `fieldActive(towerId, true|false)` when that changes (calling every frame is fine); fields never told
+ * stay idle (a faint rim). Ignored for shield / beacon fields and unknown towers.
+ */
+export interface FxFieldActive {
+  fieldActive(tw: number, active: boolean): void;
+}
+
 // ---- colours --------------------------------------------------------------------------------------------------------
 
 type RGB = [number, number, number];
@@ -646,6 +655,8 @@ const DISC_VS = /* glsl */ `
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
+// Idle fields are a faint rim only; slow rings / fill play only while uAct (an enemy inside) is up. Slow and beacon
+// discs use MAX blending (MAXBLEND): overlapping fields cap at one field's brightness instead of stacking to white.
 const DISC_FS = /* glsl */ `
   uniform float uTime;
   uniform float uMode;
@@ -654,6 +665,7 @@ const DISC_FS = /* glsl */ `
   uniform float uR;
   uniform vec3 uCol;
   uniform float uFlash;
+  uniform float uAct;
   varying vec2 vP;
   float hash(float n) { return fract(sin(n * 127.1 + 311.7) * 43758.5453); }
   float line(float d, float at, float w) { float q = (d - at) / w; return exp(-q * q); }
@@ -664,47 +676,50 @@ const DISC_FS = /* glsl */ `
     float px = 1.0 / max(uR, 0.5); // one metre in disc units
     float a = 0.0;
     if (uMode < 0.5) {
-      // Slow field: soft mint fill, scalloped rim, rings that bloom outward from the flower.
+      // Slow field: scalloped rim at rest; while active a faint fill and rings that bloom outward from the flower.
       float edge = 1.0 - smoothstep(0.86, 1.0, d);
       float petals = 0.5 + 0.5 * cos(ang * 18.0 + uTime * 0.25);
-      float rim = line(d, 0.965 - 0.012 * petals, 0.035) * (0.75 + 0.35 * petals);
+      float rim = line(d, 0.965 - 0.012 * petals, 0.016 + 0.05 * px) * (0.75 + 0.35 * petals);
       float rings = 0.0;
       for (int k = 0; k < 3; k++) {
         float rp = fract(uTime * 0.22 + float(k) / 3.0);
         rings += line(d, rp, 0.05 * px + 0.012) * sin(rp * 3.14159) * 0.55;
       }
       float inner = line(d, 0.72, 0.012) * (0.5 + 0.5 * sin(ang * 6.0 - uTime * 0.6)) * 0.35;
-      a = rim * 0.8 + edge * (0.11 + 0.04 * sin(uTime * 1.6)) + rings * edge * (0.6 + 0.2 * uLv) + inner;
+      a = rim * (0.2 + 0.15 * uAct) + uAct * (edge * (0.03 + 0.01 * sin(uTime * 1.6)) + rings * edge * (0.25 + 0.1 * uLv) + inner * 0.5);
     } else if (uMode < 1.5) {
-      // Beacon: two turning rune rings.
-      float rot = uTime * 0.35;
-      float band = smoothstep(0.785, 0.80, d) * (1.0 - smoothstep(0.915, 0.93, d));
-      float aa = (ang + rot) / 6.28318 * 40.0;
+      // Beacon: one thin, slowly turning rune row between two hairline borders.
+      float rot = uTime * 0.2;
+      float band = smoothstep(0.88, 0.89, d) * (1.0 - smoothstep(0.92, 0.93, d));
+      float aa = (ang + rot) / 6.28318 * 48.0;
       float cell = floor(aa);
       float f = fract(aa);
-      float radial = clamp((d - 0.8) / 0.12, 0.0, 0.999);
-      float row = floor(radial * 3.0);
-      float on = step(0.45, hash(cell * 3.7 + row * 1.3));
-      float bar = step(0.18, f) * step(f, 0.82) * on;
+      float on = step(0.45, hash(cell * 3.7));
+      float bar = step(0.2, f) * step(f, 0.8) * on;
       float tick = step(0.42, f) * step(f, 0.58) * (1.0 - on);
-      float runes = band * max(bar * (0.55 + 0.45 * step(0.2, fract(radial * 3.0)) * step(fract(radial * 3.0), 0.8)), tick * 0.8);
-      float borders = line(d, 0.775, 0.008) + line(d, 0.94, 0.008) * 0.9;
-      float dash = line(d, 0.6, 0.01) * step(0.45, fract((ang - rot * 1.6) / 6.28318 * 28.0)) * 0.8;
+      float runes = band * max(bar, tick * 0.7);
+      float borders = line(d, 0.875, 0.006) + line(d, 0.94, 0.006);
       float inner = 0.0;
       if (uLv > 2.5) {
         float a2 = (ang - rot * 0.8) / 6.28318 * 22.0;
-        inner = line(d, 0.42, 0.03) * step(0.3, fract(a2)) * step(fract(a2), 0.7) * step(0.4, hash(floor(a2) + 9.0)) * 0.9;
+        inner = line(d, 0.42, 0.02) * step(0.3, fract(a2)) * step(fract(a2), 0.7) * step(0.4, hash(floor(a2) + 9.0)) * 0.3;
       }
-      float fill = (1.0 - smoothstep(0.7, 1.0, d)) * 0.05 + line(d, 0.99, 0.02) * 0.35;
-      float shimmer = 0.85 + 0.15 * sin(uTime * 2.0 + ang * 3.0);
-      a = (runes * 0.75 + borders * 0.8 + dash * 0.8 + inner) * shimmer * (0.75 + 0.12 * uLv) + fill;
+      float shimmer = 0.85 + 0.15 * sin(uTime * 1.2 + ang * 3.0);
+      a = (runes * 0.35 + borders * 0.4 + inner) * shimmer * (0.85 + 0.05 * uLv) + line(d, 0.99, 0.02) * 0.25;
     } else {
       // Shield: warm line where the bubble meets the ground.
-      a = line(d, 0.99, 0.014 + 0.1 * px) * (0.7 + uFlash) + (1.0 - smoothstep(0.8, 1.0, d)) * 0.03 * (1.0 + uFlash * 3.0);
+      a = line(d, 0.99, 0.014 + 0.1 * px) * (0.5 + uFlash) + (1.0 - smoothstep(0.8, 1.0, d)) * 0.09 * uFlash;
     }
     a *= uAlpha;
     if (a < 0.003) discard;
-    gl_FragColor = vec4(uCol, a);
+    #ifdef MAXBLEND
+    // MAX blending ignores alpha: the colour itself is the strength (a lighten blend over the ground).
+    // A little white keeps it reading as pale mint over green grass (MAX would otherwise only lift the blue channel).
+    float s = min(a * 1.8, 1.0);
+    gl_FragColor = vec4(uCol * s + s * 0.3, a);
+    #else
+    gl_FragColor = vec4(uCol * 0.85, a);
+    #endif
     ${GLSL_TAIL}
   }
 `;
@@ -765,13 +780,13 @@ const DOME_FS = /* glsl */ `
         rip += exp(-k * k) * (1.0 - t / 1.1) * (1.0 + 2.0 * exp(-ang * 5.0) * (1.0 - t / 0.3));
       }
     }
-    float base = 0.025 + 0.012 * uLv;
-    float a = base + ln * (0.06 + 0.2 * fres) * (0.55 + 0.45 * shimmer) + lit * 0.05 + pow(fres, 2.2) * 0.24;
+    float base = 0.015 + 0.008 * uLv;
+    float a = base + ln * (0.03 + 0.08 * fres) * (0.55 + 0.45 * shimmer) + lit * 0.025 + pow(fres, 2.2) * 0.08;
     a += rip * (0.25 + ln * 1.2) + uFlash * (0.08 + ln * 0.35 + fres * 0.4);
     float foot = smoothstep(0.0, 0.08, vLocal.y);
-    a *= uAlpha * mix(1.6, 1.0, foot);
+    a *= uAlpha * mix(1.1, 1.0, foot);
     if (!gl_FrontFacing) a *= 0.45;
-    vec3 c = uCol * (1.0 + fres * 0.8 + rip * 0.8);
+    vec3 c = uCol * (1.0 + fres * 0.3 + rip * 0.8 + uFlash * 0.5);
     gl_FragColor = vec4(c, a);
     ${GLSL_TAIL}
   }
@@ -857,6 +872,9 @@ interface Field {
   domeMat: THREE.ShaderMaterial | null;
   ripN: number;
   flash: number;
+  /** Slow field: an enemy is inside (set by Fx.fieldActive); act eases towards it. */
+  active: boolean;
+  act: number;
 }
 
 interface Disabled {
@@ -1254,7 +1272,7 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
   const dyingFields: Field[] = [];
   const discGeo = new THREE.PlaneGeometry(2, 2, 1, 1).rotateX(-Math.PI / 2);
   const domeGeo = new THREE.SphereGeometry(1, 56, 20, 0, Math.PI * 2, 0, Math.PI / 2);
-  const SLOW_COL = lin(0x4ee6d9, 1.25);
+  const SLOW_COL = lin(0x4ee6d9, 0.9);
   const BEACON_COL = lin(0x3ff0c8, 1.7);
   const SHIELD_COL = lin(0xff9a30, 1.25);
   const SHIELD_COL3 = lin(0xffc65a, 1.4);
@@ -1263,13 +1281,20 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
     const c = kind === 'slow' ? SLOW_COL : kind === 'beacon' ? BEACON_COL : lv === 3 ? SHIELD_COL3 : SHIELD_COL;
     const discMat = transparent(
       new THREE.ShaderMaterial({
-        uniforms: { uTime, uMode: { value: mode }, uLv: { value: lv }, uAlpha: { value: 0 }, uR: { value: radius }, uCol: { value: new THREE.Vector3(c[0], c[1], c[2]) }, uFlash: { value: 0 } },
+        uniforms: { uTime, uMode: { value: mode }, uLv: { value: lv }, uAlpha: { value: 0 }, uR: { value: radius }, uCol: { value: new THREE.Vector3(c[0], c[1], c[2]) }, uFlash: { value: 0 }, uAct: { value: 0 } },
+        defines: kind === 'shield' ? {} : { MAXBLEND: 1 },
         vertexShader: DISC_VS,
         fragmentShader: DISC_FS,
       }),
       true,
     );
     if (kind === 'shield') discMat.blending = THREE.NormalBlending;
+    else {
+      // Lighten, not add: overlapping slow / beacon discs never get brighter than one of them.
+      discMat.blending = THREE.CustomBlending;
+      discMat.blendEquation = THREE.MaxEquation;
+      discMat.blendEquationAlpha = THREE.MaxEquation;
+    }
     discMat.polygonOffset = true;
     discMat.polygonOffsetFactor = -1;
     discMat.polygonOffsetUnits = -2;
@@ -1294,7 +1319,7 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
       dome.position.set(at.x, at.y, at.z);
       dome.scale.setScalar(0.001);
     }
-    return { tw, kind, x: at.x, y: at.y, z: at.z, r: 0, target: radius, lv, alpha: 0, dying: false, acc: 0, disc, discMat, dome, domeMat, ripN: 0, flash: 0 };
+    return { tw, kind, x: at.x, y: at.y, z: at.z, r: 0, target: radius, lv, alpha: 0, dying: false, acc: 0, disc, discMat, dome, domeMat, ripN: 0, flash: 0, active: false, act: 0 };
   };
   const disposeField = (f: Field) => {
     group.remove(f.disc);
@@ -1655,7 +1680,15 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
     }
   };
 
-  const updateFields = (dt: number) => {
+  const camPos = new THREE.Vector3();
+  /** Field strength from camera distance: full at board zoom, barely there in the versus overview. */
+  const farFade = (f: Field) => {
+    const d = Math.hypot(camPos.x - f.x, camPos.y - f.y, camPos.z - f.z);
+    const t = Math.min(1, Math.max(0, (d - 60) / 80));
+    return 1 - 0.75 * t * t * (3 - 2 * t);
+  };
+  const updateFields = (dt: number, camera: THREE.Camera) => {
+    camera.getWorldPosition(camPos);
     const k = 1 - Math.exp(-dt * 4.5);
     for (let i = dyingFields.length - 1; i >= 0; i--) {
       const f = dyingFields[i];
@@ -1675,21 +1708,24 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
       f.r += (f.target - f.r) * k;
       f.alpha += (1 - f.alpha) * k;
       f.flash = Math.max(0, f.flash - dt * 2.5);
+      f.act += ((f.active ? 1 : 0) - f.act) * (1 - Math.exp(-dt * (f.active ? 5 : 1.6)));
       const r = Math.max(0.001, f.r);
+      const fade = farFade(f);
       f.disc.scale.set(r, 1, r);
-      f.discMat.uniforms.uAlpha.value = f.alpha;
+      f.discMat.uniforms.uAlpha.value = f.alpha * fade;
       f.discMat.uniforms.uR.value = r;
       f.discMat.uniforms.uFlash.value = f.flash;
+      f.discMat.uniforms.uAct.value = f.act;
       if (f.dome && f.domeMat) {
         f.dome.scale.set(r, r * DOME_H, r);
-        f.domeMat.uniforms.uAlpha.value = f.alpha;
+        f.domeMat.uniforms.uAlpha.value = f.alpha * fade * fade;
         f.domeMat.uniforms.uFlash.value = f.flash;
         f.domeMat.uniforms.uHex.value = Math.max(3, r * 1.15);
       }
       // Ambient particles.
       const lvk = 0.6 + 0.2 * f.lv;
       if (f.kind === 'slow') {
-        f.acc += dt * r * r * 0.55 * lvk * q;
+        f.acc += dt * r * r * 0.3 * lvk * q * f.act;
         while (f.acc >= 1) {
           f.acc -= 1;
           const a = Math.random() * 6.283;
@@ -1704,11 +1740,11 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
           P.spin = rnd(-1, 1);
           P.fadeIn = 0.25;
           P.fadeOut = 0.55;
-          col(Math.random() < 0.7 ? MINT : CREAM, rnd(1.4, 2.2));
+          col(Math.random() < 0.7 ? MINT : CREAM, rnd(0.9, 1.4));
           emit(add);
         }
       } else if (f.kind === 'beacon') {
-        f.acc += dt * r * 2.4 * lvk * q;
+        f.acc += dt * r * 0.9 * lvk * q;
         while (f.acc >= 1) {
           f.acc -= 1;
           const a = Math.random() * 6.283;
@@ -1721,11 +1757,11 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
           P.stretch = 0.25;
           P.fadeIn = 0.15;
           P.fadeOut = 0.5;
-          col(BEACON_COL, rnd(1.2, 1.8));
+          col(BEACON_COL, rnd(0.7, 1.1));
           emit(add);
         }
       } else {
-        f.acc += dt * r * 0.7 * q;
+        f.acc += dt * r * 0.35 * q;
         while (f.acc >= 1) {
           f.acc -= 1;
           randDir(true);
@@ -1737,7 +1773,7 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
           P.spin = rnd(-2, 2);
           P.fadeIn = 0.3;
           P.fadeOut = 0.4;
-          col(f.lv === 3 ? SHIELD_COL3 : SHIELD_COL, 1.6);
+          col(f.lv === 3 ? SHIELD_COL3 : SHIELD_COL, 1.1);
           emit(add);
         }
       }
@@ -1779,7 +1815,7 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
 
   // ---- the interface ----------------------------------------------------------------------------------------------
 
-  const fx: Fx = {
+  const fx: Fx & FxFieldActive = {
     beams(list) {
       for (const e of list) {
         let b = beamsById.get(e.tw);
@@ -1889,6 +1925,11 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
       const c = kind === 'slow' ? MINT : kind === 'beacon' ? BEACON_COL : AMBER;
       ring(at.x, at.y, at.z, 0.5, radius, 0.9, 0.25, c, 1.6, 0);
       if (kind === 'shield') ripple(nf, 0, 1, 0);
+    },
+
+    fieldActive(tw, active) {
+      const f = fields.get(tw);
+      if (f) f.active = active;
     },
 
     zap(tw) {
@@ -2194,7 +2235,7 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
       time += step;
       uTime.value = time;
       updateMissiles(step);
-      updateFields(step);
+      updateFields(step, _camera);
       updateDisabled(step);
       updateBeams(step);
       updateArcs();
