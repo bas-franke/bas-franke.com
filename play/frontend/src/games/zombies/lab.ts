@@ -1,13 +1,16 @@
 // Dev lab for the Last Light graphics: /lab-zombies.html?map=storage&q=medium
 // Fly with WASD (Shift faster, Z / X down / up), drag to look. B breaks chunks, N blasts a hole in the nearest wall,
-// 0-6 set every window's boards, P puffs dust ahead, L flashlight, H hurt, 7 / 8 / 9 quality, M next map.
+// 0-6 set every window's boards, P puffs dust ahead, F shoots where you look (tiles chip), G drops a grenade ahead,
+// L flashlight, H hurt, 7 / 8 / 9 quality, M next map.
 // ?cam=x,y,z,yaw,pitch parks the camera (screenshots); ?models=0 skips models.ts.
 
 import * as THREE from 'three';
 import { MAPS, zmapById } from '@shared/zombies/maps';
-import { buildWorld, chunksInSphere, collapse, damageChunk, type World } from '@shared/zombies/world';
+import type { ImpactMat } from '@shared/zombies/protocol';
+import { buildWorld, chunksInSphere, collapse, damageChunk, raycast, type World } from '@shared/zombies/world';
 import { Engine } from '../../engine/engine';
-import type { Flashlight, Models, Pipeline, Quality, WorldView } from './api';
+import type { Flashlight, Fx, Models, Pipeline, Quality, WorldView } from './api';
+import { createFx } from './fx';
 import { createPipeline } from './post';
 import { createWorldView } from './world';
 
@@ -59,6 +62,7 @@ camera.rotation.order = 'YXZ';
 let world: World;
 let view: WorldView;
 let pipe: Pipeline;
+let fx: Fx;
 let models: Models = stubModels;
 
 const flash = new THREE.SpotLight(0xfff1dc, 60, 32, 0.5, 0.9, 2);
@@ -98,6 +102,7 @@ if (camParam) {
 }
 
 function build() {
+  fx?.dispose();
   pipe?.dispose();
   view?.dispose();
   const def = MAPS[mapIndex];
@@ -107,6 +112,7 @@ function build() {
   view = createWorldView(scene, world, models, quality);
   const t1 = performance.now();
   pipe = createPipeline(renderer, scene, camera, world, view, quality);
+  fx = createFx(scene, world, pipe);
   engine.renderHook = () => pipe.render(frameParams());
   engine.invalidateShadows();
   console.log(`[lab] ${def.name}: world ${(t1 - t0).toFixed(0)} ms, pipeline ${(performance.now() - t1).toFixed(0)} ms, ${world.chunks.length} chunks`);
@@ -118,7 +124,7 @@ function frameParams() {
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
   const fl: Flashlight[] = [{ pos: { x: flash.position.x, y: flash.position.y, z: flash.position.z }, dir: { x: dir.x, y: dir.y, z: dir.z }, on: flashOn ? 1 : 0 }];
-  return { time, dt: lastDt, hurt, hit: 0, downed: false, flashlights: fl, flashes: [] };
+  return { time, dt: lastDt, hurt, hit: 0, downed: false, flashlights: fl, flashes: fx.flashes() };
 }
 
 const broke = (list: number[]) => {
@@ -136,6 +142,16 @@ function blast(c: THREE.Vector3, r = 1.6) {
   broke(out);
   pipe.puff(c, 1.5, 0.9, 6, 0.5);
   return out.length;
+}
+
+/** A bullet from the eye along `d`, like the client's own shots. */
+function shoot(o: THREE.Vector3, d: THREE.Vector3) {
+  d.normalize();
+  const hit = raycast(world, o, d, 80);
+  if (!hit) return null;
+  const p = o.clone().addScaledVector(d, hit.t);
+  fx.impact(p, hit.n, hit.mat as ImpactMat, hit.chunk);
+  return { p, mat: hit.mat, chunk: hit.chunk };
 }
 
 const keys = new Set<string>();
@@ -162,6 +178,16 @@ window.addEventListener('keydown', (e) => {
       // Blast where the camera looks, 4 m ahead.
       blast(camera.position.clone().addScaledVector(fwd, 4));
       break;
+    case 'KeyF':
+      shoot(camera.position.clone(), fwd.clone());
+      break;
+    case 'KeyG': {
+      const hit = raycast(world, camera.position, fwd, 12);
+      const p = camera.position.clone().addScaledVector(fwd, hit ? hit.t - 0.3 : 4);
+      fx.explosion(p);
+      blast(p, 1.6);
+      break;
+    }
     case 'KeyP': {
       const c = camera.position.clone().addScaledVector(fwd, 3);
       pipe.puff(c, 1.2, 0.8, 5, 0.4);
@@ -214,6 +240,10 @@ window.addEventListener('mousemove', (e) => {
   engine,
   blast: (x: number, y: number, z: number, r?: number) => blast(new THREE.Vector3(x, y, z), r),
   setFlash: (on: boolean) => (flashOn = on),
+  get fx() {
+    return fx;
+  },
+  shoot: (ox: number, oy: number, oz: number, dx: number, dy: number, dz: number) => shoot(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, dy, dz)),
 };
 
 let fpsAcc = 0;
@@ -243,6 +273,7 @@ const tick = (dt: number, now: number) => {
   flash.target.updateMatrixWorld();
   flash.intensity = flashOn ? 60 : 0;
   view.update(dt, now);
+  fx.update(dt, camera);
   fpsAcc += dt;
   fpsN++;
   if (now - fpsShown > 0.5) {

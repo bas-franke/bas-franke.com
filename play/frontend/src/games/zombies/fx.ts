@@ -16,6 +16,7 @@ import type { ImpactMat } from '@shared/zombies/protocol';
 import type { WeaponKind } from '@shared/zombies/weapons';
 import { firstBlock, raycast, type World } from '@shared/zombies/world';
 import { type CreateFx, type Fx, type FrameParams, type Pipeline, VIEWMODEL_LAYER } from './api';
+import { faceAB, faceNormal, facePoint, STONE_TINT, type Stone, type Tile, TILE_HITS, TileDamage, tilePieceGeometry, tilePieceMaterial } from './tiles';
 
 const GRAVITY = 14;
 
@@ -601,6 +602,8 @@ class FragmentPool {
   onImpact?: Impact;
   /** Settled pieces snap to a face; casings instead lie on their side (axis horizontal). */
   snapRest = true;
+  /** Angle settled pieces snap to: a quarter turn for blocks, half a turn for flat pieces (face up or face down). */
+  restStep = Math.PI / 2;
 
   constructor(
     geo: THREE.BufferGeometry,
@@ -684,6 +687,17 @@ class FragmentPool {
       this.mesh.instanceMatrix.needsUpdate = true;
     }
     return i;
+  }
+
+  /** Sets a piece's orientation (tile pieces start flat against the face they came off). */
+  setRot(i: number, x: number, y: number, z: number) {
+    this.rot[i * 3] = x;
+    this.rot[i * 3 + 1] = y;
+    this.rot[i * 3 + 2] = z;
+    if (this.state[i] === 3) {
+      this.write(i, 1);
+      this.mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   private unpile(i: number) {
@@ -806,8 +820,8 @@ class FragmentPool {
           if (vel[i3 + 1] === 0 && Math.hypot(vel[i3], vel[i3 + 2]) < 0.08) {
             // Lie flat-ish: snap the tumble to a resting angle, and add to the pile below.
             if (this.snapRest) {
-              rot[i3] = Math.round(rot[i3] / (Math.PI / 2)) * (Math.PI / 2);
-              rot[i3 + 2] = Math.round(rot[i3 + 2] / (Math.PI / 2)) * (Math.PI / 2);
+              rot[i3] = Math.round(rot[i3] / this.restStep) * this.restStep;
+              rot[i3 + 2] = Math.round(rot[i3 + 2] / this.restStep) * this.restStep;
             } else rot[i3] = 0;
             state[i] = 2;
             if (r > 0.015) {
@@ -1294,6 +1308,11 @@ class Effects implements Fx {
   private readonly slabMat = new Map<FragmentPool, Debris>();
   private readonly planks: FragmentPool;
   private readonly casings: FragmentPool;
+  /** Chipped and cracked tiles on the marble floor and the travertine columns (tiles.ts). */
+  private readonly tiles: TileDamage;
+  /** Tile chips and broken-off pieces of tile, per stone. They never fade: a fought-over lobby keeps its litter. */
+  private readonly tileChips: Record<Stone, FragmentPool[]>;
+  private readonly tilePieces: Record<Stone, FragmentPool[]>;
   private readonly embers: ParticlePool;
   private readonly rings: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; age: number; life: number; size: number }[] = [];
   private readonly piles: Piles;
@@ -1384,6 +1403,29 @@ class Effects implements Fx {
     this.casings = new FragmentPool(casingGeo, own(new THREE.MeshStandardMaterial({ color: 0xc9973f, roughness: 0.32, metalness: 1 })), 140, world, this.piles, 0.42, 0.85, 2.2);
     this.casings.snapRest = false;
     this.root.add(this.casings.mesh);
+
+    this.tiles = new TileDamage(world, this.root);
+    this.tileChips = {} as Record<Stone, FragmentPool[]>;
+    this.tilePieces = {} as Record<Stone, FragmentPool[]>;
+    for (const stone of ['marble', 'travertine'] as const) {
+      const mat = own(tilePieceMaterial(stone));
+      const seed = stone === 'marble' ? 31 : 37;
+      // Thin flat chips: a low bounce and a long skid on the polished stone before they stop, face up or face down.
+      this.tileChips[stone] = [0, 1].map((k) => {
+        const pool = new FragmentPool(own(tilePieceGeometry(seed + k * 3, 5 + k, 1)), mat, 160, world, this.piles, 0.22, 0.88, 2.4);
+        pool.restStep = Math.PI;
+        this.root.add(pool.mesh);
+        return pool;
+      });
+      // Pieces of a whole tile: squarish, they slap down flat and break up when they fall from any height.
+      this.tilePieces[stone] = [4, 5, 7].map((sides, k) => {
+        const big = new FragmentPool(own(tilePieceGeometry(seed + 20 + k * 5, sides, 0.2)), mat, 40, world, this.piles, 0.14, 0.55, 5);
+        big.restStep = Math.PI;
+        big.onImpact = (_i, x, y, z, speed, size) => this.tileShatter(stone, x, y, z, speed, size);
+        this.root.add(big.mesh);
+        return big;
+      });
+    }
 
     const gritMat = own(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true }));
     this.grit = new ParticlePool(own(new THREE.TetrahedronGeometry(0.5)), gritMat, 700, { stretch: 0, drag: 0.6, bounce: 0.25, fade: false, gravity: GRAVITY });
@@ -1568,6 +1610,126 @@ class Effects implements Fx {
     return true;
   }
 
+  private tileChip(stone: Stone) {
+    const pools = this.tileChips[stone];
+    return pools[Math.floor(Math.random() * pools.length)];
+  }
+
+  /** A falling piece of tile hit the floor hard: it breaks into smaller pieces, which stay. */
+  private tileShatter(stone: Stone, x: number, y: number, z: number, speed: number, size: number): boolean {
+    if (speed < 4 || size < 0.12) return false;
+    const pieces = 3 + Math.round(size * 8);
+    for (let i = 0; i < pieces; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.5, 2) * Math.min(1.5, speed / 6);
+      const w = size * (i < 3 ? rand(0.3, 0.45) : rand(0.08, 0.18));
+      _c.set(STONE_TINT[stone]).multiplyScalar(rand(0.85, 1.15));
+      this.tileChip(stone).spawn(x + Math.cos(th) * size * 0.2, y + 0.02, z + Math.sin(th) * size * 0.2, Math.cos(th) * s, rand(0.4, 1.6), Math.sin(th) * s, w, rand(0.012, 0.016), w * rand(0.6, 1.1), _c, 1e9, 0, 10);
+    }
+    _c.set(stone === 'marble' ? 0x8a8884 : 0xcabd9f);
+    for (let i = 0; i < 6; i++) {
+      const th = rand(0, 6.28);
+      this.grit.spawn(x, y + 0.03, z, Math.cos(th) * rand(0.6, 2.2), rand(0.3, 1.4), Math.sin(th) * rand(0.6, 2.2), rand(0.008, 0.02), rand(1, 2), _c);
+    }
+    _c.set(0xb8b4ac);
+    this.smoke.spawn(x, y + 0.1, z, rand(-0.3, 0.3), 0.08, rand(-0.3, 0.3), 0.2, 0.6, rand(1.5, 2.5), 0.3, _c);
+    return true;
+  }
+
+  /**
+   * A bullet (or a blast) on tiled stone: a chip out of the tile down to its concrete bed, cracks, chips flying off;
+   * the hit that makes TILE_HITS breaks the whole tile off in pieces and leaves the bed.
+   */
+  private tileHit(t: Tile, p: Vec3, add = 1) {
+    const before = t.hits;
+    const hits = this.tiles.hit(t, p, add);
+    if (hits === before) return;
+    const n = faceNormal(t);
+    const floor = t.axis === 1;
+    const ox = p.x + n.x * 0.015;
+    const oy = p.y + n.y * 0.015;
+    const oz = p.z + n.z * 0.015;
+    const tint = STONE_TINT[t.stone];
+    const chips = hits >= TILE_HITS ? 3 : Math.round(rand(3, 5));
+    for (let i = 0; i < chips; i++) {
+      const w = rand(0.018, 0.05);
+      _c.set(tint).multiplyScalar(rand(0.85, 1.2));
+      // Off the floor chips skip low and far; off a column they spit out of the face and drop.
+      if (floor) {
+        const th = rand(0, 6.28);
+        const s = rand(0.8, 3.2);
+        this.tileChip(t.stone).spawn(ox, oy, oz, Math.cos(th) * s, rand(0.6, 2.4), Math.sin(th) * s, w, rand(0.005, 0.009), w * rand(0.6, 1.1), _c, 1e9, 0, 22);
+      } else {
+        const s = rand(1.2, 3.5);
+        this.tileChip(t.stone).spawn(ox, oy, oz, (n.x + rand(-0.6, 0.6)) * s, rand(0, 1.6), (n.z + rand(-0.6, 0.6)) * s, w, rand(0.005, 0.009), w * rand(0.6, 1.1), _c, 1e9, 0, 22);
+      }
+    }
+    // Stone dust: pale grit and a small puff.
+    _c.set(t.stone === 'marble' ? 0x9a9792 : 0xd2c6aa);
+    for (let i = 0; i < 6; i++) {
+      const s = rand(1.2, 3.5);
+      this.grit.spawn(ox, oy, oz, (n.x + rand(-0.7, 0.7)) * s, (n.y + rand(-0.2, 0.9)) * s, (n.z + rand(-0.7, 0.7)) * s, rand(0.008, 0.022), rand(0.8, 2), _c);
+    }
+    _c.setRGB(0.72, 0.7, 0.66);
+    this.smoke.spawn(ox + n.x * 0.05, oy + n.y * 0.05, oz + n.z * 0.05, n.x * 0.8, n.y * 0.8 + 0.12, n.z * 0.8, 0.08, 0.5, rand(0.8, 1.4), 0.45, _c);
+    if (this.time - this.lastPuff > 0.035) {
+      this.lastPuff = this.time;
+      this.puff({ x: ox + n.x * 0.12, y: oy + n.y * 0.12, z: oz + n.z * 0.12 }, 0.14, 0.3, 1.4, 0.4);
+    }
+    if (hits < TILE_HITS) return;
+
+    // The tile comes off: pieces on a rough grid of the tile, the ones by the impact first and fastest.
+    const [pa, pb] = faceAB(t.axis, p);
+    const w = t.a1 - t.a0;
+    const h = t.b1 - t.b0;
+    const na = Math.max(1, Math.round(w / 0.4));
+    const nb = Math.max(1, Math.round(h / 0.32));
+    const pools = this.tilePieces[t.stone];
+    for (let i = 0; i < na; i++)
+      for (let j = 0; j < nb; j++) {
+        const ca = t.a0 + ((i + 0.5) * w) / na + rand(-0.02, 0.02);
+        const cb = t.b0 + ((j + 0.5) * h) / nb + rand(-0.02, 0.02);
+        const pool = pools[Math.floor(Math.random() * pools.length)];
+        const sa = (w / na) * rand(0.8, 1.25);
+        const sb = (h / nb) * rand(0.8, 1.25);
+        const c = facePoint(t, ca, cb, 0.012);
+        const da = ca - pa;
+        const db = cb - pb;
+        const d = Math.hypot(da, db);
+        const near = Math.max(0, 1 - d / 0.9);
+        _c.set(tint).multiplyScalar(rand(0.9, 1.1));
+        if (floor) {
+          // Popped up out of the bed, falling back in and around the hole.
+          const out = rand(0.5, 1.8) * (0.4 + near);
+          const l = d || 1;
+          const th = rand(-0.5, 0.5);
+          const vx = ((da * Math.cos(th) - db * Math.sin(th)) / l) * out;
+          const vz = ((da * Math.sin(th) + db * Math.cos(th)) / l) * out;
+          const k = pool.spawn(c.x, c.y, c.z, vx, rand(0.9, 2.4) * (0.5 + near), vz, sa, 0.016, sb, _c, 1e9, d * 0.06, 7);
+          pool.setRot(k, rand(-0.08, 0.08), rand(0, 6.28), rand(-0.08, 0.08));
+          continue;
+        }
+        // Hangs for a beat, peels off the face and drops.
+        const out = rand(0.3, 1.3) * (0.5 + near);
+        const along = rand(-0.3, 0.3);
+        const delay = rand(0, 0.12) + d * 0.1;
+        // The thin axis (local y) turns to the face normal: about z for faces across x, about x for faces across z.
+        if (t.axis === 0) {
+          const k = pool.spawn(c.x, c.y, c.z, n.x * out, rand(-0.2, 0.8), along, sb, 0.016, sa, _c, 1e9, delay, 3);
+          pool.setRot(k, rand(0, 6.28), rand(-0.05, 0.05), Math.PI / 2 + rand(-0.05, 0.05));
+        } else {
+          const k = pool.spawn(c.x, c.y, c.z, along, rand(-0.2, 0.8), n.z * out, sa, 0.016, sb, _c, 1e9, delay, 3);
+          pool.setRot(k, Math.PI / 2 + rand(-0.05, 0.05), rand(0, 6.28), rand(-0.05, 0.05));
+        }
+      }
+    // A heavier burst of dust out of the bed.
+    const mid = facePoint(t, (t.a0 + t.a1) / 2, (t.b0 + t.b1) / 2, 0.1);
+    _c.setRGB(0.7, 0.68, 0.64);
+    for (let i = 0; i < 3; i++)
+      this.smoke.spawn(mid.x + rand(-0.2, 0.2), mid.y + rand(-0.1, 0.1), mid.z + rand(-0.2, 0.2), n.x * 0.6 + rand(-0.3, 0.3), n.y * 0.4 + 0.15, n.z * 0.6 + rand(-0.3, 0.3), 0.2, 0.8, rand(1.6, 2.6), 0.5, _c);
+    this.puff(mid, 0.4, 0.5, 3, 0.5);
+  }
+
   private ring(p: Vec3, size: number, life: number) {
     const r = this.rings.find((x) => x.age >= x.life) ?? this.rings[0];
     r.mesh.position.set(p.x, Math.max(0.03, p.y < 1.4 ? 0.03 : p.y), p.z);
@@ -1583,6 +1745,12 @@ class Effects implements Fx {
     if (mat === 'none') return;
     if (mat === 'flesh') {
       this.blood(p, { x: -n.x, y: -n.y, z: -n.z }, 0.35);
+      return;
+    }
+    // Tiled stone chips instead of losing a block; once the tile is gone the bullet hits its concrete bed.
+    const tile = this.tiles.tileAt(p, n, mat, chunk);
+    if (tile && tile.hits < TILE_HITS) {
+      this.tileHit(tile, p);
       return;
     }
     const m = asDebris(mat);
@@ -1964,6 +2132,12 @@ class Effects implements Fx {
   }
 
   explosion(p: Vec3) {
+    // The blast lifts the floor tiles under it and cracks the ones around.
+    if (p.y < 1.6)
+      for (const { t, d } of this.tiles.floorTilesNear(p, 2.2)) {
+        const hp = { x: Math.min(t.a1 - 0.08, Math.max(t.a0 + 0.08, p.x + rand(-0.2, 0.2))), y: 0, z: Math.min(t.b1 - 0.08, Math.max(t.b0 + 0.08, p.z + rand(-0.2, 0.2))) };
+        this.tileHit(t, hp, d < 1 ? TILE_HITS : d < 1.7 ? 2 : 1);
+      }
     this.flash({ x: p.x, y: p.y + 0.3, z: p.z }, 0xffa04a, 60, 0.35);
     // Fireball in waves: a white-hot core, then orange billows, then a dull red that turns to smoke.
     _c.setRGB(1, 0.92, 0.75).multiplyScalar(4);
@@ -2124,6 +2298,10 @@ class Effects implements Fx {
     for (const p of Object.values(this.slabs)) p.wake();
     this.planks.wake();
     this.casings.wake();
+    for (const s of ['marble', 'travertine'] as const) {
+      for (const p of this.tileChips[s]) p.wake();
+      for (const p of this.tilePieces[s]) p.wake();
+    }
   }
 
   update(dt: number, camera: THREE.Camera) {
@@ -2139,6 +2317,10 @@ class Effects implements Fx {
     for (const p of Object.values(this.slabs)) p.update(dt);
     this.planks.update(dt);
     this.casings.update(dt);
+    for (const s of ['marble', 'travertine'] as const) {
+      for (const p of this.tileChips[s]) p.update(dt);
+      for (const p of this.tilePieces[s]) p.update(dt);
+    }
     this.grit.update(dt);
     this.sparks.update(dt);
     this.embers.update(dt);
@@ -2192,6 +2374,11 @@ class Effects implements Fx {
     this.root.removeFromParent();
     for (const pools of Object.values(this.frags)) for (const p of pools) p.mesh.dispose();
     for (const p of Object.values(this.slabs)) p.mesh.dispose();
+    for (const s of ['marble', 'travertine'] as const) {
+      for (const p of this.tileChips[s]) p.mesh.dispose();
+      for (const p of this.tilePieces[s]) p.mesh.dispose();
+    }
+    this.tiles.dispose();
     for (const x of [this.planks, this.casings, this.grit, this.sparks, this.embers, this.drops, this.smoke, this.fire, this.decals, this.tracers]) {
       x.mesh.geometry.dispose();
       x.mesh.dispose();
@@ -2205,6 +2392,10 @@ class Effects implements Fx {
     for (const p of Object.values(this.slabs)) p.clear();
     this.planks.clear();
     this.casings.clear();
+    for (const s of ['marble', 'travertine'] as const) {
+      for (const p of this.tileChips[s]) p.clear();
+      for (const p of this.tilePieces[s]) p.clear();
+    }
     this.grit.clear();
     this.sparks.clear();
     this.embers.clear();

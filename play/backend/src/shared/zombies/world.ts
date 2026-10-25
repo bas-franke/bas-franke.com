@@ -306,7 +306,7 @@ export function buildWorld(def: MapDef, openZones?: readonly ZoneId[]): World {
           for (let r = 0; r + 1 < ys.length; r++) {
             const x0 = p.x - n / 2 + i * s;
             const z0 = p.z - n / 2 + j * s;
-            add(v(x0, ys[r], z0), v(x0 + s, ys[r + 1], z0 + s), 'travertine', 'column', p.zone, ceil);
+            add(v(x0, ys[r], z0), v(x0 + s, ys[r + 1], z0 + s), 'travertine', 'column', p.zone, ceil, false, true);
           }
     } else {
       // Reception desk / bar counter: a walnut body on the floor under a marble top slab, 1 m deep.
