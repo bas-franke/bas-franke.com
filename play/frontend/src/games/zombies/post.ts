@@ -18,7 +18,8 @@
 //      transmittance floor for bright far pixels plus blurred light in the fog), viewmodel over it
 //   7. auto exposure: average log luminance into a 1x1 target, adapted over time; a low key and tight max for night
 //   8. bloom (dual filter, on exposed values) and the night grade: cold blue-grey shadows, sodium highlights, ACES,
-//      vignette, grain and dither against banding, the hurt / hit / downed effects
+//      vignette, the hurt / hit / downed effects, into an 8-bit display-encoded target
+//   9. FXAA on that (every quality), then grain and dither against banding
 
 import * as THREE from 'three';
 import { VIEWMODEL_LAYER, type CreatePipeline, type FrameParams, type Pipeline, type Quality } from './api';
@@ -704,13 +705,56 @@ void main() {
   col += vec3(0.25, 0.0, 0.01) * hv * hv * hurt * pulse;
   col *= 1.0 - downed * 0.4;
   col = acesFit(col);
-  // Fine film grain (mostly in the mid-tones), then a triangular dither of one 8-bit step in output space: the dark
-  // smooth fog gradients would band without it.
-  float tl = dot(col, vec3(0.299, 0.587, 0.114));
+  // Display-encoded into an 8-bit target: the AA pass works on what the eye sees, and adds the grain after.
+  gl_FragColor = sRGBTransferOETF(vec4(max(col, 0.0), 1.0));
+}
+`;
+
+// FXAA 3.11-style (quality-lite) on the graded, display-encoded image. MSAA alone leaves the brightest edges stepped
+// (it resolves in linear HDR, where a lamp or lit window outweighs the dark fog next to it), and low has no MSAA.
+// Then fine film grain (mostly in the mid-tones) and a triangular dither of one 8-bit step: the dark smooth fog
+// gradients would band without it.
+const aaFrag = /* glsl */ `
+uniform sampler2D tSrc;
+uniform vec2 texel;
+uniform float time;
+uniform float grain;
+uniform float on; // the lab's A/B switch
+varying vec2 vUv;
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+vec3 fxaa() {
+  vec3 cM = texture2D(tSrc, vUv).rgb;
+  float lM = luma(cM);
+  float lN = luma(texture2D(tSrc, vUv + vec2(0.0, texel.y)).rgb);
+  float lS = luma(texture2D(tSrc, vUv - vec2(0.0, texel.y)).rgb);
+  float lE = luma(texture2D(tSrc, vUv + vec2(texel.x, 0.0)).rgb);
+  float lW = luma(texture2D(tSrc, vUv - vec2(texel.x, 0.0)).rgb);
+  float mn = min(lM, min(min(lN, lS), min(lE, lW)));
+  float mx = max(lM, max(max(lN, lS), max(lE, lW)));
+  // A low floor: the night image is dark, and its edges are dark-on-darker.
+  if (on < 0.5 || mx - mn < max(0.0156, mx * 0.1)) return cM;
+  float lNW = luma(texture2D(tSrc, vUv + vec2(-texel.x, texel.y)).rgb);
+  float lNE = luma(texture2D(tSrc, vUv + texel).rgb);
+  float lSW = luma(texture2D(tSrc, vUv - texel).rgb);
+  float lSE = luma(texture2D(tSrc, vUv + vec2(texel.x, -texel.y)).rgb);
+  vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+  float red = max((lN + lS + lE + lW) * 0.03125, 0.0078125);
+  float rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + red);
+  dir = clamp(dir * rcp, -8.0, 8.0) * texel;
+  vec3 a = 0.5 * (texture2D(tSrc, vUv - dir * 0.1667).rgb + texture2D(tSrc, vUv + dir * 0.1667).rgb);
+  vec3 b = a * 0.5 + 0.25 * (texture2D(tSrc, vUv - dir * 0.5).rgb + texture2D(tSrc, vUv + dir * 0.5).rgb);
+  float lB = luma(b);
+  return (lB < mn || lB > mx) ? a : b;
+}
+void main() {
+  // The grain goes on in linear, as it did before the AA pass existed; the dither in output space.
+  vec3 col = sRGBTransferEOTF(vec4(fxaa(), 1.0)).rgb;
+  float tl = luma(col);
   vec2 seed = gl_FragCoord.xy + fract(time * 13.7) * 1000.0;
   float g = h12(seed) - 0.5;
   col += g * grain * (0.35 + 0.65 * smoothstep(0.0, 0.12, tl)) * (1.0 - 0.7 * smoothstep(0.4, 1.0, tl));
-  vec4 outC = linearToOutputTexel(vec4(max(col, 0.0), 1.0));
+  vec4 outC = sRGBTransferOETF(vec4(max(col, 0.0), 1.0));
   outC.rgb += (h12(seed + 17.3) + h12(seed + 41.9) - 1.0) / 255.0;
   gl_FragColor = outC;
 }
@@ -978,6 +1022,10 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
   // The lab tunes exposure on the final pass; the prefilter follows it.
   prefilter.uniforms.expo = final.uniforms.expo;
   prefilter.uniforms.exposure = final.uniforms.exposure;
+  // 8-bit, display-encoded: what the AA pass smooths. The lab's grain slider (on the final pass) drives the AA pass.
+  const ldrRT = new THREE.WebGLRenderTarget(4, 4, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
+  ldrRT.texture.generateMipmaps = false;
+  const aa = pass(aaFrag, { tSrc: { value: ldrRT.texture }, texel: { value: new THREE.Vector2() }, time: final.uniforms.time, grain: final.uniforms.grain, on: { value: 1 } });
 
   const draw = (mat: THREE.ShaderMaterial, target: THREE.WebGLRenderTarget | null) => {
     quad.material = mat;
@@ -1005,6 +1053,8 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     sceneRT.setSize(w, h);
     viewRT.setSize(w, h);
     combineRT.setSize(w, h);
+    ldrRT.setSize(w, h);
+    aa.uniforms.texel.value.set(1 / w, 1 / h);
     halfRT.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
     quarterRT.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
     const sd = Math.max(1, spec.ssrDiv);
@@ -1104,7 +1154,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     profile: boolean;
     times: PassTimes;
   } = {
-    debug: { fog: fogUniforms, ssr: ssrUniforms, combine: combine.uniforms, final: final.uniforms },
+    debug: { fog: fogUniforms, ssr: ssrUniforms, combine: combine.uniforms, final: final.uniforms, aa: aa.uniforms },
     flags,
     get profile() {
       return profiling;
@@ -1333,7 +1383,8 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       f.hurt.value = p.hurt;
       f.hit.value = p.hit;
       f.downed.value = p.downed ? 1 : 0;
-      draw(final, null);
+      draw(final, ldrRT);
+      draw(aa, null);
       mark('bloomGrade');
       renderer.autoClear = autoClear;
     },
@@ -1371,6 +1422,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       sceneRT.dispose();
       viewRT.dispose();
       combineRT.dispose();
+      ldrRT.dispose();
       halfRT.dispose();
       quarterRT.dispose();
       ssrRT.dispose();
@@ -1381,7 +1433,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       for (const r of shaftRTs) r.dispose();
       tri.dispose();
       depthOnly.dispose();
-      for (const m of [fogMat, ssrMat, halve, combine, lum, prefilter, down, up, final]) m.dispose();
+      for (const m of [fogMat, ssrMat, halve, combine, lum, prefilter, down, up, final, aa]) m.dispose();
       envRT?.dispose();
       pmrem.dispose();
       if (scene.environment === envRT?.texture) scene.environment = null;
