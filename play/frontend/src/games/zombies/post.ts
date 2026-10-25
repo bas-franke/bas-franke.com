@@ -89,13 +89,16 @@ uniform float dust;
 uniform vec4 gain; // lamps, flashlights, sun, density
 uniform vec4 night; // outside density, inside density, creep depth (m), street-light gain
 uniform float inBoost;
-uniform float dbg; // street-light in-scatter inside, relative to outside
+uniform float dbg;
+uniform vec3 cityGlow;
+uniform float cookieOut; // how much of the beam cookie shows in the outside fog // street-light in-scatter inside, relative to outside
 uniform int lampCount;
 uniform vec3 lampPos[${MAX_LAMPS}];
 uniform vec3 lampColor[${MAX_LAMPS}];
 uniform vec2 lampCone[${MAX_LAMPS}];
 uniform int slCount;
 uniform int slShadows;
+uniform int slShafts; // street lights marked shafts (sorted first), shadow map or not
 uniform vec3 slPos[${MAX_STREET}];
 uniform vec3 slDir[${MAX_STREET}];
 uniform vec3 slColor[${MAX_STREET}];
@@ -142,7 +145,7 @@ float density(vec3 p, out float puffShare, out float inside) {
   inside = insideness(p, big);
   float hy = max(p.y, 0.0);
   float outD = night.x * (0.6 + 0.8 * big) * (0.8 + 0.4 * n) * (0.45 + 0.55 * exp(-hy / 14.0));
-  float inD = night.y * dust * (0.3 + 1.5 * n * n) + night.y * 0.7 * exp(-hy / 1.4) * n;
+  float inD = night.y * dust * (0.55 + 0.9 * n) + night.y * 0.5 * exp(-hy / 1.4) * n;
   float d = mix(outD, inD, inside);
   float pd = 0.0;
   for (int i = 0; i < ${MAX_PUFFS}; i++) {
@@ -162,6 +165,26 @@ float sunVis(vec3 p) {
   if (n.x < 0.0 || n.x > 1.0 || n.y < 0.0 || n.y > 1.0) return 1.0;
   float d = texture2D(tSun, n.xy).r;
   return n.z - 0.0008 <= d ? 1.0 : 0.0;
+}
+
+float noise2(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  float a = hash13(vec3(i, 7.0)), b = hash13(vec3(i + vec2(1, 0), 7.0)), c = hash13(vec3(i + vec2(0, 1), 7.0)), d = hash13(vec3(i + 1.0, 7.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// Street-light cookie: streaks in the lamp's own projection (constant along each ray from the lamp), as if the light
+// came through grime, rain streaks and the gaps of the fixture. The facade's thin mullions alone leave the cone almost
+// fully lit; the cookie splits it into separate diverging beams with dark gaps, and the real shadows cut into those.
+// Needs no shadow map, so on low the lamps without one still throw beams.
+float slCookie(int k, vec3 ld, float amount) {
+  vec3 D = slDir[k];
+  vec3 R = normalize(cross(D, vec3(0.0, 1.0, 0.0)));
+  vec3 U = cross(R, D);
+  vec2 q = vec2(dot(ld, R), dot(ld, U)) / max(dot(ld, D), 0.05);
+  float sk = float(k) * 17.3;
+  float n = noise2(vec2(q.x * 12.0 + sk, q.y * 1.6)) * 0.75 + noise2(vec2(q.x * 33.0 - sk, q.y * 4.0)) * 0.25;
+  return mix(1.0, 0.04 + 0.96 * smoothstep(0.47, 0.6, n), amount);
 }
 
 // Street-light shadow maps (perspective): compare linear depths so one bias works near and far.
@@ -225,10 +248,14 @@ void main() {
       if (cone <= 0.0) continue;
       float fall = 1.0 - rr * rr;
       float vis = k < slShadows ? slVis(k, p) : 1.0;
+      if (vis <= 0.0) continue;
+      if (k < slShafts) vis *= slCookie(k, ld, mix(cookieOut, 1.0, inside));
+      // Only the shaft lamps get the lobby boost: the others are plaza lights.
+      float boost = k < slShafts ? mix(1.0, inBoost, inside) : 1.0;
       // Forward scattering makes the shafts glow when you look towards the lamp; the isotropic part keeps them
       // readable from the side.
-      float ph = hg(dot(dir, ld), 0.55) * 0.6 + 0.4 * 0.0796;
-      L += slColor[k] * night.w * mix(1.0, inBoost, inside) * cone * fall * fall * vis * ph / (r2 + 0.6);
+      float ph = hg(dot(dir, ld), 0.6) * 0.65 + 0.35 * 0.0796;
+      L += slColor[k] * night.w * boost * cone * fall * fall * vis * ph / (r2 + 0.6);
     }
     for (int k = 0; k < ${MAX_LAMPS}; k++) {
       if (k >= lampCount) break;
@@ -261,6 +288,9 @@ void main() {
     trans *= ext;
     if (trans < 0.003) break;
   }
+  // Beyond the march the fog is lit by the city: a faint warm-grey glow low over the horizon, so tower silhouettes
+  // read dark against it.
+  if (depth >= 1.0) scatter += cityGlow * (0.25 + 0.75 * exp(-max(dir.y, 0.0) * 5.0));
   vec4 cur = vec4(scatter, trans);
   vec3 endP = camPos + dir * min(dist, 30.0);
   vec4 pc = prevViewProj * vec4(endP, 1.0);
@@ -383,7 +413,7 @@ uniform sampler2D tSSR;
 uniform sampler2D tHalf;
 uniform sampler2D tQuarter;
 uniform vec2 blurTexel;
-uniform vec3 glow; // transmittance floor for bright far things, distance where it starts, blur strength
+uniform vec3 glow; // transmittance floor for bright far things, (unused), halo strength
 uniform vec2 fogRes;
 uniform vec2 res;
 uniform float near;
@@ -496,21 +526,27 @@ void main() {
   vec3 wide = vec3(0.0);
   // A 12-tap Vogel disc on the quarter-res image, weighted towards the centre: round and soft, no rings.
   float wsumB = 0.0;
+  // Tighter for the nearer towers, so their window grids survive; wider far away.
+  vec2 blurR = blurTexel * mix(1.2, 2.8, smoothstep(30.0, 120.0, dz));
   for (int i = 0; i < 12; i++) {
     float fi = float(i) + 0.5;
     float rr = sqrt(fi / 12.0);
     float a = fi * 2.39996;
     float wb = 1.0 - 0.6 * rr;
-    wide += texture2D(tQuarter, vUv + vec2(cos(a), sin(a)) * rr * blurTexel * 3.2).rgb * wb;
+    wide += texture2D(tQuarter, vUv + vec2(cos(a), sin(a)) * rr * blurR).rgb * wb;
     wsumB += wb;
   }
   wide /= wsumB;
-  col = mix(col, wide, smoothstep(0.55, 0.95, fogged));
+  col = mix(col, wide, smoothstep(0.55, 0.95, fogged) * 0.7);
   // Bright far things (the city's lit windows, lamp heads) glow through fog that would swallow them: a transmittance
   // floor that only bright pixels reach, so dark towers stay lost in the murk. Never for the sky.
+  // Gated by how fogged the pixel is (not by its own depth), so leaf cards and the windows seen between them get the
+  // same floor: no speckle where near and far pixels alternate.
   float bright = smoothstep(0.4, 4.0, dot(col, vec3(0.2126, 0.7152, 0.0722)));
-  float floorT = depth < 1.0 ? glow.x * bright * smoothstep(glow.y, glow.y + 12.0, dz) * (1.0 - 0.4 * smoothstep(40.0, 140.0, dz)) : 0.0;
-  fog.rgb += wide * glow.x * glow.z * fogged;
+  float floorT = depth < 1.0 ? glow.x * bright * smoothstep(0.8, 0.97, fogged) * (1.0 - 0.4 * smoothstep(40.0, 140.0, dz)) : 0.0;
+  // The halo: blurred light in the fog in front, mostly from the bright things.
+  float wl = dot(wide, vec3(0.2126, 0.7152, 0.0722));
+  fog.rgb += wide * glow.x * glow.z * fogged * smoothstep(0.2, 2.0, wl);
   col = col * max(fog.a, floorT) + fog.rgb;
   vec4 vm = texture2D(tView, vUv);
   col = col * (1.0 - vm.a) + vm.rgb;
@@ -827,10 +863,13 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     night: { value: new THREE.Vector4(0.22, 0.036, 3.5, 0.08) },
     // The shafts in the thin lobby haze would be far fainter than the lamp-lit fog outside; lift them so the lobby
     // reads as lit by the street.
-    inBoost: { value: 10 },
+    inBoost: { value: 22 },
     dbg: { value: 0 },
+    cookieOut: { value: 0.5 },
+    cityGlow: { value: new THREE.Color(0.016, 0.014, 0.013) },
     slCount: { value: 0 },
     slShadows: { value: 0 },
+    slShafts: { value: 0 },
     slPos: { value: arr3(MAX_STREET) },
     slDir: { value: arr3(MAX_STREET) },
     slColor: { value: arr3(MAX_STREET) },
@@ -1150,6 +1189,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       const sl = (wext.streetLights ?? []).slice().sort((a, b) => Number(b.shafts) - Number(a.shafts)).slice(0, MAX_STREET);
       u.slCount.value = sl.length;
       u.slShadows.value = shafts.length;
+      u.slShafts.value = sl.filter((l) => l.shafts).length;
       sl.forEach((L, i) => {
         let base = baseIntensity.get(L.light);
         if (base === undefined) baseIntensity.set(L.light, (base = L.light.intensity));
