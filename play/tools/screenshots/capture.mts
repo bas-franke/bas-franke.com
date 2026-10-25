@@ -1,9 +1,10 @@
 // Takes the screenshots the lobby shows for each game: a few Rockets maps, every Ruckus minigame and every Last Light map, captured from
-// a real match against bots in a headless browser, and a few Dustrunners tracks mid-race with the AI flying. Starts its own backend and dev server on spare ports, so a dev
+// a real match against bots in a headless browser, and a few Dustrunners tracks mid-race with the AI flying our pod. Garden Sentinels: hard bots build up
+// the gardens while we call every wave early. Starts its own backend and dev server on spare ports, so a dev
 // server you have open is left alone.
 //
 //   npm run screenshots                          everything
-//   npm run screenshots -- --only rockets        one game (rockets, ruckus, zombies, dustrunners); zombies includes the art
+//   npm run screenshots -- --only rockets        one game (rockets, ruckus, zombies, dustrunners, garden); zombies includes the art
 //   npm run screenshots -- --only zombies-art    only Last Light's key art (menu and loading screens)
 //   npm run screenshots -- --stale               only the games whose graphics changed since their last capture
 //   npm run screenshots -- --maps foundry,orbit  which Rockets maps (default below)
@@ -418,11 +419,160 @@ function writeArt(shots: Shot[]) {
   writeFileSync(artManifestPath, `${JSON.stringify(shots, null, 2)}\n`);
 }
 
+// Garden Sentinels: hard bots build the gardens; we call every wave early so the towers pile up fast.
+type GardenDev = {
+  __garden?: {
+    client: { memo: Map<number, { kind: string; x: number; z: number }>; origins: { x: number; z: number }[] };
+    store: { get(): { phase: string; wave: number; you: string; players: { id: string; ready: boolean }[] } };
+    actions: { ready(): void };
+    lookAt(x: number, z: number, dist?: number): void;
+    home(): void;
+    state(): { towers: { id: number; k: string; lv: number; b: number; x: number; y: number }[]; enemies: number; snapshot: { en: { id: number; k: string }[] } | null };
+    cellToWorld(b: number, col: number, row: number): { x: number; z: number } | null;
+  };
+};
+interface GardenStatus {
+  phase: string;
+  wave: number;
+  masterworks: number;
+  enemies: number;
+  boss: boolean;
+}
+
+async function gardenRoom(map: string, mode: 'coop' | 'vs'): Promise<string> {
+  const res = await fetch(`${api}/api/rooms`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Garden Sentinels screenshots', game: 'garden', maxPlayers: GAMES.garden.maxPlayers, bots: BOTS, botDifficulty: 'hard', mode, map }),
+  });
+  if (!res.ok) fail(`Creating a garden room failed: HTTP ${res.status} ${await res.text()}`);
+  const { room } = (await res.json()) as { room: { code: string } };
+  return room.code;
+}
+
+/** Calls the next wave as soon as a build phase starts (we are the only human, so the bots follow) and reports progress. */
+async function gardenTick(page: Page): Promise<GardenStatus> {
+  return page.evaluate(() => {
+    const g = (window as unknown as GardenDev).__garden!;
+    const s = g.store.get();
+    if (s.phase === 'build' && !s.players.find((p) => p.id === s.you)?.ready) g.actions.ready();
+    const st = g.state();
+    return {
+      phase: s.phase,
+      wave: s.wave,
+      masterworks: st.towers.filter((t) => t.lv === 3).length,
+      enemies: st.enemies,
+      boss: !!st.snapshot?.en.some((e) => e.k === 'colossus'),
+    };
+  });
+}
+
+async function gardenMatch(context: BrowserContext, map: string, mode: 'coop' | 'vs') {
+  const page = await startMatch(context, await gardenRoom(map, mode));
+  await page.waitForFunction(() => !!(window as unknown as GardenDev).__garden);
+  await page.addStyleTag({ content: '.gs-hint { display: none !important; }' });
+  return page;
+}
+
+async function shootGarden(context: BrowserContext): Promise<Shot[]> {
+  // The first-match coach has no place in a screenshot.
+  await context.addInitScript(() => localStorage.setItem('garden.coach.v1', JSON.stringify({ seen: [], kinds: [], off: true })));
+  const shots = new Map<string, Shot>();
+  const take = async (page: Page, file: string, caption: string) => {
+    await sleep(700);
+    await screenshot(page, file);
+    shots.set(file, { file, caption });
+    log(`  ${caption}`);
+  };
+
+  // Greenhouse Commons, co-op: the cover mid-wave, a masterwork close-up, and the boss on wave 10.
+  log('Garden Sentinels · Greenhouse Commons (plays up to the wave 10 boss, a few minutes)');
+  let page = await gardenMatch(context, 'greenhouse-commons', 'coop');
+  let deadline = Date.now() + 12 * 60_000;
+  while (Date.now() < deadline && shots.size < 3) {
+    const s = await gardenTick(page);
+    if (s.phase === 'over') break;
+    if (!shots.has('garden-greenhouse.jpg') && s.phase === 'wave' && s.wave >= 6 && s.enemies >= 18) {
+      await page.evaluate(() => (window as unknown as GardenDev).__garden!.home());
+      await take(page, 'garden-greenhouse.jpg', 'Defend the greenhouse together');
+    } else if (!shots.has('garden-masterwork.jpg') && s.phase === 'wave' && s.masterworks >= 3 && s.enemies >= 10) {
+      // The masterwork with the most upgraded towers around it, from close up.
+      await page.evaluate(() => {
+        const g = (window as unknown as GardenDev).__garden!;
+        const top = g.state().towers.filter((t) => t.lv === 3);
+        const near = (a: (typeof top)[0]) => top.filter((t) => Math.hypot(t.x - a.x, t.y - a.y) <= 3).length;
+        const best = top.sort((a, b) => near(b) - near(a))[0];
+        const p = g.cellToWorld(best.b, best.x, best.y)!;
+        g.lookAt(p.x, p.z, 16);
+      });
+      await take(page, 'garden-masterwork.jpg', 'Upgrade to masterworks');
+    } else if (!shots.has('garden-boss.jpg') && s.boss) {
+      // Let the boss walk into the tower fire first.
+      await sleep(4000);
+      const found = await page.evaluate(() => {
+        const g = (window as unknown as GardenDev).__garden!;
+        const boss = g.state().snapshot?.en.find((e) => e.k === 'colossus');
+        const m = boss && g.client.memo.get(boss.id);
+        if (!m) return false;
+        g.lookAt(m.x, m.z, 24);
+        return true;
+      });
+      if (found) await take(page, 'garden-boss.jpg', 'The Prism Colossus');
+    }
+    await sleep(400);
+  }
+  await page.close();
+
+  // Lily Moat, co-op, a few waves in.
+  log('Garden Sentinels · Lily Moat');
+  page = await gardenMatch(context, 'lily-moat', 'coop');
+  deadline = Date.now() + 6 * 60_000;
+  while (Date.now() < deadline) {
+    const s = await gardenTick(page);
+    if (s.phase === 'over') break;
+    if (s.phase === 'wave' && s.wave >= 4 && s.enemies >= 14) {
+      await page.evaluate(() => (window as unknown as GardenDev).__garden!.home());
+      await take(page, 'garden-lily-moat.jpg', 'Lily Moat');
+      break;
+    }
+    await sleep(400);
+  }
+  await page.close();
+
+  // Versus: six gardens side by side, everyone sending enemies at everyone else.
+  log('Garden Sentinels · Versus');
+  page = await gardenMatch(context, 'seedling-plot', 'vs');
+  deadline = Date.now() + 6 * 60_000;
+  while (Date.now() < deadline) {
+    const s = await gardenTick(page);
+    if (s.phase === 'over') break;
+    if (s.phase === 'wave' && s.wave >= 4 && s.enemies >= 20) {
+      await page.evaluate(() => {
+        const g = (window as unknown as GardenDev).__garden!;
+        const xs = g.client.origins.map((p) => p.x);
+        const zs = g.client.origins.map((p) => p.z);
+        g.lookAt((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2, Math.max(...xs) - Math.min(...xs) + 40);
+      });
+      await take(page, 'garden-versus.jpg', 'Last garden standing wins');
+      break;
+    }
+    await sleep(400);
+  }
+  await page.close();
+
+  if (!shots.size) fail('No Garden Sentinels shot was taken.');
+  const order = ['garden-greenhouse.jpg', 'garden-boss.jpg', 'garden-lily-moat.jpg', 'garden-versus.jpg', 'garden-masterwork.jpg'];
+  const missing = order.filter((f) => !shots.has(f));
+  if (missing.length) log(`  missing: ${missing.join(', ')}; run again for those`);
+  return order.filter((f) => shots.has(f)).map((f) => shots.get(f)!);
+}
+
 const shooters: Record<AnyGame, (context: BrowserContext) => Promise<Shot[]>> = {
   rockets: shootRockets,
   ruckus: shootRuckus,
   zombies: shootZombies,
   dustrunners: shootDustrunners,
+  garden: shootGarden,
 };
 
 // ---- output ------------------------------------------------------------------------------------------------------

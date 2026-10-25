@@ -1,5 +1,5 @@
 import { type FormEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { GAMES, LIMITS, type BotDifficulty, type GameId, type GameMode, type RocketsMode, type GameServerMsg, type PlayerInfo, type RoomView, type Team, colorHex } from '@shared/protocol';
 import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
@@ -567,6 +567,9 @@ function WaitingRoom({
                   );
                 })}
               </div>
+              <Link className="btn small" to="/lastlight" style={{ marginTop: 12 }}>
+                Last Light menu
+              </Link>
             </div>
           )}
 
