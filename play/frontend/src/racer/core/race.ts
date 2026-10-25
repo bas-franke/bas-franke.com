@@ -1,7 +1,7 @@
 // One race: the grid, the countdown, every pod's flight, contacts between pods, slipstream, positions and the final
 // classification. Courses are point-to-point, so a race is one run from the start line to the finish line. Pure simulation: no three.js scene, no DOM. RaceView renders it; the career awards it.
 // Hits damage a pod where they land (the engine on that side, or the cockpit from behind and on hard landings); once a
-// part is wrecked the pod is out for a moment, then put back in the middle of the corridor as a ghost that blinks and
+// part is wrecked the pod is thrown up tumbling, bounces and skids to a stop (see stepWreck), then is put back in the middle of the corridor as a ghost that blinks and
 // cannot be hit for a few seconds.
 
 import { aiInput, type AiProfile } from './ai';
@@ -41,14 +41,39 @@ export interface Racer extends RacerSetup {
   ghost: number;
   /** Seconds before the next hit can do damage (one crash is one hit, not one per physics step). */
   hurtCool: number;
+  /** The tumble of a wreck (meaningful while `wrecked` > 0). */
+  wreck: Wreck;
 }
+
+/**
+ * A wreck's flight: height above the ground and vertical speed, sideways drift (m/s, + right), and its tumble as roll
+ * (about the direction of travel), pitch and yaw relative to the course, with their rates in rad/s.
+ */
+export interface Wreck {
+  h: number;
+  vy: number;
+  vx: number;
+  roll: number;
+  pitch: number;
+  yaw: number;
+  wr: number;
+  wp: number;
+  wy: number;
+  /** Whether it has come to rest on the ground. */
+  rest: boolean;
+}
+
+const newWreck = (): Wreck => ({ h: 0, vy: 0, vx: 0, roll: 0, pitch: 0, yaw: 0, wr: 0, wp: 0, wy: 0, rest: true });
 
 /** Damage parts. */
 export const LEFT_ENGINE = 0;
 export const RIGHT_ENGINE = 1;
 export const COCKPIT = 2;
 /** Seconds a wrecked pod lies before it respawns, and seconds of ghosting after. */
-export const WRECK_TIME = 2.4;
+export const WRECK_TIME = 3;
+/** Gravity on a tumbling wreck, and how much of its vertical speed survives a bounce. */
+const WRECK_GRAVITY = 24;
+const WRECK_BOUNCE = 0.45;
 export const GHOST_TIME = 3;
 /** Damage per unit of impact above the threshold that a scrape stays under. */
 const HURT = 0.42;
@@ -95,7 +120,7 @@ export class Race {
       const col = i % 2 === 0 ? -1 : 1;
       const s = this.track.startS - 12 - row * 16 - (col > 0 ? 7 : 0);
       const x = col * Math.min(7, this.track.frameAt(s).width / 4);
-      return { ...r, state: newPodState(s, x), lap: -1, lapStart: 0, lapTimes: [], bestLap: Infinity, finish: null, position: i + 1, progress: 0, input: { ...NO_INPUT }, damage: [0, 0, 0], wrecked: 0, ghost: 0, hurtCool: 0 };
+      return { ...r, state: newPodState(s, x), lap: -1, lapStart: 0, lapTimes: [], bestLap: Infinity, finish: null, position: i + 1, progress: 0, input: { ...NO_INPUT }, damage: [0, 0, 0], wrecked: 0, ghost: 0, hurtCool: 0, wreck: newWreck() };
     });
     this.player = this.racers.find((r) => !r.ai) ?? this.racers[0];
     this.updateOrder();
@@ -154,13 +179,9 @@ export class Race {
       r.hurtCool = Math.max(0, r.hurtCool - dt);
       r.ghost = Math.max(0, r.ghost - dt);
       if (r.wrecked > 0) {
-        // Down: the wreck slides to a stop, then the pod is put back on the course.
         r.input = { ...NO_INPUT };
-        const st = r.state;
-        st.v = Math.max(0, st.v - 60 * dt);
-        st.s = this.track.clamp(st.s + st.v * dt);
-        st.impact = 0;
-        st.boosting = false;
+        this.stepWreck(r, dt);
+        if (r.state.impact > 0.02) this.events.onImpact?.(r, r.state.impact);
         r.wrecked -= dt;
         if (r.wrecked <= 0) this.respawn(r);
         continue;
@@ -270,11 +291,93 @@ export class Race {
     r.hurtCool = 0.3;
     const d = ((strength - HURT_MIN) * HURT) / parts.length;
     for (const p of parts) r.damage[p] = Math.min(1, r.damage[p] + d);
-    if (r.damage.some((v) => v >= 1)) {
-      r.wrecked = WRECK_TIME;
-      r.state.boosting = false;
-      this.events.onWreck?.(r);
+    if (r.damage.some((v) => v >= 1)) this.wreckPod(r);
+  }
+
+  /**
+   * The pod goes down: thrown up and away from what it hit, spinning hardest about its length (harder the faster it
+   * was going), the nose kicked up or down and slewed round.
+   */
+  private wreckPod(r: Racer) {
+    const st = r.state;
+    const k = Math.min(1.3, st.v / 90);
+    const side = st.impactSide || (Math.random() < 0.5 ? -1 : 1);
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    r.wrecked = WRECK_TIME;
+    st.boosting = false;
+    r.wreck = {
+      h: st.h,
+      vy: Math.max(st.vy, 0) + 5 + 9 * k,
+      vx: -side * rnd(4, 10) * k,
+      roll: 0,
+      pitch: 0,
+      yaw: 0,
+      wr: side * rnd(5, 9) * (0.4 + k),
+      wp: rnd(-3, 3) * k,
+      wy: -side * rnd(1, 3) * k,
+      rest: false,
+    };
+    this.events.onWreck?.(r);
+  }
+
+  /**
+   * A wreck in flight: it keeps most of its speed in the air and tumbles; each time it comes down it bounces (lower
+   * every time, each bounce a hit with sparks and a crunch), the ground grabs at it so it slews round, and once it stops
+   * bouncing it skids to a stop and settles flat or on its back.
+   */
+  private stepWreck(r: Racer, dt: number) {
+    const st = r.state;
+    const w = r.wreck;
+    st.impact = 0;
+    st.boosting = false;
+    st.v = Math.max(0, st.v - (w.h > 0.05 ? 7 : 55) * dt);
+    st.s = this.track.clamp(st.s + st.v * dt);
+    const lim = this.track.frameAt(st.s).width / 2 - 3;
+    st.x += w.vx * dt;
+    if (Math.abs(st.x) > lim) {
+      // Off the wall and back into the corridor.
+      st.x = Math.sign(st.x) * lim;
+      w.vx = -w.vx * 0.5;
+      w.wy = -w.wy;
+      st.impact = Math.min(1, Math.abs(w.vx) / 8 + 0.3);
+      st.impactSide = Math.sign(st.x);
     }
+    if (!w.rest) {
+      w.vy -= WRECK_GRAVITY * dt;
+      w.h += w.vy * dt;
+      if (w.h <= 0) {
+        w.h = 0;
+        if (w.vy < -3) {
+          st.impact = Math.min(1, -w.vy / 12);
+          st.impactSide = 0;
+          w.vy *= -WRECK_BOUNCE;
+          w.wr *= 0.6;
+          w.wp = -w.wp * 0.5 + (Math.random() - 0.5) * 2;
+          w.wy += (Math.random() - 0.5) * 3;
+          w.vx *= 0.7;
+          st.v *= 0.82;
+        } else {
+          w.vy = 0;
+          w.rest = true;
+        }
+      }
+    }
+    // On the ground the spin dies away and the wreck settles flat, or upside down if it is nearer that.
+    const ground = w.h < 0.4;
+    const damp = Math.exp(-(ground ? 4 : 0.3) * dt);
+    w.wr *= damp;
+    w.wp *= damp;
+    w.wy *= Math.exp(-(ground ? 2 : 0.2) * dt);
+    if (ground) w.vx *= Math.exp(-3 * dt);
+    w.roll += w.wr * dt;
+    w.pitch += w.wp * dt;
+    w.yaw += w.wy * dt;
+    if (w.rest) {
+      const ease = 1 - Math.exp(-5 * dt);
+      w.roll += (Math.round(w.roll / Math.PI) * Math.PI - w.roll) * ease;
+      w.pitch += (Math.round(w.pitch / Math.PI) * Math.PI - w.pitch) * ease;
+    }
+    st.h = w.h;
   }
 
   /** Back on the course where the pod went down, in the middle of the corridor (or the nearest lane clear of rocks). */
@@ -292,6 +395,7 @@ export class Race {
       }
     }
     Object.assign(st, newPodState(s, x), { v: r.stats.topSpeed * 0.4, boost: st.boost });
+    r.wreck = newWreck();
     r.damage = [0, 0, 0];
     r.ghost = GHOST_TIME;
     this.events.onRespawn?.(r);

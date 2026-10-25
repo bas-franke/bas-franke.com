@@ -16,6 +16,7 @@ attribute vec3 aNrm;
 attribute vec3 aVel;
 attribute vec4 aT; // spawn time, life, start size, end size
 attribute vec4 aM; // seed, rise speed, opacity, drag
+attribute float aK; // brightness (1 = as lit; smoke from a badly damaged part is darker)
 uniform float uTime;
 uniform vec3 uCamVel;
 uniform float uShutter;
@@ -28,8 +29,10 @@ varying float vAlpha;
 varying float vH;
 varying float vSize;
 varying float vTone;
+varying float vK;
 varying vec3 vSunV;
 void main() {
+  vK = aK;
   float age = uTime - aT.x;
   float u = age / aT.y;
   if (u < 0.0 || u > 1.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
@@ -79,6 +82,7 @@ varying float vAlpha;
 varying float vH;
 varying float vSize;
 varying float vTone;
+varying float vK;
 varying vec3 vSunV;
 void main() {
   vec4 t = texture2D(uTex, vUv);
@@ -91,7 +95,7 @@ void main() {
   vec3 n = normalize(vec3(vDir * q.x + nrm * q.y, 0.6));
   float l = dot(n, vSunV);
   vec3 col = mix(uShade, uLit, smoothstep(-0.45, 0.7, l));
-  col *= 0.9 + 0.2 * vTone;
+  col *= (0.9 + 0.2 * vTone) * vK;
   gl_FragColor = vec4(col, min(a, 0.9));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -110,6 +114,8 @@ export interface Puff {
   opacity: number;
   rise: number;
   drag: number;
+  /** Brightness multiplier, 1 if omitted. */
+  shade?: number;
 }
 
 export class DustSystem {
@@ -121,17 +127,20 @@ export class DustSystem {
   private time = 0;
 
   /**
-   * `tint` replaces the sand colours (lit side, shade side), for smoke; `near` is the distance range over which puffs
-   * fade in from the camera (the pack's dust fades early so it never hides the course).
+   * Options, for smoke: `tint` replaces the sand colours (lit side, shade side); `near` is the distance range over
+   * which puffs fade in from the camera (the pack's dust fades early so it never hides the course); `shutter` how much
+   * puffs streak along their motion past the camera.
    */
-  constructor(count: number, theme: Theme, sunDir: THREE.Vector3, tint?: { lit: THREE.Vector3; shade: THREE.Vector3 }, near: [number, number] = [4, 22]) {
-    const { geo, attr } = quadGeometry(count, { aPos: 3, aNrm: 3, aVel: 3, aT: 4, aM: 4 });
+  constructor(count: number, theme: Theme, sunDir: THREE.Vector3, opts: { tint?: { lit: THREE.Vector3; shade: THREE.Vector3 }; near?: [number, number]; shutter?: number } = {}) {
+    const { tint, near = [4, 22], shutter = 0.03 } = opts;
+    const { geo, attr } = quadGeometry(count, { aPos: 3, aNrm: 3, aVel: 3, aT: 4, aM: 4, aK: 1 });
     const t = attr.aT.array as Float32Array;
     for (let i = 0; i < count; i++) {
       t[i * 4] = -1e6;
       t[i * 4 + 1] = 1;
     }
     for (let i = 0; i < count; i++) (attr.aM.array as Float32Array)[i * 4 + 3] = 1;
+    (attr.aK.array as Float32Array).fill(1);
     this.a = attr;
     this.ring = new InstanceRing(count, attr);
     this.tex = puffAtlas();
@@ -148,7 +157,7 @@ export class DustSystem {
       uniforms: {
         uTime: { value: 0 },
         uCamVel: { value: new THREE.Vector3() },
-        uShutter: { value: 0.03 },
+        uShutter: { value: shutter },
         uSun: { value: sunDir.clone() },
         uNear: { value: new THREE.Vector2(...near) },
         uTex: { value: null },
@@ -164,12 +173,13 @@ export class DustSystem {
 
   emit(p: Puff) {
     const i = this.ring.next();
-    const { aPos, aNrm, aVel, aT, aM } = this.a;
+    const { aPos, aNrm, aVel, aT, aM, aK } = this.a;
     aPos.setXYZ(i, p.pos.x, p.pos.y, p.pos.z);
     aNrm.setXYZ(i, p.normal.x, p.normal.y, p.normal.z);
     aVel.setXYZ(i, p.vel.x, p.vel.y, p.vel.z);
     aT.setXYZW(i, this.time, p.life, p.size0, p.size1);
     aM.setXYZW(i, Math.random(), p.rise, p.opacity, p.drag);
+    aK.setX(i, p.shade ?? 1);
   }
 
   /** Call before emitting this frame's puffs (spawn times use it). */

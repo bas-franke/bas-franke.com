@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { createStore, type Store } from '../games/types';
 import { RaceAudio } from './audio/sound';
 import { DISPLAY_KMH, type PodDesign } from './core/pods';
-import { INTRO, Race, WRECK_TIME, type Phase, type RacerSetup } from './core/race';
+import { INTRO, Race, type Phase, type RacerSetup } from './core/race';
 import { trackById } from './core/tracks';
 import { ChaseCamera } from './fx/camera';
 import { Controls } from './fx/controls';
@@ -25,6 +25,8 @@ import type { FxPod, FxView, PodVisual, PostFx, Quality, SpeedFx, WorldContext }
 /** Hover height of a pod's centre above the road. */
 export const HOVER = 1.5;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
+/** Height of a wreck's centre above the ground when it lies on the sand. */
+const WRECK_REST = 1;
 /** Name tags show within TAG_FAR metres of the camera, fully opaque inside TAG_NEAR. */
 const TAG_FAR = 140;
 const TAG_NEAR = 70;
@@ -262,7 +264,8 @@ export class RaceView {
     const player = race.player;
     const pv = this.visuals[race.racers.indexOf(player)];
     const pos = pv.object.position;
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(pv.object.quaternion);
+    // A tumbling wreck would spin the chase camera with it: follow the course's direction until the respawn.
+    const forward = player.wrecked > 0 ? race.track.frameAt(player.state.s).tangent.clone() : new THREE.Vector3(0, 0, -1).applyQuaternion(pv.object.quaternion);
     const speed01 = player.state.v / player.stats.topSpeed;
 
     if (race.phase === 'intro') {
@@ -311,9 +314,9 @@ export class RaceView {
       const bob = Math.sin(this.time * 2.3 + i * 1.7) * 0.12 + Math.sin(this.time * 17 + i) * 0.03 * Math.min(1, st.v / 60);
       // On its side the lower engine would scrape the road: ride higher.
       const lift = Math.abs(st.roll) * 1.9;
-      // A wreck slumps onto the sand, nose down and listing.
-      const down = r.wrecked > 0 ? Math.min(1, (WRECK_TIME - r.wrecked) * 4) : 0;
-      const pos = f.pos.clone().addScaledVector(f.right, st.x).addScaledVector(f.up, (HOVER + bob + lift) * (1 - down * 0.6));
+      // A wreck tumbles through the air and comes to rest on the sand (its centre about a metre up).
+      const wrecked = r.wrecked > 0;
+      const pos = f.pos.clone().addScaledVector(f.right, st.x).addScaledVector(f.up, wrecked ? WRECK_REST : HOVER + bob + lift);
       pos.y += st.h;
       const forward = f.tangent.clone().multiplyScalar(Math.cos(st.psi)).addScaledVector(f.right, -Math.sin(st.psi)).normalize();
       const right = forward.clone().cross(f.up).normalize();
@@ -326,10 +329,13 @@ export class RaceView {
       let pitch = (r.input.throttle - r.input.brake) * 0.03 + (st.boosting ? 0.03 : 0);
       if (st.air) pitch += THREE.MathUtils.clamp(Math.atan2(st.vy, Math.max(10, st.v)) - Math.asin(THREE.MathUtils.clamp(f.tangent.y, -1, 1)), -0.5, 0.5);
       v.object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, roll, 'ZXY')));
-      if (r === race.player) this.camUp.set(0, 1, 0).applyQuaternion(v.object.quaternion);
+      if (wrecked) {
+        const w = r.wreck;
+        v.object.quaternion.setFromRotationMatrix(m.makeBasis(f.right, f.up, f.tangent.clone().negate()));
+        v.object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(w.pitch, w.yaw, w.roll, 'YXZ')));
+      } else if (r === race.player) this.camUp.set(0, 1, 0).applyQuaternion(v.object.quaternion);
       // Knife edge: Q rolls onto the left side, E onto the right.
-      if (st.roll) v.object.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, (-st.roll * Math.PI) / 2));
-      if (down) v.object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.14 * down, 0, (i % 2 ? 0.32 : -0.32) * down)));
+      if (st.roll && !wrecked) v.object.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, (-st.roll * Math.PI) / 2));
       v.object.position.copy(pos);
       // A ghost after the respawn blinks.
       v.object.visible = r.ghost <= 0 || Math.floor(r.ghost * 9) % 2 === 0;
