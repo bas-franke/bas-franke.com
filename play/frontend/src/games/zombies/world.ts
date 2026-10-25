@@ -75,12 +75,27 @@ const MAT_SET: Record<string, SetName> = {
   travertine: 'travertine',
   walnut: 'walnut',
 };
-/** Cold, faint moonlight: just enough to model the silhouettes outside. */
-const MOON_COLOR = new THREE.Color(0.62, 0.72, 1.0);
-const MOON_INTENSITY = 0.22;
+/** Faint moonlight through the city haze, warmed to match the amber grade: just enough to model the silhouettes outside. */
+const MOON_COLOR = new THREE.Color(1.0, 0.78, 0.55);
+const MOON_INTENSITY = 0.16;
+/** Fill: the city's amber glow from above, near-black marble below (the target grade has no cold tones). */
+const HEMI_SKY = 0x5c4630;
+const HEMI_GROUND = 0x0c0907;
+const HEMI_INTENSITY = 0.3;
 /** High-pressure sodium, a deep amber, and the hotel lanterns' warmer white. */
 const SODIUM = new THREE.Color(1.0, 0.5, 0.17);
 const LANTERN = new THREE.Color(1.0, 0.7, 0.4);
+/** Floor: albedo lift and the gold veins' self-glow (linear, before exposure). */
+const FLOOR_LIFT = 1.4;
+const FLOOR_GLOW = 0.5;
+/** Travertine walls toned down to a warm taupe: the target's lobby is dark, its light comes from slots and strips. */
+const TRAV_TONE = 0x8a7c6c;
+/** The three shaft-casting mast lamps outside the facade. */
+const MAST_INTENSITY = 12000;
+/** Window/door boards' warm self-glow through the grain (0: tried 1.6, no visible gain in the refshot). */
+const BOARD_GLOW = 0;
+/** The columns' light slots (linear emission). */
+const SLOT_COLOR = new THREE.Color(1.0, 0.62, 0.3).multiplyScalar(2.5);
 
 /**
  * Shadow-casting lamps and shadow map sizes per quality. The hotel's own lamps are failing, so their shadow budget went
@@ -108,6 +123,13 @@ interface ProjOpts {
   normalScale?: number;
   /** Multiplies the texture's roughness. */
   rough?: number;
+  /** Emission colour (linear) for the set's glow mask (ORM red channel): the floor's gold veins. */
+  glow?: THREE.Color;
+  /**
+   * Column cladding: per-instance `aCol` (the column's centre x, z) puts two vertical light slots near the corners of
+   * every face, burning this colour (linear).
+   */
+  slots?: THREE.Color;
 }
 
 const NOISE_GLSL = /* glsl */ `
@@ -133,7 +155,7 @@ float zCellEdge(vec2 p) {
 `;
 
 /** World-space UVs for the given vertex: one projection per dominant normal axis. */
-const PROJ_VERTEX = (damage: boolean) => /* glsl */ `#include <fog_vertex>
+const PROJ_VERTEX = (damage: boolean, slots = false) => /* glsl */ `#include <fog_vertex>
 {
   mat4 zm = modelMatrix;
   #ifdef USE_INSTANCING
@@ -159,6 +181,7 @@ const PROJ_VERTEX = (damage: boolean) => /* glsl */ `#include <fog_vertex>
   vMetalnessMapUv = zuv;
   #endif
   ${damage ? 'vZDamage = aDamage;' : ''}
+  ${slots ? 'vec2 zc = zw.xz - aCol; vZAlong = abs(zn.x) > 0.5 ? zc.y : abs(zn.z) > 0.5 ? zc.x : 99.0;' : ''}
 }`;
 
 function projMaterial(o: ProjOpts): THREE.MeshStandardMaterial {
@@ -183,6 +206,8 @@ function projMaterial(o: ProjOpts): THREE.MeshStandardMaterial {
   const scale = 1 / o.set.meters;
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTexScale = { value: scale };
+    if (o.glow) sh.uniforms.uGlow = { value: o.glow };
+    if (o.slots) sh.uniforms.uSlot = { value: o.slots };
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -190,9 +215,10 @@ function projMaterial(o: ProjOpts): THREE.MeshStandardMaterial {
 uniform float uTexScale;
 varying vec3 vZPos;
 varying vec2 vZUv;
-${o.damage ? 'attribute float aDamage; varying float vZDamage;' : ''}`,
+${o.damage ? 'attribute float aDamage; varying float vZDamage;' : ''}
+${o.slots ? 'attribute vec2 aCol; varying float vZAlong;' : ''}`,
       )
-      .replace('#include <fog_vertex>', PROJ_VERTEX(!!o.damage));
+      .replace('#include <fog_vertex>', PROJ_VERTEX(!!o.damage, !!o.slots));
     sh.fragmentShader = sh.fragmentShader
       .replace(
         '#include <common>',
@@ -200,6 +226,8 @@ ${o.damage ? 'attribute float aDamage; varying float vZDamage;' : ''}`,
 varying vec3 vZPos;
 varying vec2 vZUv;
 ${o.damage ? 'varying float vZDamage;' : ''}
+${o.glow ? 'uniform vec3 uGlow;' : ''}
+${o.slots ? 'uniform vec3 uSlot; varying float vZAlong;' : ''}
 ${NOISE_GLSL}`,
       )
       .replace(
@@ -238,8 +266,32 @@ ${
         `#include <roughnessmap_fragment>
 roughnessFactor = mix(roughnessFactor, 1.0, zCrack);`,
       );
+    if (o.glow)
+      sh.fragmentShader = sh.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+#ifdef USE_ROUGHNESSMAP
+totalEmissiveRadiance += uGlow * texture2D(roughnessMap, vRoughnessMapUv).r * (1.0 - zCrack);
+#endif`,
+      );
+    if (o.slots)
+      sh.fragmentShader = sh.fragmentShader
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+// Light slots: a dark recessed channel with a glowing strip in it, 12 cm in from each corner.
+float zSlotD = abs(abs(vZAlong) - 0.47);
+float zSlot = 1.0 - smoothstep(0.009, 0.014, zSlotD);
+float zRecess = 1.0 - smoothstep(0.022, 0.03, zSlotD);
+diffuseColor.rgb *= 1.0 - 0.85 * zRecess;`,
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+totalEmissiveRadiance += uSlot * zSlot * (1.0 - zCrack) * (0.85 + 0.15 * zNoise(vec2(vZPos.y * 3.0, vZAlong * 9.0)));`,
+        );
   };
-  m.customProgramCacheKey = () => `zproj-${o.damage ? 1 : 0}${o.grime ? 1 : 0}${o.instanced ? 1 : 0}${o.dents ? 1 : 0}`;
+  m.customProgramCacheKey = () => `zproj-${o.damage ? 1 : 0}${o.grime ? 1 : 0}${o.instanced ? 1 : 0}${o.dents ? 1 : 0}${o.glow ? 1 : 0}${o.slots ? 1 : 0}`;
   return m;
 }
 
@@ -384,6 +436,7 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
     let mat = chunkMats.get(m);
     if (!mat) {
       if (m === 'glass') mat = glass;
+      else if (m === 'column') mat = keep(projMaterial({ set: texSet('woodPanel'), instanced: true, damage: true, env: 0.7, slots: SLOT_COLOR }));
       else {
         const set = MAT_SET[m] ?? 'travertine';
         mat = keep(
@@ -393,6 +446,7 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
             damage: true,
             dents: set === 'brass',
             grime: set === 'travertine',
+            color: set === 'travertine' ? TRAV_TONE : undefined,
             env: set === 'brass' ? 1.2 : set === 'marbleSlab' ? 1.1 : set === 'walnut' ? 0.8 : 0.45,
           }),
         );
@@ -405,12 +459,12 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   const yardSet = texSet('plaza');
   const travSet = texSet('travertine');
   const brassSet = texSet('brass');
-  const floorMat = keep(projMaterial({ set: floorSet, env: 1.25 }));
-  // The black marble is lifted a little so the striped pools of street light read on it at night.
-  floorMat.color.setScalar(1.8);
+  // Black marble with glowing gold veins; the mirror finish comes from post.ts's SSR (env reflection on low).
+  const floorMat = keep(projMaterial({ set: floorSet, env: 1.25, glow: new THREE.Color(1.0, 0.76, 0.42).multiplyScalar(FLOOR_GLOW) }));
+  floorMat.color.setScalar(FLOOR_LIFT);
   // Wet paving after rain: darker and glossy, so lamp pools and lit windows smear across it (not a mirror).
   const plazaMat = keep(projMaterial({ set: yardSet, env: 0.9, rough: 0.5, color: 0x9a948c }));
-  const travMat = keep(projMaterial({ set: travSet, env: 0.45, grime: true }));
+  const travMat = keep(projMaterial({ set: travSet, env: 0.45, grime: true, color: TRAV_TONE }));
   const ceilingMat = keep(projMaterial({ set: travSet, color: 0xf2eadc, env: 0.25, normalScale: 0.4 }));
   // A trace of street light bounced off the floor keeps the coffers from going pure black.
   ceilingMat.emissive.set(0x2a1a0e);
@@ -420,9 +474,11 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   const darkSteel = keep(new THREE.MeshStandardMaterial({ color: 0x2c2d2f, roughness: 0.45, metalness: 0.8 }));
   const plyMat = (() => {
     const s = texSet('wood');
-    const m = keep(new THREE.MeshStandardMaterial({ map: s.map, normalMap: s.normalMap, roughnessMap: s.orm, roughness: 1, metalness: 0, color: 0xd8c2a0, envMapIntensity: 0.3 }));
+    // The boards glow warm through their grain, as if backlit by the street light pouring in around them.
+    const m = keep(new THREE.MeshStandardMaterial({ map: s.map, normalMap: s.normalMap, roughnessMap: s.orm, roughness: 1, metalness: 0, color: 0xd8c2a0, envMapIntensity: 0.3, emissiveMap: s.map, emissive: new THREE.Color(1.0, 0.62, 0.32), emissiveIntensity: BOARD_GLOW }));
     s.onUpgrade((st) => {
       m.map = st.map;
+      m.emissiveMap = st.map;
       m.normalMap = st.normalMap;
       m.roughnessMap = st.orm;
     });
@@ -434,8 +490,9 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   // What a chunk looks like. Gameplay keeps its material (health); the lower atrium walls are dressed in walnut
   // panelling, the wall behind reception in black marble, the lounge in walnut.
   const looks = (c: (typeof world.chunks)[number]): string => {
-    if (c.mat === 'glass' || !c.wall) return c.mat;
     const part = (c as { part?: string }).part ?? '';
+    if (part === 'column') return 'column';
+    if (c.mat === 'glass' || !c.wall) return c.mat;
     const cz = (c.min.z + c.max.z) / 2;
     if (part === 'atriumWest' && c.max.y <= 5.4 && cz > -11.5 && cz < 3.5) return 'marble';
     if ((part === 'atriumWest' || part === 'atriumEast') && c.max.y <= 4.6) return 'walnut';
@@ -462,6 +519,25 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
     const attr = new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1);
     attr.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('aDamage', attr);
+    if (mat === 'column') {
+      // Each chunk's column centre, for the light slots.
+      const cols = def.props.filter((p) => p.kind === 'column');
+      const ac = new Float32Array(list.length * 2);
+      list.forEach((ci, k) => {
+        const c = world.chunks[ci];
+        const x = (c.min.x + c.max.x) / 2;
+        const z = (c.min.z + c.max.z) / 2;
+        let best = cols[0];
+        let bd = Infinity;
+        for (const p of cols) {
+          const d = (p.x - x) ** 2 + (p.z - z) ** 2;
+          if (d < bd) [bd, best] = [d, p];
+        }
+        ac[k * 2] = best?.x ?? x;
+        ac[k * 2 + 1] = best?.z ?? z;
+      });
+      geo.setAttribute('aCol', new THREE.InstancedBufferAttribute(ac, 2));
+    }
     keep(geo);
     const mesh = new THREE.InstancedMesh(geo, chunkMat(mat), list.length);
     mesh.name = `chunks-${mat}`;
@@ -486,7 +562,7 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
     group.add(mesh);
   }
   const writeDamage = (i: number, d: number) => {
-    if (d <= visualDamage[i]) return;
+    if (d <= visualDamage[i] || !meshOf[i]) return;
     visualDamage[i] = d;
     const mesh = meshOf[i];
     const attr = damageAttr.get(mesh)!;
@@ -805,7 +881,7 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   moon.layers.enableAll();
   scene.add(moon, moon.target);
   // A dim cold sky above, near-black wet ground below: shadows stay blue-grey and readable, never warm.
-  const hemi = new THREE.HemisphereLight(0x6a7c9c, 0x14110e, 0.32);
+  const hemi = new THREE.HemisphereLight(HEMI_SKY, HEMI_GROUND, HEMI_INTENSITY);
   hemi.layers.enableAll();
   scene.add(hemi);
 
@@ -946,7 +1022,7 @@ void main() {
   const mastHeight = 9.5;
   for (const x of [-7.5, 1.5, 9]) {
     const pos = new THREE.Vector3(x, mastHeight, mastZ);
-    street({ pos, aim: new THREE.Vector3(x * 0.45, 0, facadeZ + 21), color: SODIUM, intensity: 12000, outer: 0.45, inner: 0.16, range: 60, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone(), 0, l, 1.8) });
+    street({ pos, aim: new THREE.Vector3(x * 0.45, 0, facadeZ + 21), color: SODIUM, intensity: MAST_INTENSITY, outer: 0.45, inner: 0.16, range: 60, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone(), 0, l, 1.8) });
   }
   for (const [x, fail] of [
     [-17, 0],
@@ -1069,9 +1145,26 @@ void main() {
     floorDark.position.y = -0.9;
     envScene.add(floorDark);
     // The facade: foggy night glass lit dull orange by the street lights, brighter low down where the lamps are.
-    const glow = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.11, 0.05) }));
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 0.17, 0.07) }));
     glow.position.set(0, 6, -19.5);
     envScene.add(glow);
+    // The columns' light slots and the galleries' LED strips: the warm streaks the floor mirrors where SSR is off.
+    const strip = new THREE.MeshBasicMaterial({ color: SLOT_COLOR.clone().multiplyScalar(0.5) });
+    for (const p of def.props) {
+      if (p.kind !== 'column') continue;
+      for (const sx of [-0.47, 0.47]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 11, 0.05), strip);
+        bar.position.set(p.x + sx, 6, p.z + 0.62);
+        envScene.add(bar);
+      }
+    }
+    for (const m of def.mezzanine ?? []) {
+      const w = def.walls.find((x) => x.id === m.wall);
+      if (!w || w.along !== 'z') continue;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, w.a1 - w.a0), strip);
+      bar.position.set(w.fixed - w.out * m.depth, m.y - 0.1, (w.a0 + w.a1) / 2);
+      envScene.add(bar);
+    }
     const lampsMat = new THREE.MeshBasicMaterial({ color: SODIUM.clone().multiplyScalar(5) });
     for (const x of [-7.5, 1.5, 9]) {
       const p = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), lampsMat);

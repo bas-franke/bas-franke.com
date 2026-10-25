@@ -18,7 +18,8 @@ export type SetName =
   | 'brass'
   | 'fabric'
   | 'leather'
-  | 'plaza';
+  | 'plaza'
+  | 'woodPanel';
 
 /** One pixel's material, filled by a set's generator. Colours are sRGB 0..1. */
 interface Px {
@@ -28,6 +29,8 @@ interface Px {
   b: number;
   rough: number;
   metal: number;
+  /** Self-glow mask 0..1, stored in the ORM red channel (unused as occlusion); world.ts turns it into emission. */
+  glow: number;
 }
 
 // ---- periodic noise ---------------------------------------------------------------------------------------------
@@ -527,10 +530,10 @@ function veinNetRaw(u: number, v: number, n: number, warp: number, seed: number)
   return f2 - f1;
 }
 
-/** The vein distance field, cached on a 512 grid (it is continuous, so bilinear sampling keeps the edges crisp). */
+/** The vein distance field, cached on a 1024 grid (it is continuous, so bilinear sampling keeps the edges crisp). */
 const veinCache = new Map<number, Float32Array>();
 function veinNet(u: number, v: number, n: number, warp: number, seed: number) {
-  const g = 512;
+  const g = 1024;
   const key = n * 100003 + seed;
   let d = veinCache.get(key);
   if (!d) {
@@ -587,7 +590,40 @@ function marbleBody(u: number, v: number, px: Px, seed: number) {
   px.metal = 0;
 }
 
-/** 1.2 m polished tiles of the black marble, 2 x 2 on a 2.4 m set, each turned so the veins never line up. */
+/**
+ * The lobby floor: near-black polished marble cut by a sparse crackle of thin gold veins (the glow mask makes them
+ * shine faintly, like the light catching gilded kintsugi seams), 1.6 m tiles, 2 x 2 on a 3.2 m set, each turned and
+ * cut from a different part of the vein field, with thin brass inlay joints between them.
+ */
+function goldVeinMarble(u: number, v: number, px: Px, seed: number) {
+  const cloud = cfbm(u, v, 3, 5, seed + 1);
+  const cloud2 = cfbm(u, v, 12, 4, seed + 2);
+  px.r = 0.017 + cloud * 0.026 + cloud2 * 0.008;
+  px.g = 0.016 + cloud * 0.022 + cloud2 * 0.007;
+  px.b = 0.016 + cloud * 0.019 + cloud2 * 0.006;
+  // Main crackle: edges of a warped cellular network, widths wandering along their length; not every edge is a vein.
+  const e1 = veinNet(u, v, 4, 0.18, seed + 10);
+  const w1 = 0.007 + Math.pow(cfbm(u, v, 5, 3, seed + 20), 2) * 0.006;
+  const keep1 = smooth(0.18, 0.3, cfbm(u, v, 3, 3, seed + 21));
+  const big = smooth(w1, w1 * 0.35, e1) * keep1;
+  const halo1 = smooth(w1 * 3.5, w1, e1) * keep1;
+  // Finer branches between them, thinner and patchier.
+  const e2 = veinNet(u, v, 9, 0.2, seed + 30);
+  const w2 = 0.013 + Math.pow(cfbm(u, v, 8, 3, seed + 40), 2) * 0.006;
+  const keep2 = smooth(0.4, 0.52, cfbm(u, v, 4, 3, seed + 41));
+  const mid = smooth(w2, w2 * 0.35, e2) * keep2;
+  const halo2 = smooth(w2 * 3, w2, e2) * keep2;
+  const core = Math.max(big, mid * 0.8);
+  const halo = Math.max(halo1, halo2 * 0.6);
+  tint(px, 0.1, 0.055, 0.02, halo * 0.45);
+  const hot = 0.75 + 0.25 * cloud2;
+  tint(px, 0.95 * hot, 0.78 * hot, 0.46 * hot, core);
+  px.glow = core * (0.55 + 0.45 * cfbm(u, v, 6, 3, seed + 50));
+  px.h = 0.5 + cloud * 0.01 - core * 0.015;
+  px.rough = 0.025 + cloud2 * 0.035 + core * 0.12;
+  px.metal = core * 0.6;
+}
+
 const marbleFloor: Gen = (u, v, px) => {
   const tx = u * 2;
   const ty = v * 2;
@@ -601,16 +637,21 @@ const marbleFloor: Gen = (u, v, px) => {
   // One shared vein field; each tile is cut from a different part of it (cheap, and no two tiles match).
   const ou = hash(ix, iy, 65);
   const ov = hash(ix, iy, 66);
-  marbleBody((ru * 0.6 + ou) % 1, (rv * 0.6 + ov) % 1, px, 100);
+  goldVeinMarble((ru * 0.6 + ou) % 1, (rv * 0.6 + ov) % 1, px, 100);
   shade(px, 0.85 + hash(ix, iy, 62) * 0.3);
-  const e = Math.min(lx, 1 - lx, ly, 1 - ly) * 1.2;
-  const joint = smooth(0.0035, 0.001, e);
-  tint(px, 0.11, 0.1, 0.09, joint);
-  px.h -= joint * 0.25;
-  px.rough = Math.max(px.rough, joint * 0.6);
+  // Joints: a hairline brass inlay with a dark groove either side.
+  const e = Math.min(lx, 1 - lx, ly, 1 - ly) * 1.6;
+  const groove = smooth(0.007, 0.0025, e);
+  const inlay = smooth(0.0032, 0.0012, e);
+  shade(px, 1 - groove * 0.6);
+  tint(px, 0.62, 0.45, 0.2, inlay);
+  px.glow = Math.max(px.glow, inlay * 0.7);
+  px.metal = Math.max(px.metal, inlay);
+  px.rough = mix(px.rough, 0.28, groove);
+  px.h -= groove * 0.2;
   // Faint scuffs where the polish has worn.
-  const scuff = smooth(0.7, 0.85, cfbm(u, v, 18, 3, 63)) * smooth(0.55, 0.8, cfbm(u, v, 3, 3, 64));
-  px.rough += scuff * 0.1;
+  const scuff = smooth(0.72, 0.86, cfbm(u, v, 18, 3, 63)) * smooth(0.55, 0.8, cfbm(u, v, 3, 3, 64));
+  px.rough += scuff * 0.06;
 };
 
 const marbleSlab: Gen = (u, v, px) => marbleBody(u, v, px, 300);
@@ -745,6 +786,43 @@ const plaza: Gen = (u, v, px) => {
   tint(px, 0.42, 0.4, 0.36, smooth(0.6, 0.85, fbm(u, v, 3, 4, 123)) * 0.25);
 };
 
+/**
+ * Column cladding: horizontal planks of warm oiled oak, 0.3 m high, joints staggered per course, with long straight
+ * grain, darker shadow gaps between the planks and a satin finish that catches the light.
+ */
+const woodPanel: Gen = (u, v, px) => {
+  const rows = 8;
+  const ry = v * rows;
+  const row = Math.floor(ry);
+  const ly = ry - row;
+  const off = hash(row, 0, 131) * 0.6;
+  const rx = u + off;
+  const plank = Math.floor(rx);
+  const lx = rx - plank;
+  const id = hash(wrap(plank, 1), row, 132);
+  // Grain runs along the plank (u); each plank is cut from a different part of the log.
+  const gy = ly + id * 7.3;
+  const drift = cfbm(u, v * 0.3 + id, 2, 4, 133) * 0.6;
+  const g = gy * 14 + drift * 3 + Math.sin(u * Math.PI * 4 + id * 6) * 0.25;
+  const ring = Math.pow(0.5 + 0.5 * Math.sin(g * Math.PI * 2), 2.5);
+  const fine = vnoise(u * 48, v * 700, 48, 134);
+  const figure = cfbm(u, v, 5, 4, 135);
+  px.r = 0.64 - ring * 0.1 + figure * 0.07;
+  px.g = 0.47 - ring * 0.08 + figure * 0.05;
+  px.b = 0.27 - ring * 0.05 + figure * 0.03;
+  shade(px, (0.9 + id * 0.16) * (0.9 + fine * 0.18));
+  px.h = 0.55 - ring * 0.015 + fine * 0.01;
+  px.rough = 0.34 + fine * 0.1 + ring * 0.06;
+  px.metal = 0;
+  // Shadow gaps between courses and plank ends.
+  const ey = Math.min(ly, 1 - ly) / rows;
+  const ex = Math.min(lx, 1 - lx);
+  const gap = Math.max(smooth(0.0035, 0.0012, ey), smooth(0.0025, 0.0008, ex));
+  shade(px, 1 - gap * 0.7);
+  px.h -= gap * 0.5;
+  px.rough = Math.max(px.rough, gap * 0.8);
+};
+
 export const SPECS: Record<SetName, { gen: Gen; size: number; meters: number; normal: number }> = {
   brick: { gen: brick, size: 1024, meters: 1.05, normal: 9 },
   plaster: { gen: plaster, size: 1024, meters: 2, normal: 3 },
@@ -755,7 +833,7 @@ export const SPECS: Record<SetName, { gen: Gen; size: number; meters: number; no
   floorWood: { gen: floorWood, size: 1024, meters: 3, normal: 4 },
   floorTile: { gen: floorTile, size: 1024, meters: 2.4, normal: 4 },
   mud: { gen: mud, size: 512, meters: 6, normal: 3 },
-  marbleFloor: { gen: marbleFloor, size: 1024, meters: 2.4, normal: 2 },
+  marbleFloor: { gen: marbleFloor, size: 1536, meters: 3.2, normal: 1.5 },
   marbleSlab: { gen: marbleSlab, size: 1024, meters: 1.6, normal: 1.5 },
   travertine: { gen: travertine, size: 1024, meters: 2.4, normal: 5 },
   walnut: { gen: walnut, size: 1024, meters: 1.2, normal: 3 },
@@ -763,6 +841,7 @@ export const SPECS: Record<SetName, { gen: Gen; size: number; meters: number; no
   fabric: { gen: fabric, size: 512, meters: 0.5, normal: 4 },
   leather: { gen: leather, size: 512, meters: 0.5, normal: 4 },
   plaza: { gen: plaza, size: 512, meters: 2.4, normal: 3 },
+  woodPanel: { gen: woodPanel, size: 1024, meters: 2.4, normal: 3 },
 };
 
 export interface TexData {
@@ -777,12 +856,13 @@ export function generate(name: SetName, n: number): TexData {
   const albedo = new Uint8Array(n * n * 4);
   const orm = new Uint8Array(n * n * 4);
   const height = new Float32Array(n * n);
-  const px: Px = { h: 0, r: 0, g: 0, b: 0, rough: 0, metal: 0 };
+  const px: Px = { h: 0, r: 0, g: 0, b: 0, rough: 0, metal: 0, glow: 0 };
   for (let y = 0; y < n; y++) {
     const v = (y + 0.5) / n;
     for (let x = 0; x < n; x++) {
       const u = (x + 0.5) / n;
       px.metal = 0;
+      px.glow = 0;
       spec.gen(u, v, px);
       const i = y * n + x;
       height[i] = px.h;
@@ -790,7 +870,7 @@ export function generate(name: SetName, n: number): TexData {
       albedo[i * 4 + 1] = clamp01(px.g) * 255;
       albedo[i * 4 + 2] = clamp01(px.b) * 255;
       albedo[i * 4 + 3] = 255;
-      orm[i * 4] = 255;
+      orm[i * 4] = clamp01(px.glow) * 255;
       orm[i * 4 + 1] = clamp01(px.rough) * 255;
       orm[i * 4 + 2] = clamp01(px.metal || 0) * 255;
       orm[i * 4 + 3] = 255;
