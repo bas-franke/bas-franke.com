@@ -1,5 +1,6 @@
 import { GAMES, type BotDifficulty, type GameId, type RoomSettings, type RoomSummary } from '@shared/protocol';
 import { MAP_LIST } from '@shared/rockets/maps';
+import { saveName as saveIdentityName, savedName as savedIdentityName } from './identity';
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
@@ -61,7 +62,6 @@ export async function quickPlay(game: GameId) {
   return room.code;
 }
 
-const NAME_KEY = 'play.name';
 const DIFFICULTY_KEY = 'play.difficulty';
 
 // Storage can throw (blocked site data, private windows): these are conveniences, so fall back quietly.
@@ -80,8 +80,9 @@ function write(key: string, value: string) {
   }
 }
 
-export const savedName = () => read(NAME_KEY) ?? '';
-export const saveName = (name: string) => write(NAME_KEY, name);
+/** The nickname lives in identity.ts (cookie + localStorage, account nickname when logged in). */
+export const savedName = () => savedIdentityName();
+export const saveName = (name: string) => saveIdentityName(name);
 export const savedDifficulty = (): BotDifficulty => {
   const d = read(DIFFICULTY_KEY);
   return d === 'easy' || d === 'hard' ? d : 'normal';

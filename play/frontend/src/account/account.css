@@ -1,0 +1,391 @@
+/* Identity gate, account pages and the header's account chip. Builds on .panel, .field, .btn from styles.css. */
+
+/* ---- header chip ----------------------------------------------------------------------------------------- */
+
+.acct-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  max-width: 220px;
+  padding: 0 12px 0 4px;
+  border-radius: 13px;
+  border: 1px solid var(--line);
+  background: rgba(255, 226, 196, 0.05);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.acct-chip:hover {
+  text-decoration: none;
+  background: rgba(255, 226, 196, 0.12);
+  border-color: var(--line-strong);
+}
+.acct-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.acct-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: linear-gradient(140deg, var(--brand), var(--rose));
+  color: var(--on-accent);
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.acct-avatar.big {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  font-size: 26px;
+  transform: rotate(-4deg);
+}
+
+.acct-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 560px) {
+  .acct-chip {
+    padding: 0 4px;
+    max-width: none;
+  }
+  .acct-chip .acct-chip-name,
+  .acct-chip .acct-tag {
+    display: none;
+  }
+}
+
+/* ---- shared form bits ------------------------------------------------------------------------------------ */
+
+.acct-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+}
+.acct-form .error {
+  margin: 0;
+}
+.acct-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.acct-actions.acct-center {
+  justify-content: center;
+}
+.acct-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--brand);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.acct-link:hover {
+  text-decoration: underline;
+}
+.acct-field-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+.acct-switch {
+  margin: 0;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+.acct-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 209, 102, 0.08);
+  border: 1px solid rgba(255, 209, 102, 0.25);
+  color: var(--gold);
+  font-size: 14px;
+}
+.acct-pitch,
+.acct-lead,
+.acct-note {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+.acct-ok {
+  margin: 0;
+  color: var(--mint);
+  font-size: 14px;
+}
+.acct-sent {
+  text-align: center;
+  align-items: center;
+}
+.acct-sent h3 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 22px;
+}
+.acct-sent p {
+  margin: 0;
+  color: var(--ink-dim);
+}
+.acct-sent .acct-actions {
+  justify-content: center;
+}
+.acct-sent-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: rgba(124, 244, 201, 0.12);
+  color: var(--mint);
+  font-size: 28px;
+}
+.acct-dev {
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line-strong);
+  font-size: 13px;
+}
+
+/* ---- identity gate --------------------------------------------------------------------------------------- */
+
+.gate-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: max(24px, env(safe-area-inset-top)) var(--gutter) max(24px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(700px 480px at 20% 0%, rgba(255, 179, 122, 0.18), transparent 62%),
+    radial-gradient(640px 460px at 100% 100%, rgba(255, 138, 122, 0.14), transparent 60%),
+    radial-gradient(rgba(255, 226, 196, 0.05) 1px, transparent 1.4px) 0 0 / 24px 24px,
+    var(--bg);
+}
+.gate {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 30px 26px 24px;
+  border-radius: 28px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow:
+    0 40px 80px -40px rgba(12, 4, 8, 0.9),
+    inset 0 1px 0 rgba(255, 236, 214, 0.06);
+  text-align: center;
+  animation: gate-in 0.35s cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+@keyframes gate-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gate {
+    animation: none;
+  }
+}
+.gate-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 22px;
+}
+.gate-brand .dot {
+  color: var(--coral);
+}
+.gate h1 {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.15;
+}
+.gate-sub {
+  margin: -6px 0 0;
+  color: var(--ink-dim);
+}
+.gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gate .field input.gate-input {
+  padding: 14px 16px;
+  font-size: 18px;
+  text-align: center;
+}
+.gate-play {
+  width: 100%;
+}
+.gate-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+.gate-or::before,
+.gate-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-strong);
+}
+.gate-alt {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.gate-alt .btn {
+  width: 100%;
+}
+.gate .acct-pitch {
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+.gate-back {
+  margin: 0;
+}
+.gate-back .acct-link {
+  color: var(--ink-dim);
+}
+
+/* ---- account page ---------------------------------------------------------------------------------------- */
+
+.acct-wrap {
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.acct-back {
+  align-self: flex-start;
+  color: var(--ink-dim);
+  font-size: 14px;
+  font-weight: 700;
+}
+.acct-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.acct-card h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 20px;
+}
+.notice-panel.acct-left {
+  text-align: left;
+}
+.notice-panel.acct-left h2,
+.notice-panel.acct-left > p {
+  text-align: center;
+}
+.acct-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.acct-head > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.acct-head h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.acct-email {
+  color: var(--ink-faint);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.acct-logout {
+  flex: none;
+}
+.acct-inline-row {
+  display: flex;
+  gap: 10px;
+}
+.acct-inline-row input {
+  flex: 1;
+  min-width: 0;
+}
+.acct-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 16px;
+  background: rgba(20, 12, 17, 0.45);
+  border: 1px solid var(--line);
+}
+.acct-tabs button {
+  padding: 9px 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.acct-tabs button.on {
+  background: rgba(255, 226, 196, 0.1);
+  color: var(--ink);
+}
+.acct-danger {
+  border-color: rgba(255, 107, 139, 0.22);
+}
