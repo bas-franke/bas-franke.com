@@ -2138,7 +2138,6 @@ fieldset.panel {
     top: 106px;
   }
 }
-}
 
 /* The "newer stories" pill floats over the top of the first story: give that story room for it, and fade the pill
    out once the reader has moved on so it never covers a later story's tags. */
