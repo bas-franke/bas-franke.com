@@ -1204,8 +1204,9 @@ export class RocketsBot {
     const d = vdist(at, nearest);
     if (d >= RK.splashRadius) return true;
     const selfDmg = RK.splashDamage * (1 - d / RK.splashRadius) * RK.selfDamageScale;
-    // A point-blank direct hit is a fair trade while healthy; blowing up a wall in our face never is.
-    return direct ? self.hp - selfDmg > 20 : selfDmg < 8 && self.hp > 40;
+    // A point-blank direct hit is a fair trade while healthy; blowing up a wall in our face (a wasted rocket and a
+    // shove) never is.
+    return direct ? self.hp > selfDmg : d > RK.splashRadius * 0.75 && self.hp > selfDmg;
   }
 
   // ---- dodging --------------------------------------------------------------------------------------------------

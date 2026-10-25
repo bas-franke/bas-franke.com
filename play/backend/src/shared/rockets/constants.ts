@@ -48,7 +48,8 @@ export const RK = {
   /** Direct hit on a target at least airshotHeight above the ground (higher than a plain jump): always a kill. */
   airshotDamage: 100,
   airshotHeight: 2.5,
-  selfDamageScale: 0.4,
+  /** Your own rockets never hurt you: rocket jumps and point-blank shots only cost you the knockback. */
+  selfDamageScale: 0,
   /** Velocity added at the centre of the blast for a full-damage hit. */
   knockback: 13,
   /** Rocket jumps feel better with a little extra lift: a jump plus a rocket at the feet climbs about 15 m. */
