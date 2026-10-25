@@ -416,7 +416,17 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
 
   if (theme.neon) {
     neonTrim(map, solid, glow, out.fade, rand, out.numbers);
-    if (wallTop > 0) rooftops(half, wallTop, solid, glow, rand);
+    if (wallTop > 0) {
+      rooftops(half, wallTop, solid, glow, rand);
+      // Yellow safety railings along the wall tops, on the outer side of the pipes.
+      const rail = 0xf2c232;
+      const e = half + 0.85;
+      alongWalls(half, 2.2, (x, z, nx, nz) => solid.add(at(box(0.08, 1.1, 0.08), x - nx * 0.35, wallTop + 0.55, z - nz * 0.35), rail));
+      for (let side = 0; side < 4; side++) {
+        const yaw = (side * Math.PI) / 2;
+        for (const y of [0.5, 1.05]) solid.add(at(box(half * 2 + 1.7, 0.07, 0.07), 0, wallTop + y, -e).rotateY(yaw), rail);
+      }
+    }
   }
 
   if (theme.lava) {
