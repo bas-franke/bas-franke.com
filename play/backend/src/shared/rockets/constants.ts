@@ -7,24 +7,25 @@ export const RK = {
   /** The server loop runs at this rate and sends one snapshot per loop. */
   loopHz: 30,
 
-  gravity: 18,
-  jumpSpeed: 9.2,
+  /** Floaty on purpose: a plain jump hangs about 1.25 s and peaks about 2.5 m. */
+  gravity: 13,
+  jumpSpeed: 8.2,
   groundSpeed: 9.5,
   groundAccel: 10,
   friction: 6,
   stopSpeed: 3,
   airSpeed: 9.5,
   /** Quake air acceleration, used for forward + strafe (strafe jumping) and for drifting with any key. */
-  airAccel: 1.4,
-  /** Air acceleration when the keys push against the current motion: a soft brake (about 7.6 m/s^2), so knockback keeps its punch. */
-  airStopAccel: 0.8,
+  airAccel: 2,
+  /** Air acceleration when the keys push against the current motion: a soft brake (about 11 m/s^2), so knockback keeps its punch. */
+  airStopAccel: 1.2,
   /** Strafe-only extra push (CPM): tiny top speed, huge acceleration, so A/D plus mouse turns sharply in the air. */
   airStrafeSpeed: 0.9,
   airStrafeAccel: 60,
   /** Steering while airborne (CPM-style), strongest with only forward or back pressed. Makes rocket jumps controllable. */
-  airControl: 5,
+  airControl: 8,
   /** Share of the air control that still applies with a strafe key held. */
-  airControlStrafeScale: 0.45,
+  airControlStrafeScale: 0.6,
   stepHeight: 0.5,
 
   halfWidth: 0.4,
@@ -47,13 +48,13 @@ export const RK = {
   directDamage: 85,
   /** Direct hit on a target at least airshotHeight above the ground (higher than a plain jump): always a kill. */
   airshotDamage: 100,
-  airshotHeight: 2.5,
+  airshotHeight: 2.9,
   /** Your own rockets never hurt you: rocket jumps and point-blank shots only cost you the knockback. */
   selfDamageScale: 0,
   /** Velocity added at the centre of the blast for a full-damage hit. */
-  knockback: 13,
+  knockback: 12,
   /** Rocket jumps feel better with a little extra lift: a jump plus a rocket at the feet climbs about 15 m. */
-  selfKnockbackScale: 1.2,
+  selfKnockbackScale: 1.1,
   /** Minimum upward share of the knockback so ground hits lift players. */
   knockbackLift: 0.2,
 
