@@ -78,6 +78,8 @@ export const GHOST_TIME = 3;
 /** Damage per unit of impact above the threshold that a scrape stays under. */
 const HURT = 0.42;
 const HURT_MIN = 0.12;
+/** The same for walls, rocks and landings: a square hit wrecks the part, a solid one does over half. */
+const TERRAIN_HURT = 1.2;
 
 export type Phase = 'intro' | 'countdown' | 'racing' | 'finished';
 
@@ -192,7 +194,7 @@ export class Race {
       if (r.state.impact > 0.02) {
         this.events.onImpact?.(r, r.state.impact);
         const side = r.state.impactSide;
-        this.hurt(r, r.state.impact, side < 0 ? [LEFT_ENGINE] : side > 0 ? [RIGHT_ENGINE] : [COCKPIT]);
+        this.hurt(r, r.state.impact, side < 0 ? [LEFT_ENGINE] : side > 0 ? [RIGHT_ENGINE] : [COCKPIT], TERRAIN_HURT);
       }
       if (r.state.padHit) this.events.onPad?.(r);
       // Crossing the start line, then the finish line.
@@ -286,10 +288,10 @@ export class Race {
   }
 
   /** Damages `parts` (shared between them) for a hit of `strength`; a part reaching 1 wrecks the pod. */
-  private hurt(r: Racer, strength: number, parts: number[]) {
+  private hurt(r: Racer, strength: number, parts: number[], rate = HURT) {
     if (!this.solid(r) || r.finish !== null || r.hurtCool > 0 || strength < HURT_MIN) return;
     r.hurtCool = 0.3;
-    const d = ((strength - HURT_MIN) * HURT) / parts.length;
+    const d = ((strength - HURT_MIN) * rate) / parts.length;
     for (const p of parts) r.damage[p] = Math.min(1, r.damage[p] + d);
     if (r.damage.some((v) => v >= 1)) this.wreckPod(r);
   }
