@@ -67,6 +67,18 @@
         "5175"
       ],
       "port": 5175
+    },
+    {
+      "name": "wordward-frontend",
+      "runtimeExecutable": "C:/Users/buunn/AppData/Local/Temp/claude/C--Projects-bas-franke-com/8dab55c6-e7c6-496f-b912-fb805e6169bc/scratchpad/node24/node-v24.22.1-win-x64/node.exe",
+      "runtimeArgs": [
+        "wordward/frontend/node_modules/vite/bin/vite.js",
+        "wordward/frontend",
+        "--strictPort",
+        "--port",
+        "5186"
+      ],
+      "port": 5186
     }
   ]
 }
