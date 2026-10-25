@@ -23,6 +23,8 @@ export const config = {
   analyticsSalt: optional(env.ANALYTICS_SALT),
   /** Time zone that decides where a day (and month) starts in the analytics. */
   timezone: env.ANALYTICS_TZ ?? 'Europe/Amsterdam',
+  /** Bearer token for screenshot uploads (status/tools/upload-screenshot.mjs). Without it, uploads need a login. */
+  screenshotToken: optional(env.SCREENSHOT_TOKEN),
 
   /** Login for the status page. Without a password the page is public. */
   statusUser: env.STATUS_USER ?? 'admin',

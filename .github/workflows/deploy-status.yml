@@ -81,6 +81,21 @@ jobs:
             "$PROJECT/deploy/ecosystem.config.cjs" \
             "server:/srv/apps/$PROJECT/backend/"
 
+      # Screenshot uploads (status/tools/upload-screenshot.mjs) need the same token on the server. Skipped without the secret.
+      - name: Sync screenshot upload token
+        env:
+          SCREENSHOT_TOKEN: ${{ secrets.STATUS_SCREENSHOT_TOKEN }}
+        run: |
+          if [ -z "$SCREENSHOT_TOKEN" ]; then
+            echo "::warning::STATUS_SCREENSHOT_TOKEN is not set; screenshot uploads stay disabled."
+            exit 0
+          fi
+          # Token goes over stdin so it never shows up in a command line; umask keeps the temp file private.
+          printf '%s' "$SCREENSHOT_TOKEN" | ssh server "umask 077 && token=\$(cat) && f=/srv/apps/$PROJECT/.env \
+            && touch \$f \
+            && { grep -v '^SCREENSHOT_TOKEN=' \$f || true; printf 'SCREENSHOT_TOKEN=%s\n' \"\$token\"; } > \$f.new \
+            && mv \$f.new \$f"
+
       - name: Install and restart backend
         run: |
           ssh server "cd /srv/apps/$PROJECT/backend \
