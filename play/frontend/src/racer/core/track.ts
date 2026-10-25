@@ -46,8 +46,9 @@ export const ROOF_CLEAR = 2.5;
  * well over) and the corridor width. */
 export const SLOT_GAP = 5;
 export const SLOT_WIDTH = 1.3;
-/** Distance between the walls of one run, metres. */
-export const SLOT_APART = 75;
+/** Depth of a slot formation along the course: from a single wall of rocks to a small rock massif. */
+export const SLOT_LEN_MIN = 4;
+export const SLOT_LEN_MAX = 44;
 
 export interface Frame {
   /** Distance from the start of the centreline, metres. */
@@ -122,9 +123,13 @@ export interface Shortcut {
   roof1: number;
 }
 
-/** A barrier right across the corridor with narrow slots (centres `gaps`) that only a pod on its side gets through. */
+/**
+ * A rock formation right across the corridor with narrow slots (centres `gaps`) that only a pod on its side gets
+ * through: from `s` to `s + len`, a single wall when short, a canyon through a small rock massif when long.
+ */
 export interface SlotWall {
   s: number;
+  len: number;
   gaps: number[];
 }
 
@@ -243,7 +248,7 @@ export class Track {
     this.shortcuts = this.pickShortcuts();
     for (const c of this.shortcuts) fixed.push([c.s0 - 30, c.s1 + 30, def.width * SHORTCUT_WIDTH]);
     this.slotWalls = this.pickSlotWalls();
-    for (const w of this.slotWalls) fixed.push([w.s - 30, w.s + 30, def.width * SLOT_WIDTH]);
+    for (const w of this.slotWalls) fixed.push([w.s - 30, w.s + w.len + 30, def.width * SLOT_WIDTH]);
     for (const f of this.frames) {
       let w = f.width;
       for (const [a, b, fw] of fixed) {
@@ -499,16 +504,20 @@ export class Track {
     });
   }
 
-  /** Slot walls on straight stretches, in pairs or threes SLOT_APART apart: two runs of them, three on long courses. */
+  /**
+   * Slot formations on straight stretches, one at a time (never one straight behind another): two on a course, three
+   * on long ones. Each is a different depth, from a single wall to a massif with a canyon through it, and has two slots.
+   */
   private pickSlotWalls(): SlotWall[] {
     const r = rng(this.def.seed * 23 + 9);
     const runs = this.raceLength > 5200 ? 3 : 2;
     const out: SlotWall[] = [];
     const taken: [number, number][] = this.shortcuts.map((c) => [c.s0 - 150, c.s1 + 250]);
     const windows = runs === 3 ? [[0.2, 0.4], [0.45, 0.65], [0.7, 0.88]] : [[0.25, 0.48], [0.58, 0.85]];
-    for (const [a, b] of windows) {
-      const n = r() < 0.5 ? 2 : 3;
-      const len = (n - 1) * SLOT_APART;
+    // Depths for this course's formations, shuffled so a course gets a mix: a wall, a short block, a long massif.
+    const depths = [SLOT_LEN_MIN + r() * 4, 14 + r() * 10, 30 + r() * (SLOT_LEN_MAX - 30)].sort(() => r() - 0.5);
+    windows.forEach(([a, b], i) => {
+      const len = depths[i % depths.length];
       let best: number | null = null;
       let bestK = Infinity;
       for (let f = a; f <= b; f += 0.005) {
@@ -521,23 +530,14 @@ export class Track {
           best = s0;
         }
       }
-      if (best === null) continue;
+      if (best === null) return;
       taken.push([best - 100, best + len + 100]);
-      // Two slots per wall, well apart, and the next wall's never straight behind them: weave and roll.
+      // Two slots, well apart.
       const hw = (this.def.width * SLOT_WIDTH) / 2;
-      let prev: number[] = [];
-      for (let k = 0; k < n; k++) {
-        let gaps: number[] = [];
-        for (let tries = 0; tries < 12; tries++) {
-          const g1 = -hw + 8 + r() * (hw - 12);
-          const g2 = Math.min(hw - 8, g1 + 16 + r() * (hw - 12));
-          gaps = [g1, g2];
-          if (!prev.some((p) => gaps.some((g) => Math.abs(g - p) < 7))) break;
-        }
-        prev = gaps;
-        out.push({ s: best + k * SLOT_APART, gaps });
-      }
-    }
+      const g1 = -hw + 8 + r() * (hw - 12);
+      const g2 = Math.min(hw - 8, g1 + 16 + r() * (hw - 12));
+      out.push({ s: best, len, gaps: [g1, g2] });
+    });
     return out.sort((a, b) => a.s - b.s);
   }
 
@@ -548,7 +548,7 @@ export class Track {
     const out: Kicker[] = [];
     const taken: [number, number][] = [
       ...this.shortcuts.map((c): [number, number] => [c.s0 - 150, c.s1 + 250]),
-      ...this.slotWalls.map((w): [number, number] => [w.s - 150, w.s + 150]),
+      ...this.slotWalls.map((w): [number, number] => [w.s - 150, w.s + w.len + 150]),
     ];
     const cands: { lip: number; k: number }[] = [];
     for (let f = 0.1; f <= 0.9; f += 0.005) {
@@ -589,7 +589,7 @@ export class Track {
       this.jumps.some((j) => s > j.s0 - 60 && s < j.s1 + 110) ||
       this.kickers.some((k) => s > k.s0 - 60 && s < k.lip + 280) ||
       this.shortcuts.some((c) => s > c.s0 - 90 && s < c.s1 + (c.kind === 'ledge' ? 200 : 60)) ||
-      this.slotWalls.some((w) => s > w.s - 90 && s < w.s + 90) ||
+      this.slotWalls.some((w) => s > w.s - 90 && s < w.s + w.len + 90) ||
       pads.some((p) => Math.abs(p - s) < 45) ||
       (this.gorgeS !== null && Math.abs(this.gorgeS - s) < 170) ||
       this.inCave(s, 70);
@@ -644,21 +644,31 @@ export class Track {
         group++;
       }
     }
-    // Slot walls: rocks edge to edge across the corridor except for the slots, each SLOT_GAP wide. Each stretch of wall
-    // between two slots is its own formation, so a pod pinned against it slides off towards the nearer slot.
+    // Slot formations: rocks edge to edge across the corridor except for the slots, each SLOT_GAP wide, in rows every
+    // few metres for the formation's depth. Rocks rise towards the middle of each block and of the formation's depth,
+    // so a deep one reads as a small rock massif with canyons through it. Each block between two slots is its own
+    // formation, so a pod pinned against it slides off towards the nearer slot.
     for (const w of this.slotWalls) {
-      const hw = this.frameAt(w.s).width / 2;
-      const edges = [-hw - 2, ...[...w.gaps].sort((p, q) => p - q).flatMap((g) => [g - SLOT_GAP / 2, g + SLOT_GAP / 2]), hw + 2];
-      for (let k = 0; k < edges.length; k += 2) {
-        const a = edges[k];
-        const b = edges[k + 1];
-        const rad = Math.max(1.4, Math.min(4.2, (b - a) / 2));
-        const n = Math.max(1, Math.round((b - a - 2 * rad) / 6) + 1);
-        for (let j = 0; j < n; j++) {
-          const x = n === 1 ? (a + b) / 2 : a + rad + ((b - a - 2 * rad) * j) / (n - 1);
-          rock(w.s, x, rad, 13, 'slot', 0, 0);
+      const rows = Math.max(1, Math.round(w.len / 4) + 1);
+      const blocks: number[] = [];
+      for (let row = 0; row < rows; row++) {
+        const ss = rows === 1 ? w.s : w.s + (w.len * row) / (rows - 1);
+        const along = rows === 1 ? 1 : Math.sin((Math.PI * row) / (rows - 1));
+        const hw = this.frameAt(ss).width / 2;
+        const edges = [-hw - 2, ...[...w.gaps].sort((p, q) => p - q).flatMap((g) => [g - SLOT_GAP / 2, g + SLOT_GAP / 2]), hw + 2];
+        for (let k = 0; k < edges.length; k += 2) {
+          const a = edges[k];
+          const b = edges[k + 1];
+          const rad = Math.max(1.4, Math.min(4.2, (b - a) / 2));
+          const n = Math.max(1, Math.round((b - a - 2 * rad) / 6) + 1);
+          blocks[k / 2] ??= group++;
+          for (let j = 0; j < n; j++) {
+            const x = n === 1 ? (a + b) / 2 : a + rad + ((b - a - 2 * rad) * j) / (n - 1);
+            const mid = n === 1 ? 1 : Math.sin((Math.PI * (j + 0.5)) / n);
+            const h = 10 + (4 + Math.min(18, w.len * 0.45)) * along * mid + r() * 3;
+            out.push({ s: ss, x, r: rad, h, kind: 'slot', group: blocks[k / 2], side: 0, t: 0 });
+          }
         }
-        group++;
       }
     }
     let s = this.startS + 320;

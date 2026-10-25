@@ -233,10 +233,11 @@ export function aiInput(track: Track, view: AiView, time: number): PodInput {
   let roll = 0;
   let slotSlow = false;
   for (const w of track.slotWalls) {
+    // Held through the whole formation: a deep one is a canyon to stay rolled in until its far end.
     const d = w.s - st.s;
-    if (d < -8 || d > 60 + st.v * 1.6) continue;
+    if (d < -(w.len + 6) || d > 60 + st.v * 1.6) continue;
     const kk = Math.max(0.3, Math.min(1, Math.max(0, d) / look));
-    // Pick a slot once (the one nearest the pod: the next wall can be close) and stick to it.
+    // Pick a slot once (the one nearest the pod) and stick to it.
     if (p.slotS !== w.s) {
       let g = w.gaps[0];
       for (const gg of w.gaps) if (Math.abs(gg - st.x) < Math.abs(g - st.x)) g = gg;
