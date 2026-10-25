@@ -414,7 +414,10 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
     }
   }
 
-  if (theme.neon) neonTrim(map, solid, glow, out.fade, rand, out.numbers);
+  if (theme.neon) {
+    neonTrim(map, solid, glow, out.fade, rand, out.numbers);
+    if (wallTop > 0) rooftops(half, wallTop, solid, glow, rand);
+  }
 
   if (theme.lava) {
     // A lava lake far down the pit: falling in is what kills you, so make it look like it.
@@ -653,5 +656,64 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, fade: Bucket, rand:
       glow.add(at(box(0.08, ph * 0.6, 0.08), ccx + sx * (ex + 0.11), foot + ph * 0.45, ccz + sz * (ez + 0.11)), 0xffc040);
     }
     for (const y of [foot + 0.35, core.max.y - 0.3]) solid.add(at(box(ex * 2 + 0.24, 0.5, ez * 2 + 0.24), ccx, y, ccz), 0x34303e);
+  }
+}
+
+/**
+ * A ring of rooftop clutter just outside the outer walls, between them and the skyline: plant rooms in the arena's
+ * pink and gunmetal with vents and lit windows, round water tanks, satellite dishes on posts and duct runs. All of it
+ * stands well behind the walls, out of reach.
+ */
+function rooftops(half: number, wallTop: number, solid: Bucket, glow: Bucket, rand: () => number) {
+  const dark = 0x3a3848;
+  const pinks = [0xc23c8c, 0xa8357a, 0x4a4660, 0x5a566e];
+  const n = 26;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + rand() * 0.15;
+    // Out to the corners of the square, not a circle, so nothing pokes through the wall.
+    const edge = half / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
+    const d = edge + 4 + rand() * 7;
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    const yaw = -a;
+    const kind = rand();
+    if (kind < 0.5) {
+      // A plant room: a block, a vent grille, a lit window strip, an AC fan box on the roof.
+      const w = 4 + rand() * 5;
+      const h = wallTop + 1.5 + rand() * 8;
+      const dpt = 3 + rand() * 3;
+      solid.add(at(box(dpt, h, w), x, h / 2, z, yaw), pinks[Math.floor(rand() * pinks.length)]);
+      const fx = x - Math.cos(a) * (dpt / 2 + 0.03);
+      const fz = z - Math.sin(a) * (dpt / 2 + 0.03);
+      solid.add(at(box(0.06, 1.2, w * 0.4), fx, h * 0.55, fz, yaw), dark);
+      glow.add(at(box(0.06, 0.25, w * 0.6), fx, h - 0.8, fz, yaw), rand() < 0.5 ? 0xff5ac8 : 0x56f2ff);
+      solid.add(at(box(1.6, 0.9, 1.6), x, h + 0.45, z, yaw), dark);
+      solid.add(at(cyl(0.6, 0.12, 10), x, h + 0.95, z), 0x5a566e);
+    } else if (kind < 0.72) {
+      // A round water tank on legs.
+      const h = wallTop + rand() * 4;
+      const r = 1.6 + rand() * 1.2;
+      for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) solid.add(at(box(0.2, h, 0.2), x + sx * r * 0.6, h / 2, z + sz * r * 0.6), dark);
+      solid.add(at(new THREE.CylinderGeometry(r, r, 3, 12), x, h + 1.5, z), 0x6a6680);
+      solid.add(at(new THREE.ConeGeometry(r * 1.05, 1, 12), x, h + 3.5, z), 0x4a4660);
+      solid.add(at(cyl(r * 1.01, 0.15, 12), x, h + 0.9, z), 0xf2c232);
+    } else if (kind < 0.88) {
+      // A satellite dish on a post, tipped up toward the sky and the arena.
+      const h = wallTop + 3 + rand() * 5;
+      solid.add(at(cyl(0.18, h, 6), x, h / 2, z), dark);
+      const dish = new THREE.SphereGeometry(1.8, 12, 4, 0, Math.PI * 2, 0, Math.PI / 4).rotateX(-0.9).rotateY(yaw + Math.PI / 2);
+      solid.add(at(dish, x, h + 0.4, z), 0xd8d4e0);
+      glow.add(at(new THREE.IcosahedronGeometry(0.18, 0), x, h + 0.6, z), 0xff4a3a);
+    } else {
+      // A duct run along the outside of the wall, on stands.
+      const len = 6 + rand() * 6;
+      const h = wallTop + 0.8 + rand() * 2;
+      solid.add(at(box(1.2, 1.2, len), x, h, z, yaw), 0x5a566e);
+      for (let s = -len / 2 + 1; s < len / 2; s += 2.5) {
+        const sx = x + Math.sin(a) * s;
+        const sz = z - Math.cos(a) * s;
+        solid.add(at(box(0.2, h, 0.2), sx, h / 2, sz), dark);
+      }
+    }
   }
 }
