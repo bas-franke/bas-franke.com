@@ -43,12 +43,18 @@ const GRIP = new THREE.Vector3(0.15, 1.2, -0.36);
 
 const loader = new GLTFLoader();
 
-function load(name: string): Promise<GLTF | null> {
+function load(name: string, quiet = false): Promise<GLTF | null> {
   return loader.loadAsync(`${BASE}${name}.glb`).catch((err) => {
-    console.warn(`Last Light: ${name}.glb failed to load; using primitives`, err);
+    if (!quiet) console.warn(`Last Light: ${name}.glb failed to load; using primitives`, err);
     return null;
   });
 }
+
+/**
+ * Extra prop packs, each built by its own Blender script (tools/blender/props/). A name found in a pack wins over the
+ * same name in props.glb, so a pack can replace a prop; a pack that does not exist yet is simply skipped.
+ */
+const PROP_PACKS = ['props_furniture', 'props_lighting', 'props_plants', 'props_arch'];
 
 /** Small deterministic hash so a variant always looks the same on every client. */
 function hash(n: number, salt: number) {
@@ -253,9 +259,14 @@ export function createModels(): Models {
   let survivorGltf: GLTF | null = null;
   let weapons: THREE.Object3D | null = null;
   let props: THREE.Object3D | null = null;
+  let packs: THREE.Object3D[] = [];
   let arms: THREE.Object3D | null = null;
 
-  const ready = Promise.all([load('zombie'), load('survivor'), load('weapons'), load('props'), load('arms')]).then(([z, s, w, p, a]) => {
+  const packsReady = Promise.all(PROP_PACKS.map((n) => load(n, true))).then((list) => {
+    packs = list.flatMap((g) => (g ? [g.scene] : []));
+    for (const pk of packs) prepare(pk, false);
+  });
+  const ready = Promise.all([load('zombie'), load('survivor'), load('weapons'), load('props'), load('arms'), packsReady]).then(([z, s, w, p, a]) => {
     zombieGltf = z;
     survivorGltf = s;
     weapons = w?.scene ?? null;
@@ -373,7 +384,9 @@ export function createModels(): Models {
       return a;
     },
     prop(name) {
-      const src = props?.getObjectByName(name);
+      let src: THREE.Object3D | undefined;
+      for (const pk of packs) if ((src = pk.getObjectByName(name))) break;
+      src ??= props?.getObjectByName(name);
       if (!src) return fallbackProp(name);
       const p = src.clone(true);
       p.position.set(0, 0, 0);
