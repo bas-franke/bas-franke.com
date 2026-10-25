@@ -1002,6 +1002,23 @@ export class RocketsClient implements GameClient {
         mat.onBeforeCompile = src.onBeforeCompile;
         mat.onBeforeRender = src.onBeforeRender;
         mat.customProgramCacheKey = src.customProgramCacheKey;
+        if ((src as THREE.MeshToonMaterial).isMeshToonMaterial) {
+          // Worn metal: a warm rim light round the gun's silhouette edges, picking up the dusk sun.
+          const base = src.onBeforeCompile.bind(src);
+          const key = src.customProgramCacheKey.bind(src);
+          mat.onBeforeCompile = (shader, renderer) => {
+            base(shader, renderer);
+            shader.fragmentShader = shader.fragmentShader.replace(
+              '#include <opaque_fragment>',
+              `{
+                float rim = pow(1.0 - max(dot(normalize(normal), normalize(vViewPosition)), 0.0), 3.0);
+                outgoingLight += vec3(1.0, 0.58, 0.32) * rim * 0.5;
+              }
+              #include <opaque_fragment>`,
+            );
+          };
+          mat.customProgramCacheKey = () => `${key()}|vmRim`;
+        }
         mat.transparent = true;
         own.set(src, mat);
         // Outline copies follow the quality setting's ink switch on the shared originals.
