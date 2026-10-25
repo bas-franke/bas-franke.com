@@ -26,9 +26,13 @@ export function RacerPage() {
   });
 
   useEffect(() => {
+    const title = document.title;
     document.title = 'Dustrunners · play';
     document.body.classList.add('racer-body');
-    return () => document.body.classList.remove('racer-body');
+    return () => {
+      document.title = title;
+      document.body.classList.remove('racer-body');
+    };
   }, []);
 
   if (screen.kind === 'race')
@@ -39,6 +43,7 @@ export function RacerPage() {
         onFinish={(result) => setScreen({ kind: 'results', req: screen.req, result })}
         onQuit={() => setScreen({ kind: 'menu' })}
         onRestart={() => setScreen({ ...screen, n: screen.n + 1 })}
+        onExit={() => navigate('/')}
       />
     );
   return (
@@ -53,7 +58,7 @@ export function RacerPage() {
   );
 }
 
-function RaceScreen(props: { req: RaceRequest; onFinish(r: RaceResult): void; onQuit(): void; onRestart(): void }) {
+function RaceScreen(props: { req: RaceRequest; onFinish(r: RaceResult): void; onQuit(): void; onRestart(): void; onExit(): void }) {
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<RaceView | null>(null);
   const cb = useRef(props);
@@ -74,7 +79,7 @@ function RaceScreen(props: { req: RaceRequest; onFinish(r: RaceResult): void; on
   return (
     <div className="racer-screen">
       <div className="racer-host" ref={host} />
-      {view && <Hud view={view} onQuit={() => cb.current.onQuit()} onRestart={() => cb.current.onRestart()} />}
+      {view && <Hud view={view} onQuit={() => cb.current.onQuit()} onRestart={() => cb.current.onRestart()} onExit={() => cb.current.onExit()} />}
     </div>
   );
 }

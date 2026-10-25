@@ -167,7 +167,7 @@ export function RuckusHud({ client, ctx }: { client: RuckusClient; ctx: ClientCo
             {s.ended && (
               <div className="actions">
                 <button className="btn ghost" onClick={ctx.leave}>
-                  Leave room
+                  Back to main page
                 </button>
               </div>
             )}
@@ -189,7 +189,7 @@ export function RuckusHud({ client, ctx }: { client: RuckusClient; ctx: ClientCo
                 </button>
               )}
               <button className="btn ghost" onClick={ctx.leave}>
-                Leave room
+                Back to main page
               </button>
               <button className="btn primary" onClick={() => setMenu(false)}>
                 Resume

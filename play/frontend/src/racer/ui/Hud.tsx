@@ -10,7 +10,7 @@ import { VolumeControl } from '../../ui/VolumeControl';
 import { TouchControls } from './TouchControls';
 import './hud.css';
 
-export function Hud({ view, onQuit, onRestart }: { view: RaceView; onQuit(): void; onRestart(): void }) {
+export function Hud({ view, onQuit, onRestart, onExit }: { view: RaceView; onQuit(): void; onRestart(): void; onExit(): void }) {
   const [touch, setTouch] = useState(wantsTouch);
 
   useEffect(() => {
@@ -20,6 +20,7 @@ export function Hud({ view, onQuit, onRestart }: { view: RaceView; onQuit(): voi
         if (view.hud.get().phase !== 'finished' || paused) view.setPaused(!paused);
       } else if (paused && e.code === 'KeyR') onRestart();
       else if (paused && e.code === 'KeyQ') onQuit();
+      else if (paused && e.code === 'KeyM') onExit();
     };
     // A touch anywhere switches the on-screen controls on (tablets with a fine pointer, hybrid laptops).
     const first = (e: PointerEvent) => {
@@ -31,7 +32,7 @@ export function Hud({ view, onQuit, onRestart }: { view: RaceView; onQuit(): voi
       window.removeEventListener('keydown', key);
       window.removeEventListener('pointerdown', first);
     };
-  }, [view, onQuit, onRestart]);
+  }, [view, onQuit, onRestart, onExit]);
 
   return (
     <div className={`hud${touch ? ' touch' : ''}`}>
@@ -56,7 +57,7 @@ export function Hud({ view, onQuit, onRestart }: { view: RaceView; onQuit(): voi
       <IntroHint view={view} touch={touch} />
       {touch && <TouchControls view={view} />}
       <PauseButton view={view} />
-      <PauseMenu view={view} onQuit={onQuit} onRestart={onRestart} />
+      <PauseMenu view={view} onQuit={onQuit} onRestart={onRestart} onExit={onExit} />
     </div>
   );
 }
@@ -70,7 +71,7 @@ const PauseButton = memo(function PauseButton({ view }: { view: RaceView }) {
   );
 });
 
-const PauseMenu = memo(function PauseMenu({ view, onQuit, onRestart }: { view: RaceView; onQuit(): void; onRestart(): void }) {
+const PauseMenu = memo(function PauseMenu({ view, onQuit, onRestart, onExit }: { view: RaceView; onQuit(): void; onRestart(): void; onExit(): void }) {
   const paused = useHud(view, (s) => s.paused);
   const track = useHud(view, (s) => s.trackName);
   if (!paused) return null;
@@ -90,6 +91,10 @@ const PauseMenu = memo(function PauseMenu({ view, onQuit, onRestart }: { view: R
         <button className="hud-pause-item" onClick={onQuit}>
           <span>Quit to menu</span>
           <kbd>Q</kbd>
+        </button>
+        <button className="hud-pause-item" onClick={onExit}>
+          <span>Back to main page</span>
+          <kbd>M</kbd>
         </button>
         <VolumeControl className="hud-volume" />
       </div>

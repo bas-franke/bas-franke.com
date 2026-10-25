@@ -84,7 +84,7 @@ export function mount(el: HTMLElement) {
     hud.set(patch);
   }, 50);
   const root = createRoot(el);
-  root.render(createElement(Hud, { view, onQuit: () => undefined, onRestart: () => undefined }));
+  root.render(createElement(Hud, { view, onQuit: () => undefined, onRestart: () => undefined, onExit: () => undefined }));
   return () => {
     clearInterval(timer);
     root.unmount();

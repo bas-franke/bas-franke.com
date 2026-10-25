@@ -385,7 +385,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
                 </button>
               )}
               <button className="btn ghost" onClick={ctx.leave}>
-                Leave room
+                Back to main page
               </button>
             </div>
           </div>
@@ -423,7 +423,7 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
                 </button>
               )}
               <button className="btn ghost" onClick={ctx.leave}>
-                Leave room
+                Back to main page
               </button>
               <button className="btn ghost" onClick={() => setShowSettings(true)}>
                 Settings
