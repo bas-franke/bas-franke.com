@@ -337,6 +337,13 @@ body.in-feed {
   }
 }
 
+/* Touch screens: native snap flips a story on the lightest flick, so swipe.ts pages the feed itself. It drives
+   vertical panning; horizontal panning and pinch zoom stay native. */
+.feed.feed-paged {
+  scroll-snap-type: none;
+  touch-action: pan-x pinch-zoom;
+}
+
 /* Topic mode indicator and the "newer stories" pill float over the top of the feed. */
 .mode-bar,
 .before-pill {

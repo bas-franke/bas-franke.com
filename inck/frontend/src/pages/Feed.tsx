@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api, timeUntil } from '../api';
 import Art, { CategoryIcon, Flame } from '../components/Art';
 import StoryCard, { storyPath } from '../components/StoryCard';
+import { useSwipePager } from '../swipe';
 import type { FeedPage, Site, Story } from '../types';
 
 type State = 'loading' | 'ready' | 'empty' | 'error';
@@ -115,6 +116,8 @@ export default function Feed({ site }: { site: Site | null }) {
       clearTimeout(pending);
     };
   }, [stories, state]);
+
+  useSwipePager(scroller, state === 'ready');
 
   // Keep the URL and title on the story being read, and count a view after a short dwell.
   const current = stories[active];
