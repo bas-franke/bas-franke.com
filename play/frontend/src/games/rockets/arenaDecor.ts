@@ -60,7 +60,7 @@ const THEMES: Record<string, Theme> = {
     dusk: true,
     neon: true,
     sun: [0.62, 0.2, -0.76],
-    light: { sky: 0xb4a2ff, ground: 0x6a3a68, hemi: 1.7, sun: 0xffa874, sunI: 2.5 },
+    light: { sky: 0x9a8cff, ground: 0x4a2c5c, hemi: 1.35, sun: 0xffa060, sunI: 3.2 },
   },
   skyway: { surfaces: { floor: s('turf', 'strata'), platform: s('planks'), stair: s('planks') }, props: [], skyline: 'islands', under: 'rocks' },
   canyon: {
