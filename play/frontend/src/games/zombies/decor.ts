@@ -53,6 +53,20 @@ const POINT_BUDGET: Record<Quality, number> = { low: 0, medium: 6, high: 12 };
 
 const box = (sx: number, sy: number, sz: number) => new THREE.BoxGeometry(sx, sy, sz);
 
+/**
+ * Brightness 0..1 of a failing lamp at `time`. `fail` 0 = a steady faint hum, 1 = dying: buzzing stutters (fast
+ * drops to near-off) and now and then an outage of a second or two. Deterministic per `seed`, so every client agrees.
+ */
+export function failing(time: number, seed: number, fail: number): number {
+  const hum = 0.97 + 0.03 * Math.sin(time * 2.1 + seed);
+  if (fail <= 0) return hum;
+  const out = Math.sin(time * 0.53 + seed * 0.7) + 0.6 * Math.sin(time * 0.91 + seed * 1.3);
+  if (out > 1.58 - fail * 0.62) return 0.03;
+  const buzz = Math.sin(time * 9 + seed) * Math.sin(time * 13.7 + seed * 2);
+  if (buzz > 0.95 - fail * 0.45) return Math.sin(time * 61 + seed * 3) > 0 ? 0.12 : 0.55;
+  return hum;
+}
+
 function seeded(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -201,6 +215,8 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
   // ---- mezzanine galleries -------------------------------------------------------------------------------------
   const atrium = def.zones?.find((z) => z.id === 'atrium')?.rect ?? world.interior;
   const atriumH = def.zones?.find((z) => z.id === 'atrium')?.h ?? world.height;
+  // Railing runs, swapped for props_arch's glassRailing segments once the models load.
+  const railRuns: { w: WallDef; a0: number; a1: number; top: number; off: number; prims: THREE.Object3D[] }[] = [];
   for (const m of def.mezzanine ?? []) {
     const w = walls.get(m.wall);
     if (!w) continue;
@@ -261,6 +277,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       for (const p of posts) p.dispose();
       pm.castShadow = true;
       group.add(pm);
+      railRuns.push({ w, a0, a1, top, off: depth - 0.06, prims: [glassPanel, hand, pm] });
       // Upper-floor doorways: dark recesses in brass frames, with a warm wall light between them.
       for (let a = a0 + 2; a < a1 - 1.5; a += 4.5) {
         const door = new THREE.Mesh(keep(box(w.along === 'x' ? 1.1 : 0.04, 2.3, w.along === 'x' ? 0.04 : 1.1)), walnut);
@@ -528,6 +545,8 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     return b.isEmpty() ? null : b;
   };
   let deskTop: { at: (t: number, side?: number) => THREE.Vector3; inward: number; yaw: number; placeholders: THREE.Object3D[] } | null = null;
+  // Counter faces for props_arch's deskTrim: centre, outward normal, direction along the face, length, stand-ins.
+  const counterFaces: { c: THREE.Vector3; n: THREE.Vector3; along: THREE.Vector3; len: number; prims: THREE.Object3D[] }[] = [];
   for (const pr of def.props ?? []) {
     if (pr.kind !== 'desk' && pr.kind !== 'bar') continue;
     const n = pr.n ?? 6;
@@ -547,6 +566,14 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       const kick = new THREE.Mesh(keep(box(alongX ? len : 0.02, 0.04, alongX ? 0.02 : len)), mats.brass);
       kick.position.set(strip.position.x, b.max.y - 0.06, strip.position.z);
       group.add(kick);
+      const half = (alongX ? size.z : size.x) / 2;
+      counterFaces.push({
+        c: new THREE.Vector3(c.x + (alongX ? 0 : side * half), 0, c.z + (alongX ? side * half : 0)),
+        n: new THREE.Vector3(alongX ? 0 : side, 0, alongX ? side : 0),
+        along: new THREE.Vector3(alongX ? 1 : 0, 0, alongX ? 0 : 1),
+        len,
+        prims: [strip, kick],
+      });
     }
     for (let k = -1; k <= 1; k++) addGlow(new THREE.Vector3(c.x + (alongX ? (k * len) / 3 : size.x / 2 + 0.2), 0.15, c.z + (alongX ? size.z / 2 + 0.2 : (k * len) / 3)), WARM, 0.9);
     const top = b.max.y;
@@ -755,6 +782,137 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
 
   // ---- models arrive -------------------------------------------------------------------------------------------
   let disposed = false;
+  // ---- props_arch: brass reveals on the columns, desk trims, glass railings ---------------------------------------
+  // Hundreds of small pieces, so each part of each model becomes one InstancedMesh; a piece mounted on a breakable
+  // chunk collapses to zero scale when that chunk breaks.
+  const instHide = new Map<number, { mesh: THREE.InstancedMesh; idx: number }[]>();
+  const zeroM = new THREE.Matrix4().makeScale(0, 0, 0);
+  const instance = (model: THREE.Object3D, places: { m: THREE.Matrix4; chunk: number }[], glowMat?: THREE.Material) => {
+    if (!places.length) return;
+    model.updateMatrixWorld(true);
+    model.traverse((o) => {
+      const src = o as THREE.Mesh;
+      if (!src.isMesh) return;
+      const local = src.matrixWorld.clone();
+      let mat = src.material as THREE.MeshStandardMaterial;
+      const glows = mat.name === 'DeskGlow';
+      if (glows && glowMat) mat = glowMat as THREE.MeshStandardMaterial;
+      const im = new THREE.InstancedMesh(src.geometry, mat, places.length);
+      im.castShadow = !glows && !mat.transparent;
+      im.receiveShadow = !glows;
+      if (glows || mat.transparent) im.userData.noMoonShadow = true;
+      if (mat.transparent) im.renderOrder = 2;
+      im.userData.noMerge = true;
+      const tmp = new THREE.Matrix4();
+      places.forEach((pl, k) => {
+        im.setMatrixAt(k, tmp.multiplyMatrices(pl.m, local));
+        if (pl.chunk < 0) return;
+        const list = instHide.get(pl.chunk) ?? [];
+        list.push({ mesh: im, idx: k });
+        instHide.set(pl.chunk, list);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.computeBoundingSphere();
+      group.add(im);
+    });
+  };
+  /** The chunk whose box contains `p`, or -1. */
+  const chunkAt = (p: THREE.Vector3) => {
+    let found = -1;
+    const probe = { min: { x: p.x - 0.01, y: p.y - 0.01, z: p.z - 0.01 }, max: { x: p.x + 0.01, y: p.y + 0.01, z: p.z + 0.01 } };
+    forChunks(world, probe, (i) => {
+      const c = world.chunks[i];
+      if (p.x >= c.min.x && p.x <= c.max.x && p.y >= c.min.y && p.y <= c.max.y && p.z >= c.min.z && p.z <= c.max.z) {
+        found = i;
+        return true;
+      }
+    });
+    return found;
+  };
+  /** A placement matrix; `yaw` turns the model's +Z (its back) towards (sin yaw, cos yaw). */
+  const placeAt = (x: number, y: number, z: number, yaw: number, sx = 1, sy = 1, sz = 1) =>
+    new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(sx, sy, sz));
+  const placeArch = (prop: (name: string) => THREE.Object3D | null) => {
+    // Columns: brass corner angles and a centre seam on every face, row by row so each piece falls with its chunk,
+    // and a brass base band round the foot (panel 8 of the props sheet).
+    const reveal = prop('brassReveal');
+    if (reveal) {
+      const corners: { m: THREE.Matrix4; chunk: number }[] = [];
+      const seams: { m: THREE.Matrix4; chunk: number }[] = [];
+      const bands: { m: THREE.Matrix4; chunk: number }[] = [];
+      for (const pr of def.props ?? []) {
+        if (pr.kind !== 'column') continue;
+        const half = (pr.n ?? 1.2) / 2;
+        const rows = new Map<number, number>();
+        for (const c of world.chunks)
+          if (c.part === 'column' && Math.abs((c.min.x + c.max.x) / 2 - pr.x) < half && Math.abs((c.min.z + c.max.z) / 2 - pr.z) < half) rows.set(c.min.y, c.max.y);
+        for (const [y0, y1] of rows) {
+          const ym = (y0 + y1) / 2;
+          for (const [sx, sz] of [
+            [1, 1],
+            [1, -1],
+            [-1, -1],
+            [-1, 1],
+          ] as const) {
+            // The model's corner faces +X / +Z; turn it to face (sx, sz).
+            const yaw = sx > 0 ? (sz > 0 ? 0 : Math.PI / 2) : sz > 0 ? -Math.PI / 2 : Math.PI;
+            const inside = new THREE.Vector3(pr.x + sx * (half - 0.1), ym, pr.z + sz * (half - 0.1));
+            corners.push({ m: placeAt(pr.x + sx * half, y0, pr.z + sz * half, yaw, 1, y1 - y0, 1), chunk: chunkAt(inside) });
+          }
+          for (const [nx, nz] of [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+          ] as const) {
+            const yaw = Math.atan2(nx, nz);
+            const behind = new THREE.Vector3(pr.x + nx * (half - 0.1) + nz * 0.05, ym, pr.z + nz * (half - 0.1) + nx * 0.05);
+            seams.push({ m: placeAt(pr.x + nx * (half + 0.004), ym, pr.z + nz * (half + 0.004), yaw, 1, y1 - y0, 1), chunk: chunkAt(behind) });
+            if (y0 < 0.01) bands.push({ m: placeAt(pr.x + nx * (half + 0.006), 0.05, pr.z + nz * (half + 0.006), yaw, half * 2 + 0.024, 1, 1), chunk: chunkAt(behind) });
+          }
+        }
+      }
+      instance(reveal, corners);
+      instance(new THREE.Mesh(keep(box(0.024, 1, 0.008)), mats.brass), seams);
+      instance(new THREE.Mesh(keep(box(1, 0.1, 0.012)), mats.brass), bands);
+    }
+    // Reception desk and bar: a deskTrim every metre along both long faces (replacing the stand-in strips; panel 7).
+    const trim = prop('deskTrim');
+    if (trim && counterFaces.length) {
+      const places: { m: THREE.Matrix4; chunk: number }[] = [];
+      for (const f of counterFaces) {
+        const count = Math.max(1, Math.round(f.len));
+        const seg = f.len / count;
+        // The trim's back (+Z) goes against the counter, its front faces out along the face normal.
+        const yaw = Math.atan2(-f.n.x, -f.n.z);
+        for (let k = 0; k < count; k++) {
+          const p = f.c.clone().addScaledVector(f.along, -f.len / 2 + (k + 0.5) * seg);
+          places.push({ m: placeAt(p.x, 0, p.z, yaw, seg, 1, 1), chunk: chunkAt(p.clone().addScaledVector(f.n, -0.15).setY(0.25)) });
+        }
+        for (const o of f.prims) o.visible = false;
+      }
+      instance(trim, places, ledMat);
+    }
+    // Mezzanine balustrades: 2 m glassRailing segments along each run, stretched to fit (panel 15).
+    const rail = prop('glassRailing');
+    if (rail && railRuns.length) {
+      const places: { m: THREE.Matrix4; chunk: number }[] = [];
+      for (const r of railRuns) {
+        const len = r.a1 - r.a0;
+        const count = Math.max(1, Math.round(len / 2));
+        const seg = len / count;
+        // Back (+Z) towards the wall: the gallery behind, the atrium in front.
+        const yaw = r.w.along === 'z' ? Math.atan2(r.w.out, 0) : Math.atan2(0, r.w.out);
+        for (let k = 0; k < count; k++) {
+          const p = wallPoint(r.w, r.a0 + (k + 0.5) * seg, r.top, r.off);
+          places.push({ m: placeAt(p.x, p.y, p.z, yaw, seg / 2, 1, 1), chunk: -1 });
+        }
+        for (const o of r.prims) o.visible = false;
+      }
+      instance(rail, places);
+    }
+  };
+
   let wings: THREE.Object3D | null = null;
   void models.ready.then(() => {
     if (disposed) return;
@@ -905,6 +1063,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       }
       for (const m of deskTop.placeholders) m.visible = false;
     }
+    placeArch(prop);
     mergeStatic(group);
   });
 
@@ -913,6 +1072,14 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     glows,
     lamps: [],
     breakChunk(i) {
+      const inst = instHide.get(i);
+      if (inst) {
+        for (const { mesh, idx } of inst) {
+          mesh.setMatrixAt(idx, zeroM);
+          mesh.instanceMatrix.needsUpdate = true;
+        }
+        instHide.delete(i);
+      }
       const list = onChunk.get(i);
       if (!list) return;
       for (const o of list) o.visible = false;

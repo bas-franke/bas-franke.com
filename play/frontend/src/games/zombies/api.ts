@@ -51,7 +51,8 @@ export type PropName =
   | 'locker' | 'lamp' | 'board' | 'nade' | 'fence' | 'tree'
   | 'sofa' | 'armchair' | 'brassTable' | 'coffeeTable' | 'tableLamp' | 'floorLamp' | 'planterTree' | 'flowers'
   | 'sconce' | 'pendant' | 'revolvingDoor' | 'elevatorDoors' | 'securityShutter' | 'barStool' | 'booth'
-  | 'diningTable' | 'diningChair' | 'luggageCart' | 'stanchion' | 'receptionBell' | 'computer';
+  | 'diningTable' | 'diningChair' | 'luggageCart' | 'stanchion' | 'receptionBell' | 'computer'
+  | 'glassRailing' | 'brassReveal' | 'deskTrim';
 
 export interface Models {
   /** Resolves when every GLB is loaded (or fell back to primitives). */
