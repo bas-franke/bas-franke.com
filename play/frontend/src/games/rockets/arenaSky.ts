@@ -213,6 +213,58 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       sky.add(traffic);
       disposables.push(carGeo, mat);
     }
+    // Elevated highways on arcs between the skyline rings: a dark deck on pillars, a lit edge and lamp dots.
+    const roads = new Bucket();
+    const deck = new THREE.Color(0x1e1c3c).lerp(horizon, 0.18);
+    for (let i = 0; i < 4; i++) {
+      const r = 96 + i * 9 + rand() * 6;
+      const y = 16 + rand() * 12;
+      const a0 = rand() * Math.PI * 2;
+      const span = 0.7 + rand() * 0.6;
+      const steps = Math.ceil((span * r) / 4);
+      for (let s = 0; s < steps; s++) {
+        const a = a0 + (s / steps) * span;
+        const seg = (span * r) / steps + 0.1;
+        const [cx, cz] = [Math.cos(a) * r, Math.sin(a) * r];
+        // Segments run along the tangent: local z after the -a turn.
+        roads.add(at(new THREE.BoxGeometry(5, 0.8, seg), cx, y, cz, -a), deck);
+        roads.add(at(new THREE.BoxGeometry(0.2, 0.16, seg), cx - Math.cos(a) * 2.5, y + 0.1, cz - Math.sin(a) * 2.5, -a), i % 2 ? 0xff5ac8 : 0x56f2ff);
+        if (s % 3 === 0) roads.add(at(new THREE.BoxGeometry(0.5, 0.25, 0.5), cx + Math.cos(a) * 2.3, y + 0.6, cz + Math.sin(a) * 2.3), 0xfff0c8);
+        if (s % 6 === 0) roads.add(at(new THREE.BoxGeometry(1.4, y + 12, 1.4), cx, (y - 12) / 2, cz), deck.clone().multiplyScalar(0.8));
+      }
+    }
+    const roadGeo = roads.build();
+    if (roadGeo) {
+      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, toneMapped: false });
+      sky.add(new THREE.Mesh(roadGeo, mat));
+      disposables.push(roadGeo, mat);
+    }
+    // Searchlights from the city: soft additive cones that sweep slowly.
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + rand();
+      const d = 120 + rand() * 40;
+      const len = 140;
+      const beam = new Bucket();
+      const cone = new THREE.CylinderGeometry(5, 0.6, len, 12, 1, true).translate(0, len / 2, 0);
+      beam.add(cone, i === 1 ? 0x9ad8ff : 0xffd0f0, (_x, y) => 0.16 * (1 - y / len));
+      const geo = beam.build()!;
+      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false, toneMapped: false });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(Math.cos(a) * d, -5, Math.sin(a) * d);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = -7;
+      const phase = rand() * 10;
+      mesh.onBeforeRender = () => {
+        const t = performance.now() / 1000 + phase;
+        // Lean inward over the arena and swing side to side.
+        mesh.rotation.set(0, -a, 0);
+        mesh.rotateZ(0.5 + 0.18 * Math.sin(t * 0.21));
+        mesh.rotateX(0.35 * Math.sin(t * 0.13));
+        mesh.updateMatrixWorld();
+      };
+      sky.add(mesh);
+      disposables.push(geo, mat);
+    }
     const puffTex = radialGlow();
     const puffMat = new THREE.SpriteMaterial({ map: puffTex, color: 0xe6d2f4, transparent: true, opacity: 0.24, depthWrite: false });
     const wall = map.half + 0.5;
