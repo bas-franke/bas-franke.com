@@ -10,6 +10,7 @@ import type { RaceView } from '../../racer/RaceView';
 import { Hud as RaceHud } from '../../racer/ui/Hud';
 import { fmtTime, ordinal, useHud, wantsTouch } from '../../racer/ui/hudStore';
 import '../../racer/ui/racer.css';
+import { InviteLink } from '../../ui/InviteLink';
 import { VolumeControl } from '../../ui/VolumeControl';
 import { type ClientContext, useStore } from '../types';
 import { type DrScore, type DustrunnersClient, type DustrunnersHudState, pointsFor } from './client';
@@ -110,6 +111,7 @@ export function DustrunnersHud({ client, ctx }: { client: DustrunnersClient; ctx
                 <span>Back to main page</span>
               </button>
               <VolumeControl className="hud-volume" />
+              <InviteLink code={room.code} variant="dustrunners" label="Invite pilots" hint="Joiners wait for the next race." />
             </div>
           </div>
         )}

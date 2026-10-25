@@ -8,6 +8,7 @@ import type { FeedLine, RocketsClient, RocketsHudState } from './client';
 import { SettingsPanel } from './SettingsPanel';
 import { TouchControls, useTouchMode } from './TouchControls';
 import { settings } from './settings';
+import { InviteLink } from '../../ui/InviteLink';
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -407,9 +408,10 @@ export function RocketsHud({ client, ctx }: { client: RocketsClient; ctx: Client
           <div className="scoreboard">
             <h2>Paused (for you)</h2>
             <p className="sub">
-              The match keeps running on {s.mapName}. Room code {room.code}.
+              The match keeps running on {s.mapName}.
             </p>
             {scoreTable(s.scores)}
+            <InviteLink code={room.code} variant="rockets" />
             <div className="actions">
               {teams && myTeam !== undefined && (
                 // The server kills us without penalty and we respawn on the other side.

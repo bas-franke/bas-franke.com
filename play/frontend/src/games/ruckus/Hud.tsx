@@ -3,6 +3,7 @@ import { colorHex } from '@shared/protocol';
 import { RU } from '@shared/ruckus/constants';
 import type { RuckusScore } from '@shared/ruckus/protocol';
 import { MINIGAMES } from '@shared/ruckus/world';
+import { InviteLink } from '../../ui/InviteLink';
 import { VolumeControl } from '../../ui/VolumeControl';
 import { TouchControls, useTouchMode } from '../rockets/TouchControls';
 import { type ClientContext, useStore } from '../types';
@@ -179,8 +180,9 @@ export function RuckusHud({ client, ctx }: { client: RuckusClient; ctx: ClientCo
         <div className="overlay-center">
           <div className="scoreboard">
             <h2>Menu</h2>
-            <p className="sub">The game keeps going. Room code {room.code}.</p>
+            <p className="sub">The game keeps going.</p>
             <Standings scores={s.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />
+            <InviteLink code={room.code} variant="ruckus" />
             <VolumeControl />
             <div className="actions">
               {isHost && (

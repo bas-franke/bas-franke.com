@@ -5,6 +5,12 @@ import type { ClientMsg, GameClientMsg, ServerMsg } from '@shared/protocol';
 export type SocketStatus = 'connecting' | 'open' | 'closed';
 type Listener = (m: ServerMsg) => void;
 
+/** The device id the server uses to put a player who reconnects mid-match back into the game. */
+function playIdCookie() {
+  const m = /(?:^|;\s*)play_id=([^;]*)/.exec(document.cookie);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
 export class RoomSocket {
   private ws?: WebSocket;
   private readonly listeners = new Set<Listener>();
@@ -25,7 +31,9 @@ export class RoomSocket {
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/api/ws?room=${encodeURIComponent(this.code)}&name=${encodeURIComponent(this.name)}`;
+    // The play_id cookie rides along with the upgrade; `pid` repeats it for proxies that drop cookies on WebSockets.
+    const pid = playIdCookie();
+    const url = `${proto}//${location.host}/api/ws?room=${encodeURIComponent(this.code)}&name=${encodeURIComponent(this.name)}${pid ? `&pid=${encodeURIComponent(pid)}` : ''}`;
     const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {

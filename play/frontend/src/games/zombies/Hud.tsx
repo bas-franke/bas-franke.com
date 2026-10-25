@@ -3,6 +3,7 @@ import { GAMES, colorHex } from '@shared/protocol';
 import { ZB } from '@shared/zombies/constants';
 import type { ZScore } from '@shared/zombies/protocol';
 import { WEAPONS, type WeaponId, type WeaponKind } from '@shared/zombies/weapons';
+import { InviteLink } from '../../ui/InviteLink';
 import { VolumeControl } from '../../ui/VolumeControl';
 import { type ClientContext, useStore } from '../types';
 import type { Quality } from './api';
@@ -316,9 +317,7 @@ function PauseMenu({
             </button>
           ))}
         </nav>
-        <div className="ll-pause-code">
-          Room code <b>{code}</b>
-        </div>
+        <InviteLink code={code} variant="ll" label="Bring backup" hint="Joiners wait at the door until the next match." />
       </div>
 
       <div className="ll-pause-panel">

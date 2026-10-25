@@ -36,8 +36,9 @@ export function RoomList({ rooms, filter, onJoin, onCreate }: { rooms: RoomSumma
 function RoomRow({ room: r, onJoin }: { room: RoomSummary; onJoin: () => void }) {
   const meta = GAMES[r.game];
   const taken = r.humans + r.bots;
-  // Humans replace bots when they join, so a room is only full once humans hold every seat.
+  // Humans replace bots (at the next match start if one is running), so a room is only full once humans hold every seat.
   const full = r.humans >= r.maxPlayers;
+  const waiting = r.waiting ?? 0;
   const live = r.state === 'playing';
   const seats = Array.from({ length: r.maxPlayers }, (_, i) => (i < r.humans ? 'human' : i < taken ? 'bot' : 'free'));
   return (
@@ -57,14 +58,21 @@ function RoomRow({ room: r, onJoin }: { room: RoomSummary; onJoin: () => void })
           </span>
           {r.humans} {r.humans === 1 ? 'player' : 'players'}
           {r.bots ? ` + ${r.bots} ${r.bots === 1 ? 'bot' : 'bots'}` : ''} · {r.maxPlayers} seats
+          {waiting > 0 && ` · ${waiting} waiting for the next match`}
         </div>
       </div>
       <span className="code" title="Room code">
         {r.code}
       </span>
       <span className={`pill state ${live ? 'live' : ''}`}>{live ? 'Live' : 'Waiting'}</span>
-      <button type="button" className="btn small primary" onClick={onJoin} disabled={full}>
-        {full ? 'Full' : live ? 'Drop in' : 'Join'}
+      <button
+        type="button"
+        className="btn small primary"
+        onClick={onJoin}
+        disabled={full}
+        title={live && !full ? 'A match is running: you wait in the room and play from the next one' : undefined}
+      >
+        {full ? 'Full' : live ? 'Join · next match' : 'Join'}
       </button>
     </article>
   );

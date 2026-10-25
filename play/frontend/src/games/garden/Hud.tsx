@@ -11,6 +11,7 @@ import { G } from '@shared/garden/constants';
 import { ENEMIES, SENDS, type EnemyKind } from '@shared/garden/enemies';
 import { TFlag, type GScore } from '@shared/garden/protocol';
 import { TARGET_MODES, TOWER_KINDS, TOWERS, type Level, type TargetMode, type TowerKind } from '@shared/garden/towers';
+import { InviteLink } from '../../ui/InviteLink';
 import { VolumeControl } from '../../ui/VolumeControl';
 import { type ClientContext, type Store, useStore } from '../types';
 import type { GardenActions, GHudState, HudIncoming, HudSelected, Quality, Toast } from './api';
@@ -292,8 +293,9 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
           <div className="gs-sheet gs-menu">
             <h2>Menu</h2>
             <p className="gs-sub">
-              The garden keeps growing while you are here. Room code <b className="gs-code">{room.code}</b>
+              The garden keeps growing while you are here.
             </p>
+            <InviteLink code={room.code} variant="garden" label="Invite gardeners" />
             <div className="gs-settings">
               <div className="gs-setting">
                 <span>Graphics</span>

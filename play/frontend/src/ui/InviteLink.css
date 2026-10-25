@@ -1,0 +1,228 @@
+/* Invite link + copy button. Base look is a neutral dark card; variants restyle it to sit inside each game's menu. */
+
+.invite-link {
+  --inv-bg: rgba(255, 255, 255, 0.06);
+  --inv-line: rgba(255, 255, 255, 0.14);
+  --inv-ink: #fcf0e4;
+  --inv-dim: rgba(252, 240, 228, 0.6);
+  --inv-accent: var(--accent, #ffb37a);
+  --inv-on-accent: #1a1319;
+  --inv-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--inv-line);
+  border-radius: var(--inv-radius);
+  background: var(--inv-bg);
+  color: var(--inv-ink);
+  text-align: left;
+  pointer-events: auto;
+  text-shadow: none;
+}
+
+.invite-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.invite-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--inv-dim);
+}
+.invite-code {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.invite-code-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--inv-dim);
+}
+.invite-code b {
+  font: 700 18px/1 ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  letter-spacing: 0.18em;
+  color: var(--inv-ink);
+}
+
+.invite-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.invite-link .invite-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--inv-line);
+  border-radius: calc(var(--inv-radius) - 4px);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--inv-ink);
+  font: 500 13px/1.2 ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  text-overflow: ellipsis;
+  user-select: all;
+}
+.invite-link .invite-url:focus {
+  outline: 2px solid var(--inv-accent);
+  outline-offset: 1px;
+}
+.invite-link .invite-copy {
+  flex: 0 0 auto;
+  min-width: 7.5em;
+  margin: 0;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: calc(var(--inv-radius) - 4px);
+  background: var(--inv-accent);
+  color: var(--inv-on-accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    filter 120ms,
+    transform 120ms;
+}
+.invite-link .invite-copy:hover {
+  filter: brightness(1.1);
+}
+.invite-link .invite-copy:active {
+  transform: translateY(1px);
+}
+.invite-link .invite-copy:focus-visible {
+  outline: 2px solid var(--inv-ink);
+  outline-offset: 2px;
+}
+.invite-link .invite-copy.copied {
+  background: var(--mint, #7cf4c9);
+  color: #10231c;
+}
+.invite-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--inv-dim);
+}
+
+@media (max-width: 480px) {
+  .invite-row {
+    flex-direction: column;
+  }
+}
+
+/* ---- waiting room: the panel look of the lobby -------------------------------------------------------------- */
+.invite-room {
+  --inv-bg: color-mix(in srgb, var(--accent, var(--brand, #ffb37a)) 7%, transparent);
+  --inv-line: var(--line-strong, rgba(255, 226, 196, 0.18));
+  --inv-dim: var(--ink-faint, #9a857c);
+  --inv-radius: 20px;
+  flex: 0 1 400px;
+  padding: 12px 16px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent, var(--brand, #ffb37a)) 50%, transparent);
+}
+.invite-room .invite-code b {
+  font-size: 22px;
+}
+/* styles.css stacks the room title as a column on phones: the flex basis would become a height there. */
+@media (max-width: 560px) {
+  .invite-room {
+    flex: none;
+  }
+}
+
+/* ---- Rockets / Ruckus: the lobby-coloured scoreboard card ------------------------------------------------------- */
+.invite-rockets,
+.invite-ruckus {
+  margin-top: 14px;
+  --inv-bg: rgba(0, 0, 0, 0.2);
+  --inv-line: var(--line-strong, rgba(255, 226, 196, 0.18));
+}
+.invite-ruckus {
+  --inv-accent: var(--gold, #ffd166);
+}
+
+/* ---- Last Light: field notes in the side column of the pause menu ---------------------------------------------- */
+.invite-ll {
+  --inv-bg: rgba(14, 11, 10, 0.55);
+  --inv-line: rgba(230, 220, 203, 0.16);
+  --inv-ink: var(--ll-bone, #e6dccb);
+  --inv-dim: var(--ll-dim, rgba(230, 220, 203, 0.55));
+  --inv-accent: var(--ll-red, #b8352a);
+  --inv-on-accent: #f4ece0;
+  --inv-radius: 2px;
+  margin-top: 28px;
+  border-left: 2px solid var(--ll-red, #b8352a);
+}
+.invite-ll .invite-label,
+.invite-ll .invite-code-label {
+  font: 400 12px Oswald, sans-serif;
+  letter-spacing: 0.18em;
+}
+.invite-ll .invite-code b {
+  font: 400 18px 'Special Elite', monospace;
+  letter-spacing: 0.2em;
+}
+.invite-ll .invite-copy {
+  font: 600 13px Oswald, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.invite-ll .invite-copy.copied {
+  background: var(--ll-bone, #e6dccb);
+  color: #1a1412;
+}
+
+/* ---- Garden Sentinels: cream sheet, chunky green button --------------------------------------------------------- */
+.invite-garden {
+  --inv-bg: rgba(255, 255, 255, 0.6);
+  --inv-line: #e3cfb6;
+  --inv-ink: var(--gs-ink, #2b3440);
+  --inv-dim: rgba(43, 52, 64, 0.65);
+  --inv-accent: var(--gs-green, #6baf4b);
+  --inv-on-accent: #fff;
+  --inv-radius: 1em;
+  margin: 0.8em 0;
+}
+.invite-garden .invite-url {
+  background: #fff;
+}
+.invite-garden .invite-copy {
+  font-weight: 800;
+  box-shadow: 0 0.15em 0 #4d8a33;
+}
+.invite-garden .invite-copy.copied {
+  background: #8fd16a;
+  color: #1d3112;
+}
+
+/* ---- Dustrunners: slanted race-HUD card, yellow accent ---------------------------------------------------------- */
+.invite-dustrunners {
+  --inv-bg: rgba(255, 255, 255, 0.07);
+  --inv-line: rgba(255, 204, 26, 0.25);
+  --inv-accent: var(--hud-yellow, #ffcc1a);
+  --inv-on-accent: #1c1206;
+  --inv-radius: 2px;
+  margin-top: 0.4em;
+  font-style: italic;
+}
+.invite-dustrunners .invite-url {
+  font-style: normal;
+}
+.invite-dustrunners .invite-copy {
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

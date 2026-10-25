@@ -1,0 +1,50 @@
+/* Waiting for the next match: the banner on top of the waiting room and the tag in the player list. */
+
+.waiting-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--brand)) 45%, transparent);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--accent, var(--brand)) 20%, transparent), transparent 70%),
+    var(--panel, rgba(52, 37, 47, 0.6));
+}
+.waiting-banner b {
+  display: block;
+  font-size: 17px;
+  color: var(--ink);
+}
+.waiting-banner span {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+.waiting-pulse {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent, var(--brand));
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, var(--brand)) 60%, transparent);
+  animation: waiting-pulse 1.6s ease-out infinite;
+}
+@keyframes waiting-pulse {
+  to {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting-pulse {
+    animation: none;
+  }
+}
+
+.players .tag.waiting-tag {
+  color: var(--accent, var(--brand));
+  border-color: color-mix(in srgb, var(--accent, var(--brand)) 45%, transparent);
+  background: color-mix(in srgb, var(--accent, var(--brand)) 12%, transparent);
+}

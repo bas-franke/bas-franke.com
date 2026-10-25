@@ -5,7 +5,7 @@ import { MAP_LIST, RANDOM_MAP } from '@shared/rockets/maps';
 import { MODES, MODE_IDS, TEAMS } from '@shared/rockets/modes';
 import { GMODES } from '@shared/garden/constants';
 import { drTrackById } from '@shared/dustrunners/tracks';
-import { DIFFICULTIES, type QuickStart, difficultyBlurb, quickPlay, randomMapId, saveDifficulty, saveName, savedName } from '../api';
+import { DIFFICULTIES, type QuickStart, difficultyBlurb, quickPlay, randomMapId, saveDifficulty, savedName } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
 import { loadLook } from '../games/rockets/look';
@@ -15,9 +15,11 @@ import { RoomSocket } from '../net/socket';
 import { GameCover } from '../ui/GameCover';
 import { GameDetails } from '../ui/GameDetails';
 import { Header } from '../ui/Header';
+import { InviteLink } from '../ui/InviteLink';
 import { DustrunnersPanels, DustrunnersSoloLink, dustrunnersTrackName } from './DustrunnersPanels';
 import { GardenPanels, gardenMapName, gardenMode } from './GardenPanels';
 import { MapPicker } from './MapPicker';
+import './waiting.css';
 
 /** The robot customiser brings three.js along, so it loads on first open. */
 const CustomizeDialog = lazy(() => import('../games/rockets/CustomizeDialog').then((m) => ({ default: m.CustomizeDialog })));
@@ -62,10 +64,10 @@ export function RoomPage() {
   const { code = '' } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // Quick play arrives with router state asking for an instant start; it never stops to ask for a name.
+  // Quick play arrives with router state asking for an instant start.
   const quick = (location.state as QuickStart | null)?.quickStart === true;
-  const [name, setName] = useState(savedName() || (quick ? 'Player' : ''));
-  const [askName, setAskName] = useState(!savedName() && !quick);
+  // The global nickname gate runs before every page, so a name is always saved; 'Player' is only a fallback.
+  const [name] = useState(() => savedName() || 'Player');
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const [you, setYou] = useState('');
   const [room, setRoom] = useState<RoomView | null>(null);
@@ -84,7 +86,6 @@ export function RoomPage() {
   const chatId = useRef(0);
 
   useEffect(() => {
-    if (askName || !name) return;
     const s = new RoomSocket(code.toUpperCase(), name).connect();
     setSocket(s);
     setFatal('');
@@ -142,7 +143,7 @@ export function RoomPage() {
       s.close();
       setSocket(null);
     };
-  }, [code, name, askName]);
+  }, [code, name]);
 
   useEffect(() => {
     if (!notice) return;
@@ -176,20 +177,6 @@ export function RoomPage() {
     }
   }, []);
 
-  if (askName) {
-    return (
-      <NamePrompt
-        code={code}
-        initial={name}
-        onSubmit={(n) => {
-          saveName(n);
-          setName(n);
-          setAskName(false);
-        }}
-      />
-    );
-  }
-
   if (fatal) {
     return (
       <div className="page">
@@ -219,11 +206,13 @@ export function RoomPage() {
 
   const meta = GAMES[room.game];
   const isHost = room.hostId === you;
+  // Joined during a running match: sit in the waiting room until the next one starts.
+  const waiting = !!room.players.find((p) => p.id === you)?.waiting;
 
   return (
     <div className="page" style={{ ['--accent' as string]: meta.accent }}>
       <WaitingRoom room={room} you={you} isHost={isHost} socket={socket!} notice={notice} chat={chat} lastMatch={lastMatch} onLeave={leave} />
-      {room.state === 'playing' && <GameStage game={room.game} ctx={ctx} attach={attachGame} />}
+      {room.state === 'playing' && !waiting && <GameStage game={room.game} ctx={ctx} attach={attachGame} />}
     </div>
   );
 }
@@ -249,33 +238,6 @@ function PlayNowButton({ game }: { game: GameId }) {
   );
 }
 
-function NamePrompt({ code, initial, onSubmit }: { code: string; initial: string; onSubmit: (name: string) => void }) {
-  const [value, setValue] = useState(initial);
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    onSubmit(value.trim() || 'Player');
-  };
-  return (
-    <div className="page">
-      <Header />
-      <form className="panel notice-panel" onSubmit={submit}>
-        <span className="room-code">{code.toUpperCase()}</span>
-        <h2>You are joining a room</h2>
-        <p>What should the others call you?</p>
-        <label className="field" style={{ textAlign: 'left' }}>
-          Your name
-          <input value={value} onChange={(e) => setValue(e.target.value)} maxLength={LIMITS.playerNameMax} placeholder="Player" autoFocus />
-        </label>
-        <div className="form-actions">
-          <button className="btn primary" type="submit">
-            Join
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 function WaitingRoom({
   room,
   you,
@@ -297,24 +259,17 @@ function WaitingRoom({
 }) {
   const meta = GAMES[room.game];
   const bots = room.players.filter((p) => p.bot).length;
-  const humans = room.players.length - bots;
+  const waitingCount = room.players.filter((p) => p.waiting).length;
+  const amWaiting = !!room.players.find((p) => p.id === you)?.waiting;
+  // The line-up counts the seated players; joiners waiting for the next match are listed but not seated yet.
+  const humans = room.players.length - bots - waitingCount;
   const host = room.players.find((p) => p.id === room.hostId);
   const canStart = room.players.length >= meta.minPlayers;
   const playing = room.state === 'playing';
-  const [copied, setCopied] = useState(false);
   const [details, setDetails] = useState(false);
   const [customize, setCustomize] = useState(false);
   const shots = SCREENSHOTS[room.game];
 
-  const share = async () => {
-    try {
-      await navigator.clipboard.writeText(location.href);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard unavailable */
-    }
-  };
   const setBots = (count: number, difficulty?: BotDifficulty) => socket.send({ t: 'setBots', count, difficulty });
   const setMap = (map: string) => socket.send({ t: 'setMap', map });
   const setMode = (mode: GameMode) => socket.send({ t: 'setMode', mode });
@@ -348,6 +303,7 @@ function WaitingRoom({
       <span className="who">{p.name}</span>
       {p.id === you && <span className="tag">you</span>}
       {p.id === room.hostId && <span className="tag host">host</span>}
+      {p.waiting && <span className="tag waiting-tag">waiting · next match</span>}
       {p.bot && <span className="tag">bot · {difficulty.label.toLowerCase()}</span>}
       {!p.bot && p.id !== you && p.connected && <span className="tag">{p.ping} ms</span>}
       {!p.connected && <span className="tag">reconnecting…</span>}
@@ -357,9 +313,6 @@ function WaitingRoom({
   return (
     <>
       <Header>
-        <button className="btn small" onClick={share}>
-          {copied ? 'Link copied' : 'Copy invite link'}
-        </button>
         <button className="btn small ghost" onClick={onLeave}>
           Leave
         </button>
@@ -375,12 +328,22 @@ function WaitingRoom({
             {(hasMaps || zombies || dustrunners) && ` · ${mapName}`}
           </span>
         </div>
-        <div className="room-code-box" title="Share this code">
-          <span className="label">Room code</span>
-          <span className="room-code">{room.code}</span>
-        </div>
+        <InviteLink code={room.code} variant="room" label="Invite link" hint={playing ? 'A match is running: friends who join now play from the next one.' : undefined} />
       </div>
       {notice && <p className="error">{notice}</p>}
+
+      {playing && amWaiting && (
+        <div className="waiting-banner" role="status" data-testid="waiting-banner">
+          <span className="waiting-pulse" aria-hidden />
+          <div>
+            <b>A match is running. You're in for the next one.</b>
+            <span>
+              {waitingCount === 1 ? 'You are the only one waiting' : `${waitingCount} players are waiting`}; you are seated the moment {isHost ? 'you start' : 'the host starts'} the next
+              match{isHost ? ' (end this one first)' : ''}. Chat works in the meantime.
+            </span>
+          </div>
+        </div>
+      )}
 
       {lastMatch && !playing && (
         <AfterMatch room={room} you={you} isHost={isHost} last={lastMatch} canStart={canStart} onStart={start} onMap={setMap} onLeave={onLeave} />
@@ -422,7 +385,7 @@ function WaitingRoom({
             ) : (
               <ul className="players">
                 {room.players.map(playerRow)}
-                {Array.from({ length: room.maxPlayers - room.players.length }, (_, i) => (
+                {Array.from({ length: Math.max(0, room.maxPlayers - room.players.length) }, (_, i) => (
                   <li key={`free-${i}`} className="free">
                     <span className="avatar" />
                     <span className="who">Open seat</span>
@@ -448,13 +411,19 @@ function WaitingRoom({
               {isHost ? (
                 <>
                   <span className="slots">{canStart ? lineup : `Needs at least ${meta.minPlayers} players. Add a bot or share the code.`}</span>
+                  {playing && amWaiting && (
+                    // A host who is not in the running match (they took over from a leaver) can still end it.
+                    <button className="btn danger" onClick={() => socket.send({ t: 'stop' })}>
+                      End this match
+                    </button>
+                  )}
                   <button className="btn primary start start-btn" data-testid="start" disabled={!canStart || playing} onClick={start}>
                     {playing ? 'Match running' : `Start ${meta.name}`}
                   </button>
                 </>
               ) : (
                 <span className="slots">
-                  {playing ? 'A match is running; you will drop in.' : `Waiting for ${host?.name ?? 'the host'} to start the game.`} {lineup}.
+                  {playing ? (amWaiting ? 'A match is running; you play from the next one.' : 'A match is running.') : `Waiting for ${host?.name ?? 'the host'} to start the game.`} {lineup}.
                 </span>
               )}
             </div>
