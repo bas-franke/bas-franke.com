@@ -184,9 +184,9 @@ def body_forms(fam, k=1.0, garment=False):
     ball(t, P(0, -0.012, 0.93), R(0.14 + 0.018 * g), (1.1, 0.8, 0.8))
     ball(t, P(0, 0.004, 1.02), R(0.13 + 0.02 * g), (1.08, 0.8, 0.75))
     ball(t, P(0, 0.008, 1.1), R(0.125 + 0.024 * g), (1.08, 0.8, 0.75))
-    ball(t, P(0, 0.008, 1.2), R(0.15 + 0.03 * g), (1.1, 0.8, 0.8))
-    ball(t, P(0, 0.012, 1.29), R(0.168 + 0.04 * g), (1.15, 0.8, 0.75))
-    ball(t, P(0, -0.006, 1.375), R(0.172 + 0.04 * g), (1.22, 0.72, 0.52))
+    ball(t, P(0, 0.008, 1.2), R(0.15 + 0.022 * g), (1.1, 0.8, 0.8))
+    ball(t, P(0, 0.012, 1.29), R(0.168 + 0.024 * g), (1.15, 0.8, 0.75))
+    ball(t, P(0, -0.006, 1.375), R(0.172 + 0.024 * g), (1.22, 0.71, 0.52))
     if not garment:
         for x in (-1, 1):
             ball(t, P(x * 0.08, 0.075, 1.31), R(0.075), (1.3, 0.55, 0.85))  # pecs
@@ -202,7 +202,7 @@ def body_forms(fam, k=1.0, garment=False):
         for x in (-1, 1):
             ball(t, P(x * 0.09, -0.015, 1.45), R(0.055), (1.6, 0.9, 0.65))  # over the traps
             ball(t, P(x * 0.075, -0.06, 0.93), R(0.085), (0.95, 0.8, 1.0))  # seat
-            ball(t, P(x * 0.085, 0.07, 1.3), R(0.078), (1.3, 0.6, 0.9))  # over the pecs
+            ball(t, P(x * 0.083, 0.068, 1.3), R(0.074), (1.3, 0.56, 0.86))  # over the pecs
             ball(t, P(x * 0.15, -0.03, 1.24), R(0.07), (0.85, 0.8, 1.35))  # over the lats
     # Neck.
     capsule(t, P(0, -0.004, 1.43), P(0, 0.008, 1.6), R(0.064 + 0.01 * g))
@@ -217,13 +217,13 @@ def body_forms(fam, k=1.0, garment=False):
         sh = P(x * 0.17, 0.0, 1.42)
         el = P(x * 0.33, 0.0, 1.17)
         wr = P(x * 0.44, 0.03, 0.94)
-        ball(a, P(x * (0.205 + 0.012 * g), 0.0, 1.405), R(0.07 + 0.022 * g), (1.0, 1.1, 0.95))  # deltoid / shoulder seam
-        cone_capsule(a, sh, el, R(0.06 + 0.028 * g), R(0.046 + 0.026 * g), n=4)
+        ball(a, P(x * (0.205 + 0.005 * g), 0.0, 1.405), R(0.07 + 0.012 * g), (1.0, 1.1, 0.95))  # deltoid / shoulder seam
+        cone_capsule(a, sh, el, R(0.06 + 0.013 * g), R(0.046 + 0.014 * g), n=4)
         if not garment:
             ball(a, sh.lerp(el, 0.5) + Vector((0, 0.022, 0)), R(0.038), (1.0, 1.0, 1.6))  # biceps
             ball(a, sh.lerp(el, 0.42) + Vector((0, -0.026, 0)), R(0.04), (1.0, 1.0, 1.7))  # triceps
             ball(a, el.lerp(wr, 0.25) + Vector((0, 0.006, 0)), R(0.041), (1.0, 1.0, 1.5))  # forearm mass
-        cone_capsule(a, el, wr, R(0.047 + 0.025 * g), R(0.031 + 0.022 * g), n=4)
+        cone_capsule(a, el, wr, R(0.047 + 0.011 * g), R(0.031 + 0.013 * g), n=4)
 
     # Legs.
     for x, side in ((-1, "L"), (1, "R")):
@@ -231,14 +231,14 @@ def body_forms(fam, k=1.0, garment=False):
         hip = P(x * 0.098, 0.0, 0.95)
         kn = P(x * 0.11, 0.01, 0.51)
         an = P(x * 0.12, -0.02, 0.1)
-        cone_capsule(lg, hip, kn, R(0.094 + 0.014 * g), R(0.06 + 0.027 * g), n=5)
+        cone_capsule(lg, hip, kn, R(0.094 + 0.012 * g), R(0.06 + 0.02 * g), n=5)
         if not garment:
             ball(lg, hip.lerp(kn, 0.4) + Vector((0, 0.028, 0)), R(0.06), (1.0, 1.0, 1.8))  # quads
             ball(lg, P(x * 0.11, 0.043, 0.52), R(0.033), (1.0, 0.8, 1.0))  # kneecap
             ball(lg, kn.lerp(an, 0.3) + Vector((0, -0.028, 0)), R(0.047), (1.0, 1.0, 1.6))  # calf
             capsule(lg, P(x * 0.12, -0.03, 0.04), P(x * 0.12, 0.14, 0.025), R(0.03))  # foot
             ball(lg, P(x * 0.12, -0.02, 0.065), R(0.036), (0.9, 1.0, 0.9))  # heel / ankle
-        cone_capsule(lg, kn, an, R(0.056 + 0.03 * g), R(0.035 + 0.024 * g), n=5)
+        cone_capsule(lg, kn, an, R(0.056 + 0.02 * g), R(0.035 + 0.022 * g), n=5)
 
 
 def families(prefix, res):
@@ -544,7 +544,7 @@ def split_garment(g):
 
     bz.delete_faces(shirt, lambda c, n: (c.z < 1.04 * S and abs(c.x) < 0.27 * S) or c.z > 1.565 * S or past_wrist(c))
     # Trousers: waist to just above the ankle; no torso.
-    bz.delete_faces(trousers, lambda c, n: c.z > 1.075 * S or c.z < 0.3 * S or abs(c.x) > 0.27 * S)
+    bz.delete_faces(trousers, lambda c, n: c.z > 1.075 * S or c.z < 0.245 * S or abs(c.x) > 0.27 * S)
     log(f"removed islands: shirt {remove_islands(shirt)} faces, trousers {remove_islands(trousers)} faces")
     return shirt, trousers
 
@@ -737,14 +737,14 @@ def split_legs(trousers):
 
 
 def blouse(trousers):
-    """Bloused hems: the last ~10 cm of each leg puffs out over the boot collar with gathered vertical pleats, and the
-    very hem tucks in under it (the boot top hides it at ~0.33 m)."""
+    """Bloused hems: the bottom of each leg hangs as a loose thin drape over the boot collar (~0.33 m), flaring a little
+    toward the hem at ~0.25 m with soft vertical pleats, so it covers the boot top instead of sitting on it as a ring."""
     rnd = random.Random(23)
     phase = [rnd.random() * 6.3 for _ in range(4)]
 
     def fn(co, n):
         z = co.z / S
-        if z > 0.42 or z < 0.28:
+        if z > 0.44 or z < 0.2:
             return None
         x = 1 if co.x > 0 else -1
         kn, an = P(x * 0.11, 0.01, 0.51), P(x * 0.12, -0.02, 0.1)
@@ -756,10 +756,10 @@ def blouse(trousers):
             return None
         rdir = radial.normalized()
         ang = math.atan2(rdir.y, rdir.x)
-        t = (z - 0.31) / 0.11  # 0 at the hem, 1 at the top of the blouse
-        puff = 0.014 * math.sin(math.pi * max(0.0, min(1.0, t))) if t > 0 else -0.006 * min(1.0, -t / 0.25)
-        pleat = 0.005 * math.sin(ang * 9 + phase[0] + 2.5 * math.sin(ang * 2 + phase[1])) * max(0.0, 1 - abs(t - 0.4) / 0.8)
-        return rdir * (puff + pleat)
+        t = max(0.0, min(1.0, (0.44 - z) / 0.19))  # 0 at the top of the drape, 1 at the hem
+        flare = 0.012 * t * t  # opens a little toward the hem to clear the boot collar
+        pleat = 0.004 * math.sin(ang * 8 + phase[0] + 2.0 * math.sin(ang * 3 + phase[1])) * t
+        return rdir * (flare + pleat)
 
     bz.push_verts(trousers, fn)
 
@@ -781,7 +781,7 @@ def build_uniform(body, mats):
         shirt = drape(shirt, collider, lambda c: 1.0 if (c.z > 1.42 * S and abs(c.x) < 0.2 * S) or (abs(c.x) > 0.42 * S and c.z < 1.0 * S) or (c.z < 1.07 * S and abs(c.x) < 0.27 * S) else 0.0, frames)
     sides = [(-1 if v.co.x < 0 else 1) for v in trousers.data.vertices]
     if frames:
-        trousers = drape(trousers, collider, lambda c: 1.0 if c.z > 1.0 * S or c.z < 0.33 * S else 0.0, frames)
+        trousers = drape(trousers, collider, lambda c: 1.0 if c.z > 1.0 * S or c.z < 0.27 * S else 0.0, frames)
     bpy.data.objects.remove(collider, do_unlink=True)
     # The drape pulls the inner leg surfaces together again: keep each vertex on its own leg's side.
     for v, side in zip(trousers.data.vertices, sides):
@@ -790,7 +790,7 @@ def build_uniform(body, mats):
             v.co.x = side * g
     log("draped")
 
-    # Compression folds and blousing (amplitudes in metres along the normal).
+    # Compression folds (amplitudes in metres along the normal): only where fabric really folds.
     specs_shirt, specs_trousers = [], []
     for x in (-1, 1):
         sh = P(x * 0.17, 0.0, 1.42)
@@ -799,32 +799,21 @@ def build_uniform(body, mats):
         up = (el - sh).normalized()
         lo = (wr - el).normalized()
         specs_shirt += [
-            (el, lo, 0.07, 0.009, 120),  # elbow bunching
-            (el + Vector((0, 0.03, 0)), lo, 0.04, 0.007, 190),  # inner elbow creases
-            (P(x * 0.415, 0.022, 1.0), lo, 0.05, 0.007, 170),  # bunching above the cuff
-            (sh.lerp(el, 0.55), up, 0.06, 0.004, 90),  # upper-arm drape
-            (P(x * 0.19, 0.03, 1.36), up, 0.05, 0.005, 110),  # armpit
-            (P(x * 0.1, 0.08, 1.2), Vector((x * 0.3, 0, 1)).normalized(), 0.07, 0.004, 80),  # front drape
-            (P(x * 0.1, -0.08, 1.15), Vector((0, 0, 1)), 0.08, 0.004, 70),  # back drape
+            (el + Vector((-x * 0.025, 0.03, 0)), lo, 0.035, 0.007, 190),  # inner elbow bend
+            (P(x * 0.42, 0.024, 0.99), lo, 0.035, 0.005, 170),  # slight bunch above the cuff
+            (P(x * 0.18, 0.03, 1.35), up, 0.035, 0.004, 120),  # armpit
         ]
         hip = P(x * 0.098, 0.0, 0.95)
         kn = P(x * 0.11, 0.01, 0.51)
         an = P(x * 0.12, -0.02, 0.1)
         leg = (an - hip).normalized()
         specs_trousers += [
-            (kn + Vector((0, -0.04, 0)), leg, 0.07, 0.01, 120),  # back of the knee
-            (kn + Vector((0, 0.04, 0)), leg, 0.06, 0.006, 90),  # front of the knee
-            (P(x * 0.119, -0.012, 0.25), leg, 0.07, 0.014, 140),  # bloused over the boot
-            (P(x * 0.118, -0.012, 0.34), leg, 0.06, 0.008, 110),
-            (P(x * 0.06, 0.04, 0.86), (hip - P(0, 0.03, 0.83)).normalized(), 0.05, 0.007, 100),  # crotch pull
-            (hip.lerp(kn, 0.45), leg, 0.1, 0.004, 60),  # thigh drape
-            (P(x * 0.09, -0.07, 0.86), Vector((0, 0, 1)), 0.06, 0.005, 90),  # seat
+            (kn + Vector((0, -0.05, 0)), leg, 0.05, 0.008, 140),  # back of the knee
+            (P(x * 0.07, 0.05, 0.9), (hip - P(0, 0.03, 0.83)).normalized(), 0.04, 0.005, 120),  # hip / crotch crease
         ]
-    specs_shirt += [(P(0, 0.0, 1.07), Vector((0, 0, 1)), 0.12, 0.006, 110)]  # bloused at the waistband
     folds(shirt, specs_shirt, 3)
     folds(trousers, specs_trousers, 5)
-    # Fabric wrinkles over the whole garment: compression folds wrapping the elbows, knees and ankles, drape lines
-    # running down the sleeves, torso and trouser legs.
+    # Crisp crease networks at the joints only; the rest of the fabric stays taut ripstop.
     sh_regions, tr_regions = [], []
     for x in (-1, 1):
         sh = P(x * 0.17, 0.0, 1.42)
@@ -833,21 +822,15 @@ def build_uniform(body, mats):
         hip = P(x * 0.098, 0.0, 0.95)
         kn = P(x * 0.11, 0.01, 0.51)
         an = P(x * 0.12, -0.02, 0.1)
+        inner = Vector((-x * 0.02, 0.03, 0))
         sh_regions += [
-            (sh.lerp(el, 0.6), el.lerp(wr, 0.35), 0.07, 0.02, 30.0, 7.0),  # elbow compression folds
-            (el.lerp(wr, 0.6), wr, 0.06, 0.011, 34.0, 8.0),  # bunching above the cuff
-            (sh, el, 0.08, 0.007, 6.0, 15.0),  # drape along the upper arm
+            (sh.lerp(el, 0.8) + inner, el.lerp(wr, 0.2) + inner, 0.04, 0.012, 34.0, 9.0),  # inner elbow
+            (P(x * 0.17, 0.03, 1.38), P(x * 0.22, 0.03, 1.32), 0.04, 0.006, 30.0, 10.0),  # armpit
         ]
         tr_regions += [
-            (hip.lerp(kn, 0.7), kn.lerp(an, 0.25), 0.1, 0.024, 24.0, 6.0),  # knee folds
-            (kn.lerp(an, 0.5), an, 0.09, 0.018, 28.0, 6.0),  # bloused above the boot
-            (hip, kn, 0.11, 0.009, 5.0, 13.0),  # drape lines down the thigh
-            (P(x * 0.03, 0.04, 0.88), hip.lerp(kn, 0.25), 0.08, 0.01, 22.0, 8.0),  # crotch pull
+            (kn + Vector((0, -0.05, 0.05)), kn + Vector((0, -0.05, -0.05)), 0.05, 0.014, 34.0, 8.0),  # back of the knee
+            (P(x * 0.05, 0.045, 0.9), hip.lerp(kn, 0.15) + Vector((0, 0.04, 0)), 0.05, 0.008, 26.0, 9.0),  # hip crease
         ]
-    sh_regions += [
-        (P(0, 0, 1.06), P(0, 0, 1.2), 0.2, 0.01, 24.0, 5.0),  # bloused over the waistband
-        (P(0, 0, 1.2), P(0, 0, 1.42), 0.22, 0.007, 5.0, 12.0),  # torso drape
-    ]
     wrinkles(shirt, sh_regions, 11)
     wrinkles(trousers, tr_regions, 17)
     blouse(trousers)

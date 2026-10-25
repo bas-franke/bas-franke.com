@@ -38,7 +38,7 @@ OUT = ARGS[0] if ARGS else os.path.join(HERE, "out", "swat_limbs.blend")
 BODY = os.path.join(HERE, "out", "swat_body.blend")
 
 # Export budgets (triangles) for the decimated shells; the whole part stays under ~8k.
-GLOVE_SHELL_TRIS = 640
+GLOVE_SHELL_TRIS = 900
 BOOT_SHELL_TRIS = 480
 
 
@@ -259,12 +259,12 @@ def keep_high(o, mat):
 # the body's hand length. The glove replaces the hand: the finish stage hides the Body_Skin faces weighted to it.
 
 FINGERS = [  # base x, segment lengths, base radius, splay (degrees)
-    (-0.0352, (0.049, 0.030, 0.024), 0.0109, -7.0),
-    (-0.0118, (0.053, 0.033, 0.025), 0.0114, -2.5),
-    (0.0118, (0.050, 0.031, 0.024), 0.0109, 3.0),
-    (0.0346, (0.039, 0.024, 0.021), 0.0098, 8.5),
+    (-0.0352, (0.049, 0.030, 0.024), 0.0122, -4.5),
+    (-0.0118, (0.053, 0.033, 0.025), 0.0127, -1.5),
+    (0.0118, (0.050, 0.031, 0.024), 0.0122, 2.0),
+    (0.0346, (0.039, 0.024, 0.021), 0.0110, 5.5),
 ]
-CURL = (math.radians(8), math.radians(16), math.radians(12))
+CURL = (math.radians(10), math.radians(12), math.radians(6))  # relaxed, slightly curled open hand
 KNUCKLE_Y = 0.099
 GLOVE_LENGTH = KNUCKLE_Y + 0.053 + 0.033 + 0.025  # wrist to the middle fingertip, straightened
 
@@ -273,7 +273,8 @@ def hand_frame(side, hand):
     """Wrist, hand axis (towards the fingertips), back-of-hand normal (outwards) and the lateral axis."""
     w, tip = hand
     a = (tip - w).normalized()
-    out = Vector((side, 0, 0))
+    # As in the sheet's A-pose the back of the hand turns ~40 degrees forward (+Y), so it reads from the front.
+    out = Vector((side, 0.85, 0))
     b = (out - a * out.dot(a)).normalized()
     return w, a, b, a.cross(b)
 
@@ -390,13 +391,13 @@ def glove_parts(tree, chains, thumb, coll, cuff):
     down, up = Vector((0, 0, -1)), Vector((0, 0, 1))
     parts = []
     # Raised armour base across the knuckles, and a hard oval cap over each knuckle.
-    bm = conform_grid(tree, 8, 2, lambda u, v: Vector((u * 0.041 - 0.001, KNUCKLE_Y - 0.003 + v * 0.011, 0.12)), down, 0.0003)
-    parts.append((modified(mesh_from_bm("armor", bm), coll, [("SOLIDIFY", {"thickness": 0.0030, "offset": 1.0})]), 1))
+    bm = conform_grid(tree, 8, 2, lambda u, v: Vector((u * 0.044 - 0.001, KNUCKLE_Y - 0.004 + v * 0.014, 0.12)), down, 0.0003)
+    parts.append((modified(mesh_from_bm("armor", bm), coll, [("SOLIDIFY", {"thickness": 0.0045, "offset": 1.0})]), 1))
     bm = bmesh.new()
     for pts, dirs, r in chains:
         hit, n = ray(tree, pts[0] + Vector((0, 0.001, 0.12)), down, 0.3)
         if hit is not None:
-            ellipsoid(bm, hit + n * 0.0040, (r * 0.98, 0.0115, 0.0052), frame(n, Vector((0, 1, 0))), segs=(8, 4))
+            ellipsoid(bm, hit + n * 0.0060, (r * 1.02, 0.0135, 0.0078), frame(n, Vector((0, 1, 0))), segs=(10, 6))
     parts.append((mesh_from_bm("caps", bm), 1))
     # Padded armour on the first two finger segments and on the thumb.
     bm = bmesh.new()
@@ -411,8 +412,8 @@ def glove_parts(tree, chains, thumb, coll, cuff):
         hit, n = ray(tree, mid + back * 0.05, -back, 0.1)
         if hit is None:
             continue
-        box(bm, hit + n * 0.0016, frame(n, d), (r * 1.2, (p1 - p0).length * 0.5, 0.0036))
-    parts.append((mesh_from_bm("pads", bm), 1))
+        box(bm, hit + n * 0.0012, frame(n, d), (r * 1.3, (p1 - p0).length * 0.55, 0.0040))
+    parts.append((modified(mesh_from_bm("pads", bm), coll, [("BEVEL", {"width": 0.0014, "segments": 1})]), 1))
     # Textured panel on the back of the hand, and the grip panel on the palm.
     bm = conform_grid(tree, 4, 3, lambda u, v: Vector((u * 0.036, 0.055 + v * 0.026, 0.12)), down, 0.0005)
     parts.append((modified(mesh_from_bm("back", bm), coll, [("SOLIDIFY", {"thickness": 0.0012, "offset": 1.0})]), 4))
@@ -432,7 +433,7 @@ def glove_parts(tree, chains, thumb, coll, cuff):
 def glove(side, tag, hand, skin, coll, mt):
     w, a, b, x = hand_frame(side, hand)
     length, thumb_side, wx, wb = hand_measure(skin, tag, w, a, b, x)
-    scale = max(0.85, min(1.25, length / GLOVE_LENGTH * 1.03))
+    scale = max(0.95, min(1.4, length / GLOVE_LENGTH * 1.19))  # a padded glove is bigger than the bare hand
     cuff = (max(1.0, (wx + 0.004) / (CUFF_RX * scale)), max(1.0, (wb + 0.004) / (CUFF_RZ * scale)))
     high, chains, thumb = glove_shell(coll, cuff)
     high.name = f"Limbs_Glove.{tag}_high"
@@ -1173,6 +1174,8 @@ def previews(anch, objs):
     thumb = hand_measure(skin, "R", w, a, b, x)[1]
     # As on the sheet: back of the hand three-quarters on, from the thumb side, fingers hanging.
     shoot("glove", w + a * 0.09, b * 0.75 + x * thumb * 0.65 + Vector((0, 0.15, 0)), -a, 0.58, res=(560, 900), key=(1.0, 0.9, 1.3))
+    # Game distance: the hand in the A-pose, straight from the front, as in the sheet's front view.
+    shoot("glove_far", w + a * 0.04, Vector((0, 1, 0.05)), Vector((0, 0, 1)), 1.5, lens=50, res=(700, 700), key=(-1.0, 1.4, 1.1))
     shoot("glove_palm", w + a * 0.085, -b * 1.0 + Vector((0, 0.5, 0)), -a, 0.60, res=(560, 900), key=(-1.0, 1.2, 1.3))
     shoot("kneepad", centre(objs["Limbs_KneePad.R"]), Vector((0.06, 1.0, 0.02)), Vector((0, 0, 1)), 0.62, res=(560, 900), key=(-0.8, 1.5, 1.0))
     bc = centre(objs["Limbs_Boot.R"])

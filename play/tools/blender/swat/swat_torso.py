@@ -716,7 +716,7 @@ def build_torso(fit, coll, m, bp):
                 row_n.append(d)
             cols_p.append(row_p)
             cols_n.append(row_n)
-        b.add_bm(shell_bm(cols_p, cols_n, 0.017), m["nylon"])
+        b.add_bm(shell_bm(cols_p, cols_n, 0.034), m["nylon"])
         # MOLLE rows on the cummerbund.
         for zc in (1.13, 1.17, 1.21):
             seg_th = np.linspace(th_f - 0.25, th_b + 0.25, 7)
@@ -725,19 +725,20 @@ def build_torso(fit, coll, m, bp):
                 pa, da = fit.radial(Vector((0, fit.axis_y(zc), zc)), ta if s > 0 else math.pi - ta, 0.16)
                 pb, db = fit.radial(Vector((0, fit.axis_y(zc), zc)), tb if s > 0 else math.pi - tb, 0.16)
                 d = (da + db).normalized()
-                c = (pa + pb) / 2 + d * 0.0225
+                c = (pa + pb) / 2 + d * 0.0395
                 bw.add_bm(box_bm(((pb - pa).length, 0.003, 0.025), (0, 0.0015, 0)), m["webbing"], frame(c, d))
     objs.append(b.finish(coll, bevel=0.004, segments=1, angle=40))
     objs.append(bw.finish(coll, smooth=False))
 
     # Side pouches on the cummerbund.
     b = Builder("Torso_SidePouches")
-    for ang in (math.radians(-22), math.radians(202)):
-        z = 1.14
-        cy = fit.axis_y(z + 0.055)
-        p, d = fit.radial(Vector((0, cy, z + 0.055)), ang, 0.16)
-        M = frame(p + d * 0.022 - Vector((0, 0, 0.055)), d)
-        add_parts(b, pouch_bm(0.08, 0.04, 0.11, flap=True, bungee=False), M, m)
+    for deg in (8, -30, 172, 210):
+        ang = math.radians(deg)
+        z = 1.115
+        cy = fit.axis_y(z + 0.06)
+        p, d = fit.radial(Vector((0, cy, z + 0.06)), ang, 0.16)
+        M = frame(p + d * 0.041 - Vector((0, 0, 0.06)), d)
+        add_parts(b, pouch_bm(0.072, 0.048, 0.125, flap=True, bungee=deg in (8, 172)), M, m)
     objs.append(b.finish(coll, smooth=True))
 
     # Padded shoulder straps from the front plate top over the trapezius to the back plate top.
@@ -814,9 +815,9 @@ def build_belt(fit, coll, m, bp):
     # Belt pouches: two pistol-mag pouches front left, a utility pouch on the left hip, medic pouch at the back.
     b = Builder("Torso_BeltPouches")
     for deg in (116, 129):
-        M = on_belt(math.radians(deg), out=0.021) @ Matrix.Translation((0, 0, -0.05))
+        M = on_belt(math.radians(deg), out=0.021) @ Matrix.Translation((0, 0, -0.026)) @ Matrix.Scale(1.15, 4)
         add_parts(b, pouch_bm(0.036, 0.03, 0.092, flap=True, bungee=False, tab=True), M, m)
-    M = on_belt(math.radians(196), out=0.021) @ Matrix.Translation((0, 0, -0.07))
+    M = on_belt(math.radians(196), out=0.021) @ Matrix.Translation((0, 0, -0.045)) @ Matrix.Scale(1.15, 4)
     add_parts(b, pouch_bm(0.08, 0.045, 0.1, flap=True, bungee=False, tab=True), M, m)
     la, lb = bp["thigh.L"]
 
@@ -827,14 +828,14 @@ def build_belt(fit, coll, m, bp):
         p = fit.outer(c, d, gap=0.03, maxd=0.25)
         return (p if p is not None else c + d * 0.085), d
 
-    p, d = lthigh(0.84, math.radians(165))
-    M = frame(p + d * 0.006, d) @ Matrix.Translation((0, 0, -0.075))
+    p, d = lthigh(0.87, math.radians(165))
+    M = frame(p + d * 0.006, d) @ Matrix.Translation((0, 0, -0.075)) @ Matrix.Scale(1.15, 4)
     add_parts(b, pouch_bm(0.125, 0.06, 0.15, flap=True, bungee=True, tab=True), M, m)
     pp, nn = [], []
     for k in range(20):
         a = 2 * math.pi * k / 20
         rp, rn = [], []
-        for z in (0.78, 0.812):
+        for z in (0.80, 0.832):
             q, dd = lthigh(z, a)
             rp.append(q + dd * 0.003)
             rn.append(dd)
@@ -845,14 +846,14 @@ def build_belt(fit, coll, m, bp):
         q, dd = lthigh(0.97, math.radians(165))
         b.add_bm(rbox_bm((0.03, 0.006, 0.09), (0, 0.003, -0.02), r=0.002, seg=1), m["webbing"], frame(q + dd * 0.004, dd))  # hanger strap
     for deg in (236, 304):
-        M = on_belt(math.radians(deg), out=0.021) @ Matrix.Translation((0, 0, -0.07))
+        M = on_belt(math.radians(deg), out=0.021) @ Matrix.Translation((0, 0, -0.045)) @ Matrix.Scale(1.15, 4)
         add_parts(b, pouch_bm(0.085, 0.048, 0.11, flap=True, bungee=False, tab=True), M, m)
-    M = on_belt(math.radians(58), out=0.021) @ Matrix.Translation((0, 0, -0.045))
+    M = on_belt(math.radians(58), out=0.021) @ Matrix.Translation((0, 0, -0.02)) @ Matrix.Scale(1.15, 4)
     add_parts(b, pouch_bm(0.04, 0.034, 0.085, flap=True, bungee=False, tab=False), M, m)
     objs.append(b.finish(coll, smooth=True))
 
     b = Builder("Torso_MedicPouch")
-    M = on_belt(math.radians(270), out=0.021) @ Matrix.Translation((0, 0, -0.08))
+    M = on_belt(math.radians(270), out=0.021) @ Matrix.Translation((0, 0, -0.055)) @ Matrix.Scale(1.15, 4)
     b.add_bm(rbox_bm((0.165, 0.062, 0.112), (0, 0.031, 0.056), r=0.014, seg=3), m["nylon"], M)
     b.add_bm(rbox_bm((0.168, 0.004, 0.006), (0, 0.062, 0.093), r=0.0015, seg=1), m["webbing"], M)  # zip seam
     for sz in ((0.046, 0.016), (0.016, 0.046)):

@@ -126,8 +126,8 @@ DETAIL = {
     "Patch": (0.15, 0.001, [("noise", 400, 3, 0.6)]),
     "Skin": (0.12, 0.0015, [("noise", 300, 6, 0.6), ("noise", 40, 3, 0.3)]),
     "Team": (0.35, 0.003, [("wave", 300, 0, 0.15), ("waveb", 300, 0, 0.15), ("noise", 8, 2, 0.5)]),
-    "Uniform": (0.12, 0.0015, [("grid", 200, 0, 0.12), ("wave", 3200, 0, 0.05), ("waveb", 3200, 0, 0.05), ("noise", 6, 2, 0.7)]),
-    "Gear": (0.12, 0.0015, [("wave", 2400, 0, 0.12), ("waveb", 2400, 0, 0.12), ("noise", 10, 2, 0.6)]),
+    "Uniform": (0.32, 0.0015, [("grid", 200, 0, 0.35), ("wave", 2600, 0, 0.12), ("waveb", 2600, 0, 0.12), ("noise", 6, 2, 0.5)]),
+    "Gear": (0.28, 0.0015, [("wave", 1800, 0, 0.25), ("waveb", 1800, 0, 0.25), ("noise", 10, 2, 0.4)]),
     "Strap": (0.15, 0.0015, [("wave", 2600, 0, 0.6), ("noise", 20, 2, 0.3)]),
     "Polymer": (0.3, 0.002, [("noise", 140, 4, 0.6), ("noise", 15, 2, 0.3)]),
     "Helmet": (0.12, 0.0015, [("noise", 300, 5, 0.7), ("noise", 10, 2, 0.3)]),
@@ -725,26 +725,27 @@ def armband(p, x):
 
 
 def tuck_trousers(meshes):
-    """Boots that carry tuck_* properties (centre and radii of the boot opening) get the trouser legs tucked in: every
-    trouser vertex more than 4 cm below the boot top is pulled inside 85% of the opening ellipse."""
+    """Trouser hems drape OUTSIDE over the boot collars (body round 4): boots carry tuck_* properties (centre and radii
+    of the boot opening, boot top); any trouser vertex around the boot shaft that sits inside the opening (plus 6 mm
+    of leather) is pushed out so the shaft never pokes through the drape."""
     boots = [m for m in meshes if "tuck_top" in m.keys()]
     legs = [m for m in meshes if "trouser" in m.name.lower() or "pant" in m.name.lower()]
     for b in boots:
         top, cx, cy, rx, ry = (float(b[k]) for k in ("tuck_top", "tuck_cx", "tuck_cy", "tuck_rx", "tuck_ry"))
         for leg in legs:
             moved = 0
+            inv = leg.matrix_world.inverted()
             for v in leg.data.vertices:
                 c = leg.matrix_world @ v.co
-                if c.z > top - 0.04 or abs(c.x - cx) > rx * 2.2 or abs(c.y - cy) > ry * 2.2:
+                if c.z > top + 0.01 or abs(c.x - cx) > rx * 2.0 or abs(c.y - cy) > ry * 2.0:
                     continue
                 dx, dy = c.x - cx, c.y - cy
-                e = math.hypot(dx / rx, dy / ry)
-                if e > 0.85:
-                    k = 0.85 / e
-                    w = leg.matrix_world.inverted() @ Vector((cx + dx * k, cy + dy * k, c.z))
-                    v.co = w
+                e = math.hypot(dx / (rx + 0.006), dy / (ry + 0.006))
+                if 0.2 < e < 1.0:
+                    k = 1.0 / e
+                    v.co = inv @ Vector((cx + dx * k, cy + dy * k, c.z))
                     moved += 1
-            print("TUCK", leg.name, "into", b.name, moved)
+            print("DRAPE", leg.name, "over", b.name, moved)
 
 
 def fitted_armband(p, arm, sleeve):
@@ -915,6 +916,9 @@ def bake(meshes, size=ATLAS):
 
     # AO.
     ao = new_img("SurvivorAO", size // 2, True, (1, 1, 1, 1))
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new("bake")
+    scene.world.light_settings.distance = 0.12  # crease-scale occlusion, not room-scale
     scene.render.bake.use_selected_to_active = False
     run("AO", ao, lambda mat, nt: [], samples=48)
     # Albedo: material colour x subtle large-scale variation, brightened on worn convex edges (pointiness).
@@ -965,6 +969,33 @@ def bake(meshes, size=ATLAS):
             col.inputs[0].default_value = base
         nt.links.new(mr.outputs["Result"], col.inputs["Scale"])
         out_sock = col.outputs[0]
+        if category(mat.name) in ("Uniform", "Gear", "Strap", "Balaclava"):
+            # Cloth: darker in concave folds (pointiness), and a faint weave in the colour so the fabric reads at
+            # full-body distance.
+            geo_c = nn("ShaderNodeNewGeometry")
+            cav = nn("ShaderNodeMapRange")
+            cav.inputs["From Min"].default_value = 0.44
+            cav.inputs["From Max"].default_value = 0.5
+            cav.inputs["To Min"].default_value = 0.45
+            cav.inputs["To Max"].default_value = 1.0
+            nt.links.new(geo_c.outputs["Pointiness"], cav.inputs["Value"])
+            br = nn("ShaderNodeTexBrick")
+            br.inputs["Scale"].default_value = 200.0
+            br.inputs["Mortar Size"].default_value = 0.05
+            nt.links.new(tc.outputs["Object"], br.inputs["Vector"])
+            wv = nn("ShaderNodeMapRange")
+            wv.inputs["From Min"].default_value = 0.0
+            wv.inputs["From Max"].default_value = 1.0
+            wv.inputs["To Min"].default_value = 0.86
+            wv.inputs["To Max"].default_value = 1.04
+            nt.links.new(br.outputs["Fac"], wv.inputs["Value"])
+            k = nn("ShaderNodeMath", operation="MULTIPLY")
+            nt.links.new(cav.outputs["Result"], k.inputs[0])
+            nt.links.new(wv.outputs["Result"], k.inputs[1])
+            sc2 = nn("ShaderNodeVectorMath", operation="SCALE")
+            nt.links.new(out_sock, sc2.inputs[0])
+            nt.links.new(k.outputs[0], sc2.inputs["Scale"])
+            out_sock = sc2.outputs[0]
         wear = WEAR.get(category(mat.name), 0.0)
         if wear:
             geo = nn("ShaderNodeNewGeometry")
@@ -1000,7 +1031,7 @@ def bake(meshes, size=ATLAS):
     ao.pixels.foreach_get(o)
     a = a.reshape(-1, 4)
     o = o.reshape(-1, 4)
-    a[:, :3] *= (0.3 + 0.7 * o[:, :1])
+    a[:, :3] *= (0.18 + 0.82 * o[:, :1])
     alb.pixels.foreach_set(a.ravel())
     alb.pack()
     # Normals.
@@ -1284,6 +1315,8 @@ def bind(obj, arm, src):
     """Weights for one exported mesh: its own if it has bone groups, rigid for head gear, else from the body (or by
     region for the stand-in), then parented to the armature."""
     n = obj.name.lower()
+    if "glove" in n and ARM_REF[0] is not None and src is not None:
+        return glove_weights(obj, arm)
     rigid = obj.get("bone") if obj.get("bone") in BONE_NAMES else next((b for k, b in RIGID.items() if k in n), None)
     if obj.get("bone") in BONE_NAMES:
         for g in list(obj.vertex_groups):
@@ -1309,6 +1342,29 @@ def bind(obj, arm, src):
 
 
 FIRST_TO_GO = ("beltpouch", "sidepouch", "medic")
+
+
+def glove_weights(obj, arm):
+    """Gloves follow the hand bone fully; only the cuff (just behind the wrist) blends into the forearm."""
+    side = "L" if obj.name.rstrip("_high").endswith("L") or ".l" in obj.name.lower() else "R"
+    b = arm.data.bones[f"hand.{side}"]
+    head = arm.matrix_world @ b.head_local
+    d = (arm.matrix_world @ b.tail_local - head).normalized()
+    for g in list(obj.vertex_groups):
+        obj.vertex_groups.remove(g)
+    gh = obj.vertex_groups.new(name=f"hand.{side}")
+    gf = obj.vertex_groups.new(name=f"forearm.{side}")
+    for v in obj.data.vertices:
+        t = (obj.matrix_world @ v.co - head).dot(d)
+        w = max(0.0, min(1.0, (t + 0.03) / 0.04))  # 0 at 3 cm behind the wrist, 1 at 1 cm past it
+        gh.add([v.index], w, "REPLACE")
+        if w < 1.0:
+            gf.add([v.index], 1.0 - w, "REPLACE")
+    obj.parent = arm
+    if not any(m.type == "ARMATURE" for m in obj.modifiers):
+        m = obj.modifiers.new("Armature", "ARMATURE")
+        m.object = arm
+    return obj
 
 
 def fit_budget(meshes, budget=BUDGET):
