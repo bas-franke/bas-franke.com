@@ -1,7 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { NICKNAME_MAX, cleanNickname, loadAccount, saveName, useAccount } from '../identity';
-import { AccountPitch, ForgotForm, LinkButton, LoginForm, RegisterForm } from './forms';
+import { AccountPitch, ForgotForm, LinkButton, LoginForm, NoMailNote, RegisterForm } from './forms';
 import './account.css';
 
 /** Mail links must work for people who have never picked a nickname. */
@@ -27,14 +27,15 @@ export function IdentityGate({ children }: { children: ReactNode }) {
 
   if (account.name || account.user || EXEMPT.test(pathname)) return <>{children}</>;
   if (!account.loaded && !waited) return <div className="gate-backdrop" />;
-  return <Gate enabled={account.enabled} />;
+  return <Gate enabled={account.enabled} mail={account.mail} />;
 }
 
-function Gate({ enabled }: { enabled: boolean }) {
+function Gate({ enabled, mail }: { enabled: boolean; mail: boolean }) {
   const [mode, setMode] = useState<Mode>('guest');
   const [nickname, setNickname] = useState('');
   const [sent, setSent] = useState(false);
-  const effective = enabled ? mode : 'guest';
+  // Without mail delivery nobody can activate a new account or reset a password: only logging in is offered.
+  const effective = !enabled ? 'guest' : !mail && (mode === 'register' || mode === 'forgot') ? 'login' : mode;
 
   const playAsGuest = (raw: string) => saveName(cleanNickname(raw) || 'Player');
 
@@ -80,15 +81,17 @@ function Gate({ enabled }: { enabled: boolean }) {
                 <div className="gate-or">
                   <span>or</span>
                 </div>
-                <div className="gate-alt">
+                <div className={mail ? 'gate-alt' : 'gate-alt single'}>
                   <button type="button" className="btn" onClick={() => setMode('login')}>
                     Log in
                   </button>
-                  <button type="button" className="btn" onClick={() => setMode('register')}>
-                    Create account
-                  </button>
+                  {mail && (
+                    <button type="button" className="btn" onClick={() => setMode('register')}>
+                      Create account
+                    </button>
+                  )}
                 </div>
-                <AccountPitch />
+                {mail ? <AccountPitch /> : <NoMailNote />}
               </>
             )}
           </>
@@ -97,7 +100,7 @@ function Gate({ enabled }: { enabled: boolean }) {
         {effective === 'login' && (
           <>
             <h1 id="gate-title">Welcome back</h1>
-            <LoginForm onForgot={() => setMode('forgot')} onRegister={() => setMode('register')} />
+            <LoginForm mail={mail} onForgot={mail ? () => setMode('forgot') : undefined} onRegister={mail ? () => setMode('register') : undefined} />
           </>
         )}
         {effective === 'register' && (

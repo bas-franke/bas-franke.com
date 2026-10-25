@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AccountError, NICKNAME_MAX, PASSWORD_MIN, changePassword, cleanNickname, deleteAccount, loadAccount, logout, saveName, updateNickname, useAccount } from '../identity';
 import { Header } from '../ui/Header';
-import { AccountPitch, ForgotForm, LoginForm, RegisterForm } from './forms';
+import { AccountPitch, ForgotForm, LoginForm, NoMailNote, RegisterForm } from './forms';
 import './account.css';
 
 const message = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
@@ -101,18 +101,24 @@ function Guest() {
 
       {account.enabled ? (
         <section className="panel acct-card">
-          <div className="acct-tabs" role="tablist">
-            <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>
-              Log in
-            </button>
-            <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'on' : ''} onClick={() => setMode('register')}>
-              Create account
-            </button>
-          </div>
-          <AccountPitch />
-          {mode === 'login' && <LoginForm autoFocus={false} onForgot={() => setMode('forgot')} onRegister={() => setMode('register')} />}
-          {mode === 'register' && <RegisterForm autoFocus={false} initialNickname={account.name} onLogin={() => setMode('login')} />}
-          {mode === 'forgot' && <ForgotForm onBack={() => setMode('login')} />}
+          {account.mail ? (
+            <div className="acct-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>
+                Log in
+              </button>
+              <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'on' : ''} onClick={() => setMode('register')}>
+                Create account
+              </button>
+            </div>
+          ) : (
+            <h2>Log in</h2>
+          )}
+          {account.mail ? <AccountPitch /> : <NoMailNote />}
+          {(mode === 'login' || !account.mail) && (
+            <LoginForm autoFocus={false} mail={account.mail} onForgot={account.mail ? () => setMode('forgot') : undefined} onRegister={account.mail ? () => setMode('register') : undefined} />
+          )}
+          {account.mail && mode === 'register' && <RegisterForm autoFocus={false} initialNickname={account.name} onLogin={() => setMode('login')} />}
+          {account.mail && mode === 'forgot' && <ForgotForm onBack={() => setMode('login')} />}
         </section>
       ) : (
         account.loaded && (

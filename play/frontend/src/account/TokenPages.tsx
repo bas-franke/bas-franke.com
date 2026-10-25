@@ -1,45 +1,66 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { PASSWORD_MIN, activate, resetPassword, takeReturn } from '../identity';
+import { PASSWORD_MIN, activate, resetPassword, takeReturn, useAccount } from '../identity';
 import { Header } from '../ui/Header';
+import { ResendButton } from './forms';
 import './account.css';
 
 const message = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
 
-/** `/account/activate/:token`: the link from the welcome mail. Activates, logs in, and goes back to where they were. */
+/**
+ * `/account/activate/:token`: the link from the welcome mail. The token is only spent when the visitor presses the
+ * button, so mail scanners that open links (and run their scripts) can't use it up.
+ */
 export function ActivatePage() {
   const { token = '' } = useParams();
   const navigate = useNavigate();
-  const [error, setError] = useState('');
-  const started = useRef(false);
+  const [state, setState] = useState<{ busy?: boolean; failed?: boolean }>({});
+  const [email, setEmail] = useState('');
+  const { mail } = useAccount();
 
-  useEffect(() => {
-    // StrictMode runs effects twice; a token can only be used once.
-    if (started.current) return;
-    started.current = true;
-    activate(token)
-      .then(() => navigate(takeReturn(), { replace: true }))
-      .catch((err: unknown) => setError(message(err)));
-  }, [token, navigate]);
+  const go = async () => {
+    setState({ busy: true });
+    try {
+      const next = takeReturn();
+      const { reloading } = await activate(token, next);
+      if (!reloading) navigate(next, { replace: true });
+    } catch {
+      setState({ failed: true });
+    }
+  };
 
   return (
     <div className="page acct-page">
       <Header />
       <div className="panel notice-panel acct-card">
-        {error ? (
+        {state.failed ? (
           <>
             <h2>That link didn't work</h2>
-            <p>{error} Links expire after a while; log in to get a fresh one.</p>
+            <p>It may have been used already, or it expired. If your account is already active, just log in. Otherwise we can send a fresh link.</p>
             <div className="acct-actions acct-center">
               <Link className="btn primary" to="/account">
-                Go to my account
+                Log in
               </Link>
             </div>
+            {mail && (
+              <form className="acct-form acct-resend" onSubmit={(e) => e.preventDefault()}>
+                <label className="field">
+                  Email for a fresh link
+                  <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                </label>
+                <div className="acct-actions acct-center">{email.includes('@') && <ResendButton email={email.trim()} />}</div>
+              </form>
+            )}
           </>
         ) : (
           <>
-            <h2>Activating your account…</h2>
-            <p>One moment.</p>
+            <h2>Almost there</h2>
+            <p>Press the button to activate your account. You'll be logged in right away.</p>
+            <div className="acct-actions acct-center">
+              <button type="button" className="btn primary big" onClick={() => void go()} disabled={state.busy} data-testid="activate">
+                {state.busy ? 'Activating…' : 'Activate my account'}
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -59,8 +80,9 @@ export function ResetPage() {
     if (password.length < PASSWORD_MIN) return setState({ error: `At least ${PASSWORD_MIN} characters.` });
     setState({ busy: true });
     try {
-      await resetPassword(token, password);
-      navigate(takeReturn(), { replace: true });
+      const next = takeReturn();
+      const { reloading } = await resetPassword(token, password, next);
+      if (!reloading) navigate(next, { replace: true });
     } catch (err) {
       setState({ error: message(err) });
     }

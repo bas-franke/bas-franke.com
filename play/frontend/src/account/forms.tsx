@@ -81,7 +81,20 @@ export function ResendButton({ email }: { email: string }) {
   );
 }
 
-export function LoginForm({ onDone, onForgot, onRegister, autoFocus = true }: { onDone?: () => void; onForgot?: () => void; onRegister?: () => void; autoFocus?: boolean }) {
+export function LoginForm({
+  onDone,
+  onForgot,
+  onRegister,
+  mail = true,
+  autoFocus = true,
+}: {
+  onDone?: () => void;
+  onForgot?: () => void;
+  onRegister?: () => void;
+  /** The server can send mail (resend activation). */
+  mail?: boolean;
+  autoFocus?: boolean;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [unverified, setUnverified] = useState(false);
@@ -92,7 +105,8 @@ export function LoginForm({ onDone, onForgot, onRegister, autoFocus = true }: { 
     setUnverified(false);
     void run(async () => {
       try {
-        await login(email.trim(), password);
+        const { reloading } = await login(email.trim(), password);
+        if (reloading) return;
       } catch (err) {
         if (err instanceof AccountError && err.unverified) setUnverified(true);
         throw err;
@@ -117,7 +131,7 @@ export function LoginForm({ onDone, onForgot, onRegister, autoFocus = true }: { 
       {unverified && (
         <div className="acct-hint">
           <span>Click the link in the email we sent you first.</span>
-          <ResendButton email={email.trim()} />
+          {mail && <ResendButton email={email.trim()} />}
         </div>
       )}
       <div className="acct-actions">
@@ -296,6 +310,11 @@ export function ForgotForm({ onBack, autoFocus = true }: { onBack?: () => void; 
       </div>
     </form>
   );
+}
+
+/** Shown instead of sign-up when the server can't send mail (no activation or reset links possible). */
+export function NoMailNote() {
+  return <p className="acct-pitch">New accounts and password resets are paused for now. Existing accounts can log in; everyone else plays as a guest, with everything saved in this browser.</p>;
 }
 
 /** One line that explains what an account is for. Shared by the gate and the account page. */

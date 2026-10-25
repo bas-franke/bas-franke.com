@@ -389,3 +389,16 @@
 .acct-danger {
   border-color: rgba(255, 107, 139, 0.22);
 }
+.gate-alt.single {
+  grid-template-columns: 1fr;
+}
+.acct-resend {
+  text-align: left;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.acct-card a.btn,
+.acct-card a.btn:hover {
+  text-decoration: none;
+}
