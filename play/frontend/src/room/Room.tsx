@@ -104,7 +104,8 @@ export function RoomPage() {
           setRoom(msg.room);
           gameRef.current?.onRoom(msg.room);
           if (msg.room.state === 'playing') setLastMatch(null);
-          if (msg.room.state === 'waiting' && was === 'playing') {
+          // Only a match we played in gets the after-match card: a member who sat it out waiting got no game messages.
+          if (msg.room.state === 'waiting' && was === 'playing' && (keyMsgs.current.init || endMsg.current)) {
             setLastMatch(lastMatchFrom(endMsg.current, keyMsgs.current.init));
             endMsg.current = undefined;
           }
@@ -371,7 +372,7 @@ function WaitingRoom({
                         </span>
                         {myTeam === t ? (
                           <span className="tag team-you">your team</span>
-                        ) : (
+                        ) : amWaiting ? null : (
                           <button type="button" className="btn small team-join" data-testid={`join-${t === 0 ? 'red' : 'blue'}`} onClick={() => setTeam(t)}>
                             Join {TEAMS[t].name}
                           </button>
@@ -381,6 +382,18 @@ function WaitingRoom({
                     </div>
                   );
                 })}
+                {waitingCount > 0 && (
+                  // Waiters get a team when the next match starts.
+                  <div className="team-col waiting-col">
+                    <div className="team-col-head">
+                      <h3>Waiting for the next match</h3>
+                      <span className="slots">
+                        {waitingCount} {waitingCount === 1 ? 'player' : 'players'}
+                      </span>
+                    </div>
+                    <ul className="players">{room.players.filter((p) => p.waiting).map(playerRow)}</ul>
+                  </div>
+                )}
               </div>
             ) : (
               <ul className="players">
