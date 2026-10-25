@@ -19,10 +19,35 @@ import { ARMOR_PRICE, NADE_PRICE } from '@shared/zombies/weapons';
 import { type StationInfo, type World, SILL_Y, WALL_T, WINDOW_TOP } from '@shared/zombies/world';
 import type { CreateWorldView, LampLight, Models, Quality, WorldView } from './api';
 import { type Glow, buildDecor, mergeStatic } from './decor';
+import { buildMotes } from './motes';
+import { buildSkyline } from './skyline';
 import { DEFAULT_SIZE, type SetName, type TexSet, texSet as rawTexSet } from './textures';
+
+/** A street lamp outside: lights the plaza and throws shafts through the glass into the lobby. */
+export interface StreetLight {
+  /** Lamp head (light origin), world space. */
+  pos: THREE.Vector3;
+  /** Unit cone axis. */
+  dir: THREE.Vector3;
+  /** Linear colour; post.ts scales it by `level` and its own gain. */
+  color: THREE.Color;
+  /** cos of the outer / inner cone half-angles. */
+  cosOuter: number;
+  cosInner: number;
+  /** Cone reach in metres. */
+  range: number;
+  /** The surface light. */
+  light: THREE.SpotLight;
+  /** Brightness 0..1 after flicker, updated every frame. */
+  level: number;
+  /** post.ts renders a shadow map for this one and draws shadowed shafts in the fog (only a few lamps). */
+  shafts: boolean;
+}
 
 /** What post.ts reads beyond the WorldView contract. */
 export interface WorldViewExt extends WorldView {
+  /** Street lamps outside, the ones with `shafts` first. */
+  streetLights: StreetLight[];
   /** Point glows for the fog (lamps, sconces). */
   glows: Glow[];
   /** Floor and outside texture sets: their roughness masks the floor reflections. */
@@ -312,34 +337,6 @@ function stationText(st: StationInfo): [string, string, string] {
     case 'armor':
       return ['BODY ARMOR', `${ARMOR_PRICE}`, '#d4c6ff'];
   }
-}
-
-/** Painted city blocks for the backdrop: rows of windows, some lit by the low sun. */
-function facadeTexture(seed: number, warm: boolean): THREE.CanvasTexture {
-  const r = seeded(seed);
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 512;
-  const g = c.getContext('2d')!;
-  const base = warm ? [196, 168, 132] : [120, 132, 140];
-  g.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`;
-  g.fillRect(0, 0, 256, 512);
-  const cols = 6 + Math.floor(r() * 4);
-  const rows = 22 + Math.floor(r() * 10);
-  const cw = 256 / cols;
-  const rh = 512 / rows;
-  for (let y = 0; y < rows; y++)
-    for (let x = 0; x < cols; x++) {
-      const k = r();
-      const glint = k > 0.93;
-      g.fillStyle = glint ? 'rgb(255,236,190)' : k > 0.5 ? 'rgb(58,66,78)' : 'rgb(82,92,104)';
-      g.fillRect(x * cw + cw * 0.18, y * rh + rh * 0.2, cw * 0.64, rh * 0.6);
-    }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
-  return tex;
 }
 
 // ---- the view -------------------------------------------------------------------------------------------------------
@@ -740,34 +737,36 @@ void main() {
   sky.onBeforeRender = (_r, _s, cam) => sky.position.copy(cam.position);
   scene.add(sky);
 
-  // ---- outside: city blocks across the street, street trees ----------------------------------------------------
+  // ---- outside: the city (skyline.ts), street lamps, street trees ----------------------------------------------
   const outside = new THREE.Group();
   group.add(outside);
-  {
-    const cityMats = [0, 1, 2, 3].map((k) => {
-      const t = keep(facadeTexture(101 + k * 17, k % 2 === 0));
-      return keep(new THREE.MeshStandardMaterial({ map: t, roughness: 0.55, metalness: 0.2, envMapIntensity: 0.6 }));
-    });
-    const cr = seeded(4242);
-    // Two rows of towers: one beyond the facade (in the sun's glare) and some to the sides.
-    const blocks: { x: number; z: number; w: number; d: number; h: number }[] = [];
-    for (let x = -70; x < 70; x += 14 + cr() * 8) blocks.push({ x, z: facadeZ - 38 - cr() * 20, w: 10 + cr() * 8, d: 10 + cr() * 8, h: 25 + cr() * 60 });
-    for (let z = facadeZ - 20; z < ext.maxZ + 40; z += 18 + cr() * 10) {
-      blocks.push({ x: ext.minX - 34 - cr() * 15, z, w: 12, d: 14, h: 18 + cr() * 40 });
-      blocks.push({ x: ext.maxX + 34 + cr() * 15, z, w: 12, d: 14, h: 18 + cr() * 40 });
-    }
-    for (const b of blocks) {
-      const g = keep(box(b.w, b.h, b.d));
-      const uv = g.getAttribute('uv') as THREE.BufferAttribute;
-      for (let j = 0; j < uv.count; j++) uv.setXY(j, uv.getX(j) * (b.w / 16), uv.getY(j) * (b.h / 30));
-      const m = new THREE.Mesh(g, cityMats[Math.floor(cr() * cityMats.length)]);
-      m.position.set(b.x, b.h / 2 - 0.02, b.z);
-      m.castShadow = false;
-      m.receiveShadow = true;
-      m.userData.noMoonShadow = true;
-      outside.add(m);
-    }
+  const skyline = buildSkyline({ facadeZ, ext, quality });
+  outside.add(skyline.group);
+  const streetLights: StreetLight[] = [];
+  // Sodium street lights across the plaza, aimed back at the glass so their light falls into the lobby.
+  for (const [x, shafts] of [
+    [-7.5, true],
+    [1.5, true],
+    [9, true],
+    [-17, false],
+    [17, false],
+  ] as const) {
+    const pos = new THREE.Vector3(x, 6.8, facadeZ - 7);
+    const aim = new THREE.Vector3(x * 0.6, 0, facadeZ + 9);
+    const dir = aim.clone().sub(pos).normalize();
+    const outer = 0.95;
+    const inner = 0.45;
+    const range = 40;
+    const color = new THREE.Color(1.0, 0.62, 0.3);
+    const light = new THREE.SpotLight(color, 900, range, outer, 1 - inner / outer, 2);
+    light.position.copy(pos);
+    light.target.position.copy(aim);
+    light.layers.enableAll();
+    scene.add(light, light.target);
+    streetLights.push({ pos, dir, color, cosOuter: Math.cos(outer), cosInner: Math.cos(inner), range, light, level: 1, shafts });
   }
+  const motes = buildMotes({ interior: world.interior, ceiling: h, streetLights, quality });
+  group.add(motes.group);
   // Street trees in front of the facade and along the sides: canopies of leaf cards that throw dappled shadows.
   const treeSpots: { x: number; z: number; s: number; yaw: number }[] = [];
   for (let x = ext.minX - 4; x <= ext.maxX + 4; x += 6.5 + rnd() * 2) treeSpots.push({ x: x + (rnd() - 0.5), z: facadeZ - 6 - rnd() * 3, s: 0.9 + rnd() * 0.35, yaw: rnd() * 6.28 });
@@ -1007,6 +1006,7 @@ void main() {
     lamps: allLamps,
     moonDir,
     moon,
+    streetLights,
     glows: decor.glows,
     floorSet,
     floorMeters: floorSet.meters,
@@ -1044,15 +1044,22 @@ void main() {
         L.bulb.emissiveIntensity = (L.base > 30 ? 9 : 2) * level;
       }
       decor.update(dt, time);
+      skyline.update(dt, time);
+      motes.update(dt, time);
     },
     setQuality(q) {
       applyQuality(q);
       decor.setQuality(q);
+      skyline.setQuality(q);
+      motes.setQuality(q);
     },
     dispose() {
       disposed = true;
       decor.dispose();
+      skyline.dispose();
+      motes.dispose();
       scene.remove(group, moon, moon.target, hemi, sky);
+      for (const S of streetLights) scene.remove(S.light, S.light.target);
       moon.shadow.map?.dispose();
       for (const L of lamps) L.light.shadow.map?.dispose();
       for (const d of disposables) d.dispose();
