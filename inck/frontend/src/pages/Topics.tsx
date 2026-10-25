@@ -31,8 +31,9 @@ export default function Topics({ site }: { site: Site | null }) {
   }, [q]);
 
   const live = (topics ?? []).filter((t) => t.stories > 0);
-  const upcoming = (topics ?? []).filter((t) => t.stories === 0);
   const hot = (topics ?? []).filter((t) => t.heat > 0).sort((a, b) => b.heat - a.heat);
+  // Hot topics without stories already show under "trending now".
+  const upcoming = (topics ?? []).filter((t) => t.stories === 0 && t.heat === 0);
 
   return (
     <main className="page">
@@ -147,10 +148,10 @@ export default function Topics({ site }: { site: Site | null }) {
           <p className="muted small">Topics that are planned but have no stories yet.</p>
           <div className="chip-row">
             {upcoming.map((t) => (
-              <span key={t.id} className="chip">
+              <Link key={t.id} to={`/t/${t.slug}`} className="chip">
                 <CategoryIcon category={t.category} />
                 {t.name}
-              </span>
+              </Link>
             ))}
           </div>
         </section>

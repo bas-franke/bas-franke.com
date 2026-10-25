@@ -149,12 +149,21 @@ export default function Feed({ site }: { site: Site | null }) {
     return () => clearInterval(clock);
   }, []);
 
+  // Where a keyboard jump is heading: a second press during the smooth scroll moves on from there, not from the story
+  // that is still marked active.
+  const jumpTarget = useRef<number | null>(null);
+  const jumpTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(jumpTimer.current), []);
+
   const go = useCallback(
     (delta: number) => {
       const root = scroller.current;
       if (!root) return;
       const cards = root.querySelectorAll<HTMLElement>('.story, .feed-end');
-      const next = Math.min(cards.length - 1, Math.max(0, active + delta));
+      const next = Math.min(cards.length - 1, Math.max(0, (jumpTarget.current ?? active) + delta));
+      jumpTarget.current = next;
+      clearTimeout(jumpTimer.current);
+      jumpTimer.current = setTimeout(() => (jumpTarget.current = null), 900);
       cards[next]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     },
     [active],

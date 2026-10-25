@@ -1083,6 +1083,11 @@ body.in-feed {
   gap: 6px;
 }
 
+a.chip:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
 .story-list {
   display: flex;
   flex-direction: column;
@@ -2126,6 +2131,23 @@ fieldset.panel {
 .story-meta details[open].sources {
   flex-basis: 100%;
   order: 10;
+}
+
+/* "sources" and "share" are small type; give them a finger-sized hit area without moving anything. */
+@media (pointer: coarse) {
+  .story-meta .link-btn,
+  .story-meta .sources summary {
+    padding: 12px 4px;
+    margin: -12px -4px;
+  }
+}
+
+/* Phones and tablets: the trending strip sits flush under the nav, so the nav must be solid or text scrolling behind
+   it shows through in the sliver between the two. The strip's own fade then ends the header. */
+@media (max-width: 1099px) {
+  .site-feed:has(.feed-has-strip) .nav {
+    background: var(--paper);
+  }
 }
 
 /* The strip scrolls sideways; fade the edge so it reads as "more to the right". */
