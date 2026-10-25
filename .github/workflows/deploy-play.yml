@@ -33,6 +33,12 @@ jobs:
             ${{ env.PROJECT }}/frontend/package-lock.json
             ${{ env.PROJECT }}/backend/package-lock.json
 
+      # Warns (never fails) when a game's graphics changed without new screenshots; see play/SCREENSHOTS.md.
+      - name: Check screenshots are fresh
+        working-directory: ${{ env.PROJECT }}
+        continue-on-error: true
+        run: node tools/screenshots/check.mjs --github || true
+
       - name: Build frontend
         working-directory: ${{ env.PROJECT }}/frontend
         run: npm ci && npm run build

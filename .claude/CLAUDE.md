@@ -36,3 +36,6 @@ Per-project setup lives in each project's own `README.md`.
 4. A change to one project must not require redeploying another.
 5. **inck: bump `PROMPT_VERSION`** in `inck/backend/src/ai.ts` whenever you change the story-writing prompt
    (writer instructions, `STORY_SCHEMA`, text cleanup in `text.ts`); the scheduler then rewrites older stories.
+6. **play: regenerate screenshots after graphical changes**: run `npm run screenshots -- --stale` in `play/` and commit
+   the images, manifests and `screenshots.lock.json` with the change; `npm run screenshots:check` tells you which
+   games are stale (see [play/SCREENSHOTS.md](../play/SCREENSHOTS.md)).

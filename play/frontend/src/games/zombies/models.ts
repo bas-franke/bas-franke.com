@@ -254,7 +254,15 @@ function fallbackArms(): THREE.Group {
 
 // ---- factory ---------------------------------------------------------------------------------------------------------
 
-export function createModels(): Models {
+/** `onFile` hears each GLB settle (loaded or failed), for the loading screen's progress bar. */
+export function createModels(onFile?: (settled: number, total: number) => void): Models {
+  const total = 5 + PROP_PACKS.length;
+  let settled = 0;
+  const tracked = (name: string, quiet = false) =>
+    load(name, quiet).finally(() => {
+      settled++;
+      onFile?.(settled, total);
+    });
   let zombieGltf: GLTF | null = null;
   let survivorGltf: GLTF | null = null;
   let weapons: THREE.Object3D | null = null;
@@ -262,11 +270,11 @@ export function createModels(): Models {
   let packs: THREE.Object3D[] = [];
   let arms: THREE.Object3D | null = null;
 
-  const packsReady = Promise.all(PROP_PACKS.map((n) => load(n, true))).then((list) => {
+  const packsReady = Promise.all(PROP_PACKS.map((n) => tracked(n, true))).then((list) => {
     packs = list.flatMap((g) => (g ? [g.scene] : []));
     for (const pk of packs) prepare(pk, false);
   });
-  const ready = Promise.all([load('zombie'), load('survivor'), load('weapons'), load('props'), load('arms'), packsReady]).then(([z, s, w, p, a]) => {
+  const ready = Promise.all([tracked('zombie'), tracked('survivor'), tracked('weapons'), tracked('props'), tracked('arms'), packsReady]).then(([z, s, w, p, a]) => {
     zombieGltf = z;
     survivorGltf = s;
     weapons = w?.scene ?? null;

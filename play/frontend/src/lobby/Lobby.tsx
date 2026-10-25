@@ -5,7 +5,7 @@ import { type QuickStart, listRooms, quickBots, quickPlay } from '../api';
 import { sfx } from '../engine/audio';
 import { SCREENSHOTS } from '../games/catalog';
 import { GameCover } from '../ui/GameCover';
-import { GameDetails } from '../ui/GameDetails';
+import { GAME_MENUS, GameDetails } from '../ui/GameDetails';
 import { Header } from '../ui/Header';
 import { CreateRoom } from './CreateRoom';
 import { RoomList } from './RoomList';
@@ -163,7 +163,7 @@ export function Lobby() {
                 key={id}
                 meta={GAMES[id]}
                 busy={quick === id}
-                onDetails={() => setDialog({ kind: 'details', game: id })}
+                onDetails={() => (GAME_MENUS[id] ? navigate(GAME_MENUS[id]) : setDialog({ kind: 'details', game: id }))}
                 onHost={() => setDialog({ kind: 'create', game: id })}
                 onPlay={() => playNow(id)}
               />

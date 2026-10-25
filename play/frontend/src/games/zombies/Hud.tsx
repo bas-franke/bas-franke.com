@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { colorHex } from '@shared/protocol';
+import { type ReactNode, useEffect, useState } from 'react';
+import { GAMES, colorHex } from '@shared/protocol';
 import { ZB } from '@shared/zombies/constants';
 import type { ZScore } from '@shared/zombies/protocol';
 import { WEAPONS } from '@shared/zombies/weapons';
@@ -7,6 +7,7 @@ import { VolumeControl } from '../../ui/VolumeControl';
 import { type ClientContext, useStore } from '../types';
 import type { Quality } from './api';
 import type { ZombiesClient } from './client';
+import { LoadingScreen } from './LoadingScreen';
 import './zombies.css';
 
 const WHY: Record<string, string> = { hit: '', kill: '', head: 'headshot', knife: 'knife', fix: 'barrier', revive: 'revive' };
@@ -27,7 +28,8 @@ export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: Client
         e.preventDefault();
         setBoard(true);
       }
-      if (e.code === 'Escape') setMenu((m) => !m);
+      // No menu over the loading screen: there is nothing to pause yet.
+      if (e.code === 'Escape' && client.hud.get().ready) setMenu((m) => !m);
     };
     const up = (e: KeyboardEvent) => e.code === 'Tab' && setBoard(false);
     window.addEventListener('keydown', down);
@@ -39,7 +41,7 @@ export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: Client
       window.removeEventListener('keyup', up);
       window.clearInterval(t);
     };
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     client.setPaused(menu);
@@ -58,7 +60,7 @@ export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: Client
 
   return (
     <div className="hud ll">
-      {!s.ready && <div className="ll-loading">Lighting the room…</div>}
+      <LoadingScreen s={s} />
 
       {s.scope && !s.ended && (
         <div className="ll-scope">
@@ -203,10 +205,143 @@ export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: Client
       )}
 
       {menu && !s.ended && (
-        <div className="overlay-center">
-          <div className="scoreboard ll-board">
-            <h2>Menu</h2>
-            <p className="sub">The dead do not wait. Room code {room.code}.</p>
+        <PauseMenu
+          client={client}
+          ctx={ctx}
+          isHost={isHost}
+          code={room.code}
+          onResume={() => setMenu(false)}
+          scores={<Scores scores={s.scores} you={ctx.you} nameOf={nameOf} colorOf={colorOf} />}
+        />
+      )}
+    </div>
+  );
+}
+
+type Section = 'resume' | 'settings' | 'controls' | 'scores' | 'leave' | 'end';
+
+/**
+ * The Esc menu: big items on the left (arrows or hover to pick, Enter or click to act), the picked section on the
+ * right, the match blurred behind. Resume, leave and end act; the others only show their panel.
+ */
+function PauseMenu({
+  client,
+  ctx,
+  isHost,
+  code,
+  onResume,
+  scores,
+}: {
+  client: ZombiesClient;
+  ctx: ClientContext;
+  isHost: boolean;
+  code: string;
+  onResume: () => void;
+  scores: ReactNode;
+}) {
+  const s = useStore(client.hud);
+  const items: { id: Section; label: string }[] = [
+    { id: 'resume', label: 'Resume' },
+    { id: 'settings', label: 'Settings' },
+    { id: 'controls', label: 'Controls' },
+    { id: 'scores', label: 'Scoreboard' },
+    { id: 'leave', label: 'Back to main page' },
+    ...(isHost ? [{ id: 'end' as const, label: 'End match for everyone' }] : []),
+  ];
+  const [sel, setSel] = useState<Section>('resume');
+  // Ending the match for everyone takes a second press.
+  const [arm, setArm] = useState(false);
+
+  const act = (id: Section) => {
+    setSel(id);
+    if (id === 'resume') onResume();
+    else if (id === 'leave') ctx.leave();
+    else if (id === 'end') {
+      if (arm) ctx.socket.send({ t: 'stop' });
+      else setArm(true);
+    }
+  };
+
+  useEffect(() => {
+    if (sel !== 'end') setArm(false);
+  }, [sel]);
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      // Sliders keep their own arrow keys.
+      if (e.target instanceof HTMLInputElement) return;
+      const i = items.findIndex((it) => it.id === sel);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const n = items.length;
+        setSel(items[(i + (e.key === 'ArrowDown' ? 1 : n - 1)) % n].id);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        act(sel);
+      }
+    };
+    window.addEventListener('keydown', down);
+    return () => window.removeEventListener('keydown', down);
+  });
+
+  const panel = sel === 'resume' || sel === 'leave' || sel === 'end' ? 'summary' : sel;
+  return (
+    <div className="ll-pause" role="dialog" aria-label="Paused">
+      <div className="ll-pause-side">
+        <div className="ll-pause-brand">
+          <span>Paused</span>
+          <h2>Last Light</h2>
+          <p>
+            {s.mapName}
+            {s.wave > 0 ? ` · wave ${s.wave}` : ''}
+          </p>
+        </div>
+        <nav className="ll-pause-items">
+          {items.map((it) => (
+            <button
+              key={it.id}
+              type="button"
+              className={`${it.id === sel ? 'sel' : ''} ${it.id === 'end' ? 'danger' : ''}`}
+              onMouseEnter={() => setSel(it.id)}
+              onFocus={() => setSel(it.id)}
+              onClick={() => act(it.id)}
+            >
+              {it.id === 'end' && arm ? 'Press again to end' : it.label}
+            </button>
+          ))}
+        </nav>
+        <div className="ll-pause-code">
+          Room code <b>{code}</b>
+        </div>
+      </div>
+
+      <div className="ll-pause-panel">
+        {panel === 'summary' && (
+          <>
+            <h3>The dead do not wait</h3>
+            <p className="ll-pause-note">
+              {sel === 'leave'
+                ? 'Leave the hotel and go back to the main page. The squad holds on without you.'
+                : sel === 'end'
+                  ? 'Ends the match for the whole squad and takes everyone back to the room.'
+                  : 'The match keeps running while this menu is open. Esc to get back in.'}
+            </p>
+            <div className="ll-pause-stats">
+              <div>
+                <b>{s.wave}</b>wave
+              </div>
+              <div>
+                <b>{s.points}</b>points
+              </div>
+              <div>
+                <b>{s.scores.find((r) => r.id === ctx.you)?.kills ?? 0}</b>kills
+              </div>
+            </div>
+          </>
+        )}
+        {panel === 'settings' && (
+          <>
+            <h3>Settings</h3>
             <div className="ll-settings">
               <label>
                 Graphics
@@ -219,27 +354,39 @@ export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: Client
                 </span>
               </label>
               <label>
-                Mouse sensitivity <b>{client.sens.toFixed(2)}</b>
+                <span>
+                  Mouse sensitivity <b>{client.sens.toFixed(2)}</b>
+                </span>
                 <input type="range" min={0.2} max={3} step={0.05} defaultValue={client.sens} onChange={(e) => client.setSensitivity(+e.target.value)} />
               </label>
               <VolumeControl />
             </div>
-            <div className="actions">
-              {isHost && (
-                <button className="btn danger" onClick={() => ctx.socket.send({ t: 'stop' })}>
-                  End match for everyone
-                </button>
-              )}
-              <button className="btn ghost" onClick={ctx.leave}>
-                Back to main page
-              </button>
-              <button className="btn primary" onClick={() => setMenu(false)}>
-                Resume
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+        {panel === 'controls' && (
+          <>
+            <h3>Controls</h3>
+            <dl className="ll-pause-keys">
+              {GAMES.zombies.controls.map((c) => (
+                <div key={c.keys}>
+                  <dt>{c.keys}</dt>
+                  <dd>{c.does}</dd>
+                </div>
+              ))}
+              <div>
+                <dt>Esc</dt>
+                <dd>This menu</dd>
+              </div>
+            </dl>
+          </>
+        )}
+        {panel === 'scores' && (
+          <>
+            <h3>Scoreboard</h3>
+            <div className="ll-pause-scores">{scores}</div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

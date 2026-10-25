@@ -31,6 +31,7 @@ import { type CharacterInstance, type Flashlight, type Fx, type Models, type Pip
 import { configureZAudio, createZAudio } from './audio';
 import { type EffectsImpl, createFx } from './fx';
 import { createModels } from './models';
+import { texturesSettled } from './textures';
 import { createPipeline } from './post';
 import { Viewmodel } from './viewmodel';
 import { createWorldView } from './world';
@@ -43,8 +44,13 @@ export interface Popup {
 }
 
 export interface ZHudState {
+  /** Fully loaded (world, models, sharp textures, shaders, first snapshot) and the first frame is on screen: playable. */
   ready: boolean;
+  /** What the loading screen shows; `done` 0..1 only ever grows. null once ready. */
+  loading: { stage: string; done: number } | null;
   mapName: string;
+  /** The map's wings and whether this match opened them (the squad size at the start decides). */
+  wings: { name: string; open: boolean; minPlayers: number }[];
   wave: number;
   phase: 'break' | 'wave';
   left: number;
@@ -183,13 +189,47 @@ interface NadeView {
 
 type Sample = { a: ZSnapshot; b: ZSnapshot; alpha: number } | null;
 
+/** Loading steps in the order the screen names them, with their share of the bar. */
+const LOAD_STAGES = [
+  { id: 'room', label: 'Waiting for the room', weight: 0.08 },
+  { id: 'gear', label: 'Unpacking gear', weight: 0.4 },
+  { id: 'build', label: 'Building the hotel', weight: 0.12 },
+  { id: 'paint', label: 'Painting the walls', weight: 0.15 },
+  { id: 'shaders', label: 'Warming up shaders', weight: 0.15 },
+  { id: 'snap', label: 'Finding your squad', weight: 0.1 },
+] as const;
+type LoadStage = (typeof LOAD_STAGES)[number]['id'];
+
+/** Every wait in the loading sequence gives up after this long: the game has fallbacks for anything missing. */
+const LOAD_TIMEOUT = 20_000;
+const within = (p: Promise<unknown>, ms = LOAD_TIMEOUT) => Promise.race([p.catch(() => undefined), new Promise((r) => setTimeout(r, ms))]);
+
+/** A camera pose for the key-art capture (play/tools/screenshots): eye position, yaw/pitch in radians, fov in degrees. */
+export interface CinematicShot {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  fov?: number;
+}
+
 /** Fixed-size pool of flashlight cones for other survivors (no shadows: too many). */
 const REMOTE_LIGHTS = 9;
 
 export class ZombiesClient implements GameClient {
+  /**
+   * Set to a pose to film the hotel from there: no viewmodel, own flashlight, HUD, bob or shake, and local input
+   * leaves the camera alone. Back to null resumes normal play. Used by the screenshot tool via window.__zombies.
+   */
+  cinematic: CinematicShot | null = null;
+  private wasCinematic = false;
+
   readonly hud = createStore<ZHudState>({
     ready: false,
+    loading: { stage: LOAD_STAGES[0].label, done: 0 },
     mapName: '',
+    wings: [],
     wave: 0,
     phase: 'break',
     left: 0,
@@ -310,6 +350,13 @@ export class ZombiesClient implements GameClient {
   private popKey = 0;
   private tension = 0;
   private sensitivity = loadSensitivity();
+  private readonly loadDone: Record<LoadStage, number> = { room: 0, gear: 0, build: 0, paint: 0, shaders: 0, snap: 0 };
+  private builtSignal!: () => void;
+  private readonly builtP = new Promise<void>((r) => (this.builtSignal = r));
+  private snapSignal!: () => void;
+  private readonly snapP = new Promise<void>((r) => (this.snapSignal = r));
+  /** Characters spawned only to compile their shaders during loading. */
+  private readonly warmed: CharacterInstance[] = [];
 
   constructor(private readonly ctx: ClientContext) {}
 
@@ -327,16 +374,81 @@ export class ZombiesClient implements GameClient {
     this.input.sensitivity = 0.0022 * this.sensitivity;
     this.audio = createZAudio();
     this.audio.unlock();
-    this.models = createModels();
+    this.models = createModels((n, total) => this.progress('gear', n / total));
+    // Nothing moves until the loading screen is gone.
+    this.input.enabled = false;
     engine.scene.add(engine.camera);
     this.buildLocal();
     if (this.pendingInit) this.applyInit(this.pendingInit);
     engine.start((dt, now) => this.frame(dt, now));
     if (import.meta.env.DEV) (window as unknown as { __zombies: ZombiesClient }).__zombies = this;
+    void this.boot();
+  }
+
+  /** Marks loading step `stage` `v` (0..1) done and updates the screen's label (first unfinished step) and bar. */
+  private progress(stage: LoadStage, v: number) {
+    this.loadDone[stage] = Math.max(this.loadDone[stage], clamp(v, 0, 1));
+    if (this.hud.get().ready) return;
+    let done = 0;
+    let label: string | null = null;
+    for (const st of LOAD_STAGES) {
+      done += st.weight * this.loadDone[st.id];
+      if (label === null && this.loadDone[st.id] < 1) label = st.label;
+    }
+    this.hud.set({ loading: { stage: label ?? 'Ready', done: Math.min(0.99, done) } });
+  }
+
+  /**
+   * The loading sequence. GLBs download while the room state arrives; then the textures sharpen, every shader the
+   * match needs compiles (zombie and survivor included: they only show up later), and `ready` waits for a real frame
+   * so the loading screen lifts onto a finished picture. Every wait times out rather than hang.
+   */
+  private async boot() {
+    const gear = within(this.models!.ready).then(() => this.progress('gear', 1));
+    await within(this.builtP, 60_000);
+    await gear;
+    if (this.disposed) return;
+    this.progress('paint', 0.1);
+    await within(texturesSettled());
+    this.progress('paint', 1);
+    if (this.disposed || !this.built) return this.finishLoading();
+    await this.warmShaders();
+    this.progress('shaders', 1);
+    await within(this.snapP, 8000);
+    this.progress('snap', 1);
+    // Two animation frames: the engine's loop has drawn the finished scene at least once.
+    await within(new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))), 1500);
+    this.finishLoading();
+  }
+
+  private async warmShaders() {
+    const engine = this.engine!;
+    try {
+      // One of each character, far below the camera, so their materials compile now rather than on first sight.
+      for (const inst of [this.models!.zombie(0), this.models!.survivor(0xffffff)]) {
+        inst.root.position.set(engine.camera.position.x, engine.camera.position.y - 50, engine.camera.position.z);
+        engine.scene.add(inst.root);
+        this.warmed.push(inst);
+      }
+    } catch {
+      /* they compile on first sight instead */
+    }
+    this.progress('shaders', 0.2);
+    // compileAsync lets the driver build programs in parallel (KHR_parallel_shader_compile) without freezing the page.
+    await within(engine.renderer.compileAsync(engine.scene, engine.camera));
+    for (const inst of this.warmed.splice(0)) inst.dispose();
+  }
+
+  private finishLoading() {
+    if (this.disposed || this.hud.get().ready) return;
+    if (this.input) this.input.enabled = !this.paused;
+    this.hud.set({ ready: true, loading: null });
   }
 
   unmount() {
     this.disposed = true;
+    document.body.classList.remove('ll-cinematic');
+    for (const inst of this.warmed.splice(0)) inst.dispose();
     this.input?.dispose();
     this.audio?.dispose();
     this.fx?.dispose();
@@ -352,7 +464,7 @@ export class ZombiesClient implements GameClient {
   setPaused(paused: boolean) {
     this.paused = paused;
     if (this.input) {
-      this.input.enabled = !paused;
+      this.input.enabled = !paused && this.hud.get().ready;
       if (paused) this.input.exitLock();
       this.input.clearOnce();
     }
@@ -390,9 +502,15 @@ export class ZombiesClient implements GameClient {
     const m = raw as ZombiesServerMsg;
     switch (m.k) {
       case 'init':
+        this.progress('room', 1);
         if (!this.engine) this.pendingInit = m;
         else this.applyInit(m);
-        this.hud.set({ scores: m.scores, wave: m.wave, mapName: m.map.name });
+        this.hud.set({
+          scores: m.scores,
+          wave: m.wave,
+          mapName: m.map.name,
+          wings: (zmapById(m.map.id)?.zones ?? []).map((z) => ({ name: z.name, open: m.zones.includes(z.id), minPlayers: z.minPlayers })),
+        });
         return;
       case 'snap':
         this.onSnapshot(m.s);
@@ -445,7 +563,8 @@ export class ZombiesClient implements GameClient {
     engine.renderHook = () => this.pipe?.render(this.frameParams());
     this.engine?.setMaxPixelRatio(q === 'high' ? 1.5 : q === 'medium' ? 1.25 : 1);
     this.built = true;
-    this.hud.set({ ready: true });
+    this.progress('build', 1);
+    this.builtSignal();
   }
 
   /** Flashlight and viewmodel: they live on the camera. */
@@ -494,6 +613,7 @@ export class ZombiesClient implements GameClient {
     this.timeline.push(s, s.t / 1000);
     this.timeline.trim(1);
     this.latest = s;
+    this.snapSignal();
     if (s.bd) this.setBoards(s.bd, false);
     const own = s.pl.find((p) => p.id === this.ctx.you);
     if (own && s.me) this.reconcile(own, s.me);
@@ -753,10 +873,16 @@ export class ZombiesClient implements GameClient {
     // The first frame after start can report a negative step (rAF time before the engine's clock).
     const dt = clamp(rawDt, 0, 0.1);
     this.hud.set({ dragLook: input.dragLook });
+    const cine = !!this.cinematic;
+    if (cine !== this.wasCinematic) {
+      this.wasCinematic = cine;
+      document.body.classList.toggle('ll-cinematic', cine);
+      if (cine) input.exitLock();
+    }
     // Look.
     this.lookX = 0;
     this.lookY = 0;
-    if (!this.paused) {
+    if (!this.paused && !cine) {
       const look = input.look();
       const adsScale = this.adsK > 0.5 ? WEAPONS[this.slots[this.cur] ?? START_WEAPON].zoom : 1;
       this.lookX = -look.dx * adsScale;
@@ -817,7 +943,7 @@ export class ZombiesClient implements GameClient {
     if (this.flashlight) {
       const lp = this.flashlight.getWorldPosition(new THREE.Vector3());
       this.flashlight.target.getWorldPosition(dir).sub(lp).normalize();
-      flashlights.push({ pos: lp, dir: dir.clone(), on: this.flashOn && this.me.life !== 2 ? 1 : 0 });
+      flashlights.push({ pos: lp, dir: dir.clone(), on: this.flashOn && this.me.life !== 2 && !this.cinematic ? 1 : 0 });
     }
     for (const r of this.remotes.values()) {
       if (r.life === 2) continue;
@@ -837,7 +963,8 @@ export class ZombiesClient implements GameClient {
   }
 
   private canAct() {
-    return !this.paused && this.me.life !== 2 && !this.hud.get().ended;
+    const h = this.hud.get();
+    return !this.paused && !this.cinematic && h.ready && this.me.life !== 2 && !h.ended;
   }
 
   /** Reload, switch, knife, grenade, flashlight. */
@@ -1453,6 +1580,19 @@ export class ZombiesClient implements GameClient {
     const cam = this.engine!.camera;
     const me = this.me;
     this.correction.multiplyScalar(Math.exp(-dt * 12));
+    const shot = this.cinematic;
+    if (shot) {
+      // Key-art camera: exactly the pose asked for, none of the player's feel on top.
+      cam.position.set(shot.x, shot.y, shot.z);
+      cam.rotation.set(shot.pitch, shot.yaw, 0);
+      const fov = shot.fov ?? 72;
+      if (cam.fov !== fov) {
+        cam.fov = fov;
+        cam.updateProjectionMatrix();
+      }
+      if (this.flashlight) this.flashlight.intensity = 0;
+      return;
+    }
     if (me.life === 2) {
       // Spectate: hover over the first survivor still standing.
       const r = [...this.remotes.values()].find((x) => x.life === 0);
@@ -1521,7 +1661,7 @@ export class ZombiesClient implements GameClient {
       lookX: this.lookX,
       lookY: this.lookY,
       downed: this.me.life === 1,
-      visible: this.me.life !== 2 && !scoped,
+      visible: this.me.life !== 2 && !scoped && !this.cinematic,
     });
   }
 

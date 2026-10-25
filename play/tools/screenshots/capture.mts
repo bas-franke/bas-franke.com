@@ -3,12 +3,16 @@
 // server you have open is left alone.
 //
 //   npm run screenshots                          everything
-//   npm run screenshots -- --only rockets        one game (rockets, ruckus, zombies, dustrunners)
+//   npm run screenshots -- --only rockets        one game (rockets, ruckus, zombies, dustrunners); zombies includes the art
+//   npm run screenshots -- --only zombies-art    only Last Light's key art (menu and loading screens)
+//   npm run screenshots -- --stale               only the games whose graphics changed since their last capture
 //   npm run screenshots -- --maps foundry,orbit  which Rockets maps (default below)
 //   npm run screenshots -- --browser msedge      chrome | msedge | chromium (default: first one that starts)
 //   npm run screenshots -- --headful --verbose   watch it happen / see server output
 //
-// Output: frontend/public/screenshots/<game>-<variant>.jpg and frontend/src/games/screenshots.json.
+// Output: frontend/public/screenshots/<game>-<variant>.jpg and frontend/src/games/screenshots.json; Last Light's key art in
+// frontend/public/art/lastlight/<id>.jpg and frontend/src/games/zombies/art.json; the fingerprint of every game shot in
+// frontend/src/games/screenshots.lock.json (inputs.mjs says which files count; `npm run screenshots:check` compares).
 // See ../../SCREENSHOTS.md for when to run this and how to add a game.
 
 import { type ChildProcess, spawn } from 'node:child_process';
@@ -20,10 +24,13 @@ import { GAME_IDS, GAMES, SOLO_GAME_IDS, SOLO_GAMES, type GameId, type SoloGameI
 import { MAP_LIST } from '../../backend/src/shared/rockets/maps.js';
 import { MINIGAME_IDS, MINIGAMES, type MinigameId } from '../../backend/src/shared/ruckus/world.js';
 import { ZMAP_LIST } from '../../backend/src/shared/zombies/maps.js';
+import { INPUTS, fingerprint, staleGames, writeLock } from './inputs.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const outDir = path.join(root, 'frontend/public/screenshots');
 const manifestPath = path.join(root, 'frontend/src/games/screenshots.json');
+const artDir = path.join(root, 'frontend/public/art/lastlight');
+const artManifestPath = path.join(root, 'frontend/src/games/zombies/art.json');
 const tsxCli = path.join(root, 'backend/node_modules/tsx/dist/cli.mjs');
 const viteCli = path.join(root, 'frontend/node_modules/vite/bin/vite.js');
 
@@ -54,7 +61,12 @@ const option = (name: string) => {
   return i >= 0 ? (argv[i + 1] ?? '') : undefined;
 };
 const flag = (name: string) => argv.includes(`--${name}`);
-const only = (option('only')?.split(',').filter(Boolean) ?? ALL_IDS) as AnyGame[];
+/** `--only zombies-art` (or zombies-art next to other games) shoots Last Light's key art without its lobby shots. */
+const ART = 'zombies-art';
+const onlyArg = option('only')?.split(',').filter(Boolean);
+let only = (onlyArg?.filter((g) => g !== ART) ?? ALL_IDS) as AnyGame[];
+let art = !!onlyArg?.includes(ART);
+const staleOnly = flag('stale');
 const maps = option('maps')?.split(',').filter(Boolean) ?? DEFAULT_MAPS;
 const browserPreference = option('browser');
 const headless = !flag('headful');
@@ -68,7 +80,7 @@ function fail(message: string): never {
 const log = (message: string) => console.log(`[screenshots] ${message}`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-for (const g of only) if (!ALL_IDS.includes(g)) fail(`Unknown game "${g}". Games: ${ALL_IDS.join(', ')}.`);
+for (const g of only) if (!ALL_IDS.includes(g)) fail(`Unknown game "${g}". Games: ${ALL_IDS.join(', ')}, ${ART}.`);
 for (const m of maps) if (!MAP_LIST.some((x) => x.id === m)) fail(`Unknown map "${m}". Maps: ${MAP_LIST.map((x) => x.id).join(', ')}.`);
 if (!existsSync(tsxCli) || !existsSync(viteCli)) fail('Dependencies are missing. Run `npm run install:all` in play/ first.');
 
@@ -114,11 +126,11 @@ async function waitFor(url: string, what: string, timeoutMs = 90_000) {
 const api = `http://127.0.0.1:${BACKEND_PORT}`;
 const site = `http://127.0.0.1:${FRONTEND_PORT}`;
 
-async function createRoom(game: GameId, map?: string): Promise<string> {
+async function createRoom(game: GameId, map?: string, bots = game === 'zombies' ? 3 : BOTS): Promise<string> {
   const res = await fetch(`${api}/api/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: `${GAMES[game].name} screenshots`, game, maxPlayers: GAMES[game].maxPlayers, bots: game === 'zombies' ? 3 : BOTS, botDifficulty: 'normal', map }),
+    body: JSON.stringify({ name: `${GAMES[game].name} screenshots`, game, maxPlayers: GAMES[game].maxPlayers, bots, botDifficulty: 'normal', map }),
   });
   if (!res.ok) fail(`Creating a ${game} room failed: HTTP ${res.status} ${await res.text()}`);
   const { room } = (await res.json()) as { room: { code: string } };
@@ -291,6 +303,115 @@ async function shootZombies(context: BrowserContext): Promise<Shot[]> {
   return shots;
 }
 
+// ---- Last Light key art --------------------------------------------------------------------------------------------
+
+type Vec = { x: number; y: number; z: number };
+/**
+ * Where an art shot's camera goes. Either a camera position and the point it looks at (`at: 'zombies'` aims at the
+ * crowd nearest the facade), or `bot`: a three-quarter close-up of the living SWAT bot nearest the facade, `back`
+ * metres in front of it and `side` metres to its right.
+ */
+type ArtCam = { from: Vec; at: Vec | 'zombies'; fov?: number } | { bot: { back: number; side: number; up: number }; fov?: number };
+
+/**
+ * The key art, in the order the menu shows it (the first is the default). Coordinates are the hotel's
+ * (backend/src/shared/zombies/maps.ts): atrium x -12..12, z -18..18, 12 m high, glass facade at z = -18 (north,
+ * where the zombies come in), lounge bar x 12.5..24.5 and restaurant x -24.5..-12.5 behind passages at z -3..3.
+ */
+const ART_SHOTS: { id: string; caption: string; cam: ArtCam }[] = [
+  { id: 'hotel-facade', caption: 'They come through the glass', cam: { from: { x: 0.8, y: 0.55, z: 11 }, at: { x: 0, y: 2.4, z: -18 }, fov: 62 } },
+  { id: 'swat-line', caption: 'Holding the line', cam: { bot: { back: 2.6, side: 1.3, up: 1.45 }, fov: 50 } },
+  { id: 'reception', caption: 'The reception desk', cam: { from: { x: -4.2, y: 1.55, z: 5 }, at: { x: -9.6, y: 1.0, z: -6 }, fov: 60 } },
+  { id: 'chandeliers', caption: 'Under the chandeliers', cam: { from: { x: 1.5, y: 1.1, z: 15 }, at: { x: 0, y: 8.5, z: -4 }, fov: 70 } },
+  { id: 'columns', caption: 'Marble and gunfire', cam: { from: { x: -1.8, y: 1.3, z: -5 }, at: { x: -6, y: 2.2, z: -12.5 }, fov: 58 } },
+  { id: 'mezzanine', caption: 'The view from the mezzanine', cam: { from: { x: -10.4, y: 6.4, z: 15.5 }, at: { x: 2, y: 1, z: -10 }, fov: 64 } },
+  { id: 'lounge-bar', caption: 'The lounge bar', cam: { from: { x: 13.4, y: 1.6, z: 7.5 }, at: { x: 19.5, y: 1.1, z: -8 }, fov: 64 } },
+  { id: 'restaurant', caption: 'The restaurant', cam: { from: { x: -13.4, y: 1.7, z: 8 }, at: { x: -20.5, y: 0.8, z: -4 }, fov: 64 } },
+];
+const ART_WIDTH = 1920;
+const ART_HEIGHT = 1080;
+const ART_QUALITY = 86;
+/** Players (us + bots) in the art match: 7+ opens the restaurant as well as the lounge (zonesFor in maps.ts). */
+const ART_BOTS = 8;
+
+interface ZDev {
+  cinematic?: { x: number; y: number; z: number; yaw: number; pitch: number; fov?: number } | null;
+  hud: { get(): { ready: boolean; phase: string; hp: number; life: number } };
+  zombies: Map<number, { pos: Vec }>;
+  remotes: Map<string, { pos: Vec; yaw: number; life: number }>;
+}
+
+/** Last Light's key art: HUD-free 1920×1080 frames of one bot match, from the camera positions in ART_SHOTS. */
+async function shootZombiesArt(browser: Browser): Promise<Shot[]> {
+  log(`Last Light · key art (${ART_SHOTS.length} shots at ${ART_WIDTH}×${ART_HEIGHT})`);
+  const context = await browser.newContext({ viewport: { width: ART_WIDTH, height: ART_HEIGHT }, deviceScaleFactor: 1 });
+  await context.addInitScript(() => localStorage.setItem('play.name', 'Player'));
+  const page = await startMatch(context, await createRoom('zombies', ZMAP_LIST[0].id, ART_BOTS));
+  const hasHook = await page.evaluate(() => 'cinematic' in (window as unknown as { __zombies: ZDev }).__zombies);
+  if (!hasHook) fail('window.__zombies has no `cinematic` camera (frontend/src/games/zombies/client.ts); the key art needs it.');
+  await page.addStyleTag({ content: '.hud, .menu-hint, .hint-bar { display: none !important; }' });
+  // Wait for the first wave to rise and reach the boards.
+  await page
+    .waitForFunction(() => {
+      const c = (window as unknown as { __zombies: ZDev }).__zombies;
+      return c.hud.get().phase === 'wave' && c.zombies.size >= 6;
+    }, null, { timeout: 60_000, polling: 500 })
+    .catch(() => log('  the first wave did not show up in a minute; shooting anyway'));
+  await sleep(7000);
+  mkdirSync(artDir, { recursive: true });
+  const shots: Shot[] = [];
+  for (const { id, caption, cam } of ART_SHOTS) {
+    const placed = await page.evaluate((cam) => {
+      const c = (window as unknown as { __zombies: ZDev }).__zombies;
+      let from: Vec;
+      let at: Vec;
+      if ('bot' in cam) {
+        const bots = [...c.remotes.values()].filter((r) => r.life === 0).sort((a, b) => a.pos.z - b.pos.z);
+        const b = bots[0];
+        if (!b) return null;
+        // yaw 0 looks down -Z: forward (-sin, -cos), right (cos, -sin).
+        const f = { x: -Math.sin(b.yaw), z: -Math.cos(b.yaw) };
+        const r = { x: Math.cos(b.yaw), z: -Math.sin(b.yaw) };
+        from = { x: b.pos.x + f.x * cam.bot.back + r.x * cam.bot.side, y: b.pos.y + cam.bot.up, z: b.pos.z + f.z * cam.bot.back + r.z * cam.bot.side };
+        at = { x: b.pos.x, y: b.pos.y + 1.25, z: b.pos.z };
+      } else {
+        from = cam.from;
+        if (cam.at === 'zombies') {
+          const near = [...c.zombies.values()].sort((a, b) => a.pos.z - b.pos.z).slice(0, 6);
+          if (!near.length) return null;
+          at = { x: near.reduce((s, z) => s + z.pos.x, 0) / near.length, y: 1.2, z: near.reduce((s, z) => s + z.pos.z, 0) / near.length };
+        } else at = cam.at;
+      }
+      const dx = at.x - from.x;
+      const dy = at.y - from.y;
+      const dz = at.z - from.z;
+      c.cinematic = { x: from.x, y: from.y, z: from.z, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)), fov: cam.fov };
+      const s = c.hud.get();
+      return { hp: s.hp, life: s.life };
+    }, cam);
+    if (!placed) {
+      log(`  ${id}: nothing to aim at, skipped`);
+      continue;
+    }
+    // Frames for the shadows, the post-processing history and the camera to settle.
+    await sleep(1200);
+    const file = `${id}.jpg`;
+    await page.screenshot({ path: path.join(artDir, file), type: 'jpeg', quality: ART_QUALITY });
+    shots.push({ file, caption });
+    log(`  ${caption}${placed.life !== 0 || placed.hp < 70 ? ` (we were ${placed.life === 0 ? 'hurt' : 'down'}: check the picture for the red hurt effect)` : ''}`);
+  }
+  await page.evaluate(() => ((window as unknown as { __zombies: ZDev }).__zombies.cinematic = null));
+  await context.close();
+  if (!shots.length) fail('No Last Light key art was captured.');
+  return shots;
+}
+
+/** Writes art.json and removes key art this run did not produce. */
+function writeArt(shots: Shot[]) {
+  for (const f of readdirSync(artDir)) if (/\.(jpe?g|png|webp)$/.test(f) && !shots.some((s) => s.file === f)) unlinkSync(path.join(artDir, f));
+  writeFileSync(artManifestPath, `${JSON.stringify(shots, null, 2)}\n`);
+}
+
 const shooters: Record<AnyGame, (context: BrowserContext) => Promise<Shot[]>> = {
   rockets: shootRockets,
   ruckus: shootRuckus,
@@ -324,6 +445,21 @@ function prune(game: AnyGame, keep: Shot[]) {
 
 // ---- main --------------------------------------------------------------------------------------------------------
 
+// The art comes with Last Light's screenshots: one fingerprint covers both.
+if (only.includes('zombies')) art = true;
+if (staleOnly) {
+  const stale = staleGames(only) as AnyGame[];
+  log(`stale: ${stale.length ? stale.join(', ') : 'none'}`);
+  only = stale;
+  art = only.includes('zombies') || !!onlyArg?.includes(ART);
+  if (!only.length && !art) {
+    log('nothing to do: the screenshots of every game match its current graphics');
+    process.exit(0);
+  }
+}
+// Fingerprints from before the run, so a file changed meanwhile still shows up as stale afterwards.
+const prints = Object.fromEntries(only.filter((g) => g in INPUTS).map((g) => [g, fingerprint(g) as string]));
+
 mkdirSync(outDir, { recursive: true });
 log(`backend on ${api}, dev server on ${site}`);
 start('backend', [tsxCli, 'backend/src/index.ts'], { PORT: String(BACKEND_PORT), HOST: '127.0.0.1', CREATE_RATE_LIMIT: '100' });
@@ -349,9 +485,17 @@ for (const game of ALL_IDS) {
 }
 for (const [game, shots] of Object.entries(update) as [AnyGame, Shot[]][]) prune(game, shots);
 writeManifest(update);
+const artShots = art ? await shootZombiesArt(browser) : [];
+if (art) writeArt(artShots);
+
+// Record what the pictures were made from. Last Light counts only when its screenshots and its art were both redone.
+const done = (Object.keys(update) as AnyGame[]).filter((g) => g in prints && update[g]!.length && (g !== 'zombies' || artShots.length));
+if (done.length) writeLock(Object.fromEntries(done.map((g) => [g, { hash: prints[g], at: new Date().toISOString() }])));
 
 await browser.close();
 shutdown();
 const total = Object.values(update).reduce((n, s) => n + s.length, 0);
 log(`done: ${total} screenshots in ${path.relative(process.cwd(), outDir)}, manifest ${path.relative(process.cwd(), manifestPath)}`);
+if (art) log(`key art: ${artShots.length} pictures in ${path.relative(process.cwd(), artDir)}, manifest ${path.relative(process.cwd(), artManifestPath)}`);
+if (done.length) log(`fingerprints updated for ${done.join(', ')}`);
 process.exit(0);

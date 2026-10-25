@@ -1,6 +1,10 @@
 import { GAMES, type GameId } from '@shared/protocol';
+import { Link } from 'react-router-dom';
 import { Gallery } from './Gallery';
 import { Modal } from './Modal';
+
+/** Room games that also have a title screen of their own (settings, how to play, host / join). */
+export const GAME_MENUS: Partial<Record<GameId, string>> = { zombies: '/lastlight' };
 
 /** Everything about one game: screenshots, description, controls and (in the lobby) a button to host it. */
 export function GameDetails({ game, onClose, onHost }: { game: GameId; onClose: () => void; onHost?: () => void }) {
@@ -32,11 +36,18 @@ export function GameDetails({ game, onClose, onHost }: { game: GameId; onClose: 
               </div>
             ))}
           </dl>
-          {onHost && (
+          {(onHost || GAME_MENUS[game]) && (
             <div className="form-actions">
-              <button type="button" className="btn primary big" onClick={onHost}>
-                Create a {meta.name} room
-              </button>
+              {GAME_MENUS[game] && (
+                <Link className="btn big" to={GAME_MENUS[game]}>
+                  Open the {meta.name} menu
+                </Link>
+              )}
+              {onHost && (
+                <button type="button" className="btn primary big" onClick={onHost}>
+                  Create a {meta.name} room
+                </button>
+              )}
             </div>
           )}
         </div>

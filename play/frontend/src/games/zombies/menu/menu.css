@@ -1,0 +1,745 @@
+/* Last Light title screen. Same voice as the HUD (zombies.css): Special Elite for the typed, Oswald for the stencilled,
+   red chalk on bone. Everything sits on a dark, drifting photo, so the layers above it are mostly gradients. */
+@import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Oswald:wght@400;600;700&display=swap');
+
+.llm {
+  --ll-red: #c8463a;
+  --ll-bone: #e6dccb;
+  --ll-dim: rgba(230, 220, 203, 0.6);
+  --ll-ink: #0a0807;
+  --ll-panel: rgba(14, 11, 10, 0.82);
+  --ll-line: rgba(230, 220, 203, 0.14);
+  position: fixed;
+  inset: 0;
+  overflow: hidden auto;
+  background: var(--ll-ink);
+  color: var(--ll-bone);
+  font-family: Oswald, 'Space Grotesk', system-ui, sans-serif;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+  align-items: center;
+  padding: clamp(24px, 5vh, 64px) clamp(16px, 6vw, 96px);
+  gap: clamp(24px, 4vw, 64px);
+  isolation: isolate;
+}
+.llm kbd {
+  font: 12px 'Special Elite', monospace;
+  padding: 1px 6px;
+  border: 1px solid var(--ll-line);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--ll-bone);
+}
+
+/* ---- backdrop ---------------------------------------------------------------------------------------------------- */
+
+.llm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.llm-shot {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 2.8s ease-in-out;
+}
+.llm-shot.on {
+  opacity: 1;
+}
+.llm-shot img {
+  position: absolute;
+  inset: -6%;
+  width: 112%;
+  height: 112%;
+  object-fit: cover;
+  /* Graded down a little so the bone text always reads, and a touch cold to sell the night. */
+  filter: brightness(0.62) saturate(0.85) contrast(1.08);
+  animation: llm-drift 15s ease-out forwards;
+  will-change: transform;
+}
+.llm-empty {
+  background: radial-gradient(ellipse at 70% 40%, #3a1612, #0a0807 70%);
+}
+@keyframes llm-drift {
+  from {
+    transform: translate(var(--x0), var(--y0)) scale(1.02);
+  }
+  to {
+    transform: translate(var(--x1), var(--y1)) scale(1.1);
+  }
+}
+
+/* The hotel's power is failing: now and then the whole picture dips and stutters. */
+.llm-flicker {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  animation: llm-brownout 9s steps(1, end) infinite;
+}
+@keyframes llm-brownout {
+  0%, 61%, 63.5%, 66%, 100% {
+    opacity: 0;
+  }
+  62% {
+    opacity: 0.45;
+  }
+  64.5% {
+    opacity: 0.3;
+  }
+  65% {
+    opacity: 0.6;
+  }
+}
+.llm-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 120% 90% at 60% 45%, transparent 35%, rgba(0, 0, 0, 0.75) 100%),
+    linear-gradient(90deg, rgba(6, 4, 3, 0.88) 0%, rgba(6, 4, 3, 0.55) 34%, transparent 62%),
+    linear-gradient(0deg, rgba(6, 4, 3, 0.8) 0%, transparent 30%);
+}
+.llm.has-panel .llm-vignette {
+  background:
+    radial-gradient(ellipse 120% 90% at 60% 45%, transparent 35%, rgba(0, 0, 0, 0.75) 100%),
+    linear-gradient(90deg, rgba(6, 4, 3, 0.88) 0%, rgba(6, 4, 3, 0.5) 40%, rgba(6, 4, 3, 0.7) 100%),
+    linear-gradient(0deg, rgba(6, 4, 3, 0.8) 0%, transparent 30%);
+}
+/* Film grain: an SVG noise tile jittered a few pixels every frame step. */
+.llm-grain {
+  position: absolute;
+  inset: -50%;
+  opacity: 0.13;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: llm-grain 0.9s steps(6) infinite;
+}
+@keyframes llm-grain {
+  0% { transform: translate(0, 0); }
+  17% { transform: translate(-3%, 2%); }
+  33% { transform: translate(2%, -4%); }
+  50% { transform: translate(-4%, -1%); }
+  67% { transform: translate(3%, 3%); }
+  83% { transform: translate(-1%, 4%); }
+  100% { transform: translate(1%, -2%); }
+}
+.llm-scan {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.12) 0 1px, transparent 1px 3px);
+  opacity: 0.5;
+}
+
+/* ---- title + main menu ------------------------------------------------------------------------------------------- */
+
+.llm-main {
+  align-self: center;
+  max-width: 560px;
+  min-width: 0;
+}
+.llm-kicker {
+  display: block;
+  font: 13px 'Special Elite', monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ll-dim);
+}
+.llm-title {
+  margin: 6px 0 4px;
+  font: 700 clamp(72px, 11vw, 168px) / 0.92 Oswald, sans-serif;
+  letter-spacing: 0.04em;
+  color: #f3e6d6;
+  /* Neon-ish: a hot core with a red bloom around it. */
+  text-shadow:
+    0 0 2px rgba(255, 240, 225, 0.9),
+    0 0 18px rgba(200, 70, 58, 0.55),
+    0 0 48px rgba(200, 70, 58, 0.35),
+    0 4px 0 rgba(0, 0, 0, 0.6);
+  animation: llm-hum 6s infinite;
+}
+.llm-title > span {
+  display: block;
+  white-space: nowrap;
+}
+/* LAST sits smaller and spaced out above the big word, like a marquee's top line. */
+.llm-title > span:first-child {
+  font-size: 0.42em;
+  letter-spacing: 0.62em;
+  margin-bottom: 0.06em;
+}
+/* The failing tube: the I in LIGHT stutters off and on. */
+.llm-dying {
+  font-style: normal;
+  display: inline-block;
+  animation: llm-die 4.7s infinite;
+}
+@keyframes llm-hum {
+  0%, 18%, 22%, 54%, 100% { opacity: 1; }
+  20% { opacity: 0.86; }
+  55% { opacity: 0.93; }
+}
+@keyframes llm-die {
+  0%, 9%, 13%, 15%, 48%, 52%, 100% {
+    opacity: 1;
+    text-shadow: inherit;
+  }
+  10%, 14% {
+    opacity: 0.15;
+    text-shadow: none;
+  }
+  49%, 51% {
+    opacity: 0.35;
+    text-shadow: none;
+  }
+  50% {
+    opacity: 0.08;
+    text-shadow: none;
+  }
+}
+.llm-tagline {
+  margin: 0 0 clamp(20px, 4vh, 40px);
+  font: 18px 'Special Elite', monospace;
+  color: var(--ll-dim);
+  max-width: 42ch;
+}
+
+.llm-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 420px;
+}
+.llm-item {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 14px 8px 22px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.llm-item-label {
+  font: 600 clamp(22px, 2.6vw, 28px) / 1.1 Oswald, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ll-bone);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+.llm-item-sub {
+  font: 13px 'Special Elite', monospace;
+  color: var(--ll-dim);
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.2s, opacity 0.2s;
+}
+/* A red flashlight beam behind the current item. */
+.llm-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(200, 70, 58, 0.32), rgba(200, 70, 58, 0.06) 70%, transparent);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: -1;
+}
+.llm-item:hover,
+.llm-item:focus-visible,
+.llm-item.active {
+  border-left-color: var(--ll-red);
+  transform: translateX(6px);
+}
+.llm-item:hover::before,
+.llm-item:focus-visible::before,
+.llm-item.active::before {
+  opacity: 1;
+}
+.llm-item:hover .llm-item-sub,
+.llm-item:focus-visible .llm-item-sub,
+.llm-item.active .llm-item-sub {
+  max-height: 1.6em;
+  opacity: 1;
+}
+.llm-item:focus-visible {
+  outline: 1px dashed rgba(230, 220, 203, 0.5);
+  outline-offset: 2px;
+}
+.llm-item[disabled] {
+  cursor: progress;
+  opacity: 0.75;
+}
+.llm-exit {
+  margin-top: 14px;
+}
+.llm-exit .llm-item-label {
+  font-size: 17px;
+  color: var(--ll-dim);
+}
+.llm-error {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--ll-red);
+  background: rgba(200, 70, 58, 0.16);
+  font: 14px 'Special Elite', monospace;
+  color: #f0c8bf;
+}
+.llm-keys {
+  margin: clamp(18px, 4vh, 36px) 0 0;
+  font: 12px 'Special Elite', monospace;
+  color: var(--ll-dim);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ---- panel -------------------------------------------------------------------------------------------------------- */
+
+.llm-panel {
+  align-self: center;
+  max-height: calc(100vh - 2 * clamp(24px, 5vh, 64px));
+  max-height: calc(100dvh - 2 * clamp(24px, 5vh, 64px));
+  display: flex;
+  flex-direction: column;
+  background: var(--ll-panel);
+  border: 1px solid var(--ll-line);
+  border-top: 3px solid var(--ll-red);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  animation: llm-slide 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  min-width: 0;
+}
+@keyframes llm-slide {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+}
+.llm-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--ll-line);
+}
+.llm-panel-head h2 {
+  margin: 2px 0 0;
+  font: 600 30px / 1.1 Oswald, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.llm-close {
+  all: unset;
+  cursor: pointer;
+  padding: 6px 10px;
+  font: 14px 'Special Elite', monospace;
+  color: var(--ll-dim);
+  border: 1px solid var(--ll-line);
+}
+.llm-close:hover,
+.llm-close:focus-visible {
+  color: var(--ll-bone);
+  border-color: var(--ll-red);
+}
+.llm-panel-body {
+  overflow: auto;
+  padding: 16px 22px 22px;
+  outline: none;
+  overscroll-behavior: contain;
+}
+
+.llm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.llm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.llm-label {
+  font: 600 13px Oswald, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ll-dim);
+}
+.llm-hint {
+  font: 13px 'Special Elite', monospace;
+  color: var(--ll-dim);
+}
+.llm input:not([type='range']) {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  font: 18px 'Special Elite', monospace;
+  color: var(--ll-bone);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--ll-line);
+  border-radius: 0;
+}
+.llm input::placeholder {
+  color: rgba(230, 220, 203, 0.3);
+}
+.llm input:focus-visible,
+.llm-panel button:focus-visible {
+  outline: 2px solid var(--ll-red);
+  outline-offset: 2px;
+}
+
+.llm-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.llm-choice button,
+.llm-stepper button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  padding: 8px 16px;
+  font: 600 15px Oswald, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ll-dim);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--ll-line);
+}
+.llm-choice button:hover,
+.llm-stepper button:hover:not([disabled]) {
+  color: var(--ll-bone);
+  border-color: rgba(230, 220, 203, 0.35);
+}
+.llm-choice button.on {
+  color: #fff;
+  background: rgba(200, 70, 58, 0.55);
+  border-color: var(--ll-red);
+}
+.llm-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.llm-stepper button {
+  width: 42px;
+  padding: 6px 0;
+  text-align: center;
+  font-size: 20px;
+}
+.llm-stepper button[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+.llm-stepper output {
+  min-width: 120px;
+  display: grid;
+  place-items: center;
+  font: 17px 'Special Elite', monospace;
+  border: 1px solid var(--ll-line);
+  background: rgba(0, 0, 0, 0.3);
+}
+.llm-slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.llm-slider b {
+  font: 16px 'Special Elite', monospace;
+  min-width: 3.5ch;
+}
+.llm input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--ll-red);
+}
+.llm-volume {
+  color: var(--ll-bone);
+}
+.llm-cta {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  align-self: flex-start;
+  padding: 12px 28px;
+  font: 600 20px Oswald, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--ll-red);
+  box-shadow: 0 0 24px rgba(200, 70, 58, 0.4);
+  transition: filter 0.15s, transform 0.15s;
+}
+.llm-cta:hover:not([disabled]) {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+.llm-cta[disabled] {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+}
+.llm-cta.small {
+  padding: 10px 22px;
+  font-size: 17px;
+}
+
+/* Join */
+.llm-code-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.llm-code-row .llm-field {
+  flex: 1;
+}
+.llm-code-row .llm-cta {
+  margin-top: 25px;
+}
+.llm .llm-code {
+  font-size: 26px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+}
+.llm-rooms-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.llm-count {
+  padding: 0 7px;
+  background: var(--ll-red);
+  color: #fff;
+  font-size: 12px;
+}
+.llm-empty-note {
+  margin: 0;
+  font: 14px 'Special Elite', monospace;
+  color: var(--ll-dim);
+}
+.llm-empty-note p {
+  margin: 0 0 6px;
+}
+.llm-link {
+  all: unset;
+  cursor: pointer;
+  color: var(--ll-red);
+  font: 600 15px Oswald, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.llm-rooms {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.llm-room {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--ll-line);
+  border-left: 3px solid transparent;
+}
+.llm-room:hover:not([disabled]),
+.llm-room:focus-visible {
+  border-left-color: var(--ll-red);
+  background: rgba(200, 70, 58, 0.12);
+}
+.llm-room[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.llm-room-name {
+  font: 600 17px Oswald, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.llm-room-meta {
+  grid-column: 1;
+  font: 12px 'Special Elite', monospace;
+  color: var(--ll-dim);
+}
+.llm-room-code {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font: 18px 'Special Elite', monospace;
+  letter-spacing: 0.2em;
+  color: var(--ll-red);
+}
+
+/* How to play */
+.llm-help {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.llm-controls {
+  margin: 0 0 8px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  align-items: baseline;
+}
+.llm-controls > div {
+  display: contents;
+}
+.llm-controls dt {
+  text-align: right;
+  white-space: nowrap;
+}
+.llm-controls dd {
+  margin: 0;
+  font-size: 15px;
+}
+.llm-rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: rule;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.llm-rules li {
+  counter-increment: rule;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 0 8px;
+}
+.llm-rules li::before {
+  content: counter(rule, decimal-leading-zero);
+  grid-row: 1 / span 2;
+  font: 15px 'Special Elite', monospace;
+  color: var(--ll-red);
+}
+.llm-rules b {
+  font: 600 15px Oswald, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.llm-rules span {
+  font-size: 15px;
+  line-height: 1.4;
+  color: rgba(230, 220, 203, 0.82);
+}
+
+/* Caption of the current shot, like a security camera's label. */
+.llm-caption {
+  position: fixed;
+  right: clamp(16px, 3vw, 32px);
+  bottom: clamp(12px, 2.5vh, 24px);
+  margin: 0;
+  max-width: min(60vw, 420px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 12px 'Special Elite', monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ll-dim);
+  text-shadow: 0 1px 4px #000;
+  animation: llm-fade 1.2s ease-out;
+  pointer-events: none;
+}
+.llm-rec {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ll-red);
+  box-shadow: 0 0 8px var(--ll-red);
+  animation: llm-blink 1.6s steps(1, end) infinite;
+}
+@keyframes llm-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes llm-blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* ---- narrow screens: the panel takes over the column -------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .llm {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    padding: 28px 16px 56px;
+  }
+  .llm.has-panel .llm-main {
+    display: none;
+  }
+  .llm-panel {
+    max-height: none;
+  }
+  .llm-panel-body {
+    overflow: visible;
+  }
+  .llm-caption {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
+  .llm-vignette {
+    background: linear-gradient(0deg, rgba(6, 4, 3, 0.92) 0%, rgba(6, 4, 3, 0.6) 55%, rgba(6, 4, 3, 0.35) 100%);
+  }
+  /* Touch has no hover: show every item's line all the time. */
+  .llm-item-sub {
+    max-height: 1.6em;
+    opacity: 1;
+  }
+  .llm-keys {
+    display: none;
+  }
+}
+@media (max-width: 420px) {
+  .llm-code-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .llm-code-row .llm-cta {
+    margin-top: 0;
+    align-self: stretch;
+    text-align: center;
+  }
+  .llm-stepper output {
+    min-width: 0;
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .llm-shot img,
+  .llm-flicker,
+  .llm-grain,
+  .llm-title,
+  .llm-dying,
+  .llm-panel {
+    animation: none;
+  }
+  .llm-shot {
+    transition-duration: 0.6s;
+  }
+}
