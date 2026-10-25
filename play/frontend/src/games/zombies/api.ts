@@ -26,8 +26,17 @@ export const VIEWMODEL_LAYER = 1;
 
 /** Animation clips in zombie.glb (in place: the server moves the root; loops marked). */
 export type ZombieClip = 'idle' | 'walk' | 'jog' | 'crawl' | 'attack' | 'tear' | 'vault' | 'rise' | 'death_back' | 'death_fwd';
-/** Clips in survivor.glb. */
-export type SurvivorClip = 'idle' | 'walk' | 'run' | 'downed' | 'reload';
+/** Clips in survivor.glb (the `_pistol` set is optional: client.ts falls back to the rifle clip without it). */
+export type SurvivorClip =
+  | 'idle'
+  | 'walk'
+  | 'run'
+  | 'downed'
+  | 'reload'
+  | 'idle_pistol'
+  | 'walk_pistol'
+  | 'run_pistol'
+  | 'reload_pistol';
 
 export interface CharacterInstance {
   root: THREE.Object3D;

@@ -18,9 +18,17 @@ Modelling, in order:
      then given compression folds at the elbows, knees, crotch and waist, blousing above the boots, sunken seams, a mock
      collar, cuffs with hook-and-loop tabs, shoulder pockets with flaps and velcro panels, thigh cargo pockets with
      flaps and pleats, and knee seams.
-  4. Weights: heat-map automatic weights on the body, copied to the uniform by nearest-surface data transfer.
-Collection `Body`: Survivor (armature), Body_Skin, Body_Eyes, Body_Shirt, Body_Trousers. Materials: Body_Skin,
-Body_Eyes, Body_Uniform (navy ripstop), Body_Velcro.
+     That detailed uniform is the HIGH bake source (Body_Shirt_high / Body_Trousers_high, obj["high"] = True,
+     obj["high_of"] = the low name). The exported LOW uniform is a QuadriFlow quad cage of the same garment volume
+     (~4.9k tris for shirt + trousers), cut with planar cuts, shrink-wrapped onto the draped cloth, lifted onto the
+     pockets / flaps / collar so the silhouette and the short bake rays carry them, with the sleeves gathered into the
+     glove cuffs (they end inside the skin 4 cm above the wrist), the shirt tail tucked inside the trouser waist and
+     the hems bloused over the boot collars.
+  4. Weights: heat-map automatic weights on the body, copied to the uniform by nearest-surface data transfer, then
+     relaxed round the shoulders, elbows, hips and knees so raised arms roll the cloth instead of creasing it.
+Collection `Body`: Survivor (armature), Body_Skin (weight source, not exported), Body_Eyes, Body_Shirt,
+Body_Trousers, plus the two _high bake sources. Materials: Body_Skin, Body_Eyes, Body_Uniform (navy ripstop),
+Body_Velcro.
 """
 
 import importlib.util
@@ -217,13 +225,13 @@ def body_forms(fam, k=1.0, garment=False):
         sh = P(x * 0.17, 0.0, 1.42)
         el = P(x * 0.33, 0.0, 1.17)
         wr = P(x * 0.44, 0.03, 0.94)
-        ball(a, P(x * (0.205 + 0.005 * g), 0.0, 1.405), R(0.07 + 0.012 * g), (1.0, 1.1, 0.95))  # deltoid / shoulder seam
-        cone_capsule(a, sh, el, R(0.06 + 0.013 * g), R(0.046 + 0.014 * g), n=4)
+        ball(a, P(x * (0.205 + 0.002 * g), 0.0, 1.405), R(0.07 + 0.005 * g), (1.0, 1.1, 0.95))  # deltoid / shoulder seam
+        cone_capsule(a, sh, el, R(0.06 + 0.007 * g), R(0.046 + 0.009 * g), n=4)
         if not garment:
             ball(a, sh.lerp(el, 0.5) + Vector((0, 0.022, 0)), R(0.038), (1.0, 1.0, 1.6))  # biceps
             ball(a, sh.lerp(el, 0.42) + Vector((0, -0.026, 0)), R(0.04), (1.0, 1.0, 1.7))  # triceps
             ball(a, el.lerp(wr, 0.25) + Vector((0, 0.006, 0)), R(0.041), (1.0, 1.0, 1.5))  # forearm mass
-        cone_capsule(a, el, wr, R(0.047 + 0.011 * g), R(0.031 + 0.013 * g), n=4)
+        cone_capsule(a, el, wr, R(0.047 + 0.008 * g), R(0.031 + 0.01 * g), n=4)
 
     # Legs.
     for x, side in ((-1, "L"), (1, "R")):
@@ -526,6 +534,16 @@ def remove_islands(obj, min_faces=300):
     return len(kill)
 
 
+# The sleeve ends inside the glove cuff (the glove runs ~8.5 cm up the forearm), 4 cm above the wrist; the trouser hem
+# hangs over the boot collar (boot top ~0.335 m), bloused.
+SLEEVE_END = -0.04
+HEM_Z = 0.29
+# Export budget: shirt + trousers ~4.7k tris (QuadriFlow faces before the cuts); the high copies feed the normal bake.
+LOW_FACES = 2750
+LOW_TRIS = 4900
+HIGH_TRIS = 60000
+
+
 def split_garment(g):
     """Cuts the garment volume into a shirt (neck to wrists, down to the hips) and trousers (waist to the boot tops)."""
     shirt = g.copy()
@@ -540,11 +558,11 @@ def split_garment(g):
     def past_wrist(c):
         x = 1 if c.x > 0 else -1
         el, wr = P(x * 0.33, 0.0, 1.17), P(x * 0.44, 0.03, 0.94)
-        return abs(c.x) > 0.3 * S and (c - wr).dot((wr - el).normalized()) > -0.004
+        return abs(c.x) > 0.3 * S and (c - wr).dot((wr - el).normalized()) > SLEEVE_END
 
-    bz.delete_faces(shirt, lambda c, n: (c.z < 1.04 * S and abs(c.x) < 0.27 * S) or c.z > 1.565 * S or past_wrist(c))
+    bz.delete_faces(shirt, lambda c, n: (c.z < 1.04 * S and abs(c.x) < 0.27 * S) or c.z > 1.6 * S or past_wrist(c))
     # Trousers: waist to just above the ankle; no torso.
-    bz.delete_faces(trousers, lambda c, n: c.z > 1.075 * S or c.z < 0.245 * S or abs(c.x) > 0.27 * S)
+    bz.delete_faces(trousers, lambda c, n: c.z > 1.075 * S or c.z < HEM_Z or abs(c.x) > 0.27 * S)
     log(f"removed islands: shirt {remove_islands(shirt)} faces, trousers {remove_islands(trousers)} faces")
     return shirt, trousers
 
@@ -737,14 +755,15 @@ def split_legs(trousers):
 
 
 def blouse(trousers):
-    """Bloused hems: the bottom of each leg hangs as a loose thin drape over the boot collar (~0.33 m), flaring a little
-    toward the hem at ~0.25 m with soft vertical pleats, so it covers the boot top instead of sitting on it as a ring."""
+    """Bloused hems: above the boot collar (~0.335 m) the leg puffs out ~1.5 cm with soft vertical pleats, then comes
+    in a little toward the hem (0.29 m), which hangs over the collar like the reference's trousers."""
     rnd = random.Random(23)
     phase = [rnd.random() * 6.3 for _ in range(4)]
+    top = 0.47 * S
+    span = top - HEM_Z
 
     def fn(co, n):
-        z = co.z / S
-        if z > 0.44 or z < 0.2:
+        if co.z > top or co.z < HEM_Z - 0.02:
             return None
         x = 1 if co.x > 0 else -1
         kn, an = P(x * 0.11, 0.01, 0.51), P(x * 0.12, -0.02, 0.1)
@@ -756,17 +775,205 @@ def blouse(trousers):
             return None
         rdir = radial.normalized()
         ang = math.atan2(rdir.y, rdir.x)
-        t = max(0.0, min(1.0, (0.44 - z) / 0.19))  # 0 at the top of the drape, 1 at the hem
-        flare = 0.012 * t * t  # opens a little toward the hem to clear the boot collar
-        pleat = 0.004 * math.sin(ang * 8 + phase[0] + 2.0 * math.sin(ang * 3 + phase[1])) * t
-        return rdir * (flare + pleat)
+        t = max(0.0, min(1.0, (top - co.z) / span))  # 0 at the top of the drape, 1 at the hem
+        puff = 0.022 * math.sin(math.pi * 0.8 * t) ** 1.5
+        pleat = 0.005 * math.sin(ang * 7 + phase[0] + 2.0 * math.sin(ang * 3 + phase[1])) * t
+        return rdir * (puff + pleat)
 
     bz.push_verts(trousers, fn)
+
+
+# ---- the low-poly uniform -------------------------------------------------------------------------------------------
+
+def smoothstep(e0, e1, x):
+    t = max(0.0, min(1.0, (x - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
+
+
+def quad_low(g, target):
+    """A clean, symmetric quad cage of the closed garment volume (QuadriFlow), ~`target` faces; decimation fallback."""
+    lo = g.copy()
+    lo.data = g.data.copy()
+    link(lo)
+    lo.name = lo.data.name = "GarmentLow"
+    activate(lo)
+    try:
+        bpy.ops.object.quadriflow_remesh(target_faces=target, use_preserve_sharp=False, use_preserve_boundary=False,
+                                         use_mesh_symmetry=True, seed=1)
+    except RuntimeError as e:
+        log(f"quadriflow failed ({e}); decimating")
+    if len(lo.data.polygons) > target * 1.5 or len(lo.data.polygons) < target * 0.3:
+        lo = decimate_to(lo, target * 2)
+    lo.data.materials.clear()
+    for m in g.data.materials:
+        lo.data.materials.append(m)
+    log(f"low cage {len(lo.data.polygons)} faces")
+    return smooth(lo)
+
+
+def bisect_keep(obj, co, no, region=None):
+    """Cuts `obj` with the plane (co, no) and deletes everything on the +no side; `region(face_center)` limits the cut
+    to part of the mesh (e.g. one sleeve). Gives straight, clean garment edges on the low mesh."""
+    co, no = Vector(co), Vector(no)
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    faces = [f for f in bm.faces if region is None or region(f.calc_center_median())]
+    verts = {v for f in faces for v in f.verts}
+    edges = {e for f in faces for e in f.edges}
+    bmesh.ops.bisect_plane(bm, geom=list(verts) + list(edges) + faces, dist=1e-6, plane_co=co, plane_no=no)
+    kill = [f for f in bm.faces if (region is None or region(f.calc_center_median())) and (f.calc_center_median() - co).dot(no) > 0]
+    bmesh.ops.delete(bm, geom=kill, context="FACES")
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+
+
+def split_low(lo):
+    """The low cage cut like the high garment, with planar cuts (clean cuff, hem, waist and collar edges)."""
+    shirt = lo.copy()
+    shirt.data = lo.data.copy()
+    link(shirt)
+    shirt.name = shirt.data.name = "Body_Shirt"
+    trousers = lo
+    trousers.name = trousers.data.name = "Body_Trousers"
+    bisect_keep(shirt, P(0, 0, 1.6), (0, 0, 1))
+    bisect_keep(shirt, P(0, 0, 1.04), (0, 0, -1), region=lambda c: abs(c.x) < 0.27 * S)
+    for x in (-1, 1):
+        el, wr = P(x * 0.33, 0.0, 1.17), P(x * 0.44, 0.03, 0.94)
+        ax = (wr - el).normalized()
+        bisect_keep(shirt, wr + ax * SLEEVE_END, ax, region=lambda c, x=x: c.x * x > 0.3 * S)
+    bisect_keep(trousers, P(0, 0, 1.075), (0, 0, 1))
+    bisect_keep(trousers, Vector((0, 0, HEM_Z)), (0, 0, -1))
+    bz.delete_faces(trousers, lambda c, n: abs(c.x) > 0.27 * S)
+    log(f"low islands removed: shirt {remove_islands(shirt, 40)} faces, trousers {remove_islands(trousers, 40)} faces")
+    return smooth(shirt), smooth(trousers)
+
+
+def skin_bvh(body):
+    from mathutils.bvhtree import BVHTree
+    return BVHTree.FromObject(body, bpy.context.evaluated_depsgraph_get())
+
+
+def sleeve_taper(obj, bvh):
+    """Gathers each sleeve into the glove: from 11 cm above the wrist the sleeve closes onto the forearm and the last
+    centimetres sit just inside the skin, so the glove cuff always covers the sleeve end."""
+    for x in (-1, 1):
+        el, wr = P(x * 0.33, 0.0, 1.17), P(x * 0.44, 0.03, 0.94)
+        ax = (wr - el).normalized()
+        for v in obj.data.vertices:
+            c = v.co
+            if c.x * x < 0.27 * S:
+                continue
+            d = (c - wr).dot(ax)
+            if d < -0.115 or d > 0.02:
+                continue
+            foot = wr + ax * d
+            rad = c - foot
+            rad -= ax * rad.dot(ax)
+            r = rad.length
+            if r < 1e-5:
+                continue
+            dirn = rad / r
+            loc, _n, _i, dist = bvh.ray_cast(foot, dirn, 0.12)
+            rs = dist if loc is not None else 0.03
+            s = smoothstep(-0.115, -0.07, d)
+            target = (1 - s) * r + s * (rs - 0.003)
+            v.co = foot + dirn * min(r, target)
+    obj.data.update()
+
+
+def tuck_shirt(shirt, depth=0.007):
+    """The shirt's tail sits inside the trouser waist (no z-fighting between 1.04 and 1.075 m)."""
+    def fn(co, n):
+        if abs(co.x) > 0.27 * S or co.z > 1.1 * S:
+            return None
+        return -n * depth * smoothstep(1.1 * S, 1.08 * S, co.z)
+    bz.push_verts(shirt, fn)
+
+
+def waist_band(trousers):
+    def fn(co, n):
+        if co.z < 1.03 * S:
+            return None
+        return n * 0.003 * smoothstep(1.03 * S, 1.045 * S, co.z)
+    bz.push_verts(trousers, fn)
+
+
+def wrap_to(lo, target):
+    """Shrink-wraps the low cage onto the draped high garment (nearest surface point)."""
+    sw = lo.modifiers.new("Wrap", "SHRINKWRAP")
+    sw.target = target
+    sw.wrap_method = "NEAREST_SURFACEPOINT"
+    sw.offset = 0.0005
+    return apply_all(lo)
+
+
+def lift_to(lo, high, max_d=0.035, under=0.003):
+    """Raises the low surface onto the high one's raised details (pockets, flaps, collar, waistband) along the normal,
+    so the silhouette carries them and the normal bake's short rays reach them; the lift is smoothed over neighbours."""
+    from mathutils.bvhtree import BVHTree
+    bvh = BVHTree.FromObject(high, bpy.context.evaluated_depsgraph_get())
+    me = lo.data
+    me.update()
+    disp = []
+    for v in me.vertices:
+        # Cast inward from outside: the first outward-facing high surface is the outermost layer (a pocket's face, not
+        # its back); surfaces facing the other way belong to a neighbouring limb and are skipped.
+        n = v.normal
+        start = v.co + n * max_d
+        t, lift = 0.0, 0.0
+        for _k in range(4):
+            loc, nh, _i, dist = bvh.ray_cast(start - n * t, -n, max_d + 0.003 - t)
+            if loc is None:
+                break
+            t += dist + 1e-4
+            if nh.dot(n) > 0.2:
+                lift = max(0.0, max_d - t - under)
+                break
+        disp.append(lift)
+    nbr = [[] for _ in me.vertices]
+    for e in me.edges:
+        a, b = e.vertices
+        nbr[a].append(b)
+        nbr[b].append(a)
+    moved = 0
+    for i, v in enumerate(me.vertices):
+        if disp[i] < 0.001:
+            continue
+        # A lone lifted vertex is a thin detail (pleat, tab, seam bead): leave it to the bake.
+        if not any(disp[j] > 0.002 for j in nbr[i]):
+            continue
+        avg = sum(disp[j] for j in nbr[i]) / len(nbr[i])
+        v.co += v.normal * min(disp[i], 0.5 * disp[i] + 0.5 * avg + 0.004)
+        moved += 1
+    me.update()
+    log(f"{lo.name}: {moved} verts lifted onto the high detail")
+
+
+def mark_high(obj, low_name):
+    obj.name = obj.data.name = f"{low_name}_high"
+    obj["high"] = True
+    obj["high_of"] = low_name
+    obj["part"] = "body"
+    for md in list(obj.modifiers):
+        obj.modifiers.remove(md)
+    return obj
 
 
 def build_uniform(body, mats):
     log("garment volume")
     g = garment_volume(mats)
+    # QuadriFlow lands only roughly on its target: retry with a corrected target until the cut garment fits the budget.
+    target = LOW_FACES
+    for attempt in range(4):
+        shirt_lo, trousers_lo = split_low(quad_low(g, target))
+        total = tris(shirt_lo) + tris(trousers_lo)
+        log(f"low uniform attempt {attempt}: target {target} -> {total} tris")
+        if LOW_TRIS - 450 <= total <= LOW_TRIS or attempt == 3:
+            break
+        target = int(target * (LOW_TRIS - 200) / total)
+        for o in (shirt_lo, trousers_lo):
+            bpy.data.objects.remove(o, do_unlink=True)
     shirt, trousers = split_garment(g)
 
     log(f"shirt {tris(shirt)} tris, trousers {tris(trousers)} tris; draping")
@@ -781,7 +988,7 @@ def build_uniform(body, mats):
         shirt = drape(shirt, collider, lambda c: 1.0 if (c.z > 1.42 * S and abs(c.x) < 0.2 * S) or (abs(c.x) > 0.42 * S and c.z < 1.0 * S) or (c.z < 1.07 * S and abs(c.x) < 0.27 * S) else 0.0, frames)
     sides = [(-1 if v.co.x < 0 else 1) for v in trousers.data.vertices]
     if frames:
-        trousers = drape(trousers, collider, lambda c: 1.0 if c.z > 1.0 * S or c.z < 0.27 * S else 0.0, frames)
+        trousers = drape(trousers, collider, lambda c: 1.0 if c.z > 1.0 * S or c.z < HEM_Z + 0.02 else 0.0, frames)
     bpy.data.objects.remove(collider, do_unlink=True)
     # The drape pulls the inner leg surfaces together again: keep each vertex on its own leg's side.
     for v, side in zip(trousers.data.vertices, sides):
@@ -789,6 +996,15 @@ def build_uniform(body, mats):
         if g > 0 and side * v.co.x < g:
             v.co.x = side * g
     log("draped")
+    bvh = skin_bvh(body)
+    sleeve_taper(shirt, bvh)
+    tuck_shirt(shirt)
+    # The low cage follows the draped cloth before the folds and pockets go on (those are baked into its normal map).
+    shirt_lo = wrap_to(shirt_lo, shirt)
+    trousers_lo = wrap_to(trousers_lo, trousers)
+    sleeve_taper(shirt_lo, bvh)
+    tuck_shirt(shirt_lo)
+    clamp_leg_sides(trousers_lo)
 
     # Compression folds (amplitudes in metres along the normal): only where fabric really folds.
     specs_shirt, specs_trousers = [], []
@@ -799,8 +1015,10 @@ def build_uniform(body, mats):
         up = (el - sh).normalized()
         lo = (wr - el).normalized()
         specs_shirt += [
-            (el + Vector((-x * 0.025, 0.03, 0)), lo, 0.035, 0.007, 190),  # inner elbow bend
-            (P(x * 0.42, 0.024, 0.99), lo, 0.035, 0.005, 170),  # slight bunch above the cuff
+            (el + Vector((-x * 0.025, 0.03, 0)), lo, 0.04, 0.011, 170),  # inner elbow bend
+            (el + Vector((-x * 0.02, 0.035, -0.03)), lo, 0.03, 0.007, 230),  # secondary Z-fold below the bend
+            (P(x * 0.415, 0.024, 1.0), lo, 0.05, 0.009, 125),  # sleeve stacking above the cuff
+            (P(x * 0.4, 0.022, 1.035), lo, 0.04, 0.006, 150),
             (P(x * 0.18, 0.03, 1.35), up, 0.035, 0.004, 120),  # armpit
         ]
         hip = P(x * 0.098, 0.0, 0.95)
@@ -824,7 +1042,8 @@ def build_uniform(body, mats):
         an = P(x * 0.12, -0.02, 0.1)
         inner = Vector((-x * 0.02, 0.03, 0))
         sh_regions += [
-            (sh.lerp(el, 0.8) + inner, el.lerp(wr, 0.2) + inner, 0.04, 0.012, 34.0, 9.0),  # inner elbow
+            (sh.lerp(el, 0.8) + inner, el.lerp(wr, 0.25) + inner, 0.045, 0.018, 34.0, 9.0),  # inner elbow
+            (el.lerp(wr, 0.6), el.lerp(wr, 0.95), 0.05, 0.012, 40.0, 8.0),  # stacked folds over the glove cuff
             (P(x * 0.17, 0.03, 1.38), P(x * 0.22, 0.03, 1.32), 0.04, 0.006, 30.0, 10.0),  # armpit
         ]
         tr_regions += [
@@ -869,31 +1088,6 @@ def build_uniform(body, mats):
         extras_shirt.append(surface_panel(shirt, c + up_arm * 0.045, out, 0.095, 0.045, 0.01, mats["uniform"], f"sleeveFlap{x}", up=up_arm, bevel=0.003, offset=0.011))
         # Velcro field on the pocket face (the SWAT patch sits on the left one).
         extras_shirt.append(surface_panel(shirt, c - up_arm * 0.012, out, 0.075, 0.055, 0.003, mats["velcro"], f"sleeveVelcro{x}", up=up_arm, bevel=0.001, offset=0.011))
-        # Cuff with a hook-and-loop tab.
-        arm_axis = (P(x * 0.44, 0.03, 0.94) - P(x * 0.33, 0, 1.17)).normalized()
-        wr = P(x * 0.44, 0.03, 0.94) - arm_axis * 0.022
-        cuff = bz.prim("cyl", mats["uniform"], loc=tuple(wr), radius=0.056 * S, depth=0.045, vertices=28)
-        cuff.rotation_mode = "QUATERNION"
-        cuff.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(arm_axis)
-        cuff = apply_all(cuff)
-        activate(cuff)
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        bz.delete_faces(cuff, lambda cc, n: abs(n.dot(arm_axis)) > 0.9)
-        cuff = smooth(bz.apply_all(cuff))
-        so = cuff.modifiers.new("Solid", "SOLIDIFY")
-        so.thickness = 0.004
-        cuff = smooth(apply_all(cuff))
-        extras_shirt.append(cuff)
-        # A soft roll of bunched sleeve just above the cuff.
-        roll = bz.prim("torus", mats["uniform"], loc=tuple(wr - arm_axis * 0.04), major_radius=0.056 * S, minor_radius=0.009, major_segments=28, minor_segments=8)
-        roll.rotation_mode = "QUATERNION"
-        roll.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(arm_axis)
-        roll = apply_all(roll)
-        activate(roll)
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        extras_shirt.append(smooth(roll))
-        tab_c = wr + Vector((x * 0.05, 0.004, 0.0))
-        extras_shirt.append(bz.box((0.006, 0.035, 0.03), tuple(tab_c), mats["velcro"], bevel=0.003))
         # Thigh cargo pocket: bellows body, flap with a snap tab, two pleats.
         c = P(x * 0.19, 0.012, 0.7)
         nrm = Vector((x, 0.25, 0)).normalized()
@@ -913,16 +1107,16 @@ def build_uniform(body, mats):
         # Knee reinforcement panel (sits under the LIMBS worker's knee pad).
         extras_trousers.append(surface_panel(trousers, P(x * 0.11, 0.07, 0.52), Vector((0, 1, 0)), 0.12, 0.15, 0.003, mats["uniform"], f"kneePanel{x}", bevel=0.004))
     # Mock collar: a soft band around the neck rising toward the jaw (under the balaclava).
-    collar = bz.prim("cyl", mats["uniform"], loc=tuple(P(0, 0.004, 1.535)), radius=0.08 * S, depth=0.07, vertices=36)
+    collar = bz.prim("cyl", mats["uniform"], loc=tuple(P(0, 0.002, 1.555)), radius=0.079 * S, depth=0.095, vertices=36)
     collar = apply_all(collar)
     bz.delete_faces(collar, lambda cc, n: abs(n.z) > 0.9)
     so = collar.modifiers.new("Solid", "SOLIDIFY")
     so.thickness = 0.006
     collar = smooth(apply_all(collar))
-    bz.push_verts(collar, lambda co, n: Vector((0, -0.004, 0.012)) if co.y < 0 and co.z > 1.535 * S else (Vector((0, 0.004, -0.012)) if co.y > 0.05 and co.z > 1.535 * S else None))
+    bz.push_verts(collar, lambda co, n: Vector((0, -0.004, 0.01)) if co.y < 0 and co.z > 1.555 * S else (Vector((0, 0.006, -0.014)) if co.y > 0.05 and co.z > 1.555 * S else None))
     extras_shirt.append(collar)
     # Front zip placket on the collar.
-    extras_shirt.append(bz.box((0.012, 0.006, 0.06), tuple(P(0, 0.088, 1.52)), mats["velcro"], bevel=0.002))
+    extras_shirt.append(bz.box((0.012, 0.006, 0.08), tuple(P(0, 0.089, 1.54)), mats["velcro"], bevel=0.002))
     # Waistband with belt loops (the TORSO worker's belt sits on it).
     wb = bz.prim("cyl", mats["uniform"], loc=tuple(P(0, -0.003, 1.045)), radius=0.165 * S, depth=0.045, vertices=48)
     wb.scale = (1.0, 0.78, 1.0)
@@ -935,11 +1129,30 @@ def build_uniform(body, mats):
     wb = smooth(apply_all(wb))
     extras_trousers.append(wb)
 
-    shirt = bz.join([shirt] + extras_shirt, "Body_Shirt")
-    trousers = bz.join([trousers] + extras_trousers, "Body_Trousers")
-    shirt = decimate_to(shirt, 9000)
-    trousers = decimate_to(trousers, 8000)
-    return shirt, trousers
+    shirt = bz.join([shirt] + extras_shirt, "Body_Shirt_high")
+    trousers = bz.join([trousers] + extras_trousers, "Body_Trousers_high")
+    shirt = mark_high(decimate_to(shirt, HIGH_TRIS), "Body_Shirt")
+    trousers = mark_high(decimate_to(trousers, HIGH_TRIS), "Body_Trousers")
+
+    # Low: the hem blousing and waistband shapes, then lifted onto the high's pockets, flaps and collar.
+    blouse(trousers_lo)
+    waist_band(trousers_lo)
+    lift_to(shirt_lo, shirt)
+    lift_to(trousers_lo, trousers)
+    clamp_leg_sides(trousers_lo)
+    shirt_lo.name = shirt_lo.data.name = "Body_Shirt"
+    trousers_lo.name = trousers_lo.data.name = "Body_Trousers"
+    log(f"uniform low: shirt {tris(shirt_lo)} + trousers {tris(trousers_lo)} tris; high {tris(shirt)} + {tris(trousers)}")
+    return smooth(shirt_lo), smooth(trousers_lo), shirt, trousers
+
+
+def clamp_leg_sides(trousers):
+    for v in trousers.data.vertices:
+        side = -1 if v.co.x < 0 else 1
+        g = leg_gap(v.co.z)
+        if g > 0 and side * v.co.x < g:
+            v.co.x = side * g
+    trousers.data.update()
 
 
 # ---- rigging ------------------------------------------------------------------------------------------------------------
@@ -966,6 +1179,54 @@ def auto_weights(arm, obj):
     return obj
 
 
+JOINTS = []  # (centre, radius, iterations): where garment weights get relaxed
+for _x in (-1, 1):
+    JOINTS += [(P(_x * 0.17, 0.0, 1.42), 0.13, 10), (P(_x * 0.33, 0.0, 1.17), 0.07, 4),
+               (P(_x * 0.1, 0.0, 0.95), 0.12, 6), (P(_x * 0.11, 0.01, 0.51), 0.07, 4)]
+
+
+def smooth_joint_weights(obj):
+    """Relaxes the weights round the shoulders, elbows, hips and knees over the mesh's edges (Laplacian smoothing of
+    every bone's weight, fading out toward each region's rim), so a raised arm rolls the shoulder cloth over the
+    deltoid instead of popping it out as a ball, and the low cage bends without creases."""
+    me = obj.data
+    names = {g.index: g.name for g in obj.vertex_groups}
+    W = [{names[g.group]: g.weight for g in v.groups if g.group in names} for v in me.vertices]
+    nbr = [[] for _ in me.vertices]
+    for e in me.edges:
+        a, b = e.vertices
+        nbr[a].append(b)
+        nbr[b].append(a)
+    for c, rad, iters in JOINTS:
+        region = []
+        for v in me.vertices:
+            d = (v.co - c).length
+            if d < rad:
+                region.append((v.index, 1.0 - smoothstep(rad * 0.6, rad, d)))
+        for _ in range(iters):
+            new = {}
+            for i, k in region:
+                if not nbr[i]:
+                    continue
+                avg = {}
+                for j in nbr[i]:
+                    for bn, w in W[j].items():
+                        avg[bn] = avg.get(bn, 0.0) + w / len(nbr[i])
+                mix = {}
+                for bn in set(avg) | set(W[i]):
+                    mix[bn] = (1 - 0.5 * k) * W[i].get(bn, 0.0) + 0.5 * k * avg.get(bn, 0.0)
+                new[i] = mix
+            for i, mix in new.items():
+                W[i] = mix
+    for v, ws in zip(me.vertices, W):
+        for bn, w in ws.items():
+            g = obj.vertex_groups.get(bn) or obj.vertex_groups.new(name=bn)
+            if w > 1e-4:
+                g.add([v.index], w, "REPLACE")
+            elif bn in obj.vertex_groups:
+                g.remove([v.index])
+
+
 def transfer_weights(src, dst, arm):
     """Copies the body's bone weights to a garment from the nearest body surface."""
     for b in bz.BONES:
@@ -980,6 +1241,7 @@ def transfer_weights(src, dst, arm):
     dt.layers_vgroup_select_dst = "NAME"
     activate(dst)
     bpy.ops.object.modifier_apply(modifier=dt.name)
+    smooth_joint_weights(dst)
     # Normalise and keep at most 4 influences.
     plan = []
     for v in dst.data.vertices:
@@ -1122,7 +1384,7 @@ def main():
     mats = materials()
     arm = bz.build_armature("Survivor", S)
     body, eyes = build_body(mats)
-    shirt, trousers = build_uniform(body, mats)
+    shirt, trousers, shirt_hi, trousers_hi = build_uniform(body, mats)
     log("weights")
     auto_weights(arm, body)
     transfer_weights(body, shirt, arm)
@@ -1130,6 +1392,9 @@ def main():
     bz.skin_to(eyes, arm, ["head"], scale=S, rigid="head")
     for o in (body, eyes, shirt, trousers):
         o["part"] = "body"
+    for o in (shirt_hi, trousers_hi):
+        o.hide_render = True
+        o.hide_set(True)
     log("tris: " + ", ".join(f"{o.name} {tris(o)}" for o in (body, eyes, shirt, trousers)))
     OUT_BLEND.parent.mkdir(parents=True, exist_ok=True)
     if PREVIEW:

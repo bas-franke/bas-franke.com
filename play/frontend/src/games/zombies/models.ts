@@ -4,10 +4,10 @@
 //
 // Notes for the client:
 // - GLTFLoader strips dots from node names ("hand.R" -> "handR"); `bones` has both spellings.
-// - Survivors carry an extra `bones.grip`: an Object3D on the right hand at the rifle grip the hold poses were solved
-//   for (IK in build_zombies.py), oriented so a gun added to it with no offset points forward (-Z) in the idle pose.
-//   Both hands hold the gun in idle, walk, run and reload.
-// - One-shot clips (attack, vault, rise, death_*, reload) are LoopOnce and clamp on their last frame.
+// - Survivors carry an extra `bones.grip`: an Object3D on the right hand at the gun grip the poses were solved for
+//   (tools/blender/swat/swat_anim.py), oriented so a gun added to it with no offset points forward (-Z) in the idle
+//   pose. Both hands hold the gun in idle, walk, run and reload, and in the pistol set (`<clip>_pistol`).
+// - One-shot clips (attack, vault, rise, death_*, reload, reload_pistol) are LoopOnce and clamp on their last frame.
 // - Zombie attack: the blow lands 0.55 s into the 1.0 s clip.
 
 import * as THREE from 'three';
@@ -18,8 +18,10 @@ import type { CharacterInstance, Models, SurvivorClip, ZombieClip } from './api'
 
 const BASE = '/models/zombies/';
 const ZOMBIE_CLIPS: ZombieClip[] = ['idle', 'walk', 'jog', 'crawl', 'attack', 'tear', 'vault', 'rise', 'death_back', 'death_fwd'];
-const SURVIVOR_CLIPS: SurvivorClip[] = ['idle', 'walk', 'run', 'downed', 'reload'];
-const ONE_SHOT = new Set(['attack', 'vault', 'rise', 'death_back', 'death_fwd', 'reload']);
+const SURVIVOR_CLIPS: SurvivorClip[] = ['idle', 'walk', 'run', 'downed', 'reload', 'idle_pistol', 'walk_pistol', 'run_pistol', 'reload_pistol'];
+/** Clips only created when the GLB has them (client.ts falls back to the rifle clip when `<clip>_pistol` is missing). */
+const OPTIONAL_CLIPS = new Set(['idle_pistol', 'walk_pistol', 'run_pistol', 'reload_pistol']);
+const ONE_SHOT = new Set(['attack', 'vault', 'rise', 'death_back', 'death_fwd', 'reload', 'reload_pistol']);
 const BONE_NAMES = ['root', 'hips', 'spine', 'chest', 'neck', 'head', ...['upperarm', 'forearm', 'hand', 'thigh', 'shin', 'foot'].flatMap((b) => [`${b}.L`, `${b}.R`])];
 
 /** Default jacket colour before a zombie's variant tint is applied. */
@@ -38,8 +40,12 @@ const ZOMBIE_CLOTHES: [number[], number[]][] = [
   [[0xd8cfc0, 0xc9b9a8, 0xa9b4c2, 0xc8c0cc], [0x2a2a2e, 0x3a2e2a, 0x2c3040]],
 ];
 
-/** Where the hold poses put the rifle grip, in the survivor's own space (build_zombies.py GRIP, converted to y-up). */
-const GRIP = new THREE.Vector3(0.15, 1.2, -0.36);
+/**
+ * Where the idle's first frame holds the gun grip, in the survivor's own space (y-up): swat_anim.models_ts_grip(), printed
+ * as "ANIM grip (models.ts GRIP)" by tools/blender/build_swat.py. Every clip keeps the right hand on the grip the same
+ * way, so the gun hung here follows the hands in all of them.
+ */
+const GRIP = new THREE.Vector3(0.0679, 1.4853, -0.382);
 
 const loader = new GLTFLoader();
 
@@ -109,7 +115,9 @@ function boneMap(root: THREE.Object3D): Record<string, THREE.Bone> {
 function makeActions(mixer: THREE.AnimationMixer, clips: THREE.AnimationClip[], names: string[]) {
   const actions: Record<string, THREE.AnimationAction> = {};
   for (const name of names) {
-    const clip = clips.find((c) => c.name === name) ?? new THREE.AnimationClip(name, 1, []);
+    const found = clips.find((c) => c.name === name);
+    if (!found && OPTIONAL_CLIPS.has(name)) continue;
+    const clip = found ?? new THREE.AnimationClip(name, 1, []);
     const a = mixer.clipAction(clip);
     if (ONE_SHOT.has(name)) {
       a.setLoop(THREE.LoopOnce, 1);
