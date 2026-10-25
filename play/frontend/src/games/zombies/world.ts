@@ -572,7 +572,8 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
     const holder = new THREE.Group();
     // Local frame: x along the wall, y up, z out of the room; origin at the inside face, floor height.
     const out = new THREE.Vector3(w.out.x, 0, w.out.z);
-    const along = new THREE.Vector3(-out.z, 0, out.x);
+    // along x up = out keeps the basis right-handed; the other sign is a mirror and the quaternion comes out wrong.
+    const along = new THREE.Vector3(out.z, 0, -out.x);
     holder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(along, new THREE.Vector3(0, 1, 0), out));
     holder.position.set(w.center.x - out.x * (WALL_T / 2), 0, w.center.z - out.z * (WALL_T / 2));
     group.add(holder);
