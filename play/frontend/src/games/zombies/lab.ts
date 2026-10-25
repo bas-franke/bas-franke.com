@@ -151,6 +151,11 @@ function shoot(o: THREE.Vector3, d: THREE.Vector3) {
   if (!hit) return null;
   const p = o.clone().addScaledVector(d, hit.t);
   fx.impact(p, hit.n, hit.mat as ImpactMat, hit.chunk);
+  // Furniture takes the bullet's damage (wears, then breaks where it was hit).
+  if (hit.chunk >= 0 && world.chunks[hit.chunk].furn !== undefined) {
+    if (damageChunk(world, hit.chunk, 20)) broke([hit.chunk]);
+    else view.setChunkHp(hit.chunk, world.hp[hit.chunk]);
+  }
   return { p, mat: hit.mat, chunk: hit.chunk };
 }
 

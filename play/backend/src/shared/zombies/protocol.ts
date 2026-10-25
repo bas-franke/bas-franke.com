@@ -92,7 +92,7 @@ export interface ZScore {
 
 /** Material codes for impacts: index into IMPACT_MATS. */
 /** Appended only: indices are on the wire. */
-export const IMPACT_MATS = ['none', 'brick', 'plaster', 'concrete', 'wood', 'metal', 'flesh', 'marble', 'travertine', 'walnut', 'glass'] as const;
+export const IMPACT_MATS = ['none', 'brick', 'plaster', 'concrete', 'wood', 'metal', 'flesh', 'marble', 'travertine', 'walnut', 'glass', 'fabric', 'leather', 'ceramic', 'brass', 'foliage'] as const;
 export type ImpactMat = (typeof IMPACT_MATS)[number];
 
 export type ZEvent =

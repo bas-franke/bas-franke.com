@@ -15,7 +15,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Vec3 } from '@shared/math';
-import { FURNITURE_SIZE, type FurnitureDef, type MapDef, type WallDef } from '@shared/zombies/maps';
+import { FURNITURE_SIZE, type FurnitureDef, type MapDef, type Mat, type WallDef } from '@shared/zombies/maps';
+import { furnitureParts } from '@shared/zombies/furniture';
 import { type World, forChunks } from '@shared/zombies/world';
 import type { LampLight, Models, Quality } from './api';
 import type { SetName, TexSet } from './textures';
@@ -43,6 +44,8 @@ export interface Decor {
   glows: Glow[];
   lamps: (LampLight & { update(time: number): void })[];
   breakChunk(i: number): void;
+  /** Health of a damaged furniture chunk (world.ts forwards them; walls show their own damage). */
+  setChunkHp(i: number, hp: number): void;
   update(dt: number, time: number): void;
   setQuality(q: Quality): void;
   dispose(): void;
@@ -145,9 +148,391 @@ export function mergeStatic(root: THREE.Object3D) {
     out.renderOrder = b.mesh.renderOrder;
     out.userData.noMoonShadow = b.mesh.userData.noMoonShadow;
     out.userData.merged = true;
+    // Cut-away furniture's shadow materials (a bucket shares one material, so one pair).
+    out.customDepthMaterial = b.mesh.customDepthMaterial;
+    out.customDistanceMaterial = b.mesh.customDistanceMaterial;
     root.add(out);
     for (const m of b.list) m.removeFromParent();
   }
+}
+
+// ---- furniture cut-away -------------------------------------------------------------------------------------------
+// Furniture is chunks (furniture.ts), but drawn as whole models; where a chunk is gone, the fragment shader throws the
+// model away inside that cell. The cells live in a float texture (in each piece's own frame, so a turned sofa is cut
+// along its own seams), a coarse floor grid says which pieces can reach a point, and a per-piece row says where its
+// cells start, how it is turned and whether it is touched at all (untouched pieces cost two texel fetches).
+// - The cut edge is the union of dead cells' distance fields, roughened with value noise (±5 cm), with a charred /
+//   frayed band outside it. Cut materials render both sides; a back face seen through a hole is the inside: foam in
+//   upholstery, raw wood, soil in the pot, bright brass. Foliage and glass just vanish.
+// - Damaged cells (setChunkHp) wear: darker, scuffed, frayed fabric, dull brass, crazed glass.
+// - Shadows: every cut mesh gets a depth / distance material that discards the same way. (post.ts's own fog-shaft
+//   depth passes use an override material and still see the whole piece.)
+
+const CUT_MAT: Partial<Record<Mat, number>> = { fabric: 0, leather: 1, brass: 2, marble: 3, ceramic: 4, wood: 5, walnut: 6, foliage: 7, glass: 8 };
+const CUT_W = 1024;
+const GRID_CELL = 0.5;
+
+const CUT_HEAD = /* glsl */ `
+uniform highp sampler2D cutGrid;
+uniform highp sampler2D cutFurn;
+uniform highp sampler2D cutCells;
+uniform vec3 cutGridInfo;
+varying vec3 vCutW;
+float cutD = 1e3;
+float cutWear = 0.0;
+float cutMat = -1.0;
+float cutAct = 0.0;
+float cutScuff = 0.0;
+float cutHash(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float cutNoise(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(cutHash(i), cutHash(i + vec3(1, 0, 0)), f.x), mix(cutHash(i + vec3(0, 1, 0)), cutHash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(cutHash(i + vec3(0, 0, 1)), cutHash(i + vec3(1, 0, 1)), f.x), mix(cutHash(i + vec3(0, 1, 1)), cutHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float cutBox(vec3 p, vec3 a, vec3 b) {
+  vec3 q = abs(p - (a + b) * 0.5) - (b - a) * 0.5;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+// Distance to the dead cells (cutD), wear of the cell we are in, material of the nearest live cell.
+void cutEval(vec3 w) {
+  ivec2 gs = textureSize(cutGrid, 0);
+  ivec2 g = ivec2(floor((w.xz - cutGridInfo.xy) * cutGridInfo.z));
+  if (g.x < 0 || g.y < 0 || g.x >= gs.x || g.y >= gs.y) return;
+  vec4 ids = texelFetch(cutGrid, g, 0);
+  float nearAlive = 1e3;
+  for (int k = 0; k < 4; k++) {
+    float id = ids[k];
+    if (id < 0.5) break;
+    int fi = int(id) - 1;
+    vec4 info = texelFetch(cutFurn, ivec2(fi, 1), 0);
+    if (info.z < 0.5) continue;
+    cutAct = max(cutAct, info.z);
+    vec4 pose = texelFetch(cutFurn, ivec2(fi, 0), 0);
+    vec2 d = w.xz - pose.xy;
+    vec3 lp = vec3(d.x * pose.z - d.y * pose.w, w.y, d.x * pose.w + d.y * pose.z);
+    int s = int(info.x);
+    int n = int(info.y);
+    for (int c = 0; c < 48; c++) {
+      if (c >= n) break;
+      int t = (s + c) * 2;
+      vec4 a = texelFetch(cutCells, ivec2(t & ${CUT_W - 1}, t >> ${Math.log2(CUT_W)}), 0);
+      vec4 b = texelFetch(cutCells, ivec2((t + 1) & ${CUT_W - 1}, (t + 1) >> ${Math.log2(CUT_W)}), 0);
+      float sd = cutBox(lp, a.xyz, b.xyz);
+      if (a.w > 0.5 || info.z > 1.5) cutD = min(cutD, sd);
+      else {
+        if (sd < nearAlive) {
+          nearAlive = sd;
+          cutMat = floor(b.w);
+        }
+        float dm = fract(b.w);
+        if (dm > 0.0) cutWear = max(cutWear, dm * (1.0 - smoothstep(0.0, 0.03, sd)));
+      }
+    }
+  }
+}
+`;
+
+const CUT_VERT = /* glsl */ `#include <project_vertex>
+{
+  vec4 cutP = vec4(transformed, 1.0);
+#ifdef USE_INSTANCING
+  cutP = instanceMatrix * cutP;
+#endif
+  vCutW = (modelMatrix * cutP).xyz;
+}`;
+
+// Shared start of every cut fragment shader: evaluate, discard, and decide inside / band.
+const CUT_FRAG_MAIN = /* glsl */ `#include <clipping_planes_fragment>
+cutEval(vCutW);
+float cutN1 = cutAct > 0.5 ? cutNoise(vCutW * 9.0) * 0.65 + cutNoise(vCutW * 27.0) * 0.35 : 0.5;
+float cutEdge = cutD + (cutN1 - 0.5) * 0.14;
+if (cutAct > 1.5 && cutD < 0.1) discard;
+if (cutEdge < 0.0) discard;
+int cutM = int(cutMat + 0.5);
+// A back face of a shot piece is its inside (glTF upholstery is double-sided too); leaves and glass have none.
+// Facing by the vertex normal, not the winding: some glTF meshes are wound inside out.
+#ifdef FLAT_SHADED
+bool cutBackish = !gl_FrontFacing;
+#else
+bool cutBackish = dot(vNormal, vViewPosition) < 0.0;
+#endif
+bool cutIn = cutBackish && cutAct > 0.5 && cutM < 7;
+#ifdef CUT_SINGLE
+if (!gl_FrontFacing && !cutIn) discard;
+#endif
+float cutBand = cutAct > 0.5 ? 1.0 - smoothstep(0.0, 0.03 + cutN1 * 0.04, cutEdge) : 0.0;
+`;
+
+const CUT_COLOR = /* glsl */ `#include <color_fragment>
+if (cutAct > 0.5) {
+  if (cutIn) {
+    // The inside: foam, raw brass, pale stone, soil, raw wood.
+    vec3 ic = cutM <= 1 ? vec3(0.78, 0.62, 0.22) : cutM == 2 ? vec3(0.5, 0.36, 0.2) : cutM == 3 ? vec3(0.62, 0.6, 0.56) : cutM == 4 ? vec3(0.035, 0.022, 0.012) : cutM <= 6 ? vec3(0.6, 0.38, 0.18) : vec3(0.3);
+    diffuseColor.rgb = ic * (0.7 + 0.6 * cutN1);
+  } else {
+    float fib = cutNoise(vCutW * vec3(70.0, 18.0, 70.0));
+    // Fabric frays into pale foam fibres and dark threads; pottery shows its biscuit; brass is torn bright; wood
+    // and stone char.
+    vec3 bc = cutM <= 1 ? mix(diffuseColor.rgb * 0.25, vec3(0.75, 0.6, 0.25), step(0.55, fib) * smoothstep(0.6, 1.0, cutBand))
+      : cutM == 4 ? vec3(0.6, 0.45, 0.3) : cutM == 2 ? vec3(0.9, 0.68, 0.38) : cutM == 3 ? vec3(0.5, 0.48, 0.45) : cutM == 7 ? vec3(0.12, 0.08, 0.03) : vec3(0.025, 0.018, 0.012);
+    diffuseColor.rgb = mix(diffuseColor.rgb, bc, cutBand * 0.9);
+    if (cutWear > 0.0) {
+      if (cutM == 2) diffuseColor.rgb *= 1.0 - 0.3 * cutWear;
+      float wn = cutNoise(vCutW * 31.0) * 0.65 + cutNoise(vCutW * 97.0) * 0.35;
+      float wr = cutWear * smoothstep(0.62 - cutWear * 0.5, 0.9 - cutWear * 0.5, wn);
+      cutScuff = wr;
+      diffuseColor.rgb *= 1.0 - (cutM <= 1 ? 0.75 : cutM == 2 ? 0.5 : 0.6) * wr;
+      if (cutM == 8) {
+        // Crazing: thin bright lines along the noise's level sets.
+        float cr = 1.0 - smoothstep(0.0, 0.035, abs(cutNoise(vCutW * 26.0) - 0.5));
+        diffuseColor.rgb += vec3(0.6) * cr * cutWear;
+        diffuseColor.a = max(diffuseColor.a, cr * cutWear);
+      }
+    }
+  }
+}`;
+
+const CUT_PBR = /* glsl */ `#include <metalnessmap_fragment>
+if (cutAct > 0.5) {
+  if (cutIn) {
+    roughnessFactor = cutM == 2 ? 0.55 : 0.95;
+    metalnessFactor = cutM == 2 ? 1.0 : 0.0;
+  } else {
+    roughnessFactor = mix(roughnessFactor, cutM == 2 ? 0.3 : 1.0, cutBand);
+    if (cutM == 2) {
+      // Dull brass: a rougher, darker metal, never a painted look.
+      roughnessFactor = mix(roughnessFactor, 0.55, min(1.0, cutWear * 0.25 + cutScuff));
+    } else {
+      metalnessFactor *= 1.0 - cutBand;
+      roughnessFactor = mix(roughnessFactor, 1.0, cutWear * 0.6);
+    }
+  }
+}`;
+
+const CUT_EMIT = /* glsl */ `#include <emissivemap_fragment>
+if (cutAct > 0.5) totalEmissiveRadiance *= cutIn ? 0.15 : 1.0 - cutBand;`;
+
+const CUT_DEPTH_MAIN = /* glsl */ `#include <clipping_planes_fragment>
+cutEval(vCutW);
+if (cutAct > 0.5) {
+  if (cutAct > 1.5 && cutD < 0.1) discard;
+  if (cutD + (cutNoise(vCutW * 9.0) * 0.65 + cutNoise(vCutW * 27.0) * 0.35 - 0.5) * 0.14 < 0.0) discard;
+}`;
+
+interface FurnitureCut {
+  /** Swaps every mesh under `root` to its cut material (plus shadow materials). */
+  apply(root: THREE.Object3D): void;
+  /** The cut version of a material, for swapping a lamp's shade or bulb later. */
+  of(m: THREE.Material): THREE.Material;
+  breakChunk(i: number): void;
+  setChunkHp(i: number, hp: number): void;
+  update(): void;
+  dispose(): void;
+}
+
+function furnitureCut(world: World): FurnitureCut {
+  const pieces = world.furniture;
+  const nF = Math.max(1, pieces.length);
+  const nCells = pieces.reduce((s, f) => s + (f.c1 - f.c0), 0);
+  const rows = Math.max(1, Math.ceil((nCells * 2) / CUT_W));
+  const cells = new Float32Array(CUT_W * rows * 4);
+  const furn = new Float32Array(nF * 2 * 4);
+  const slotOf = new Int32Array(world.chunks.length).fill(-1);
+  let start = 0;
+  pieces.forEach((f, fi) => {
+    furn.set([f.x, f.z, Math.cos(f.yaw), Math.sin(f.yaw)], fi * 4);
+    // The same cells as furniture.ts's furnitureCells, but in the piece's own frame. Faces on a part's outside
+    // reach a little further, so a model that bulges past the part box still goes with its cell; foliage
+    // reaches a lot further sideways and up (leaf cards stick out of the canopy).
+    const local: { min: number[]; max: number[]; mat: number }[] = [];
+    for (const p of furnitureParts(f.kind)) {
+      const n = [p.max.x - p.min.x, p.max.y - p.min.y, p.max.z - p.min.z].map((len) => Math.max(1, Math.ceil(len / p.cell - 1e-6)));
+      const sz = [(p.max.x - p.min.x) / n[0], (p.max.y - p.min.y) / n[1], (p.max.z - p.min.z) / n[2]];
+      const lo = [p.min.x, p.min.y, p.min.z];
+      const leafy = p.mat === 'foliage';
+      const out = leafy ? 0.32 : 0.05;
+      for (let i = 0; i < n[0]; i++)
+        for (let j = 0; j < n[1]; j++)
+          for (let k = 0; k < n[2]; k++) {
+            const idx = [i, j, k];
+            const mn = idx.map((q, a) => lo[a] + q * sz[a] - (q === 0 ? (a === 1 ? (leafy ? 0 : 0.03) : out) : 0));
+            const mx = idx.map((q, a) => lo[a] + (q + 1) * sz[a] + (q === n[a] - 1 ? out : 0));
+            local.push({ min: mn, max: mx, mat: CUT_MAT[p.mat] ?? 9 });
+          }
+    }
+    const count = f.c1 - f.c0;
+    if (local.length !== count) {
+      console.warn(`[decor] furniture ${fi} (${f.kind}): ${local.length} cells, ${count} chunks; not cut`);
+      furn.set([start, 0, 0, 0], (nF + fi) * 4);
+      return;
+    }
+    local.forEach((c, k) => {
+      const o = (start + k) * 8;
+      cells.set([c.min[0], c.min[1], c.min[2], 0, c.max[0], c.max[1], c.max[2], c.mat], o);
+      slotOf[f.c0 + k] = start + k;
+    });
+    furn.set([start, count, 0, 0], (nF + fi) * 4);
+    start += count;
+  });
+  const cellTex = new THREE.DataTexture(cells, CUT_W, rows, THREE.RGBAFormat, THREE.FloatType);
+  const furnTex = new THREE.DataTexture(furn, nF, 2, THREE.RGBAFormat, THREE.FloatType);
+  // Floor grid: up to four pieces (index + 1) whose reach overlaps each 0.5 m square.
+  let x0 = Infinity;
+  let z0 = Infinity;
+  let x1 = -Infinity;
+  let z1 = -Infinity;
+  // Each piece's reach: its chunks (foliage can stand well past the footprint) plus the cells' padding and noise.
+  const reach = pieces.map((f) => {
+    const r = { minX: Infinity, minZ: Infinity, maxX: -Infinity, maxZ: -Infinity };
+    for (let i = f.c0; i < f.c1; i++) {
+      const c = world.chunks[i];
+      r.minX = Math.min(r.minX, c.min.x - 0.45);
+      r.minZ = Math.min(r.minZ, c.min.z - 0.45);
+      r.maxX = Math.max(r.maxX, c.max.x + 0.45);
+      r.maxZ = Math.max(r.maxZ, c.max.z + 0.45);
+    }
+    if (f.c1 <= f.c0) Object.assign(r, { minX: f.box.min.x, minZ: f.box.min.z, maxX: f.box.max.x, maxZ: f.box.max.z });
+    return r;
+  });
+  for (const r of reach) {
+    x0 = Math.min(x0, r.minX);
+    z0 = Math.min(z0, r.minZ);
+    x1 = Math.max(x1, r.maxX);
+    z1 = Math.max(z1, r.maxZ);
+  }
+  if (!pieces.length) x0 = z0 = x1 = z1 = 0;
+  const gw = Math.max(1, Math.ceil((x1 - x0) / GRID_CELL));
+  const gh = Math.max(1, Math.ceil((z1 - z0) / GRID_CELL));
+  const grid = new Float32Array(gw * gh * 4);
+  reach.forEach((r, fi) => {
+    const a0 = Math.max(0, Math.floor((r.minX - x0) / GRID_CELL));
+    const a1 = Math.min(gw - 1, Math.floor((r.maxX - x0) / GRID_CELL));
+    const b0 = Math.max(0, Math.floor((r.minZ - z0) / GRID_CELL));
+    const b1 = Math.min(gh - 1, Math.floor((r.maxZ - z0) / GRID_CELL));
+    for (let b = b0; b <= b1; b++)
+      for (let a = a0; a <= a1; a++) {
+        const o = (b * gw + a) * 4;
+        for (let k = 0; k < 4; k++)
+          if (grid[o + k] === 0) {
+            grid[o + k] = fi + 1;
+            break;
+          }
+      }
+  });
+  const gridTex = new THREE.DataTexture(grid, gw, gh, THREE.RGBAFormat, THREE.FloatType);
+  for (const t of [cellTex, furnTex, gridTex]) t.needsUpdate = true;
+  const uniforms = {
+    cutGrid: { value: gridTex },
+    cutFurn: { value: furnTex },
+    cutCells: { value: cellTex },
+    cutGridInfo: { value: new THREE.Vector3(x0, z0, 1 / GRID_CELL) },
+  };
+  const patch = (m: THREE.Material, depth: boolean) => {
+    const prev = m.onBeforeCompile;
+    const prevKey = m.customProgramCacheKey.bind(m);
+    m.onBeforeCompile = (sh, r) => {
+      prev.call(m, sh, r);
+      Object.assign(sh.uniforms, uniforms);
+      sh.vertexShader = 'varying vec3 vCutW;\n' + sh.vertexShader.replace('#include <project_vertex>', CUT_VERT);
+      let fs = CUT_HEAD + sh.fragmentShader;
+      if (depth) fs = fs.replace('#include <clipping_planes_fragment>', CUT_DEPTH_MAIN);
+      else
+        fs = fs
+          .replace('#include <clipping_planes_fragment>', CUT_FRAG_MAIN)
+          .replace('#include <color_fragment>', CUT_COLOR)
+          .replace('#include <metalnessmap_fragment>', CUT_PBR)
+          .replace('#include <emissivemap_fragment>', CUT_EMIT);
+      sh.fragmentShader = fs;
+    };
+    m.customProgramCacheKey = () => `cut${depth ? 'd' : ''}|${m.defines?.CUT_SINGLE !== undefined ? 1 : 0}|${prevKey()}`;
+  };
+  const made: THREE.Material[] = [];
+  const cutOf = new Map<THREE.Material, THREE.Material>();
+  const shadowOf = new Map<THREE.Material, [THREE.MeshDepthMaterial, THREE.MeshDistanceMaterial]>();
+  const of = (m: THREE.Material): THREE.Material => {
+    if (m.userData.cut) return m;
+    const known = cutOf.get(m);
+    if (known) return known;
+    // A stuttering fixture's own material is patched in place (update() drives it); everything else is cloned so
+    // the same material elsewhere in the lobby stays a plain one.
+    const c = m.userData.ownFixture ? m : m.clone();
+    if (c !== m) {
+      // clone() drops shader patches (projMaterial's world-projected UVs): carry them over.
+      c.onBeforeCompile = m.onBeforeCompile;
+      c.customProgramCacheKey = m.customProgramCacheKey;
+      made.push(c);
+    }
+    c.userData.cut = true;
+    if (c.side === THREE.FrontSide) {
+      c.defines = { ...(c.defines ?? {}), CUT_SINGLE: '' };
+      c.side = THREE.DoubleSide;
+      // Shadows stay as before: a FrontSide material casts with its back faces.
+      c.shadowSide = THREE.BackSide;
+    }
+    patch(c, false);
+    c.needsUpdate = true;
+    cutOf.set(m, c);
+    const d = new THREE.MeshDepthMaterial();
+    const dist = new THREE.MeshDistanceMaterial();
+    patch(d, true);
+    patch(dist, true);
+    made.push(d, dist);
+    shadowOf.set(c, [d, dist]);
+    return c;
+  };
+  const apply = (root: THREE.Object3D) =>
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || Array.isArray(mesh.material)) return;
+      mesh.material = of(mesh.material);
+      const sh = shadowOf.get(mesh.material);
+      if (sh) [mesh.customDepthMaterial, mesh.customDistanceMaterial] = sh;
+    });
+  let dirty = false;
+  const touch = (fi: number) => {
+    const f = pieces[fi];
+    const o = (nF + fi) * 4;
+    let all = true;
+    for (let i = f.c0; i < f.c1 && all; i++) if (slotOf[i] >= 0 && cells[slotOf[i] * 8 + 3] < 0.5) all = false;
+    furn[o + 2] = all ? 2 : 1;
+    dirty = true;
+  };
+  return {
+    apply,
+    of,
+    breakChunk(i) {
+      const s = slotOf[i];
+      const fi = world.chunks[i]?.furn;
+      if (s < 0 || fi === undefined) return;
+      cells[s * 8 + 3] = 1;
+      touch(fi);
+    },
+    setChunkHp(i, hp) {
+      const s = slotOf[i];
+      const c = world.chunks[i];
+      if (s < 0 || c?.furn === undefined) return;
+      const dmg = Math.min(0.99, Math.max(0, 1 - hp / c.maxHp));
+      const o = s * 8 + 7;
+      cells[o] = Math.floor(cells[o]) + dmg;
+      touch(c.furn);
+    },
+    update() {
+      if (!dirty) return;
+      dirty = false;
+      cellTex.needsUpdate = true;
+      furnTex.needsUpdate = true;
+    },
+    dispose() {
+      for (const m of made) m.dispose();
+      for (const t of [cellTex, furnTex, gridTex]) t.dispose();
+    },
+  };
 }
 
 export function buildDecor(world: World, mats: DecorMats, quality: Quality, models: Models): Decor {
@@ -182,13 +567,18 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
   const stem = keep(new THREE.MeshStandardMaterial({ color: 0x4d6b2c, roughness: 0.7 }));
   const vase = keep(new THREE.MeshPhysicalMaterial({ color: 0xe8f0ec, roughness: 0.05, transmission: 0.6, transparent: true, opacity: 0.45, envMapIntensity: 1.5 }));
   const cloth = keep(new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 0.85 }));
+  const lacquer = keep(new THREE.MeshStandardMaterial({ color: 0x0d0b09, roughness: 0.14, metalness: 0.35, envMapIntensity: 1.4 }));
   const bottleMats = [0x3d5a2a, 0x6a3a14, 0x8a6a30, 0x2c3a44, 0xb0b8a0].map((c) =>
     keep(new THREE.MeshStandardMaterial({ color: c, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.85, emissive: new THREE.Color(c).multiplyScalar(0.05) })),
   );
 
   // Point lights from a shared pool; the flickering candidates get one first, then the strongest.
   type Fix = { mat: THREE.MeshStandardMaterial; matBase: number; glow: Glow; glowBase: number; seed: number; fail: number; light: THREE.PointLight | null; power: number };
-  const pointCandidates: { pos: THREE.Vector3; color: THREE.Color; power: number; range: number; fix?: Fix }[] = [];
+  type Cand = { pos: THREE.Vector3; color: THREE.Color; power: number; range: number; fix?: Fix; light?: THREE.PointLight; out?: boolean };
+  const pointCandidates: Cand[] = [];
+  /** What the last fixture() lit, so a furniture lamp can be put out when it is shot to pieces. */
+  type LampRef = { glow: Glow | null; fix: Fix | null; cand: Cand | null };
+  let lastLamp: LampRef = { glow: null, fix: null, cand: null };
   const flickers: Fix[] = [];
   const addGlow = (pos: THREE.Vector3, color: THREE.Color, intensity: number, light = 0, range = 6) => {
     const glow: Glow = { pos: { x: pos.x, y: pos.y, z: pos.z }, color: color.clone(), intensity };
@@ -208,17 +598,22 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
    * stuttering ones get their own material clone and are driven by `failing` in update. Returns the material to use.
    */
   const fixture = (state: FixState, mat: THREE.MeshStandardMaterial, dead: THREE.MeshStandardMaterial, pos: THREE.Vector3, color: THREE.Color, glowI: number, light = 0, range = 6, lit = 0.5) => {
+    const n0 = pointCandidates.length;
+    lastLamp = { glow: null, fix: null, cand: null };
     if (state === 'dead') return dead;
     if (state === 'lit') {
-      addGlow(pos, color, glowI * lit, light * lit, range);
+      lastLamp.glow = addGlow(pos, color, glowI * lit, light * lit, range);
+      lastLamp.cand = pointCandidates.length > n0 ? pointCandidates[n0] : null;
       return mat;
     }
     const own = keep(mat.clone());
+    own.userData.ownFixture = true;
     own.emissiveIntensity = mat.emissiveIntensity * 1.6;
     const glow = addGlow(pos, color, glowI, light, range);
     const fix: Fix = { mat: own, matBase: own.emissiveIntensity, glow, glowBase: glowI, seed: flickers.length * 5.17 + 0.3, fail: 0.55 + fixRnd() * 0.45, light: null, power: light };
     if (light > 0) pointCandidates[pointCandidates.length - 1].fix = fix;
     flickers.push(fix);
+    lastLamp = { glow, fix, cand: pointCandidates.length > n0 ? pointCandidates[n0] : null };
     return own;
   };
 
@@ -231,6 +626,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     let bestD = Infinity;
     forChunks(world, probe, (i) => {
       const c = world.chunks[i];
+      if (c.furn !== undefined) return;
       const dx = Math.max(c.min.x - p.x, 0, p.x - c.max.x);
       const dy = Math.max(c.min.y - p.y, 0, p.y - c.max.y);
       const dz = Math.max(c.min.z - p.z, 0, p.z - c.max.z);
@@ -398,6 +794,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
           const p = new THREE.Vector3(f.x, s.h + 0.4, f.z);
           const state = pickState(0.3, 0.1);
           g.userData.lit = { glow: fixture(state, lampGlow, glowDead, p, WARM, 1.6, 1.4, 4), shade: state === 'dead' ? shadeDead : shadeMat };
+          g.userData.lamp = lastLamp;
           const sh = add(new THREE.CylinderGeometry(0.14, 0.17, 0.2, 24, 1, true), g.userData.lit.shade, 0, s.h + 0.46, 0, false);
           sh.userData.noMoonShadow = true;
         } else {
@@ -414,6 +811,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         const p = new THREE.Vector3(f.x, 1.45, f.z);
         const state = pickState(0.6, 0.2);
         g.userData.lit = { glow: fixture(state, lampGlow, glowDead, p, WARM, 2.2, 2.2, 5, 0.6), shade: state === 'dead' ? shadeDead : shadeMat };
+        g.userData.lamp = lastLamp;
         const sh = add(new THREE.CylinderGeometry(0.22, 0.26, 0.34, 28, 1, true), g.userData.lit.shade, 0, 1.52, 0, false);
         sh.userData.noMoonShadow = true;
         break;
@@ -422,6 +820,8 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         // A tall black ceramic pot with a small olive tree.
         add(new THREE.CylinderGeometry(0.42, 0.34, 0.85, 28), potMat, 0, 0.425, 0);
         add(new THREE.CylinderGeometry(0.4, 0.4, 0.02, 28), soilMat, 0, 0.84, 0, false);
+        // The outer planters hold string-light trees (built separately).
+        if (Math.abs(f.x) > 8) break;
         add(new THREE.CylinderGeometry(0.035, 0.05, 1.6, 7), mats.bark, 0, 1.6, 0);
         const cards: THREE.BufferGeometry[] = [];
         for (let k = 0; k < 22; k++) {
@@ -439,10 +839,22 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         break;
       }
       case 'centerpiece': {
-        // A round marble table on a brass plinth with a big white arrangement in a glass vase.
-        add(new THREE.CylinderGeometry(0.55, 0.65, 0.72, 40), mats.brass, 0, 0.36, 0);
-        add(new THREE.CylinderGeometry(0.8, 0.8, 0.06, 48), marble, 0, 0.75, 0);
-        add(new THREE.CylinderGeometry(0.16, 0.12, 0.45, 24), vase, 0, 1.0, 0, false);
+        // A round pedestal table in black lacquer, its drum flaring out to the floor, under a black top with a gold
+        // rim; a big white arrangement in a glass vase.
+        const drum: THREE.Vector2[] = [];
+        for (let k = 0; k <= 14; k++) {
+          const t = k / 14;
+          // Wide foot curving up into a slimmer waist, then straight up under the top.
+          drum.push(new THREE.Vector2(0.44 + 0.2 * Math.pow(1 - Math.min(1, t / 0.75), 2.2), 0.7 * t));
+        }
+        drum.unshift(new THREE.Vector2(0, 0));
+        drum.push(new THREE.Vector2(0, 0.7));
+        add(new THREE.LatheGeometry(drum, 48), lacquer, 0, 0, 0);
+        add(new THREE.CylinderGeometry(0.66, 0.66, 0.025, 48), mats.brass, 0, 0.0125, 0);
+        add(new THREE.CylinderGeometry(0.82, 0.8, 0.07, 56), lacquer, 0, 0.735, 0);
+        add(new THREE.TorusGeometry(0.815, 0.016, 8, 72).rotateX(Math.PI / 2), mats.brass, 0, 0.77, 0, false);
+        add(new THREE.TorusGeometry(0.8, 0.012, 8, 72).rotateX(Math.PI / 2), mats.brass, 0, 0.7, 0, false);
+        add(new THREE.CylinderGeometry(0.16, 0.12, 0.45, 24), vase, 0, 1.0, 0, false).userData.bouquet = true;
         const stems: THREE.BufferGeometry[] = [];
         const blooms: THREE.BufferGeometry[] = [];
         for (let k = 0; k < 40; k++) {
@@ -458,8 +870,8 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
           const tip = dir.multiplyScalar(len).add(new THREE.Vector3(0, 1.0, 0));
           for (let j = 0; j < 4; j++) blooms.push(new THREE.IcosahedronGeometry(0.035 + rnd() * 0.025, 0).translate(tip.x + (rnd() - 0.5) * 0.08, tip.y - j * 0.06, tip.z + (rnd() - 0.5) * 0.08));
         }
-        add(mergeGeometries(stems), stem, 0, 0, 0, false);
-        add(mergeGeometries(blooms), petal, 0, 0, 0);
+        add(mergeGeometries(stems), stem, 0, 0, 0, false).userData.bouquet = true;
+        add(mergeGeometries(blooms), petal, 0, 0, 0).userData.bouquet = true;
         for (const gg of [...stems, ...blooms]) gg.dispose();
         break;
       }
@@ -523,8 +935,49 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     }
     return g;
   };
-  const furnitureSlots: { def: FurnitureDef; holder: THREE.Group; fallback: THREE.Group }[] = [];
-  for (const f of def.furniture ?? []) {
+  // Furniture is cut away where its chunks break (furnitureCut above); a lamp goes out once its shade is gone or its
+  // pole is shot through.
+  const cut = furnitureCut(world);
+  const gone = new Uint8Array(world.chunks.length);
+  type Slot = { def: FurnitureDef; holder: THREE.Group; fallback: THREE.Group; shade: number[]; dark: boolean };
+  const furnitureSlots: Slot[] = [];
+  /** Cut materials on a slot's meshes; its lamp's shade and bulb stay separate meshes so they can go dark alone. */
+  const cutSlot = (slot: Slot) => {
+    cut.apply(slot.holder);
+    const lit = slot.fallback.userData.lit as { glow: THREE.Material; shade: THREE.Material } | undefined;
+    if (!lit) return;
+    const lampMats = [cut.of(lit.glow), cut.of(lit.shade)];
+    slot.holder.traverse((o) => {
+      if (lampMats.includes((o as THREE.Mesh).material as THREE.Material)) o.userData.noMerge = true;
+    });
+  };
+  const killLamp = (slot: Slot) => {
+    const lit = slot.fallback.userData.lit as { glow: THREE.Material; shade: THREE.Material } | undefined;
+    if (!lit || slot.dark) return;
+    slot.dark = true;
+    const ref = slot.fallback.userData.lamp as LampRef | undefined;
+    if (ref?.glow) ref.glow.intensity = 0;
+    if (ref?.fix) {
+      const k = flickers.indexOf(ref.fix);
+      if (k >= 0) flickers.splice(k, 1);
+      ref.fix.mat.emissiveIntensity = ref.fix.matBase * 0.02;
+    }
+    if (ref?.cand) {
+      ref.cand.out = true;
+      if (ref.cand.light) ref.cand.light.intensity = 0;
+    }
+    const glowC = cut.of(lit.glow);
+    const shadeC = cut.of(lit.shade);
+    slot.holder.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      if (m.material === glowC) m.material = glowDead;
+      else if (m.material === shadeC) m.material = shadeDead;
+      else return;
+      cut.apply(m);
+    });
+  };
+  for (const [fi, f] of (def.furniture ?? []).entries()) {
     const holder = new THREE.Group();
     holder.position.set(f.x, 0, f.z);
     // Furniture yaw: the front faces `yaw`; models face -Z at yaw 0 (glTF front), stand-ins were built with the back at +z.
@@ -532,7 +985,77 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     const fb = furnitureFallback(f);
     holder.add(fb);
     group.add(holder);
-    furnitureSlots.push({ def: f, holder, fallback: fb });
+    const info = world.furniture[fi];
+    const shade: number[] = [];
+    if (info && (f.kind === 'sideTable' || f.kind === 'floorLamp')) {
+      const parts = furnitureParts(f.kind);
+      for (let i = info.c0; i < info.c1; i++) if (parts[world.chunks[i].furnPart ?? 0]?.name === 'shade') shade.push(i);
+    }
+    const slot: Slot = { def: f, holder, fallback: fb, shade, dark: false };
+    cutSlot(slot);
+    furnitureSlots.push(slot);
+  }
+
+  // ---- string-light trees: the outer planters by the facade hold bare twig trees wound with warm fairy lights ------
+  const lightTreeAt = (f: FurnitureDef) => f.kind === 'planter' && Math.abs(f.x) > 8;
+  {
+    const twigs: THREE.BufferGeometry[] = [];
+    const bulbs: THREE.Vector3[] = [];
+    const tr = seeded(5150);
+    const up = new THREE.Vector3(0, 1, 0);
+    const branch = (p: THREE.Vector3, d: THREE.Vector3, len: number, r0: number, depth: number) => {
+      const end = p.clone().addScaledVector(d, len);
+      const g = new THREE.CylinderGeometry(r0 * 0.7, r0, len, 5, 1, true);
+      g.translate(0, len / 2, 0);
+      g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, d));
+      g.translate(p.x, p.y, p.z);
+      twigs.push(g);
+      // Bulbs strung along the outer branches.
+      if (depth >= 2) for (let t = 0.25; t <= 1.001; t += 0.3 + tr() * 0.15) bulbs.push(p.clone().addScaledVector(d, len * t).add(new THREE.Vector3((tr() - 0.5) * 0.04, (tr() - 0.5) * 0.04, (tr() - 0.5) * 0.04)));
+      if (depth >= 3) return;
+      const n = depth === 0 ? 4 : 3;
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * Math.PI * 2 + tr() * 1.2;
+        const spread = (depth === 0 ? 0.5 : 0.45) + tr() * 0.25;
+        const nd = d.clone().multiplyScalar(Math.cos(spread)).add(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(Math.sin(spread))).normalize();
+        nd.y = Math.max(nd.y, 0.35);
+        branch(end, nd.normalize(), len * (0.62 + tr() * 0.18), r0 * 0.6, depth + 1);
+      }
+    };
+    // Sized to the planter's furniture chunks: trunk to ~2 m, the lit crown 2-3 m.
+    branch(new THREE.Vector3(0, 0.84, 0), up.clone(), 0.9, 0.05, 0);
+    const twigGeo = keep(mergeGeometries(twigs));
+    for (const g of twigs) g.dispose();
+    const bulbGeo = keep(new THREE.SphereGeometry(0.022, 6, 4));
+    // Linear HDR well above 1 so the bulbs bloom; tiny, so they stay points of light.
+    const bulbMat = keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 0.62, 0.28).multiplyScalar(7) }));
+    const m4 = new THREE.Matrix4();
+    for (const [fi, f] of (def.furniture ?? []).entries()) {
+      if (!lightTreeAt(f)) continue;
+      const tree = new THREE.Group();
+      tree.position.set(f.x, 0, f.z);
+      tree.rotation.y = f.x * 1.7;
+      const tw = new THREE.Mesh(twigGeo, mats.bark);
+      tw.castShadow = true;
+      const lights = new THREE.InstancedMesh(bulbGeo, bulbMat, bulbs.length);
+      bulbs.forEach((b, k) => lights.setMatrixAt(k, m4.makeTranslation(b.x, b.y, b.z)));
+      lights.userData.noMoonShadow = true;
+      tree.add(tw, lights);
+      tree.userData.noMerge = true;
+      group.add(tree);
+      // A warm halo in the fog and a little real light on the glass and floor nearby.
+      const glowAt = new THREE.Vector3(f.x, 1.7, f.z);
+      addGlow(glowAt, WARM, 0.9, 0.8, 4);
+      // The tree comes down with any of its planter's chunks above the pot.
+      const info = world.furniture[fi];
+      if (info)
+        for (let i = info.c0; i < info.c1; i++)
+          if (world.chunks[i].max.y > 0.95) {
+            const list = onChunk.get(i) ?? [];
+            list.push(tree);
+            onChunk.set(i, list);
+          }
+    }
   }
 
   // ---- columns: brass sconces on the faces towards the aisle and the walls ----------------------------------------
@@ -581,7 +1104,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
   const chunkBox = (cx: number, cz: number, rx: number, rz: number) => {
     const b = new THREE.Box3();
     for (const c of world.chunks)
-      if (!c.wall && Math.abs((c.min.x + c.max.x) / 2 - cx) < rx && Math.abs((c.min.z + c.max.z) / 2 - cz) < rz)
+      if (!c.wall && c.furn === undefined && Math.abs((c.min.x + c.max.x) / 2 - cx) < rx && Math.abs((c.min.z + c.max.z) / 2 - cz) < rz)
         b.union(new THREE.Box3(new THREE.Vector3(c.min.x, c.min.y, c.min.z), new THREE.Vector3(c.max.x, c.max.y, c.max.z)));
     return b.isEmpty() ? null : b;
   };
@@ -795,14 +1318,93 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       revolving = { g, pos: wallPoint(w, e.at, 0, -2.2), yaw: Math.atan2(-(w.along === 'z' ? -w.out : 0), -(w.along === 'x' ? -w.out : 0)) };
     }
   }
-  if (facade) {
-    // Horizontal brass transoms across the glass every 3 m, outside the breakable panes.
+  if (facade) buildFacadeDress(facade);
+
+  // ---- the facade: a slim dark window grid and the boarded-up gate behind the security bars ------------------------
+  function buildFacadeDress(facade: WallDef) {
+    const ax = facade.along === 'x';
     const len = facade.a1 - facade.a0;
+    const grid: THREE.BufferGeometry[] = [];
+    const piece = (a: number, y: number, along: number, h: number, off: number, d: number) => {
+      const p = wallPoint(facade, a, y, off);
+      grid.push(box(ax ? along : d, h, ax ? d : along).translate(p.x, p.y, p.z));
+    };
+    // Slim brass transoms every 3 m (square panes between the 3 m mullions), on the inside face of the glass so they
+    // stay crisp in front of the misty panes, with a twin outside.
     for (let y = 3; y < facade.h - 0.5; y += 3) {
-      const t = new THREE.Mesh(keep(box(facade.along === 'x' ? len : 0.08, 0.08, facade.along === 'x' ? 0.08 : len)), mats.brass);
-      t.position.copy(wallPoint(facade, (facade.a0 + facade.a1) / 2, y, -(facade.thick + 0.06)));
-      t.castShadow = true;
-      group.add(t);
+      piece((facade.a0 + facade.a1) / 2, y, len, 0.06, 0.03, 0.05);
+      piece((facade.a0 + facade.a1) / 2, y, len, 0.06, -(facade.thick + 0.05), 0.05);
+    }
+    const gridMesh = new THREE.Mesh(keep(mergeGeometries(grid)), mats.brass);
+    for (const g of grid) g.dispose();
+    gridMesh.castShadow = true;
+    group.add(gridMesh);
+
+    // The gate: weathered planks nailed up inside the glass in front of the bars (which rise above them), framed into
+    // panels with rails, stiles and an X brace, gaps between the planks letting the street light through. Only where
+    // the bars run (never across an entrance). A warm emissive through the grain stands in for the lobby's bounce
+    // light, so the boards read as lit wood rather than a silhouette against the glare.
+    const woodSet = mats.texSet('wood');
+    const wood = keep(setMaterial(woodSet, { color: 0xa47c52, envMapIntensity: 0.25, metalness: 0, emissive: new THREE.Color(0.8, 0.45, 0.2), emissiveIntensity: 2.8 }));
+    const darkWood = keep(setMaterial(woodSet, { color: 0x6a4c30, envMapIntensity: 0.2, metalness: 0, emissive: new THREE.Color(0.8, 0.45, 0.2), emissiveIntensity: 2.1 }));
+    for (const m of [wood, darkWood]) m.emissiveMap = m.map;
+    woodSet.onUpgrade((s) => {
+      for (const m of [wood, darkWood]) m.emissiveMap = s.map;
+    });
+    const planks: THREE.BufferGeometry[] = [];
+    const braces: THREE.BufferGeometry[] = [];
+    const r = seeded(7331);
+    const plank = (list: THREE.BufferGeometry[], lenP: number, h: number, t: number, rotZ: number, a: number, y: number, off: number) => {
+      const g = box(lenP, h, t);
+      const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+      const row = Math.floor(r() * 8);
+      const shift = r();
+      for (let j = 0; j < uv.count; j++) uv.setXY(j, uv.getX(j) * lenP * 0.6 + shift, (row + 0.12 + uv.getY(j) * 0.76) / 8);
+      g.rotateZ(rotZ);
+      // Local x runs along the wall; turn it onto the wall's axis.
+      if (!ax) g.rotateY(Math.PI / 2);
+      const p = wallPoint(facade, a, y, off);
+      g.translate(p.x, p.y, p.z);
+      list.push(g);
+    };
+    const bars = world.solids.filter((s) => (s.kind as string) === 'bars' && (s.max.x - s.min.x > s.max.z - s.min.z) === ax && (ax ? Math.abs((s.min.z + s.max.z) / 2 - facade.fixed) < 0.6 : Math.abs((s.min.x + s.max.x) / 2 - facade.fixed) < 0.6));
+    const H = 2.5;
+    const backOff = 0.04;
+    for (const b of bars) {
+      const s0 = ax ? b.min.x : b.min.z;
+      const s1 = ax ? b.max.x : b.max.z;
+      const runLen = s1 - s0;
+      if (runLen < 0.6) continue;
+      const n = Math.max(1, Math.round(runLen / 2.4));
+      const pw = runLen / n;
+      for (let k = 0; k < n; k++) {
+        const c = s0 + pw * (k + 0.5);
+        // Horizontal boards, a hand's width apart now and then.
+        for (let y = 0.12; y < H - 0.1; ) {
+          const h = 0.19 + r() * 0.06;
+          plank(planks, pw - 0.04, h, 0.03, (r() - 0.5) * 0.015, c + (r() - 0.5) * 0.03, y + h / 2, backOff);
+          y += h + (r() < 0.3 ? 0.04 + r() * 0.05 : 0.012);
+        }
+        // Rails top and bottom, a stile each side, one X brace across the whole panel.
+        for (const y of [0.2, H - 0.1]) plank(braces, pw - 0.06, 0.17, 0.045, 0, c, y, backOff + 0.04);
+        for (const sx of [-1, 1]) plank(braces, H, 0.15, 0.045, Math.PI / 2, c + sx * (pw / 2 - 0.1), H / 2, backOff + 0.04);
+        const w = pw - 0.36;
+        const h = H - 0.5;
+        const l = Math.hypot(w, h);
+        const ang = Math.atan2(h, w);
+        plank(braces, l, 0.16, 0.04, ang, c, (0.2 + H - 0.1) / 2, backOff + 0.08);
+        plank(braces, l, 0.16, 0.04, -ang, c, (0.2 + H - 0.1) / 2, backOff + 0.12);
+      }
+    }
+    if (planks.length) {
+      const pm = new THREE.Mesh(keep(mergeGeometries(planks)), wood);
+      const bm = new THREE.Mesh(keep(mergeGeometries(braces)), darkWood);
+      for (const g of [...planks, ...braces]) g.dispose();
+      for (const m of [pm, bm]) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+        group.add(m);
+      }
     }
   }
 
@@ -813,13 +1415,14 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     for (const p of points) group.remove(p);
     points.length = 0;
     for (const f of flickers) f.light = null;
-    for (const c of pointCandidates.slice(0, POINT_BUDGET[q])) {
+    for (const c of pointCandidates.filter((c) => !c.out).slice(0, POINT_BUDGET[q])) {
       const p = new THREE.PointLight(c.color, c.power * 3, c.range, 2);
       p.position.copy(c.pos);
       p.layers.enableAll();
       group.add(p);
       points.push(p);
       if (c.fix) c.fix.light = p;
+      c.light = p;
     }
   };
   rebuildPoints(quality);
@@ -1024,6 +1627,8 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         }
         case 'planter': {
           const m = prop('planterTree');
+          // A light tree keeps only the pot and soil.
+          if (m && lightTreeAt(f)) m.traverse((o) => /leaves|branches/.test(o.name) && (o.visible = false));
           swap(slot.holder, slot.fallback, [m]);
           break;
         }
@@ -1037,7 +1642,18 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
           if (fl) {
             fl.position.y = 0.78;
             fl.scale.setScalar(1.6);
-            slot.fallback.children.slice(3).forEach((c) => (c.visible = false));
+            slot.fallback.children.forEach((c) => c.userData.bouquet && (c.visible = false));
+            // Pale blossoms catch the light from every side (thin petals glow through): a soft emissive through their
+            // own texture keeps the arrangement bright against the backlit facade.
+            fl.traverse((o) => {
+              const mesh = o as THREE.Mesh;
+              if (!mesh.isMesh || !/blossoms|leaves/.test(mesh.name)) return;
+              const m = keep((mesh.material as THREE.MeshStandardMaterial).clone());
+              m.emissive = /blossoms/.test(mesh.name) ? new THREE.Color(1, 0.86, 0.68) : new THREE.Color(0.7, 0.85, 0.45);
+              m.emissiveMap = m.map;
+              m.emissiveIntensity = /blossoms/.test(mesh.name) ? 0.5 : 0.22;
+              mesh.material = m;
+            });
             slot.holder.add(fl);
           }
           break;
@@ -1109,6 +1725,13 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       for (const m of deskTop.placeholders) m.visible = false;
     }
     placeArch(prop);
+    for (const slot of furnitureSlots) {
+      cutSlot(slot);
+      if (slot.dark) {
+        slot.dark = false;
+        killLamp(slot);
+      }
+    }
     mergeStatic(group);
   });
 
@@ -1116,7 +1739,21 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     group,
     glows,
     lamps: [],
+    setChunkHp(i, hp) {
+      cut.setChunkHp(i, hp);
+    },
     breakChunk(i) {
+      const c = world.chunks[i];
+      if (c?.furn !== undefined && !gone[i]) {
+        gone[i] = 1;
+        cut.breakChunk(i);
+        const slot = furnitureSlots[c.furn];
+        const kind = slot?.def.kind;
+        if (slot && (kind === 'sideTable' || kind === 'floorLamp')) {
+          const name = furnitureParts(kind)[c.furnPart ?? 0]?.name;
+          if (name === 'pole' || (slot.shade.length && slot.shade.every((j) => gone[j]))) killLamp(slot);
+        }
+      }
       const inst = instHide.get(i);
       if (inst) {
         for (const { mesh, idx } of inst) {
@@ -1131,6 +1768,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       onChunk.delete(i);
     },
     update(dt, time) {
+      cut.update();
       if (wings) wings.rotation.y += dt * 0.25;
       for (const f of flickers) {
         const l = failing(time, f.seed, f.fail);
@@ -1144,6 +1782,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     },
     dispose() {
       disposed = true;
+      cut.dispose();
       for (const d of disposables) d.dispose();
     },
   };

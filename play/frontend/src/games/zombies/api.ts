@@ -134,7 +134,8 @@ export type CreatePipeline = (renderer: THREE.WebGLRenderer, scene: THREE.Scene,
 
 export interface Fx {
   /** Bullet impact: decal (on chunks it is removed when the chunk breaks), sparks/chips, a small dust puff. */
-  impact(p: Vec3, n: Vec3, mat: ImpactMat, chunk: number): void;
+  /** `dir` is the shot direction, when known (glancing hits graze, debris carries through). */
+  impact(p: Vec3, n: Vec3, mat: ImpactMat, chunk: number, dir?: Vec3): void;
   tracer(from: Vec3, to: Vec3, kind: WeaponKind): void;
   muzzle(obj: THREE.Object3D, kind: WeaponKind, viewmodel: boolean): void;
   blood(p: Vec3, dir: Vec3, amount: number): void;

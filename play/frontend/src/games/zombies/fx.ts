@@ -16,6 +16,10 @@ import type { ImpactMat } from '@shared/zombies/protocol';
 import type { WeaponKind } from '@shared/zombies/weapons';
 import { firstBlock, raycast, type World } from '@shared/zombies/world';
 import { type CreateFx, type Fx, type FrameParams, type Pipeline, VIEWMODEL_LAYER } from './api';
+import { ATLAS_COLS, ATLAS_ROWS, D, decalAtlas } from './holes';
+import { HOLE_INFO, type HoleKind } from './holes';
+import type { Mat } from '@shared/zombies/maps';
+import { bentGeometry, ChunkParts, clumpGeometry, cushionGeometry, leafGeometry, LOOK, potShardGeometry, scrapGeometry, sliverGeometry, springGeometry, type Theme } from './wreck';
 import { faceAB, faceNormal, facePoint, STONE_TINT, type Stone, type Tile, TILE_HITS, TileDamage, tilePieceGeometry, tilePieceMaterial } from './tiles';
 
 const GRAVITY = 14;
@@ -159,6 +163,27 @@ float sNoise(vec3 x) {
   // Flesh: wet dark red with paler fat and tissue.
   diffuseColor.rgb *= mix(vec3(1.0), vec3(1.9, 1.5, 1.4), smoothstep(0.65, 0.85, n1));
   diffuseColor.rgb *= 0.75 + n2 * 0.4;
+#elif ZFX_KIND == 7
+  // Marble: white with thin grey veins wandering through it.
+  float vein = abs(sin(q.x * 14.0 + q.y * 9.0 + q.z * 6.0 + sNoise(q * 5.0) * 7.0));
+  diffuseColor.rgb *= mix(0.62, 1.0, smoothstep(0.02, 0.16, vein)) * (0.95 + n1 * 0.08);
+#elif ZFX_KIND == 8
+  // Travertine: honey bands and small dark pores.
+  diffuseColor.rgb *= 0.88 + sin(q.y * 40.0 + n2 * 4.0) * 0.06 + n1 * 0.1;
+  diffuseColor.rgb *= sNoise(q * 90.0) > 0.82 ? 0.55 : 1.0;
+#elif ZFX_KIND == 9
+  // Glass, glazed clay: almost plain.
+  diffuseColor.rgb *= 0.94 + n2 * 0.1;
+#elif ZFX_KIND == 10
+  // Upholstery: a fine woven texture.
+  diffuseColor.rgb *= 0.85 + (sin(q.x * 400.0) * sin(q.z * 400.0 + q.y * 400.0)) * 0.06 + n1 * 0.12;
+#elif ZFX_KIND == 11
+  // Leather: creased and worn paler in patches.
+  diffuseColor.rgb *= 0.85 + n1 * 0.2 + smoothstep(0.6, 0.8, n2) * 0.25;
+  sRough = (n1 - 0.5) * 0.2;
+#elif ZFX_KIND == 12
+  // Brass: polished with dark tarnish in patches.
+  diffuseColor.rgb *= mix(1.05, 0.55, smoothstep(0.55, 0.8, n2 * 0.8 + n1 * 0.3));
 #else
   diffuseColor.rgb *= 0.7 + n1 * 0.45;
 #endif
@@ -286,162 +311,6 @@ function flameTexture() {
     }
   g.putImageData(img, 0, 0);
   return tex(c);
-}
-
-/**
- * Decal atlas, 4 x 2 cells: 0-1 masonry holes, 2 wood hole, 3 metal dent, 4-5 blood splats, 6 scorch, 7 blood smear.
- * Masonry, wood and metal are drawn in neutral tones and tinted per instance; blood and scorch carry their colour.
- */
-const ATLAS_COLS = 4;
-const ATLAS_ROWS = 2;
-const CELL = 256;
-const D = { hole: 0, hole2: 1, wood: 2, metal: 3, blood: 4, blood2: 5, scorch: 6, smear: 7 } as const;
-
-function decalAtlas() {
-  const W = CELL * ATLAS_COLS;
-  const H = CELL * ATLAS_ROWS;
-  const col = new Uint8ClampedArray(W * H * 4);
-  const height = new Float32Array(W * H);
-  const rough = new Uint8ClampedArray(W * H * 4);
-  const put = (cell: number, fn: (u: number, v: number, x: number, y: number) => [number, number, number, number, number, number]) => {
-    const cx = (cell % ATLAS_COLS) * CELL;
-    const cy = Math.floor(cell / ATLAS_COLS) * CELL;
-    for (let y = 0; y < CELL; y++)
-      for (let x = 0; x < CELL; x++) {
-        const u = (x + 0.5) / CELL - 0.5;
-        const v = (y + 0.5) / CELL - 0.5;
-        const [r, g, b, a, h, ro] = fn(u, v, x + cell * 97, y);
-        const i = (cy + y) * W + cx + x;
-        col[i * 4] = r;
-        col[i * 4 + 1] = g;
-        col[i * 4 + 2] = b;
-        col[i * 4 + 3] = a;
-        height[i] = h;
-        rough[i * 4] = ro;
-        rough[i * 4 + 1] = ro;
-        rough[i * 4 + 2] = ro;
-        rough[i * 4 + 3] = 255;
-      }
-  };
-  // Masonry: a dark bore, a jagged chipped crater, a ring of pale dust.
-  const masonry = (seed: number) => (u: number, v: number, x: number, y: number): [number, number, number, number, number, number] => {
-    const r = Math.hypot(u, v) * 2;
-    const ang = Math.atan2(v, u);
-    const jag = 0.75 + vnoise(ang * 2.5 + seed, seed) * 0.5 + fbm(x / 9, y / 9, 3) * 0.25;
-    const bore = 0.12 * jag;
-    const crater = 0.42 * jag;
-    const dust = 0.95;
-    const n = fbm(x / 6 + seed, y / 6, 4);
-    if (r < bore) return [12, 10, 9, 255, -1, 230];
-    if (r < crater) {
-      const k = (r - bore) / (crater - bore);
-      const l = 60 + k * 85 + n * 45;
-      return [l, l * 0.96, l * 0.92, 255, -0.75 + k * 0.85 + (n - 0.5) * 0.3, 245];
-    }
-    if (r < dust) {
-      const k = (r - crater) / (dust - crater);
-      const a = (1 - k) * (1 - k) * 105 * (0.5 + n * 0.6);
-      const l = 160 + n * 45;
-      return [l, l * 0.97, l * 0.93, a, (1 - k) * 0.08, 250];
-    }
-    return [0, 0, 0, 0, 0, 255];
-  };
-  put(D.hole, masonry(1.3));
-  put(D.hole2, masonry(7.9));
-  // Wood: small bore, splinters torn along the grain (vertical), raw light wood inside.
-  put(D.wood, (u, v, x, y) => {
-    const r = Math.hypot(u * 1.6, v * 0.75) * 2;
-    const grain = fbm(x / 40, y / 3, 3);
-    const splinter = Math.abs(u) < 0.06 + grain * 0.12 && Math.abs(v) < 0.42 * (0.4 + grain);
-    if (r < 0.14) return [14, 9, 6, 255, -1, 220];
-    if (r < 0.38 || splinter) {
-      const l = 150 + grain * 80;
-      return [l, l * 0.8, l * 0.58, 255, -0.3 + grain * 0.6, 235];
-    }
-    if (r < 0.6) {
-      const a = (1 - (r - 0.38) / 0.22) * 120;
-      return [70, 50, 32, a, 0, 240];
-    }
-    return [0, 0, 0, 0, 0, 255];
-  });
-  // Metal: a bright, smooth dent with a dark pin hole and a scuffed ring.
-  put(D.metal, (u, v, x, y) => {
-    const r = Math.hypot(u, v) * 2;
-    const n = fbm(x / 5, y / 5, 3);
-    if (r < 0.08) return [20, 20, 22, 255, -0.6, 120];
-    if (r < 0.42) {
-      const k = r / 0.42;
-      const l = 235 - k * 60 + n * 20;
-      return [l, l, l * 1.02, 255, -(1 - k) * (1 - k), 50 + k * 60];
-    }
-    if (r < 0.62) {
-      const a = (1 - (r - 0.42) / 0.2) * 160 * n;
-      return [200, 200, 205, a, 0, 90];
-    }
-    return [0, 0, 0, 0, 0, 255];
-  });
-  // Blood: a thick pool with tendrils, satellite drops, wet and glossy.
-  const blood = (seed: number) => (u: number, v: number, x: number, y: number): [number, number, number, number, number, number] => {
-    const r = Math.hypot(u, v) * 2;
-    const ang = Math.atan2(v, u);
-    const edge = 0.45 + fbm(Math.cos(ang) * 2 + seed, Math.sin(ang) * 2 + seed, 4) * 0.45 + Math.pow(Math.max(0, Math.sin(ang * 5 + seed * 3)), 16) * 0.14 * (0.5 + vnoise(ang * 3, seed));
-    let a = r < edge ? 1 : 0;
-    // Satellite drops.
-    if (!a) {
-      const gx = Math.floor((u + 0.5) * 14);
-      const gy = Math.floor((v + 0.5) * 14);
-      const h = hash(gx + seed * 13, gy);
-      if (h > 0.86 && r < 0.98) {
-        const cx = (gx + 0.5) / 14 - 0.5;
-        const cy = (gy + 0.5) / 14 - 0.5;
-        if (Math.hypot(u - cx, v - cy) < 0.012 + (h - 0.86) * 0.25) a = 1;
-      }
-    }
-    if (!a) return [0, 0, 0, 0, 0, 255];
-    const n = fbm(x / 12, y / 12, 3);
-    const depth = Math.min(1, (edge - r) * 4);
-    const rr = 70 + n * 30 - depth * 25;
-    return [rr, 4 + n * 4, 4, 235, 0.15 + depth * 0.2, 35 + n * 40];
-  };
-  put(D.blood, blood(2.1));
-  put(D.blood2, blood(5.7));
-  put(D.scorch, (u, v, x, y) => {
-    const r = Math.hypot(u, v) * 2;
-    const n = fbm(x / 18, y / 18, 5);
-    const k = Math.max(0, 1 - r * (0.9 + (0.5 - n) * 0.8));
-    const a = Math.min(1, k * 1.6) * 235;
-    const l = 8 + (1 - k) * 25 + n * 10;
-    return [l, l * 0.95, l * 0.9, a, -k * 0.15, 250];
-  });
-  put(D.smear, (u, v, x, y) => {
-    const w = 0.18 * (1 - Math.abs(v) * 1.6) + fbm(x / 30, y / 8, 3) * 0.06;
-    const drip = Math.abs(u - 0.05 * Math.sin(v * 9)) < w && Math.abs(v) < 0.46;
-    if (!drip) return [0, 0, 0, 0, 0, 255];
-    const n = fbm(x / 10, y / 10, 3);
-    return [60 + n * 30, 3, 3, 220, 0.2, 40];
-  });
-
-  const cc = canvas(W, H);
-  cc.g.putImageData(new ImageData(col, W, H), 0, 0);
-  // Normal map from the height field (Sobel), tangent space.
-  const nrm = new Uint8ClampedArray(W * H * 4);
-  const hAt = (x: number, y: number) => height[Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))];
-  for (let y = 0; y < H; y++)
-    for (let x = 0; x < W; x++) {
-      const dx = (hAt(x + 1, y) - hAt(x - 1, y)) * 3;
-      const dy = (hAt(x, y + 1) - hAt(x, y - 1)) * 3;
-      const l = Math.hypot(dx, dy, 1);
-      const i = (y * W + x) * 4;
-      nrm[i] = ((-dx / l) * 0.5 + 0.5) * 255;
-      nrm[i + 1] = ((dy / l) * 0.5 + 0.5) * 255;
-      nrm[i + 2] = ((1 / l) * 0.5 + 0.5) * 255;
-      nrm[i + 3] = 255;
-    }
-  const nc = canvas(W, H);
-  nc.g.putImageData(new ImageData(nrm, W, H), 0, 0);
-  const rc = canvas(W, H);
-  rc.g.putImageData(new ImageData(rough, W, H), 0, 0);
-  return { color: tex(cc.c), normal: tex(nc.c, false), rough: tex(rc.c, false) };
 }
 
 // ---- geometry -------------------------------------------------------------------------------------------------------
@@ -657,6 +526,7 @@ class FragmentPool {
     this.next = (this.next + 1) % this.n;
     if (this.state[i] === 2) this.unpile(i);
     if (!this.state[i]) this.active++;
+    this.mesh.visible = true;
     const i3 = i * 3;
     this.pos[i3] = px;
     this.pos[i3 + 1] = py;
@@ -742,6 +612,8 @@ class FragmentPool {
   }
 
   update(dt: number) {
+    // An idle pool costs no draw call (most materials' pools are idle most of the time).
+    this.mesh.visible = this.active > 0;
     if (!this.active) return;
     const { pos, vel, rot, spin, size, age, life, state, piles } = this;
     for (let i = 0; i < this.n; i++) {
@@ -867,7 +739,8 @@ class ParticlePool {
     geo: THREE.BufferGeometry,
     mat: THREE.Material,
     private readonly n: number,
-    private readonly opts: { stretch: number; drag: number; bounce: number; fade: boolean; gravity: number; onLand?: Landed },
+    /** `sway`: side-to-side drift (stuffing, fluff); `twinkle`: alpha glints on and off (glass glitter). */
+    private readonly opts: { stretch: number; drag: number; bounce: number; fade: boolean; gravity: number; onLand?: Landed; sway?: number; twinkle?: boolean },
   ) {
     if (opts.fade) {
       this.alpha = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
@@ -928,6 +801,10 @@ class ParticlePool {
       vel[i3] *= drag;
       vel[i3 + 1] *= drag;
       vel[i3 + 2] *= drag;
+      if (opts.sway && pos[i3 + 1] > size[i]) {
+        vel[i3] += Math.cos(age[i] * 2.7 + i * 1.3) * opts.sway * dt;
+        vel[i3 + 2] += Math.sin(age[i] * 2.1 + i * 2.9) * opts.sway * dt;
+      }
       pos[i3] += vel[i3] * dt;
       pos[i3 + 1] += vel[i3 + 1] * dt;
       pos[i3 + 2] += vel[i3 + 2] * dt;
@@ -957,12 +834,174 @@ class ParticlePool {
         _s.set(sz, sz, sz);
       }
       this.mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
-      if (this.alpha) this.alpha.array[i] = k * k;
+      if (this.alpha) this.alpha.array[i] = opts.twinkle ? k * (0.25 + 0.75 * Math.pow(Math.abs(Math.sin(age[i] * (9 + (i % 7) * 3) + i)), 6)) : k * k;
       this.dirty = true;
     }
     if (this.dirty) {
       this.mesh.instanceMatrix.needsUpdate = true;
       if (this.alpha) this.alpha.needsUpdate = true;
+      this.dirty = false;
+    }
+  }
+}
+
+/**
+ * Flat cards that flutter down: leaves, torn cloth and paper, lacquer flakes. Strong air drag holds them to a slow
+ * fall, they rock and sway from side to side as they go, and land flat on the floor or on whatever stands below.
+ */
+class FlutterPool {
+  readonly mesh: THREE.InstancedMesh;
+  private next = 0;
+  private readonly pos: Float32Array;
+  private readonly vel: Float32Array;
+  private readonly rot: Float32Array;
+  private readonly spin: Float32Array;
+  private readonly size: Float32Array;
+  private readonly age: Float32Array;
+  private readonly life: Float32Array;
+  /** 0 free, 1 falling, 2 resting. */
+  private readonly state: Uint8Array;
+  private active = 0;
+  private dirty = false;
+
+  constructor(
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material,
+    private readonly n: number,
+    private readonly world: World,
+    private readonly piles: Piles,
+    /** Air drag per second, sideways sway and rocking. */
+    private readonly drag = 3.2,
+    private readonly sway = 2.2,
+  ) {
+    this.mesh = new THREE.InstancedMesh(geo, mat, n);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false;
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
+    this.mesh.visible = false;
+    this.mesh.setColorAt(0, _c.set(1, 1, 1));
+    for (let i = 0; i < n; i++) this.mesh.setMatrixAt(i, ZERO);
+    this.pos = new Float32Array(n * 3);
+    this.vel = new Float32Array(n * 3);
+    this.rot = new Float32Array(n * 3);
+    this.spin = new Float32Array(n * 3);
+    this.size = new Float32Array(n * 2);
+    this.age = new Float32Array(n);
+    this.life = new Float32Array(n);
+    this.state = new Uint8Array(n);
+  }
+
+  spawn(px: number, py: number, pz: number, vx: number, vy: number, vz: number, w: number, len: number, tint: THREE.Color, life: number) {
+    const i = this.next;
+    this.next = (this.next + 1) % this.n;
+    if (!this.state[i]) this.active++;
+    this.mesh.visible = true;
+    const i3 = i * 3;
+    this.pos[i3] = px;
+    this.pos[i3 + 1] = py;
+    this.pos[i3 + 2] = pz;
+    this.vel[i3] = vx;
+    this.vel[i3 + 1] = vy;
+    this.vel[i3 + 2] = vz;
+    this.rot[i3] = rand(-1.2, 1.2);
+    this.rot[i3 + 1] = rand(0, 6.28);
+    this.rot[i3 + 2] = rand(-1.2, 1.2);
+    this.spin[i3] = rand(-5, 5);
+    this.spin[i3 + 1] = rand(-3, 3);
+    this.spin[i3 + 2] = rand(-5, 5);
+    this.size[i * 2] = w;
+    this.size[i * 2 + 1] = len;
+    this.age[i] = 0;
+    this.life[i] = life;
+    this.state[i] = 1;
+    this.mesh.setColorAt(i, tint);
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  /** Something below may have gone: cards resting above the floor fall again. */
+  wake() {
+    for (let i = 0; i < this.n; i++) if (this.state[i] === 2 && this.pos[i * 3 + 1] > 0.05) this.state[i] = 1;
+  }
+
+  clear() {
+    this.state.fill(0);
+    this.active = 0;
+    for (let i = 0; i < this.n; i++) this.mesh.setMatrixAt(i, ZERO);
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  update(dt: number) {
+    this.mesh.visible = this.active > 0;
+    if (!this.active) return;
+    const { pos, vel, rot, spin, size, age, life, state } = this;
+    const drag = Math.max(0, 1 - this.drag * dt);
+    for (let i = 0; i < this.n; i++) {
+      const st = state[i];
+      if (!st) continue;
+      age[i] += dt;
+      const left = life[i] - age[i];
+      if (left <= 0) {
+        state[i] = 0;
+        this.active--;
+        this.mesh.setMatrixAt(i, ZERO);
+        this.dirty = true;
+        continue;
+      }
+      const i3 = i * 3;
+      const fading = left < 1;
+      if (st === 2 && !fading) continue;
+      if (st === 1) {
+        vel[i3 + 1] -= GRAVITY * dt;
+        vel[i3] *= drag;
+        vel[i3 + 1] *= drag;
+        vel[i3 + 2] *= drag;
+        // Side-to-side: a card falls in swoops, faster the flatter it lies.
+        const ph = age[i] * 3.4 + i * 1.7;
+        vel[i3] += Math.cos(ph) * this.sway * dt * 2;
+        vel[i3 + 2] += Math.sin(ph * 0.8 + i) * this.sway * dt * 2;
+        const oy = pos[i3 + 1];
+        pos[i3] += vel[i3] * dt;
+        pos[i3 + 1] += vel[i3 + 1] * dt;
+        pos[i3 + 2] += vel[i3 + 2] * dt;
+        rot[i3] = Math.sin(ph) * 0.7 + spin[i3] * 0.05;
+        rot[i3 + 1] += spin[i3 + 1] * dt;
+        rot[i3 + 2] = Math.cos(ph * 0.9) * 0.6 + spin[i3 + 2] * 0.05;
+        let ground = this.piles.get(pos[i3], pos[i3 + 2]) + 0.004 + (i % 9) * 0.0006;
+        if (oy > 0.15 && pos[i3 + 1] > ground) {
+          _box.min.x = pos[i3] - 0.01;
+          _box.min.y = pos[i3 + 1] - 0.01;
+          _box.min.z = pos[i3 + 2] - 0.01;
+          _box.max.x = pos[i3] + 0.01;
+          _box.max.y = pos[i3 + 1] + 0.01;
+          _box.max.z = pos[i3 + 2] + 0.01;
+          const hit = firstBlock(this.world, _box, 'nade');
+          if (hit) {
+            if (oy >= hit.max.y - 0.04 && vel[i3 + 1] <= 0) ground = hit.max.y + 0.004;
+            else {
+              pos[i3] -= vel[i3] * dt;
+              pos[i3 + 2] -= vel[i3 + 2] * dt;
+              vel[i3] *= -0.3;
+              vel[i3 + 2] *= -0.3;
+            }
+          }
+        }
+        if (pos[i3 + 1] <= ground) {
+          pos[i3 + 1] = ground;
+          rot[i3] = (i & 1) * Math.PI;
+          rot[i3 + 2] = 0;
+          state[i] = 2;
+        }
+      }
+      const k = fading ? Math.max(0.001, left) : 1;
+      _p.set(pos[i3], pos[i3 + 1], pos[i3 + 2]);
+      _q.setFromEuler(_e.set(rot[i3], rot[i3 + 1], rot[i3 + 2]));
+      _s.set(size[i * 2] * k, size[i * 2] * k, size[i * 2 + 1] * k);
+      this.mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
+      this.dirty = true;
+    }
+    if (this.dirty) {
+      this.mesh.instanceMatrix.needsUpdate = true;
       this.dirty = false;
     }
   }
@@ -1078,6 +1117,8 @@ class SpritePool {
   }
 }
 
+const _al = new THREE.Vector3();
+
 /** Decals from the atlas, in a ring buffer. */
 class DecalPool {
   readonly mesh: THREE.InstancedMesh;
@@ -1105,13 +1146,21 @@ class DecalPool {
     this.chunk = new Int32Array(n).fill(-2);
   }
 
-  add(p: Vec3, n: Vec3, size: number, cell: number, tint: THREE.Color, chunk: number, alpha = 1, stretch = 1) {
+  /** `along`: lay the decal's stretched axis along this direction (a graze runs the way the bullet went). */
+  add(p: Vec3, n: Vec3, size: number, cell: number, tint: THREE.Color, chunk: number, alpha = 1, stretch = 1, along?: Vec3) {
     const i = this.next;
     this.next = (this.next + 1) % this.n;
     _v.set(n.x, n.y, n.z).normalize();
     // Float just off the surface; floor decals stacked by age so overlapping splats never fight.
     _p.set(p.x + _v.x * 0.004, p.y + _v.y * (0.004 + (i % 7) * 0.0004), p.z + _v.z * 0.004);
-    _q.setFromUnitVectors(_z, _v).multiply(_q2.setFromAxisAngle(_z, rand(0, 6.28)));
+    _q.setFromUnitVectors(_z, _v);
+    let ang = rand(0, 6.28);
+    if (along) {
+      // The direction in the decal's own plane, then the turn that brings local +y onto it.
+      _al.set(along.x, along.y, along.z).applyQuaternion(_q2.copy(_q).invert());
+      if (_al.x * _al.x + _al.y * _al.y > 1e-6) ang = Math.atan2(-_al.x, _al.y);
+    }
+    _q.multiply(_q2.setFromAxisAngle(_z, ang));
     _s.set(size, size * stretch, 1);
     this.mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
     const cx = cell % ATLAS_COLS;
@@ -1261,25 +1310,29 @@ class TracerPool {
 
 // ---- per-material looks -------------------------------------------------------------------------------------------
 
-type Debris = 'brick' | 'plaster' | 'concrete' | 'wood' | 'metal';
+// The table and the shapes live in wreck.ts; every material has its own fragments and slabs now.
+type Debris = Mat;
+const MAT_LOOK = LOOK;
+const MATS = Object.keys(LOOK) as Mat[];
 
-const MAT_LOOK: Record<Debris, { color: number; rough: number; metal: number; dust: number; dustColor: number; grit: number; chips: number }> = {
-  brick: { color: 0x84422d, rough: 0.92, metal: 0, dust: 0.85, dustColor: 0x9a7b68, grit: 0x7a4a36, chips: 0xb88a72 },
-  plaster: { color: 0xc9c1b0, rough: 0.95, metal: 0, dust: 1, dustColor: 0xc8c2b6, grit: 0xb9b2a4, chips: 0xe4ded2 },
-  concrete: { color: 0x7d7a73, rough: 0.9, metal: 0, dust: 0.75, dustColor: 0x8c8982, grit: 0x6e6b65, chips: 0xa8a49b },
-  wood: { color: 0x6e4c2e, rough: 0.8, metal: 0, dust: 0.3, dustColor: 0x7a644c, grit: 0x8a6440, chips: 0xc8a272 },
-  metal: { color: 0x5c6166, rough: 0.42, metal: 0.85, dust: 0.08, dustColor: 0x5a5a5a, grit: 0x55595e, chips: 0x9aa0a6 },
+/** Hole cells that are drawn neutral and take the surface colour; upholstery is lerped towards white (holes.ts). */
+const holeTint = (m: Mat, cell: HoleKind, out: THREE.Color) => {
+  if (!HOLE_INFO[cell].tinted) return out.set(1, 1, 1);
+  out.set(LOOK[m].surface);
+  if (m === 'fabric' || m === 'leather') out.lerp(_white, 0.3);
+  return out;
 };
+const _white = new THREE.Color(1, 1, 1);
+/** Wet patches: the neutral dust cell tinted dark and cool. */
+const WET = 0x30383c;
 
-/** The hotel's materials break like their closest classic one: stone like concrete, walnut like wood, glass like plaster (bright, flaky). */
-const asDebris = (m: string): Debris =>
-  m === 'brick' || m === 'plaster' || m === 'concrete' || m === 'wood' || m === 'metal'
-    ? m
-    : m === 'walnut'
-      ? 'wood'
-      : m === 'glass'
-        ? 'plaster'
-        : 'concrete';
+/** Materials that crack around a cluster of holes. */
+/** Fragments of the classic five are tinted by their colour on top of it (their tuned look); the rest are not. */
+const CLASSIC_TINT: Partial<Record<Mat, 1>> = { brick: 1, plaster: 1, concrete: 1, wood: 1, metal: 1 };
+
+/** Grit chips per bullet impact. */
+const IMPACT_CHIPS: Record<Mat, number> = { brick: 6, plaster: 4, concrete: 6, wood: 6, metal: 2, marble: 6, travertine: 6, walnut: 4, glass: 0, fabric: 0, leather: 3, ceramic: 4, brass: 1, foliage: 0 };
+const CRACKS: Partial<Record<Mat, number>> = { glass: 1, marble: 1, travertine: 1, concrete: 1, ceramic: 1, plaster: 0.6, brick: 0.4 };
 
 // ---- the effects system ---------------------------------------------------------------------------------------------
 
@@ -1308,6 +1361,21 @@ class Effects implements Fx {
   private readonly slabMat = new Map<FragmentPool, Debris>();
   private readonly planks: FragmentPool;
   private readonly casings: FragmentPool;
+  /** Furniture wreckage (wreck.ts): walnut planks, sofa springs, flutter cards (leaves, scraps), stuffing, glitter, water. */
+  private readonly walnutPlanks: FragmentPool;
+  private readonly springs: FragmentPool;
+  private readonly leaves: FlutterPool;
+  private readonly scraps: FlutterPool;
+  private readonly fluff: ParticlePool;
+  private readonly glitter: ParticlePool;
+  private readonly water: ParticlePool;
+  private readonly parts: ChunkParts;
+  /** The last few bullet holes, so a cluster on stone or glass cracks (x, y, z, chunk). */
+  private readonly holes = new Float32Array(32 * 3);
+  private readonly holeChunk = new Int32Array(32).fill(-9);
+  private holeNext = 0;
+  /** Puff budget of the current debris() call, shared by every theme. */
+  private puffsLeft = 0;
   /** Chipped and cracked tiles on the marble floor and the travertine columns (tiles.ts). */
   private readonly tiles: TileDamage;
   /** Tile chips and broken-off pieces of tile, per stone. They never fade: a fought-over lobby keeps its litter. */
@@ -1357,7 +1425,16 @@ class Effects implements Fx {
       });
     const look = (m: Debris) => MAT_LOOK[m];
     const mats = {} as Record<Debris, THREE.Material>;
-    for (const m of Object.keys(MAT_LOOK) as Debris[]) mats[m] = fragMat(look(m).color, look(m).rough, look(m).metal, SURFACE_KIND[m]);
+    for (const m of MATS) mats[m] = fragMat(look(m).color, look(m).rough, look(m).metal, look(m).surf);
+    // Glass: clear, glossy, faintly lit from inside so a shard still reads in the dark; no shadows from it.
+    mats.glass = own(
+      surfaced(
+        new THREE.MeshStandardMaterial({ color: 0xd8eef2, roughness: 0.03, metalness: 0.25, transparent: true, opacity: 0.55, depthWrite: false, emissive: 0x22333a, flatShading: true }),
+        9,
+      ),
+    );
+    // Pot shards carry glaze and clay in their vertex colours.
+    mats.ceramic = own(surfaced(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.1, vertexColors: true, flatShading: true }), 9));
     this.frags = {
       brick: make([brickGeometry(1), rockGeometry(2)], mats.brick, 90),
       plaster: make([shardGeometry(3, 0.16), rockGeometry(4, 0, 0.6)], mats.plaster, 90),
@@ -1366,7 +1443,23 @@ class Effects implements Fx {
       metal: make([shardGeometry(9, 0.06), shardGeometry(10, 0.1)], mats.metal, 48, 0.4),
       gore: make([rockGeometry(11, 1, 0.8)], own(surfaced(new THREE.MeshStandardMaterial({ color: 0x5a0c0a, roughness: 0.28, metalness: 0 }), SURFACE_KIND.flesh)), 48, 0.15),
       dirt: make([rockGeometry(12, 0, 0.8)], fragMat(0x2f271e, 0.98, 0, SURFACE_KIND.dirt), 60, 0.12),
+      // Sharp-edged white chips and chunks; honey-coloured pitted lumps; dark lacquered splinters.
+      marble: make([shardGeometry(13, 0.3), rockGeometry(14, 0, 0.7)], mats.marble, 70, 0.3),
+      travertine: make([rockGeometry(15), rockGeometry(16, 0, 0.7)], mats.travertine, 60),
+      walnut: make([splinterGeometry(17), shardGeometry(18, 0.2)], mats.walnut, 60),
+      // Slivers: a lively, tinkling bounce, and they lie flat once they stop.
+      glass: make([sliverGeometry(19), sliverGeometry(20, 0.5)], mats.glass, 130, 0.5),
+      // Lumps of padding torn out with the cover on.
+      fabric: make([rockGeometry(26, 1, 0.7)], mats.fabric, 40, 0.1),
+      leather: make([rockGeometry(27, 1, 0.6)], mats.leather, 40, 0.12),
+      ceramic: make([potShardGeometry(21), potShardGeometry(22)], mats.ceramic, 60, 0.32),
+      brass: make([bentGeometry(23), bentGeometry(24)], mats.brass, 50, 0.45),
+      // Broken branches and twigs.
+      foliage: make([splinterGeometry(25)], fragMat(0x4a3622, 0.9, 0, SURFACE_KIND.wood), 60, 0.25),
     };
+    for (const p of this.frags.glass) p.mesh.castShadow = false;
+    for (const p of [...this.frags.glass, ...this.frags.ceramic, ...this.frags.marble, ...this.frags.brass]) p.restStep = Math.PI;
+    for (const p of this.frags.glass) p.onImpact = (_i, x, y, z, speed, size) => this.tinkle(x, y, z, speed, size);
     // Slabs: a chunk-shaped block with chipped corners, so a collapsing wall comes down in recognisable pieces.
     const slabGeo = own(new THREE.BoxGeometry(1, 1, 1, 2, 2, 2));
     {
@@ -1381,14 +1474,44 @@ class Effects implements Fx {
       }
     }
     const slabGeoFlat = own(flat(slabGeo));
+    // Per material: how a whole falling piece is shaped and how many can be in the air (cushions are soft and
+    // bulge, canopy pieces are leafy clumps that burst when they land).
+    const cushionGeo = own(cushionGeometry());
+    const clumpGeo = own(clumpGeometry(41));
+    const slabShape: Partial<Record<Debris, [THREE.BufferGeometry, number, number]>> = {
+      metal: [slabGeoFlat, 24, 0.12],
+      fabric: [cushionGeo, 28, 0.08],
+      leather: [cushionGeo, 20, 0.1],
+      foliage: [clumpGeo, 24, 0.05],
+      glass: [slabGeoFlat, 24, 0.1],
+      ceramic: [slabGeoFlat, 16, 0.1],
+      brass: [slabGeoFlat, 24, 0.3],
+      walnut: [slabGeoFlat, 24, 0.2],
+      marble: [slabGeoFlat, 32, 0.1],
+      travertine: [slabGeoFlat, 32, 0.12],
+    };
     this.slabs = {} as Record<Debris, FragmentPool>;
-    for (const m of Object.keys(MAT_LOOK) as Debris[]) {
-      const pool = new FragmentPool(slabGeoFlat, mats[m], m === 'metal' ? 24 : 48, world, this.piles, 0.12, 0.4, 12);
+    for (const m of MATS) {
+      const [geo, n, bounce] = slabShape[m] ?? [slabGeoFlat, 48, 0.12];
+      const pool = new FragmentPool(geo, m === 'foliage' ? own(fragMat(0x34501f, 0.8, 0, 6)) : mats[m], n, world, this.piles, bounce, 0.4, 12);
       pool.onImpact = (_i, x, y, z, speed, size) => this.shatter(m, x, y, z, speed, size);
+      if (m === 'glass') pool.mesh.castShadow = false;
       this.slabMat.set(pool, m);
       this.root.add(pool.mesh);
       this.slabs[m] = pool;
     }
+    this.walnutPlanks = new FragmentPool(own(new THREE.BoxGeometry(1, 1, 1, 4, 1, 1)), mats.walnut, 24, world, this.piles, 0.28);
+    this.springs = new FragmentPool(own(springGeometry()), own(new THREE.MeshStandardMaterial({ color: 0x9a9da0, roughness: 0.35, metalness: 0.9 })), 16, world, this.piles, 0.55, 0.7, 4);
+    this.springs.snapRest = false;
+    this.root.add(this.walnutPlanks.mesh, this.springs.mesh);
+    // Flutter cards: leaves and petals (double-sided, a little translucent-looking with emissive), scraps of cloth,
+    // paper and lacquer.
+    const leafMat = own(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.65, side: THREE.DoubleSide, emissive: 0x0a1004 }));
+    this.leaves = new FlutterPool(own(leafGeometry(51)), leafMat, 260, world, this.piles, 3.4, 2.4);
+    const scrapMat = own(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, side: THREE.DoubleSide }));
+    this.scraps = new FlutterPool(own(scrapGeometry(52)), scrapMat, 180, world, this.piles, 2.6, 1.8);
+    this.root.add(this.leaves.mesh, this.scraps.mesh);
+    this.parts = new ChunkParts(world);
     const plankGeo = own(new THREE.BoxGeometry(1, 1, 1, 6, 1, 1));
     {
       // Weathered plank with a ragged, snapped end.
@@ -1445,6 +1568,23 @@ class Effects implements Fx {
     // Embers: burning bits from explosions that drift, flicker out and barely fall.
     this.embers = new ParticlePool(own(new THREE.BoxGeometry(1, 1, 1)), sparkMat, 160, { stretch: 0.01, drag: 0.9, bounce: 0.2, fade: true, gravity: 2.2 });
     this.root.add(this.grit.mesh, this.sparks.mesh, this.drops.mesh, this.embers.mesh);
+    // Stuffing: soft tufts that drift down slowly, swaying, and shrink away on the floor.
+    const fluffMat = own(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }));
+    this.fluff = new ParticlePool(own(rockGeometry(53, 1, 0.75)), fluffMat, 220, { stretch: 0, drag: 2.6, bounce: 0.05, fade: false, gravity: 2.4, sway: 1.6 });
+    // Glitter: tiny glass glints that twinkle as they fall.
+    this.glitter = new ParticlePool(own(new THREE.OctahedronGeometry(0.5)), sparkMat, 260, { stretch: 0.004, drag: 1.4, bounce: 0.3, fade: true, gravity: 8, twinkle: true });
+    // Water from a vase: clear droplets; a share leaves a wet patch where it lands.
+    this.water = new ParticlePool(own(new THREE.IcosahedronGeometry(0.5, 0)), own(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.6 })), 140, {
+      stretch: 0.025,
+      drag: 0.3,
+      bounce: 0,
+      fade: false,
+      gravity: GRAVITY,
+      onLand: (x, _y, z) => {
+        if (Math.random() < 0.18) this.decals.add({ x, y: 0, z }, { x: 0, y: 1, z: 0 }, rand(0.08, 0.22), D.dust, _c.set(WET), -1, 0.55);
+      },
+    });
+    this.root.add(this.fluff.mesh, this.glitter.mesh, this.water.mesh);
     // Shockwave: a flat ring of dust racing out along the floor.
     const ringGeo = own(new THREE.RingGeometry(0.55, 1, 48, 1).rotateX(-Math.PI / 2));
     for (let i = 0; i < 3; i++) {
@@ -1565,20 +1705,198 @@ class Effects implements Fx {
     slot.fn = fn;
   }
 
-  /** A falling slab hit the ground hard: it breaks into rubble with a burst of dust. */
+  // ---- wreckage helpers (wreck.ts themes): every one spawns into preallocated pools only ---------------------------
+
+  /** Sparks off steel or brass: a fan around (nx, ny, nz), brass ones golden. */
+  private sparkBurst(x: number, y: number, z: number, nx: number, ny: number, nz: number, count: number, speed: number, brass: boolean) {
+    for (let i = 0; i < count; i++) {
+      const s = rand(0.3, 1) * speed;
+      // A white-hot share, the rest cooling to orange (brass: yellow-gold).
+      if (Math.random() < 0.3) _c.setRGB(1, 0.95, 0.8).multiplyScalar(6);
+      else if (brass) _c.setRGB(1, rand(0.72, 0.9), rand(0.25, 0.4)).multiplyScalar(4.5);
+      else _c.setRGB(1, rand(0.55, 0.85), rand(0.2, 0.4)).multiplyScalar(4.5);
+      this.sparks.spawn(x, y, z, (nx + rand(-0.9, 0.9)) * s, (ny + rand(-0.3, 1)) * s, (nz + rand(-0.9, 0.9)) * s, rand(0.007, 0.015), rand(0.12, 0.45), _c);
+    }
+  }
+
+  /** Tufts of stuffing (white wadding, or yellow foam for leather) bursting out and drifting down. */
+  private stuffing(x: number, y: number, z: number, count: number, foam: boolean, power: number, nx = 0, nz = 0) {
+    for (let i = 0; i < count; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.4, 1.6) * power;
+      if (foam) _c.setRGB(rand(0.85, 0.95), rand(0.72, 0.82), rand(0.38, 0.5));
+      else _c.setRGB(rand(0.92, 1), rand(0.9, 0.98), rand(0.84, 0.92));
+      const sz = foam ? rand(0.015, 0.035) : rand(0.025, 0.06);
+      this.fluff.spawn(x + rand(-0.05, 0.05), y + rand(-0.05, 0.05), z + rand(-0.05, 0.05), nx * s + Math.cos(th) * s * 0.6, rand(0.4, 1.4) * power, nz * s + Math.sin(th) * s * 0.6, sz, rand(4, 8), _c);
+    }
+  }
+
+  /** Torn scraps of cloth, paper or lacquer: `color` with a little variation, `w0`..`w1` the size. */
+  private scrapBurst(x: number, y: number, z: number, count: number, color: number, w0: number, w1: number, power: number, life = 14) {
+    for (let i = 0; i < count; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.3, 1.4) * power;
+      _c.set(color).multiplyScalar(rand(0.8, 1.1));
+      const w = rand(w0, w1);
+      this.scraps.spawn(x + rand(-0.1, 0.1), y + rand(-0.1, 0.1), z + rand(-0.1, 0.1), Math.cos(th) * s, rand(0.5, 2) * power, Math.sin(th) * s, w, w * rand(0.7, 1.4), _c, rand(life * 0.7, life * 1.3));
+    }
+  }
+
+  /** Leaves (or white petals) shaken loose: they flutter down and stay on the floor a while. */
+  private leafBurst(x: number, y: number, z: number, spread: number, count: number, flowers: boolean, power: number) {
+    for (let i = 0; i < count; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.2, 1.2) * power;
+      const petal = flowers && Math.random() < 0.65;
+      if (petal) _c.setRGB(rand(0.92, 1), rand(0.9, 0.97), rand(0.85, 0.93));
+      else if (Math.random() < 0.15) _c.setRGB(rand(0.45, 0.6), rand(0.4, 0.5), 0.12);
+      else _c.setRGB(rand(0.16, 0.28), rand(0.3, 0.45), rand(0.08, 0.14));
+      const w = petal ? rand(0.035, 0.06) : rand(0.05, 0.1);
+      this.leaves.spawn(x + rand(-0.5, 0.5) * spread, y + rand(-0.4, 0.4) * spread, z + rand(-0.5, 0.5) * spread, Math.cos(th) * s, rand(0, 1.2) * power, Math.sin(th) * s, w, w * rand(1.3, 1.9), _c, rand(14, 24));
+    }
+  }
+
+  /** Broken branches and twigs. */
+  private branches(x: number, y: number, z: number, count: number, power: number) {
+    for (let i = 0; i < count; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.4, 1.4) * power;
+      _c.setRGB(rand(0.8, 1.15), rand(0.8, 1.1), rand(0.8, 1));
+      const big = i === 0;
+      this.frags.foliage[0].spawn(x, y, z, Math.cos(th) * s, rand(0.3, 1.5) * power, Math.sin(th) * s, big ? rand(0.025, 0.04) : rand(0.008, 0.016), big ? rand(0.02, 0.035) : rand(0.008, 0.014), big ? rand(0.25, 0.5) : rand(0.06, 0.16), _c, rand(14, 22));
+    }
+  }
+
+  /** Glass: slivers flung out with (ax, az), plus a cascade of twinkling glitter. */
+  private glassBurst(x: number, y: number, z: number, spread: number, count: number, ax: number, az: number, power: number) {
+    for (let i = 0; i < count; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.3, 1.2) * power;
+      _c.setRGB(rand(0.85, 1), rand(0.95, 1.05), rand(0.95, 1.05));
+      const w = i < 3 ? rand(0.06, 0.13) : rand(0.02, 0.06);
+      this.fragPool('glass').spawn(x + rand(-0.4, 0.4) * spread, y + rand(0, 0.3) * spread, z + rand(-0.4, 0.4) * spread, ax * s + Math.cos(th) * s * 0.7, rand(0.3, 1.8) * power, az * s + Math.sin(th) * s * 0.7, w, w * 0.08, w * rand(0.8, 1.4), _c, rand(16, 26));
+    }
+    this.glints(x, y, z, spread, Math.round(count * 1.6), power);
+  }
+
+  /** Twinkling glass glitter. */
+  private glints(x: number, y: number, z: number, spread: number, count: number, power: number) {
+    for (let i = 0; i < count; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.2, 1.4) * power;
+      _c.setRGB(0.8, 0.92, 1).multiplyScalar(rand(1.5, 3.5));
+      this.glitter.spawn(x + rand(-0.4, 0.4) * spread, y + rand(-0.2, 0.4) * spread, z + rand(-0.4, 0.4) * spread, Math.cos(th) * s, rand(-0.2, 1.5) * power, Math.sin(th) * s, rand(0.006, 0.014), rand(0.8, 2.2), _c);
+    }
+  }
+
+  /** A glass sliver landed: it tinkles (glints off the floor) and a big one breaks into smaller ones. */
+  private tinkle(x: number, y: number, z: number, speed: number, size: number): boolean {
+    this.glints(x, y + 0.02, z, 0.05, 2, 0.6);
+    if (speed < 3.5 || size < 0.07) return false;
+    for (let i = 0; i < 3; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.4, 1.4);
+      const w = size * rand(0.3, 0.5);
+      _c.setRGB(rand(0.85, 1), 1, 1);
+      this.fragPool('glass').spawn(x, y + 0.02, z, Math.cos(th) * s, rand(0.5, 1.6), Math.sin(th) * s, w, w * 0.08, w * rand(0.8, 1.3), _c, rand(14, 22));
+    }
+    return true;
+  }
+
+  /** Curved shards of a glazed pot (dark outside, clay inside), big ones first. */
+  private potShards(x: number, y: number, z: number, spread: number, count: number, ax: number, az: number, power: number) {
+    for (let i = 0; i < count; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.4, 1.3) * power;
+      _c.setRGB(1, 1, 1).multiplyScalar(rand(0.85, 1.05));
+      const w = i < 3 ? rand(0.12, 0.24) : rand(0.03, 0.08);
+      this.fragPool('ceramic').spawn(x + rand(-0.3, 0.3) * spread, y + rand(-0.3, 0.3) * spread, z + rand(-0.3, 0.3) * spread, ax * s + Math.cos(th) * s * 0.7, rand(0.4, 2) * power, az * s + Math.sin(th) * s * 0.7, w, w * 0.3, w * rand(0.8, 1.2), _c, rand(16, 26));
+    }
+    _c.set(LOOK.ceramic.grit);
+    for (let i = 0; i < 6; i++) this.grit.spawn(x, y, z, rand(-1.5, 1.5) * power, rand(0.2, 1.6), rand(-1.5, 1.5) * power, rand(0.008, 0.02), rand(1, 2.5), _c);
+  }
+
+  /** Potting soil: clods and crumbs pouring out, a dark spill on the floor and a cloud of earthy dust. */
+  private soil(x: number, y: number, z: number, size: number, amount: number) {
+    const pool = this.frags.dirt[0];
+    const n = Math.round(4 + amount * 8);
+    for (let i = 0; i < n; i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.3, 1.6);
+      _c.setRGB(rand(0.8, 1.2), rand(0.8, 1.15), rand(0.8, 1.1));
+      const w = rand(0.03, 0.08);
+      pool.spawn(x + rand(-0.2, 0.2), y + rand(0, 0.2), z + rand(-0.2, 0.2), Math.cos(th) * s, rand(0, 1.5), Math.sin(th) * s, w, w * 0.7, w, _c, rand(16, 26));
+    }
+    _c.set(0x3a2e22);
+    for (let i = 0; i < Math.round(10 + amount * 14); i++) {
+      const th = rand(0, 6.28);
+      const s = rand(0.2, 2);
+      this.grit.spawn(x + rand(-0.2, 0.2), y + rand(0, 0.3), z + rand(-0.2, 0.2), Math.cos(th) * s, rand(-0.3, 1.5), Math.sin(th) * s, rand(0.008, 0.022), rand(1.5, 3), _c);
+    }
+    _c.set(0x6a5a46);
+    this.smoke.spawn(x, y + 0.2, z, rand(-0.2, 0.2), 0.1, rand(-0.2, 0.2), 0.3, 0.8, rand(2, 3.5), 0.4 * amount + 0.15, _c);
+    this.decals.add({ x: x + rand(-0.15, 0.15), y: 0, z: z + rand(-0.15, 0.15) }, { x: 0, y: 1, z: 0 }, rand(0.4, 0.7) * (0.6 + size), D.dust, _c.set(0x2a2016), -1, 0.85);
+    if (this.puffsLeft > 0) {
+      this.puffsLeft--;
+      this.puff({ x, y: y + 0.3, z }, 0.4 + size * 0.5, 0.35, rand(3, 5), 0.4);
+    }
+  }
+
+  /** Dust cloud of a material: fog blob (budgeted per debris() call) plus sprites. */
+  private dustOf(m: Debris, x: number, y: number, z: number, r: number, k = 1) {
+    const L = MAT_LOOK[m];
+    if (this.puffsLeft > 0 && L.dust > 0.05) {
+      this.puffsLeft--;
+      this.puff({ x, y, z }, r, L.dust * k, rand(4, 7), 0.5);
+    }
+    if (L.dust > 0.2) {
+      _c.set(L.dustColor);
+      for (let i = 0; i < 2; i++) this.smoke.spawn(x + rand(-0.15, 0.15), y + rand(-0.1, 0.15), z + rand(-0.15, 0.15), rand(-0.3, 0.3), rand(0, 0.25), rand(-0.3, 0.3), 0.3 * r + 0.15, 0.7, rand(2.5, 5), 0.5 * L.dust * k, _c);
+    }
+  }
+
+  /**
+   * A falling slab hit the ground hard: it breaks into rubble with a burst of dust. Each material lands its own way:
+   * cushions and brass stay whole (a puff of stuffing, a clang of sparks), a leafy clump bursts into leaves, a pane
+   * or a pot piece smashes into shards.
+   */
   private shatter(m: Debris, x: number, y: number, z: number, speed: number, size: number): boolean {
     const L = MAT_LOOK[m];
+    switch (m) {
+      case 'fabric':
+      case 'leather':
+        if (speed > 4) this.stuffing(x, y + size * 0.3, z, 3, m === 'leather', 1);
+        return false;
+      case 'brass':
+        if (speed > 3) this.sparkBurst(x, y + 0.05, z, 0, 1, 0, 6, 4, true);
+        return false;
+      case 'foliage':
+        if (speed < 1.5) return false;
+        this.leafBurst(x, y + size * 0.4, z, size, 6 + Math.round(size * 18), false, 1.2);
+        this.branches(x, y + size * 0.3, z, 2, 1.5);
+        return true;
+      case 'glass':
+        if (speed < 2) return false;
+        this.glassBurst(x, y + 0.05, z, size, 6 + Math.round(size * 14), 0, 0, Math.min(2.5, speed * 0.4));
+        return true;
+      case 'ceramic':
+        if (speed < 2.5) return false;
+        this.potShards(x, y + size * 0.3, z, size, 3 + Math.round(size * 6), 0, 0, 1.6);
+        this.soil(x, y, z, size, 0.6);
+        return true;
+    }
     // A gentle drop onto a pile keeps the slab whole; a real fall breaks it.
-    if (speed < (m === 'metal' ? 6 : m === 'wood' ? 4.5 : 3.2)) return false;
+    const woody = m === 'wood' || m === 'walnut';
+    if (speed < (m === 'metal' ? 6 : woody ? 4.5 : 3.2)) return false;
     const pieces = m === 'metal' ? 2 : 4 + Math.round(size * 6);
     for (let i = 0; i < pieces; i++) {
       const pool = this.fragPool(m);
       const th = rand(0, 6.28);
       const s = rand(0.6, 2.2) * Math.min(1.6, speed / 5);
-      const f = m === 'wood' ? 1 : rand(0.3, 0.55);
-      _c.set(L.color).multiplyScalar(rand(0.75, 1.2));
-      const fx = m === 'wood' ? rand(0.05, 0.1) : size * f;
-      const fz = m === 'wood' ? rand(0.2, 0.45) : size * f * rand(0.6, 1.1);
+      const f = woody ? 1 : rand(0.3, 0.55);
+      _c.set(CLASSIC_TINT[m] ? L.color : 0xffffff).multiplyScalar(rand(0.75, 1.2));
+      const fx = woody ? rand(0.05, 0.1) : size * f;
+      const fz = woody ? rand(0.2, 0.45) : size * f * rand(0.6, 1.1);
       pool.spawn(x + Math.cos(th) * size * 0.25, y + size * 0.3, z + Math.sin(th) * size * 0.25, Math.cos(th) * s, rand(0.6, 2.4), Math.sin(th) * s, fx, size * f * rand(0.5, 0.9), fz, _c, rand(12, 20));
     }
     _c.set(L.grit);
@@ -1730,6 +2048,7 @@ class Effects implements Fx {
     this.puff(mid, 0.4, 0.5, 3, 0.5);
   }
 
+
   private ring(p: Vec3, size: number, life: number) {
     const r = this.rings.find((x) => x.age >= x.life) ?? this.rings[0];
     r.mesh.position.set(p.x, Math.max(0.03, p.y < 1.4 ? 0.03 : p.y), p.z);
@@ -1741,7 +2060,8 @@ class Effects implements Fx {
 
   // ---- Fx -----------------------------------------------------------------------------------------------------------
 
-  impact(p: Vec3, n: Vec3, mat: ImpactMat, chunk: number) {
+  /** `dir` (optional): the shot's direction, for glancing grazes and what carries on through glass and cloth. */
+  impact(p: Vec3, n: Vec3, mat: ImpactMat, chunk: number, dir?: Vec3) {
     if (mat === 'none') return;
     if (mat === 'flesh') {
       this.blood(p, { x: -n.x, y: -n.y, z: -n.z }, 0.35);
@@ -1753,18 +2073,19 @@ class Effects implements Fx {
       this.tileHit(tile, p);
       return;
     }
-    const m = asDebris(mat);
+    const m: Debris = mat;
     const L = MAT_LOOK[m];
-    const cell = m === 'wood' ? D.wood : m === 'metal' ? D.metal : Math.random() < 0.5 ? D.hole : D.hole2;
-    // Masonry holes are tinted towards the raw inside of the material.
-    const tint = m === 'brick' ? _c.setRGB(0.95, 0.66, 0.55) : m === 'plaster' ? _c.setRGB(1, 0.98, 0.94) : m === 'concrete' ? _c.setRGB(0.82, 0.8, 0.77) : _c.setRGB(1, 1, 1);
-    const size = m === 'metal' ? rand(0.045, 0.06) : m === 'wood' ? rand(0.07, 0.1) : rand(0.07, 0.11);
-    this.decals.add(p, n, size, cell, tint, chunk, 1, m === 'wood' ? 1.4 : 1);
+    this.hole(p, n, m, chunk, dir);
     const ox = p.x + n.x * 0.02;
     const oy = p.y + n.y * 0.02;
     const oz = p.z + n.z * 0.02;
+    // Where the bullet carries on (through glass, cloth, thin brass): along the shot, or straight through the face.
+    const dl = dir ? Math.hypot(dir.x, dir.y, dir.z) || 1 : 1;
+    const tx = dir ? dir.x / dl : -n.x;
+    const ty = dir ? dir.y / dl : -n.y;
+    const tz = dir ? dir.z / dl : -n.z;
     // Chips fly out in a cone around the surface normal, grit falls.
-    const chips = m === 'metal' ? 2 : m === 'plaster' ? 4 : 6;
+    const chips = IMPACT_CHIPS[m];
     _c.set(L.chips);
     for (let i = 0; i < chips; i++) {
       const s = rand(1.5, 4.5);
@@ -1792,41 +2113,198 @@ class Effects implements Fx {
       case 'concrete':
         _c.setRGB(0.5, 0.49, 0.47);
         this.smoke.spawn(ox + n.x * 0.06, oy + n.y * 0.06, oz + n.z * 0.06, n.x * 0.8, n.y * 0.8 + 0.1, n.z * 0.8, 0.09, 0.45, rand(0.8, 1.4), 0.4, _c);
+        this.sparkBurst(ox, oy, oz, n.x, n.y, n.z, 4, 7, false);
         break;
       case 'wood':
-        // Splinters torn out along the grain.
+      case 'walnut':
+        // Splinters torn out along the grain (pale raw wood under walnut's dark lacquer, and flakes of the lacquer).
         for (let i = 0; i < 3; i++) {
-          _c.set(L.chips).multiplyScalar(rand(0.8, 1.1));
-          this.frags.wood[0].spawn(ox, oy, oz, (n.x + rand(-0.8, 0.8)) * 2.4, rand(0.5, 2.5), (n.z + rand(-0.8, 0.8)) * 2.4, rand(0.008, 0.014), rand(0.008, 0.012), rand(0.05, 0.13), _c, rand(8, 14));
+          if (m === 'walnut') _c.setRGB(2.4, 2.1, 1.8).multiplyScalar(rand(0.8, 1.1));
+          else _c.set(L.chips).multiplyScalar(rand(0.8, 1.1));
+          this.fragPool(m)
+            .spawn(ox, oy, oz, (n.x + rand(-0.8, 0.8)) * 2.4, rand(0.5, 2.5), (n.z + rand(-0.8, 0.8)) * 2.4, rand(0.008, 0.014), rand(0.008, 0.012), rand(0.05, 0.13), _c, rand(8, 14));
         }
+        if (m === 'walnut') this.scrapBurst(ox, oy, oz, 3, 0x24140a, 0.008, 0.016, 0.8, 8);
         break;
       case 'metal':
+        // Steel: a hard fan of sparks, a few hot flecks that drift, a flash and sometimes a ricochet.
+        this.sparkBurst(ox, oy, oz, n.x, n.y, n.z, 14, 11, false);
+        this.hotFlecks(ox, oy, oz, n, 2, false);
+        this.flash({ x: p.x + n.x * 0.1, y: p.y + n.y * 0.1, z: p.z + n.z * 0.1 }, 0xffb060, 1.4, 0.05);
+        if (Math.random() < 0.3) this.ricochet(p, n);
+        break;
+      case 'brass':
+        // Brass rings bright: golden sparks, a streak off the curve, hot brass flecks. A thin drum or rail is pierced
+        // instead, and spits less.
+        this.sparkBurst(ox, oy, oz, n.x, n.y, n.z, this.parts.thin(chunk) ? 6 : 12, 10, true);
+        this.hotFlecks(ox, oy, oz, n, 3, true);
+        this.flash({ x: p.x + n.x * 0.1, y: p.y + n.y * 0.1, z: p.z + n.z * 0.1 }, 0xffc870, 1.6, 0.05);
+        if (Math.random() < 0.45) this.ricochet(p, n);
+        break;
+      case 'marble':
+        // Bright white chips that fly fast, and a white dust puff that hangs.
+        for (let i = 0; i < 3; i++) {
+          _c.set(L.chips).multiplyScalar(rand(0.92, 1.05));
+          const w = rand(0.012, 0.03);
+          this.fragPool('marble').spawn(ox, oy, oz, (n.x + rand(-0.6, 0.6)) * 3, (n.y + rand(0, 0.8)) * 2.5 + 0.5, (n.z + rand(-0.6, 0.6)) * 3, w, w * 0.5, w, _c, rand(8, 14));
+        }
+        _c.setRGB(0.93, 0.92, 0.9);
+        this.smoke.spawn(ox + n.x * 0.06, oy + n.y * 0.06, oz + n.z * 0.06, n.x * 1.1, n.y * 1.1 + 0.15, n.z * 1.1, 0.11, 0.65, rand(1, 1.8), 0.7, _c);
+        this.sparkBurst(ox, oy, oz, n.x, n.y, n.z, 2, 6, false);
+        break;
+      case 'travertine':
+        // Honey dust and a pitted crumb or two.
+        _c.setRGB(0.82, 0.72, 0.52);
+        this.smoke.spawn(ox + n.x * 0.06, oy + n.y * 0.06, oz + n.z * 0.06, n.x * 1, n.y * 1 + 0.12, n.z * 1, 0.11, 0.6, rand(1, 1.7), 0.6, _c);
+        if (Math.random() < 0.6) {
+          _c.set(CLASSIC_TINT[m] ? L.color : 0xffffff).multiplyScalar(rand(0.85, 1.1));
+          const w = rand(0.02, 0.04);
+          this.fragPool('travertine').spawn(ox, oy, oz, (n.x + rand(-0.5, 0.5)) * 2.2, rand(0.5, 2), (n.z + rand(-0.5, 0.5)) * 2.2, w, w * 0.7, w, _c, rand(8, 14));
+        }
+        break;
+      case 'glass': {
+        // Glittering slivers out of both faces (most carry on with the bullet), fine sparkle, a pinch of powder.
+        for (let i = 0; i < 9; i++) {
+          const out = i < 3;
+          const s = rand(1, out ? 2.5 : 4);
+          const bx = out ? n.x : tx;
+          const by = out ? n.y : ty;
+          const bz = out ? n.z : tz;
+          _c.setRGB(rand(0.85, 1), 1, 1);
+          const w = rand(0.01, 0.035);
+          this.fragPool('glass').spawn(p.x + bx * 0.03, p.y + by * 0.03, p.z + bz * 0.03, (bx + rand(-0.5, 0.5)) * s, (by + rand(-0.2, 0.6)) * s, (bz + rand(-0.5, 0.5)) * s, w, w * 0.08, w * rand(1, 1.6), _c, rand(10, 18));
+        }
+        this.glints(p.x, p.y, p.z, 0.08, 10, 1.2);
+        _c.setRGB(0.85, 0.9, 0.92);
+        this.smoke.spawn(p.x + tx * 0.08, p.y + ty * 0.08, p.z + tz * 0.08, tx * 0.6, 0.05, tz * 0.6, 0.05, 0.3, rand(0.5, 0.9), 0.2, _c);
+        break;
+      }
+      case 'fabric':
+        // A tuft of stuffing pulled out after the bullet, threads and lint (a shade or a tablecloth has no stuffing:
+        // a few papery flakes instead).
+        if (this.parts.name(chunk) === 'shade' || this.parts.name(chunk) === 'cloth') this.scrapBurst(ox, oy, oz, 2, 0xf3e6cc, 0.01, 0.025, 0.6, 8);
+        else this.stuffing(ox, oy, oz, Math.round(rand(3, 6)), false, 0.8, n.x * 0.8, n.z * 0.8);
+        this.scrapBurst(ox, oy, oz, 3, LOOK.fabric.color, 0.005, 0.012, 0.6, 6);
+        _c.set(LOOK.fabric.dustColor);
+        this.smoke.spawn(ox + n.x * 0.05, oy, oz + n.z * 0.05, n.x * 0.5, 0.1, n.z * 0.5, 0.07, 0.4, rand(0.8, 1.3), 0.3, _c);
+        break;
+      case 'leather':
+        // Dark flecks of hide and crumbs of yellow foam.
+        _c.setRGB(0.85, 0.74, 0.42);
+        for (let i = 0; i < 4; i++) {
+          const s = rand(1, 2.5);
+          this.grit.spawn(ox, oy, oz, (n.x + rand(-0.6, 0.6)) * s, rand(0.3, 1.5), (n.z + rand(-0.6, 0.6)) * s, rand(0.008, 0.016), rand(1.2, 2.5), _c);
+        }
+        this.stuffing(ox, oy, oz, 2, true, 0.6, n.x * 0.6, n.z * 0.6);
+        break;
+      case 'ceramic':
+        // Glazed shards (dark outside, pale clay inside) and clay dust.
+        for (let i = 0; i < 3; i++) {
+          const w = rand(0.015, 0.04);
+          _c.setRGB(1, 1, 1);
+          this.fragPool('ceramic').spawn(ox, oy, oz, (n.x + rand(-0.6, 0.6)) * 2.8, rand(0.5, 2.2), (n.z + rand(-0.6, 0.6)) * 2.8, w, w * 0.3, w, _c, rand(8, 14));
+        }
+        _c.setRGB(0.76, 0.68, 0.58);
+        this.smoke.spawn(ox + n.x * 0.06, oy + n.y * 0.06, oz + n.z * 0.06, n.x * 0.9, n.y * 0.9 + 0.1, n.z * 0.9, 0.09, 0.45, rand(0.8, 1.4), 0.45, _c);
+        break;
+      case 'foliage':
+        // Leaves clipped off, fluttering down, a twig now and then; a faint green mist.
+        this.leafBurst(p.x, p.y, p.z, 0.15, Math.round(rand(3, 6)), this.parts.name(chunk) === 'flowers', 0.5);
+        if (Math.random() < 0.35) {
+          _c.setRGB(1, 1, 1);
+          this.frags.foliage[0].spawn(p.x, p.y, p.z, rand(-0.8, 0.8), rand(0.2, 1), rand(-0.8, 0.8), rand(0.006, 0.01), rand(0.006, 0.01), rand(0.05, 0.12), _c, rand(10, 16));
+        }
+        _c.setRGB(0.32, 0.4, 0.24);
+        this.smoke.spawn(p.x, p.y, p.z, tx * 0.4, 0.05, tz * 0.4, 0.06, 0.4, rand(0.6, 1), 0.15, _c);
         break;
     }
-    if (m === 'metal' || m === 'concrete') {
-      const k = m === 'metal' ? 12 : 4;
-      for (let i = 0; i < k; i++) {
-        const s = rand(3, m === 'metal' ? 12 : 8);
-        _c.setRGB(1, rand(0.55, 0.85), rand(0.2, 0.4)).multiplyScalar(m === 'metal' ? 5 : 3.5);
-        this.sparks.spawn(ox, oy, oz, (n.x + rand(-0.8, 0.8)) * s, (n.y + rand(-0.3, 1)) * s, (n.z + rand(-0.8, 0.8)) * s, rand(0.008, 0.016), rand(0.1, 0.4), _c);
-      }
-      if (m === 'metal') {
-        this.flash({ x: p.x + n.x * 0.1, y: p.y + n.y * 0.1, z: p.z + n.z * 0.1 }, 0xffb060, 1.4, 0.05);
-        // Ricochet: a bright streak whining off the plate.
-        if (Math.random() < 0.3) {
-          const rx = n.x + rand(-0.7, 0.7);
-          const ry = n.y + rand(-0.2, 0.6);
-          const rz = n.z + rand(-0.7, 0.7);
-          const rl = Math.hypot(rx, ry, rz) || 1;
-          this.tracers.spawn({ x: p.x - (rx / rl) * 1.6, y: p.y - (ry / rl) * 1.6, z: p.z - (rz / rl) * 1.6 }, { x: p.x + (rx / rl) * 10, y: p.y + (ry / rl) * 10, z: p.z + (rz / rl) * 10 }, 2.5, 0.7);
-        }
-      }
-    }
     // Dust in the fog, rate-limited (an LMG would otherwise flood the fog with blobs).
-    if (this.time - this.lastPuff > 0.035) {
+    if (L.dust > 0.05 && this.time - this.lastPuff > 0.035) {
       this.lastPuff = this.time;
-      this.puff({ x: p.x + n.x * 0.15, y: p.y + n.y * 0.15, z: p.z + n.z * 0.15 }, m === 'plaster' ? 0.2 : 0.14, L.dust * (m === 'plaster' ? 0.6 : 0.4), 1.6, 0.4);
+      const big = m === 'plaster' || m === 'marble' || m === 'travertine';
+      this.puff({ x: p.x + n.x * 0.15, y: p.y + n.y * 0.15, z: p.z + n.z * 0.15 }, big ? 0.2 : 0.14, L.dust * (big ? 0.6 : 0.4), 1.6, 0.4);
     }
+  }
+
+  /** Ricochet: a bright streak whining off the plate. */
+  private ricochet(p: Vec3, n: Vec3) {
+    const rx = n.x + rand(-0.7, 0.7);
+    const ry = n.y + rand(-0.2, 0.6);
+    const rz = n.z + rand(-0.7, 0.7);
+    const rl = Math.hypot(rx, ry, rz) || 1;
+    this.tracers.spawn({ x: p.x - (rx / rl) * 1.6, y: p.y - (ry / rl) * 1.6, z: p.z - (rz / rl) * 1.6 }, { x: p.x + (rx / rl) * 10, y: p.y + (ry / rl) * 10, z: p.z + (rz / rl) * 10 }, 2.5, 0.7);
+  }
+
+  /** Hot metal flecks that drift and glow out (embers pool). */
+  private hotFlecks(x: number, y: number, z: number, n: Vec3, count: number, brass: boolean) {
+    for (let i = 0; i < count; i++) {
+      const s = rand(1, 3);
+      _c.setRGB(1, brass ? rand(0.7, 0.85) : rand(0.45, 0.6), brass ? 0.3 : 0.15).multiplyScalar(rand(2, 3));
+      this.embers.spawn(x, y, z, (n.x + rand(-0.6, 0.6)) * s, (n.y + rand(0, 0.8)) * s, (n.z + rand(-0.6, 0.6)) * s, rand(0.006, 0.012), rand(0.5, 1.2), _c);
+    }
+  }
+
+  /**
+   * The bullet hole: the material's own cell and size (holes.ts), tinted cells in the surface colour. A glancing shot
+   * leaves a stretched graze along its path; thin brass or sheet steel is pierced; a cluster of holes in stone, glass
+   * or plaster cracks.
+   */
+  private hole(p: Vec3, n: Vec3, m: Debris, chunk: number, dir?: Vec3) {
+    if (m === 'foliage') return;
+    let inc = 1;
+    if (dir) inc = Math.abs(dir.x * n.x + dir.y * n.y + dir.z * n.z) / (Math.hypot(dir.x, dir.y, dir.z) || 1);
+    if (dir && inc < 0.26 && m !== 'fabric' && m !== 'glass' && m !== 'leather') {
+      const [a, b] = HOLE_INFO.graze.size;
+      this.decals.add(p, n, rand(a, b), D.graze, holeTint(m, 'graze', _c), chunk, 1, Math.min(3.4, 0.75 / (inc + 0.04)), dir);
+      return;
+    }
+    const r = Math.random() < 0.5;
+    const cell: HoleKind =
+      m === 'brick'
+        ? r ? 'hole' : 'hole2'
+        : m === 'plaster'
+          ? r ? 'plaster' : 'plaster2'
+          : m === 'concrete'
+            ? r ? 'concrete' : 'concrete2'
+            : m === 'wood'
+              ? r ? 'wood' : 'wood2'
+              : m === 'metal'
+                ? r || this.parts.thin(chunk) ? 'metal2' : 'metal'
+                : m === 'marble'
+                  ? r ? 'marble' : 'marble2'
+                  : m === 'glass'
+                    ? Math.random() < 0.6 ? 'glass' : 'glass2'
+                    : m === 'fabric'
+                      ? r ? 'fabric' : 'fabric2'
+                      : m === 'brass'
+                        ? this.parts.thin(chunk) ? 'brassHole' : 'brass'
+                        : m;
+    const [a, b] = HOLE_INFO[cell].size;
+    const woody = cell === 'wood' || cell === 'wood2' || cell === 'walnut';
+    this.decals.add(p, n, rand(a, b), D[cell], holeTint(m, cell, _c), chunk, 1, woody ? 1.25 : 1);
+    // A hole next to an earlier one in brittle stuff runs a crack between them.
+    const crack = CRACKS[m];
+    if (crack) {
+      const reach = m === 'glass' ? 0.32 : 0.16;
+      for (let k = 0; k < 32; k++) {
+        if (this.holeChunk[k] !== chunk) continue;
+        const dx = this.holes[k * 3] - p.x;
+        const dy = this.holes[k * 3 + 1] - p.y;
+        const dz = this.holes[k * 3 + 2] - p.z;
+        if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+        if (Math.random() < crack) {
+          const [c0, c1] = HOLE_INFO.crack.size;
+          this.decals.add({ x: p.x + dx * 0.5, y: p.y + dy * 0.5, z: p.z + dz * 0.5 }, n, rand(c0, c1) * (m === 'glass' ? 1.4 : 1), D.crack, holeTint(m, 'crack', _c), chunk, 0.9, 1.3, { x: dx, y: dy, z: dz });
+        }
+        break;
+      }
+    }
+    const k = this.holeNext;
+    this.holeNext = (k + 1) % 32;
+    this.holes[k * 3] = p.x;
+    this.holes[k * 3 + 1] = p.y;
+    this.holes[k * 3 + 2] = p.z;
+    this.holeChunk[k] = chunk;
   }
 
   tracer(from: Vec3, to: Vec3, kind: WeaponKind) {
@@ -1976,10 +2454,11 @@ class Effects implements Fx {
     const per = Math.max(0.12, Math.min(1, 14 / chunks.length));
     let puffs = 0;
     const maxPuffs = blast ? 10 : 6;
+    this.puffsLeft = maxPuffs;
     for (let k = 0; k < chunks.length; k++) {
       const c = this.world.chunks[chunks[k]];
       if (!c) continue;
-      const m = asDebris(c.mat);
+      const m = c.mat;
       const L = MAT_LOOK[m];
       const sx = c.max.x - c.min.x;
       const sy = c.max.y - c.min.y;
@@ -1997,6 +2476,11 @@ class Effects implements Fx {
       az /= al;
       const near = Math.max(0, 1 - al / 5);
       const speed = blast ? 4 + near * 9 : 1.2 + near * 1.6;
+      const theme = this.parts.theme(chunks[k], m);
+      if (theme !== 'classic') {
+        this.wreck(theme, c, chunks[k], ax, ay, az, speed, per, blast);
+        continue;
+      }
       // One big slab-ish lump plus smaller pieces: a broken chunk is mostly a few big bits, not gravel.
       if (!blast || Math.random() < 0.5) {
         _c.set(L.color).multiplyScalar(rand(0.85, 1.1));
@@ -2071,6 +2555,204 @@ class Effects implements Fx {
   }
 
   /**
+   * One chunk of a non-classic material breaks (wreck.ts Theme): glass panes shatter into flat slivers and a glitter
+   * cascade, upholstery bursts its stuffing (and a sofa its springs), a pot spills its soil, a canopy sheds leaves and
+   * branches, a lamp shade tears with a bulb pop, a vase splashes its water. `per` scales the counts down when a
+   * blast breaks many chunks at once; (ax, ay, az) points away from the hit.
+   */
+  private wreck(theme: Theme, c: World['chunks'][number], ci: number, ax: number, ay: number, az: number, speed: number, per: number, blast: boolean) {
+    const m = c.mat;
+    const L = MAT_LOOK[m];
+    const sx = c.max.x - c.min.x;
+    const sy = c.max.y - c.min.y;
+    const sz = c.max.z - c.min.z;
+    const cx = (c.min.x + c.max.x) / 2;
+    const cy = (c.min.y + c.max.y) / 2;
+    const cz = (c.min.z + c.max.z) / 2;
+    const big = Math.max(sx, sy, sz);
+    const vol = sx * sy * sz;
+    // Burst strength: a bullet break pops, a blast flings.
+    const pw = blast ? 0.6 + speed * 0.25 : 1;
+    const n = (k: number) => Math.max(1, Math.round(k * per));
+    const back = !blast ? -0.35 : 1;
+    switch (theme) {
+      case 'pane': {
+        // The pane lets go all at once: slivers hang in place for a beat, then fall out, most of them away from the
+        // shot, flat ones flipping as they go; glitter cascades down the opening.
+        const thinX = sx < sz;
+        const count = n(16) + 2;
+        for (let i = 0; i < count; i++) {
+          const px = thinX ? cx : c.min.x + rand(0.08, 0.92) * sx;
+          const py = c.min.y + rand(0.08, 0.92) * sy;
+          const pz = thinX ? c.min.z + rand(0.08, 0.92) * sz : cz;
+          const w = i < count * 0.3 ? rand(0.1, 0.18) : rand(0.03, 0.09);
+          const out = rand(0.2, 1) * speed * (blast ? 1 : 0.7) * (Math.random() < 0.3 ? -0.5 : 1);
+          _c.setRGB(rand(0.85, 1), rand(0.95, 1.05), 1);
+          const pool = this.fragPool('glass');
+          const k = pool.spawn(px, py, pz, ax * out + rand(-0.3, 0.3), rand(-0.3, 0.6) * pw, az * out + rand(-0.3, 0.3), w, w * 0.08, w * rand(1, 1.8), _c, rand(18, 30), rand(0, 0.12) + (py - c.min.y) * 0.04, 4);
+          // Lying in the plane of the pane: the thin axis (local y) across it.
+          if (thinX) pool.setRot(k, rand(-0.3, 0.3), rand(-0.3, 0.3), Math.PI / 2 + rand(-0.2, 0.2));
+          else pool.setRot(k, Math.PI / 2 + rand(-0.2, 0.2), rand(-0.3, 0.3), rand(-0.3, 0.3));
+        }
+        this.glints(cx, cy, cz, big, n(34) + 4, pw);
+        this.schedule(0.25, () => this.glints(cx, c.min.y + sy * 0.3, cz, big * 0.7, n(14) + 2, 0.6));
+        _c.setRGB(0.85, 0.9, 0.92);
+        this.smoke.spawn(cx, cy, cz, ax * 0.4, 0.05, az * 0.4, 0.2, 0.6, rand(1, 1.8), 0.15, _c);
+        break;
+      }
+      case 'vase': {
+        this.glassBurst(cx, cy, cz, big, n(12) + 3, ax, az, pw * 1.4);
+        // The water: a splash of clear droplets, and a wet patch spreading on whatever the vase stood on.
+        for (let i = 0; i < n(36) + 6; i++) {
+          const th = rand(0, 6.28);
+          const s = rand(0.6, 2.8) * pw;
+          _c.setRGB(0.7, 0.8, 0.85);
+          this.water.spawn(cx + rand(-0.08, 0.08), cy + rand(-0.1, 0.1), cz + rand(-0.08, 0.08), Math.cos(th) * s + ax, rand(0.3, 2.4), Math.sin(th) * s + az, rand(0.01, 0.028), rand(1.5, 3), _c);
+        }
+        const hit = raycast(this.world, { x: cx, y: c.min.y + 0.02, z: cz }, { x: 0, y: -1, z: 0 }, 2);
+        const under = hit ? c.min.y + 0.02 - hit.t : 0;
+        const wi = this.decals.add({ x: cx, y: under, z: cz }, hit?.n ?? { x: 0, y: 1, z: 0 }, 0.2, D.dust, _c.set(WET), hit?.chunk ?? -1, 0.7);
+        this.decals.grow(wi, rand(0.7, 1), 3);
+        // Water running off the edge onto the floor.
+        if (under > 0.3) this.schedule(0.5, () => {
+          const wf = this.decals.add({ x: cx + rand(-0.4, 0.4), y: 0, z: cz + rand(-0.4, 0.4) }, { x: 0, y: 1, z: 0 }, 0.15, D.dust, _c.set(WET), -1, 0.6);
+          this.decals.grow(wf, rand(0.5, 0.8), 4);
+        });
+        break;
+      }
+      case 'marble':
+      case 'travertine': {
+        // Heavy slabs that crack into sharp-edged pieces, and a cloud of white (or honey) dust.
+        if (!blast || Math.random() < 0.5) {
+          _c.set(CLASSIC_TINT[m] ? L.color : 0xffffff).multiplyScalar(rand(0.9, 1.08));
+          const f = rand(0.55, 0.8);
+          this.slabs[m].spawn(cx, cy, cz, ax * speed * back * 0.5 + rand(-0.4, 0.4), rand(0.2, 1) * (blast ? 3 : 1), az * speed * back * 0.5 + rand(-0.4, 0.4), sx * f, sy * f, sz * f, _c, rand(16, 26), 0, blast ? 9 : 3);
+        }
+        for (let i = 0; i < n(5) + 1; i++) {
+          _c.set(CLASSIC_TINT[m] ? L.color : 0xffffff).multiplyScalar(rand(0.85, 1.1));
+          const w = Math.max(sx, sz) * rand(0.15, 0.32);
+          const s = speed * rand(0.5, 1.2);
+          this.fragPool(m).spawn(c.min.x + rand(0.15, 0.85) * sx, c.min.y + rand(0.2, 0.9) * sy, c.min.z + rand(0.15, 0.85) * sz, ax * s * back + rand(-1, 1), rand(0.3, 1.8) * pw, az * s * back + rand(-1, 1), w, Math.min(sy, w) * rand(0.4, 0.8), w * rand(0.6, 1.1), _c, rand(14, 22));
+        }
+        _c.set(L.grit);
+        for (let i = 0; i < n(10); i++) this.grit.spawn(cx + rand(-0.2, 0.2), cy, cz + rand(-0.2, 0.2), ax * speed * rand(0.3, 1.2) + rand(-1.5, 1.5), rand(0, 2.5), az * speed * rand(0.3, 1.2) + rand(-1.5, 1.5), rand(0.008, 0.028), rand(1.5, 3.5), _c);
+        this.dustOf(m, cx, cy, cz, (0.45 + vol * 3) * (blast ? 1.4 : 1), 1.1);
+        break;
+      }
+      case 'walnut': {
+        // Planks and splinters, flakes of the dark lacquer.
+        for (let i = 0; i < n(3); i++) {
+          _c.setRGB(rand(0.85, 1.1), rand(0.85, 1.05), rand(0.85, 1));
+          const len = big * rand(0.55, 0.95);
+          const s = speed * rand(0.5, 1.1);
+          this.walnutPlanks.spawn(cx + rand(-0.15, 0.15), cy + rand(-0.15, 0.15), cz + rand(-0.15, 0.15), ax * s * back + rand(-0.5, 0.5), rand(0.3, 1.5) * pw, az * s * back + rand(-0.5, 0.5), len, rand(0.025, 0.045), rand(0.08, 0.14), _c, rand(16, 26));
+        }
+        for (let i = 0; i < n(6); i++) {
+          // Dark lacquered outside, pale raw wood where it split.
+          if (i % 2) _c.setRGB(1, 1, 1).multiplyScalar(rand(0.8, 1.1));
+          else _c.setRGB(2.4, 2.1, 1.8).multiplyScalar(rand(0.8, 1.1));
+          const s = speed * rand(0.6, 1.4);
+          this.fragPool('walnut').spawn(cx + rand(-0.2, 0.2), cy + rand(-0.2, 0.2), cz + rand(-0.2, 0.2), ax * s + rand(-1, 1), rand(0.3, 2) * pw, az * s + rand(-1, 1), rand(0.02, 0.05), rand(0.015, 0.03), rand(0.12, 0.35), _c, rand(14, 22));
+        }
+        this.scrapBurst(cx, cy, cz, n(6) + 1, 0x24140a, 0.01, 0.025, pw, 10);
+        this.dustOf(m, cx, cy, cz, 0.4 + vol * 2, 0.8);
+        break;
+      }
+      case 'upholstery':
+      case 'sofa':
+      case 'leather':
+      case 'luggage': {
+        // The cover tears open: a cloud of stuffing tufts (foam crumbs for leather), torn scraps of the cover, the
+        // padding as a soft lump, and out of a sofa seat a spring or two.
+        const foam = m === 'leather';
+        const tufts = n(blast ? 16 : 22) + 4;
+        for (let j = 0; j < 3; j++)
+          this.stuffing(c.min.x + rand(0.2, 0.8) * sx, c.min.y + rand(0.3, 0.9) * sy, c.min.z + rand(0.2, 0.8) * sz, Math.ceil(tufts / 3), foam, pw * 1.3, ax * 0.6, az * 0.6);
+        const cover = theme === 'luggage' ? 0x6a3a1e : foam ? 0x4a2418 : Math.random() < 0.3 && theme === 'sofa' ? 0x2a2e36 : LOOK.fabric.color;
+        this.scrapBurst(cx, cy, cz, n(9) + 2, cover, 0.04, 0.12, pw, 16);
+        if (theme === 'luggage') {
+          // A burst suitcase: clothes.
+          for (const col of [0xe8e4dc, 0x3a4a6a, 0x8a2a24]) this.scrapBurst(cx, cy, cz, n(2) + 1, col, 0.1, 0.2, pw * 0.8, 18);
+        }
+        if (theme === 'sofa' && Math.random() < 0.8) {
+          for (let i = 0; i < (Math.random() < 0.5 ? 1 : 2); i++) {
+            const s = rand(1, 2.5) * pw;
+            const d = rand(0.07, 0.1);
+            _c.setRGB(1, 1, 1).multiplyScalar(rand(0.8, 1));
+            this.springs.spawn(cx + rand(-0.1, 0.1), c.max.y - 0.05, cz + rand(-0.1, 0.1), ax * s + rand(-0.6, 0.6), rand(2, 3.5) * pw, az * s + rand(-0.6, 0.6), d, rand(0.1, 0.14), d, _c, rand(18, 28), 0, 8);
+          }
+        }
+        if (!blast || Math.random() < 0.5) {
+          _c.set(foam ? 0x5a3020 : cover).multiplyScalar(rand(0.85, 1.05));
+          const f = rand(0.5, 0.7);
+          this.slabs[m].spawn(cx, cy, cz, ax * speed * 0.4 + rand(-0.3, 0.3), rand(0.3, 1) * pw, az * speed * 0.4 + rand(-0.3, 0.3), sx * f, sy * f, sz * f, _c, rand(16, 26), 0, blast ? 6 : 2);
+        }
+        _c.set(L.dustColor);
+        this.smoke.spawn(cx, cy, cz, ax * 0.3, 0.1, az * 0.3, 0.25, 0.6, rand(1.5, 2.5), 0.2, _c);
+        break;
+      }
+      case 'cloth':
+        // A tablecloth tears into big white rags; no stuffing in it.
+        this.scrapBurst(cx, cy, cz, n(10) + 2, LOOK.fabric.color, 0.07, 0.2, pw, 18);
+        this.scrapBurst(cx, cy, cz, n(4), 0xf2efe8, 0.006, 0.014, pw * 0.6, 8);
+        break;
+      case 'shade': {
+        // A lamp shade: papery scraps flutter off, the bulb pops (a flash, sparks, tinkling glass) and smokes a little.
+        this.scrapBurst(cx, cy, cz, n(12) + 3, 0xf3e6cc, 0.04, 0.12, pw, 14);
+        this.flash({ x: cx, y: cy, z: cz }, 0xffe2a8, 14, 0.14);
+        this.sparkBurst(cx, cy, cz, 0, 0.3, 0, 8, 4, true);
+        this.glints(cx, cy, cz, 0.2, 12, 0.8);
+        for (let i = 0; i < 4; i++) {
+          _c.setRGB(1, 1, 1);
+          const w = rand(0.008, 0.02);
+          this.fragPool('glass').spawn(cx, cy, cz, rand(-1.5, 1.5), rand(0, 1.5), rand(-1.5, 1.5), w, w * 0.08, w * 1.4, _c, rand(10, 16));
+        }
+        _c.setRGB(0.35, 0.34, 0.32);
+        this.smoke.spawn(cx, cy, cz, 0, 0.25, 0, 0.12, 0.5, rand(1.5, 2.5), 0.3, _c);
+        break;
+      }
+      case 'pot': {
+        // Big curved glazed shards, and the soil inside pours out (more from the top of the pot).
+        const upper = c.max.y > 0.5;
+        this.potShards(cx, cy, cz, big, n(6) + 2, ax * back, az * back, speed * 0.6 * pw + 0.6);
+        this.soil(cx, upper ? c.max.y - 0.1 : cy, cz, big, upper ? 1 : 0.5);
+        this.dustOf(m, cx, cy, cz, 0.4 + vol * 2, 0.8);
+        break;
+      }
+      case 'canopy':
+      case 'flowers': {
+        // A shower of leaves (and white petals off the flowers) and broken branches; more leaves slide off after.
+        const flowers = theme === 'flowers';
+        this.leafBurst(cx, cy, cz, big * 1.4, n(flowers ? 26 : 34) + 6, flowers, pw * 1.3);
+        this.branches(cx, cy, cz, flowers ? 1 : n(3) + 1, pw);
+        this.schedule(0.3, () => this.leafBurst(cx, cy - 0.1, cz, big * 0.7, n(10) + 2, flowers, 0.4));
+        _c.set(L.grit);
+        for (let i = 0; i < n(6); i++) this.grit.spawn(cx + rand(-0.2, 0.2), cy, cz + rand(-0.2, 0.2), rand(-1, 1) * pw, rand(0, 1.5), rand(-1, 1) * pw, rand(0.006, 0.014), rand(1, 2), _c);
+        break;
+      }
+      case 'brass': {
+        // Bent brass: curled fragments, a hunk of it tumbling, a shower of golden sparks.
+        for (let i = 0; i < n(4) + 1; i++) {
+          _c.set(CLASSIC_TINT[m] ? L.color : 0xffffff).multiplyScalar(rand(0.85, 1.15));
+          const w = big * rand(0.12, 0.3);
+          const s = speed * rand(0.6, 1.4);
+          this.fragPool('brass').spawn(cx + rand(-0.15, 0.15), cy + rand(-0.15, 0.15), cz + rand(-0.15, 0.15), ax * s + rand(-1, 1), rand(0.5, 2.5) * pw, az * s + rand(-1, 1), w, w * 0.5, w * rand(0.6, 1.2), _c, rand(16, 26));
+        }
+        if (!blast || Math.random() < 0.4) {
+          _c.set(CLASSIC_TINT[m] ? L.color : 0xffffff).multiplyScalar(rand(0.9, 1.1));
+          this.slabs.brass.spawn(cx, cy, cz, ax * speed * 0.5, rand(0.3, 1.2) * pw, az * speed * 0.5, sx * 0.8, sy * 0.8, sz * 0.8, _c, rand(18, 28), 0, blast ? 8 : 3);
+        }
+        this.sparkBurst(cx, cy, cz, ax, ay + 0.3, az, n(12) + 4, speed + 5, true);
+        this.hotFlecks(cx, cy, cz, { x: ax, y: 0.4, z: az }, 3, true);
+        this.flash({ x: cx, y: cy, z: cz }, 0xffc870, 2.5, 0.06);
+        break;
+      }
+      case 'classic':
+        break;
+    }
+  }
+
+  /**
    * Chunks that lost their support come down as whole slabs, lowest first, each held in place for a beat so the
    * section visibly slumps; they shatter when they land hard. Past ~60 slabs the rest crumble as small debris.
    */
@@ -2101,15 +2783,29 @@ class Effects implements Fx {
         rest.push(chunks[k]);
         continue;
       }
-      const m = asDebris(c.mat);
-      const sx = c.max.x - c.min.x;
+      const m = c.mat;
+      let sx = c.max.x - c.min.x;
       const sy = c.max.y - c.min.y;
-      const sz = c.max.z - c.min.z;
+      let sz = c.max.z - c.min.z;
       const cx = (c.min.x + c.max.x) / 2;
       const cy = (c.min.y + c.max.y) / 2;
       const cz = (c.min.z + c.max.z) / 2;
       const delay = 0.04 + (c.min.y - minY) * 0.07 + rand(0, 0.12);
-      _c.set(MAT_LOOK[m].color).multiplyScalar(rand(0.85, 1.1));
+      // Pieces fall as their own material: a lamp shade or a vase comes down and breaks (its theme, as it lands); a
+      // pane is a thin sheet that smashes; a canopy is a leafy clump shedding leaves as it drops; cushions stay whole.
+      const theme = this.parts.theme(chunks[k], m);
+      if (theme === 'shade' || theme === 'vase') {
+        const ci = chunks[k];
+        this.schedule(delay + Math.sqrt((2 * Math.max(0.1, c.min.y)) / GRAVITY), () => this.wreck(theme, c, ci, lx, 0, lz, 1.5, 1, false));
+        continue;
+      }
+      if (m === 'glass') {
+        if (sx < sz) sx *= 0.15;
+        else sz *= 0.15;
+      }
+      if (m === 'foliage') this.schedule(delay + 0.1, () => this.leafBurst(cx, cy, cz, Math.max(sx, sy, sz) * 0.8, 5, theme === 'flowers', 0.4));
+      // The classic five tint by their colour again (their tuned, weathered look); the rest keep their material's.
+      _c.set(CLASSIC_TINT[m] ? MAT_LOOK[m].color : 0xffffff).multiplyScalar(rand(0.85, 1.1));
       const push = rand(0.2, 0.9);
       this.slabs[m].spawn(cx, cy, cz, lx * push + rand(-0.15, 0.15), rand(-0.2, 0.3), lz * push + rand(-0.15, 0.15), sx * 0.97, sy * 0.97, sz * 0.97, _c, rand(16, 26), delay, 1.6, true);
       // Mortar dust shaken loose as it goes.
@@ -2212,10 +2908,10 @@ class Effects implements Fx {
         const rotAlong = Math.abs(along.x) > 0;
         this.planks.spawn(w.center.x + along.x * rand(-0.6, 0.6), w.center.y + rand(0.3, 1.3), w.center.z + along.z * rand(-0.6, 0.6), (away.x / al) * s, rand(1, 3), (away.z / al) * s, rotAlong ? rand(0.5, 1.2) : 0.035, 0.17, rotAlong ? 0.035 : rand(0.5, 1.2), _c, rand(16, 24));
       }
-      _c.setRGB(0.6, 0.72, 0.78);
+      _c.setRGB(0.95, 1, 1);
       for (let i = 0; i < 8; i++) {
         const s = rand(2, 6);
-        this.frags.metal[0].spawn(w.center.x + along.x * rand(-0.7, 0.7), w.center.y + rand(0.2, 1.4), w.center.z + along.z * rand(-0.7, 0.7), (away.x / al) * s + rand(-1, 1), rand(0.5, 2.5), (away.z / al) * s + rand(-1, 1), rand(0.04, 0.09), 0.006, rand(0.04, 0.09), _c, rand(10, 16));
+        this.fragPool('glass').spawn(w.center.x + along.x * rand(-0.7, 0.7), w.center.y + rand(0.2, 1.4), w.center.z + along.z * rand(-0.7, 0.7), (away.x / al) * s + rand(-1, 1), rand(0.5, 2.5), (away.z / al) * s + rand(-1, 1), rand(0.04, 0.09), 0.006, rand(0.04, 0.09), _c, rand(10, 16));
       }
     }
   }
@@ -2298,6 +2994,10 @@ class Effects implements Fx {
     for (const p of Object.values(this.slabs)) p.wake();
     this.planks.wake();
     this.casings.wake();
+    this.walnutPlanks.wake();
+    this.springs.wake();
+    this.leaves.wake();
+    this.scraps.wake();
     for (const s of ['marble', 'travertine'] as const) {
       for (const p of this.tileChips[s]) p.wake();
       for (const p of this.tilePieces[s]) p.wake();
@@ -2317,6 +3017,13 @@ class Effects implements Fx {
     for (const p of Object.values(this.slabs)) p.update(dt);
     this.planks.update(dt);
     this.casings.update(dt);
+    this.walnutPlanks.update(dt);
+    this.springs.update(dt);
+    this.leaves.update(dt);
+    this.scraps.update(dt);
+    this.fluff.update(dt);
+    this.glitter.update(dt);
+    this.water.update(dt);
     for (const s of ['marble', 'travertine'] as const) {
       for (const p of this.tileChips[s]) p.update(dt);
       for (const p of this.tilePieces[s]) p.update(dt);
@@ -2379,7 +3086,7 @@ class Effects implements Fx {
       for (const p of this.tilePieces[s]) p.mesh.dispose();
     }
     this.tiles.dispose();
-    for (const x of [this.planks, this.casings, this.grit, this.sparks, this.embers, this.drops, this.smoke, this.fire, this.decals, this.tracers]) {
+    for (const x of [this.planks, this.casings, this.walnutPlanks, this.springs, this.leaves, this.scraps, this.fluff, this.glitter, this.water, this.grit, this.sparks, this.embers, this.drops, this.smoke, this.fire, this.decals, this.tracers]) {
       x.mesh.geometry.dispose();
       x.mesh.dispose();
     }
@@ -2392,10 +3099,18 @@ class Effects implements Fx {
     for (const p of Object.values(this.slabs)) p.clear();
     this.planks.clear();
     this.casings.clear();
+    this.walnutPlanks.clear();
+    this.springs.clear();
+    this.leaves.clear();
+    this.scraps.clear();
+    this.fluff.clear();
+    this.glitter.clear();
+    this.water.clear();
     for (const s of ['marble', 'travertine'] as const) {
       for (const p of this.tileChips[s]) p.clear();
       for (const p of this.tilePieces[s]) p.clear();
     }
+    this.tiles.clear();
     this.grit.clear();
     this.sparks.clear();
     this.embers.clear();

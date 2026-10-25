@@ -28,7 +28,7 @@ import { Input } from '../../engine/input';
 import { SnapshotTimeline, damp, lerpAngle } from '../../engine/interp';
 import { type ClientContext, type GameClient, createStore } from '../types';
 import { type CharacterInstance, type Flashlight, type Fx, type Models, type Pipeline, type Quality, VIEWMODEL_LAYER, type WorldView, type ZAudio } from './api';
-import { configureZAudio, createZAudio } from './audio';
+import { configureZAudio, createZAudio, playMatAt } from './audio';
 import { type EffectsImpl, createFx } from './fx';
 import { createModels } from './models';
 import { texturesSettled } from './textures';
@@ -716,7 +716,8 @@ export class ZombiesClient implements GameClient {
             const d = normalize(v3(to.x - o.x, to.y - o.y, to.z - o.z));
             const back = v3(to.x - d.x * 0.05, to.y - d.y * 0.05, to.z - d.z * 0.05);
             const hit = raycast(world, back, d, 0.2);
-            fx?.impact(to, hit?.n ?? v3(-d.x, -d.y, -d.z), mat, hit?.chunk ?? -1);
+            fx?.impact(to, hit?.n ?? v3(-d.x, -d.y, -d.z), mat, hit?.chunk ?? -1, d);
+            if (audio) playMatAt(audio, 'impact', to, mat);
           }
         }
         return;
@@ -747,7 +748,7 @@ export class ZombiesClient implements GameClient {
         fx?.debris(e.d, at, !!e.x);
         if (e.f.length) fx?.debris(e.f, at, false);
         const c = world.chunks[e.d[0] ?? e.f[0]];
-        if (c) audio?.playAt('crumble', v3((c.min.x + c.max.x) / 2, (c.min.y + c.max.y) / 2, (c.min.z + c.max.z) / 2), { amount: Math.min(1, (e.d.length + e.f.length) / 12) });
+        if (c && audio) playMatAt(audio, 'crumble', v3((c.min.x + c.max.x) / 2, (c.min.y + c.max.y) / 2, (c.min.z + c.max.z) / 2), c.mat, Math.min(1, (e.d.length + e.f.length) / 12));
         return;
       }
       case 'chp':
@@ -1204,8 +1205,8 @@ export class ZombiesClient implements GameClient {
         this.fx?.blood(end.p, d, w.damage > 100 ? 1 : 0.5);
         this.audio?.playAt(end.head ? 'headshot' : 'flesh', end.p);
       } else if (end.n && end.mat) {
-        this.fx?.impact(end.p, end.n, end.mat, end.chunk);
-        if (Math.random() < 0.4) this.audio?.playAt('impact', end.p);
+        this.fx?.impact(end.p, end.n, end.mat, end.chunk, d);
+        if (this.audio) playMatAt(this.audio, 'impact', end.p, end.mat);
       }
     }
   }

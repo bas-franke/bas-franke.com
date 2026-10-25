@@ -5,12 +5,15 @@
 //   chip them, grenades and zombies bash them, and chunks no longer connected to the floor or a ceiling collapse
 //   (collapse()). Chunk indices are stable and do not depend on the open zones, so the server only sends indices and
 //   health values.
-// - Solids never break: floor, ceilings, corner posts, brass mullions, lockers, furniture, the mezzanine slabs, the
+// - Furniture is chunks too (furniture.ts): cells of upholstery, marble, brass, ceramic, foliage, so a burst takes out
+//   the corner it hits and whatever lost its last link to the floor drops.
+// - Solids never break: floor, ceilings, corner posts, brass mullions, lockers, the mezzanine slabs, the
 //   elevator doors, the shutters of closed wings, the boundary. Clips block players and zombies but not bullets or
 //   grenades (boarded entrances: zombies get through by tearing the boards and vaulting).
 // - A 1 m grid over the whole map indexes the chunks for collision and ray casts.
 
 import type { AABB, Vec3 } from '../math.js';
+import { furnitureCells } from './furniture.js';
 import { LOCKER_ORDER, type WeaponId } from './weapons.js';
 import { FURNITURE_SIZE, type FurnitureDef, type MapDef, type Mat, type OpeningDef, type Side, type StationKind, type WallDef, type ZoneId } from './maps.js';
 
@@ -35,6 +38,11 @@ export const MAT_HP: Record<Mat, number> = {
   travertine: 150,
   walnut: 60,
   glass: 6,
+  fabric: 30,
+  leather: 40,
+  ceramic: 25,
+  brass: 300,
+  foliage: 10,
 };
 
 export interface Chunk {
@@ -50,9 +58,14 @@ export interface Chunk {
   nb: number[];
   /** Part of a wall (not a column, desk or bar). */
   wall: boolean;
-  /** The wall id (maps.ts WallDef.id) or prop kind ('column', 'desk', 'bar') it belongs to. */
+  /** The wall id (maps.ts WallDef.id), prop kind ('column', 'desk', 'bar') or 'furniture' it belongs to. */
   part: string;
   zone: ZoneId;
+  /** Furniture chunks: index into World.furniture, and the part of it (furniture.ts furnitureParts). */
+  furn?: number;
+  furnPart?: number;
+  /** Stops bullets and blasts but not bodies (leaves and flowers): players and zombies walk through. */
+  ghost?: boolean;
 }
 
 export type SolidKind =
@@ -67,7 +80,6 @@ export type SolidKind =
   | 'shutter'
   | 'elevator'
   | 'mezzanine'
-  | 'furniture'
   | 'bars';
 
 export interface Solid extends AABB {
@@ -133,6 +145,9 @@ export interface ZoneInfo {
 
 export interface FurnitureInfo extends FurnitureDef {
   box: AABB;
+  /** Its chunks: indices [c0, c1) of World.chunks. */
+  c0: number;
+  c1: number;
 }
 
 export interface LampInfo {
@@ -358,8 +373,17 @@ export function buildWorld(def: MapDef, openZones?: readonly ZoneId[]): World {
   solids.push({ kind: 'bound', min: v(bounds.minX, 0, bounds.minZ - B), max: v(bounds.maxX, 14, bounds.minZ) });
   solids.push({ kind: 'bound', min: v(bounds.minX, 0, bounds.maxZ), max: v(bounds.maxX, 14, bounds.maxZ + B) });
 
-  const furniture = def.furniture.map((f) => ({ ...f, box: furnitureBox(f) }));
-  for (const f of furniture) solids.push({ kind: 'furniture', zone: f.zone, min: f.box.min, max: f.box.max });
+  // Furniture last, so the wall and prop chunk indices stay what they were.
+  const furniture: FurnitureInfo[] = def.furniture.map((f, fi) => {
+    const c0 = chunks.length;
+    for (const cell of furnitureCells(f)) {
+      add(cell.min, cell.max, cell.mat, 'furniture', f.zone, zoneH(f.zone));
+      chunks[chunks.length - 1].furn = fi;
+      chunks[chunks.length - 1].furnPart = cell.part;
+      if (cell.mat === 'foliage') chunks[chunks.length - 1].ghost = true;
+    }
+    return { ...f, box: furnitureBox(f), c0, c1: chunks.length };
+  });
 
   const stations = placeStations(def, open);
   for (const st of stations) solids.push({ kind: 'locker', zone: st.zone, min: st.box.min, max: st.box.max });
@@ -436,7 +460,8 @@ export function buildWorld(def: MapDef, openZones?: readonly ZoneId[]): World {
       const oy = Math.min(c.max.y, o.max.y) - Math.max(c.min.y, o.min.y);
       const oz = Math.min(c.max.z, o.max.z) - Math.max(c.min.z, o.min.z);
       const pos = (ox > 0.04 ? 1 : 0) + (oy > 0.04 ? 1 : 0) + (oz > 0.04 ? 1 : 0);
-      if (pos >= 2) c.nb.push(j);
+      // The grid hands back everything in the cells around it: only boxes that really meet count.
+      if (pos >= 2 && Math.min(ox, oy, oz) > -0.02) c.nb.push(j);
     });
   });
   return world;
@@ -615,7 +640,7 @@ export function firstBlock(w: World, box: AABB, who: Mover): AABB | null {
   let hit: AABB | null = null;
   forChunks(w, box, (i) => {
     const c = w.chunks[i];
-    if (w.alive[i] && overlap(box, c.min, c.max)) {
+    if (w.alive[i] && !c.ghost && overlap(box, c.min, c.max)) {
       hit = c;
       return true;
     }
@@ -668,12 +693,11 @@ const SOLID_MAT: Record<SolidKind, Mat> = {
   bound: 'concrete',
   clip: 'concrete',
   sill: 'concrete',
-  mullion: 'metal',
-  bars: 'metal',
+  mullion: 'brass',
+  bars: 'brass',
   shutter: 'metal',
-  elevator: 'metal',
+  elevator: 'brass',
   mezzanine: 'marble',
-  furniture: 'wood',
 };
 
 /** Nearest solid or standing chunk along the ray (clips are ignored: bullets fly through windows). */

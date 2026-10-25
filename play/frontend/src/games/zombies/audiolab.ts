@@ -1,15 +1,18 @@
 // Dev lab for audio.ts at /lab-zombies-audio.html: a button per sound, and an offline render of each one with its
 // peak, RMS and timbre (spectral centroid, attack, decay to -40 dB), so levels and voices can be checked without
-// listening. `window.__zaudioLevels` holds the results.
+// listening. `window.__zaudioLevels` holds the results; `window.__zaudioWav(label)` renders one job to a base64 WAV.
 
 import type { Vec3 } from '@shared/math';
+import { IMPACT_MATS, type ImpactMat } from '@shared/zombies/protocol';
 import { WEAPON_IDS, WEAPONS, type WeaponId, type WeaponKind } from '@shared/zombies/weapons';
 import type { ZAudio, ZSound } from './api';
-import { type Surface, configureZAudio, createZAudio } from './audio';
+import { type Surface, configureZAudio, createZAudio, playMatAt } from './audio';
 
 const SOUNDS: ZSound[] = ['empty', 'reloadOut', 'reloadIn', 'pump', 'bolt', 'flesh', 'headshot', 'scream', 'swipe', 'tear', 'hammer', 'boom', 'buy', 'deny', 'hurt', 'down', 'revive', 'knife', 'throw', 'clink', 'waveStart', 'waveEnd', 'gameOver', 'points'];
 const KINDS: WeaponKind[] = ['pistol', 'smg', 'rifle', 'shotgun', 'sniper', 'lmg'];
 const SURFACES: Surface[] = ['concrete', 'wood', 'tile', 'mud', 'metal'];
+const MATS = IMPACT_MATS.filter((m) => m !== 'none' && m !== 'flesh') as ImpactMat[];
+const AT = { x: 0, y: 1.2, z: -2.5 };
 const VOICES = ['moan', 'gurgle', 'choke', 'breath'];
 const AMBIENT = ['moan', 'creak', 'metal', 'knock', 'rats', 'drip', 'bell', 'siren'] as const;
 const ROOM = { floor: 'concrete' as const, interior: { minX: -12, maxX: 12, minZ: -15, maxZ: 15 } };
@@ -37,6 +40,11 @@ add('crowd of 12 groans', () => {
 for (const s of SURFACES) add(`step ${s}`, () => playX(live, 'step', { surface: s, amount: 0.6 } as Extra));
 for (const a of [0.3, 1, 1.5]) add(`impact size ${a}`, () => live.play('impact', { amount: a }));
 for (const a of [0.1, 0.5, 1]) add(`crumble ${a}`, () => live.play('crumble', { amount: a }));
+for (const m of MATS) add(`impact ${m}`, () => playMatAt(live, 'impact', AT, m));
+for (const m of MATS) add(`break ${m}`, () => playMatAt(live, 'crumble', AT, m, 0.4));
+add('shotgun x12 into brick', () => {
+  for (let i = 0; i < 12; i++) playMatAt(live, 'impact', { x: AT.x + Math.random() - 0.5, y: AT.y, z: AT.z }, 'brick');
+});
 for (const k of AMBIENT) add(`ambient ${k}`, () => (live as unknown as Ambient).ambient(k));
 add('shot far right (indoor)', () => live.playAt('shot', { x: 10, y: 1.5, z: -5 }, { kind: 'rifle', weapon: 'm4a1' }));
 add('shot outside, heard inside', () => live.playAt('shot', { x: 20, y: 1.5, z: -5 }, { kind: 'rifle', weapon: 'm4a1' }));
@@ -140,15 +148,48 @@ function analyse(buf: AudioBuffer): Omit<Level, 'ms'> {
   return { peak, rms: Math.sqrt(sum / (n * buf.numberOfChannels)), centroid: den > 0 ? num / den : 0, attack: (pk * win) / sr, decay: ((last - pk) * win) / sr };
 }
 
-async function level(play: (a: ZAudio) => void, seconds = 4): Promise<Level> {
+async function render(play: (a: ZAudio) => void, seconds: number) {
   const ctx = new OfflineAudioContext(2, 44100 * seconds, 44100);
   const a = createZAudio(ctx);
   configureZAudio(a, ROOM);
   a.listen({ x: 0, y: 1.6, z: 0 }, 0, 0);
   play(a);
+  return ctx.startRendering();
+}
+
+async function level(play: (a: ZAudio) => void, seconds = 4): Promise<Level> {
   const t0 = performance.now();
-  const buf = await ctx.startRendering();
+  const buf = await render(play, seconds);
   return { ...analyse(buf), ms: performance.now() - t0 };
+}
+
+/** 16-bit stereo WAV, base64. */
+function wav(buf: AudioBuffer) {
+  const n = buf.length;
+  const v = new DataView(new ArrayBuffer(44 + n * 4));
+  const str = (o: number, s: string) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF');
+  v.setUint32(4, 36 + n * 4, true);
+  str(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 2, true);
+  v.setUint32(24, buf.sampleRate, true);
+  v.setUint32(28, buf.sampleRate * 4, true);
+  v.setUint16(32, 4, true);
+  v.setUint16(34, 16, true);
+  str(36, 'data');
+  v.setUint32(40, n * 4, true);
+  const l = buf.getChannelData(0);
+  const r = buf.getChannelData(1);
+  for (let i = 0; i < n; i++) {
+    v.setInt16(44 + i * 4, Math.max(-1, Math.min(1, l[i])) * 32767, true);
+    v.setInt16(46 + i * 4, Math.max(-1, Math.min(1, r[i])) * 32767, true);
+  }
+  let bin = '';
+  const u = new Uint8Array(v.buffer);
+  for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode(...u.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 (async () => {
@@ -168,8 +209,19 @@ async function level(play: (a: ZAudio) => void, seconds = 4): Promise<Level> {
     ...SURFACES.map((s) => [`step ${s}`, (a: ZAudio) => playX(a, 'step', { surface: s, amount: 0.6 } as Extra)] as [string, (a: ZAudio) => void]),
     ...[0.3, 1, 1.5].map((x) => [`impact ${x}`, (a: ZAudio) => a.play('impact', { amount: x })] as [string, (a: ZAudio) => void]),
     ...[0.1, 0.5, 1].map((x) => [`crumble ${x}`, (a: ZAudio) => a.play('crumble', { amount: x })] as [string, (a: ZAudio) => void]),
+    ['impact generic 0.5 at 2.5 m', (a) => a.playAt('impact', AT, { amount: 0.5 }), 2],
+    ['crumble generic 0.4 at 2.5 m', (a) => a.playAt('crumble', AT, { amount: 0.4 }), 3],
+    ...MATS.map((m) => [`impact ${m}`, (a: ZAudio) => playMatAt(a, 'impact', AT, m), 2] as [string, (a: ZAudio) => void, number]),
+    ...MATS.map((m) => [`break ${m}`, (a: ZAudio) => playMatAt(a, 'crumble', AT, m, 0.4), 3] as [string, (a: ZAudio) => void, number]),
+    ['impact brick x12 (shotgun, capped)', (a) => {
+      for (let i = 0; i < 12; i++) playMatAt(a, 'impact', { x: AT.x + (i % 4) * 0.2 - 0.3, y: AT.y, z: AT.z }, 'brick');
+    }, 2],
     ...AMBIENT.map((k) => [`ambient ${k}`, (a: ZAudio) => (a as unknown as Ambient).ambient(k, 0), k === 'bell' || k === 'siren' ? 12 : 4] as [string, (a: ZAudio) => void, number]),
   ];
+  (window as unknown as { __zaudioWav: (label: string) => Promise<string | null> }).__zaudioWav = async (label) => {
+    const job = jobs.find((j) => j[0] === label);
+    return job ? wav(await render(job[1], job[2] ?? 4)) : null;
+  };
   for (const [label, fn, secs] of jobs) {
     const r = await level(fn, secs ?? 4);
     out[label] = r;

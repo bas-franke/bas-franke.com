@@ -502,6 +502,8 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   };
   const byMat = new Map<string, number[]>();
   world.chunks.forEach((c, i) => {
+    // Furniture chunks are drawn by decor.ts (its models, cut away where the chunks are gone).
+    if (c.furn !== undefined) return;
     const key = looks(c);
     const list = byMat.get(key) ?? [];
     list.push(i);
@@ -1349,15 +1351,16 @@ void main() {
     lightning: 0,
     setChunkHp(i, hp) {
       const c = world.chunks[i];
+      if (c?.furn !== undefined) decor.setChunkHp(i, hp);
       if (!c || c.hard || !meshOf[i]) return;
       writeDamage(i, 1 - Math.max(0, hp) / c.maxHp);
     },
     breakChunk(i) {
+      decor.breakChunk(i);
       const mesh = meshOf[i];
       if (!mesh) return;
       mesh.setMatrixAt(slot[i], hidden);
       mesh.instanceMatrix.needsUpdate = true;
-      decor.breakChunk(i);
       // The neighbours look chipped where it tore away.
       for (const j of world.chunks[i].nb) if (world.alive[j] !== 0 && !world.chunks[j].hard) writeDamage(j, Math.max(visualDamage[j], 0.3 + visualDamage[j] * 0.5));
     },

@@ -9,7 +9,7 @@
 import type { WeaponId } from './weapons.js';
 
 export type Side = 'n' | 's' | 'e' | 'w';
-export type Mat = 'brick' | 'plaster' | 'concrete' | 'wood' | 'metal' | 'marble' | 'travertine' | 'walnut' | 'glass';
+export type Mat = 'brick' | 'plaster' | 'concrete' | 'wood' | 'metal' | 'marble' | 'travertine' | 'walnut' | 'glass' | 'fabric' | 'leather' | 'ceramic' | 'brass' | 'foliage';
 export type ZoneId = 'atrium' | 'lounge' | 'restaurant';
 export type StationKind = 'weapon' | 'ammo' | 'nades' | 'armor' | 'crate';
 

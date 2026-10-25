@@ -107,6 +107,7 @@ export class NavField {
     forChunks(w, box, (j) => {
       if (!w.alive[j]) return;
       const ch = w.chunks[j];
+      if (ch.ghost) return;
       if (box.min.x < ch.max.x && box.max.x > ch.min.x && box.min.y < ch.max.y && box.max.y > ch.min.y && box.min.z < ch.max.z && box.max.z > ch.min.z) {
         if (ch.hard) hard = true;
         else bash = true;
@@ -139,7 +140,7 @@ export class NavField {
     const w = this.world;
     forChunks(w, box, (j) => {
       const ch = w.chunks[j];
-      if (w.alive[j] && !ch.hard && box.min.y < ch.max.y && box.max.y > ch.min.y && box.min.x < ch.max.x && box.max.x > ch.min.x && box.min.z < ch.max.z && box.max.z > ch.min.z) out.push(j);
+      if (w.alive[j] && !ch.hard && !ch.ghost && box.min.y < ch.max.y && box.max.y > ch.min.y && box.min.x < ch.max.x && box.max.x > ch.min.x && box.min.z < ch.max.z && box.max.z > ch.min.z) out.push(j);
     });
     return out;
   }

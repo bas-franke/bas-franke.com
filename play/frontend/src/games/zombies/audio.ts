@@ -19,15 +19,18 @@
 //   configureZAudio(audio, { floor, interior })  floor material for footsteps and the room rectangle (indoor/outdoor)
 //   opts.surface   'concrete' | 'wood' | 'tile' | 'mud' | 'metal' forces a footstep surface
 //   opts.amount    size for 'impact' and 'crumble' (debris), loudness for 'step', damage for 'hurt'
+//   opts.mat       what an 'impact' hit or a 'crumble' broke (glass, marble, wood...): each has its own voice
+//   playMatAt(audio, 'impact' | 'crumble', pos, mat, amount)  the same, through the plain ZAudio interface
 
 import type { Vec3 } from '@shared/math';
+import type { ImpactMat } from '@shared/zombies/protocol';
 import type { WeaponId, WeaponKind } from '@shared/zombies/weapons';
 import { sfx } from '../../engine/audio';
 import type { ZAudio, ZSound } from './api';
 
 export type Surface = 'concrete' | 'wood' | 'tile' | 'mud' | 'metal';
 
-type Opts = { kind?: WeaponKind; weapon?: WeaponId; amount?: number; id?: number; surface?: Surface; variant?: number };
+type Opts = { kind?: WeaponKind; weapon?: WeaponId; amount?: number; id?: number; surface?: Surface; variant?: number; mat?: ImpactMat };
 
 /** What configureZAudio() takes: the floor of the map and the room's rectangle on the ground. */
 export interface ZAudioRoom {
@@ -38,6 +41,9 @@ export interface ZAudioRoom {
 const MAX_VOICES = 40;
 /** Zombies moaning at once; more just wait their turn. */
 const MAX_GROANS = 6;
+/** Bullet impacts ringing at once, and how many may start inside one 40 ms burst (a shotgun's pellets). */
+const MAX_IMPACTS = 6;
+const IMPACT_BURST = 3;
 /** Gain of the ambient events (creaks, rats, far moans...) before distance: they sit 25-35 dB under the guns. */
 const AMB = 5;
 const SILENT = 0.0001;
@@ -145,6 +151,35 @@ const VOWELS: [number, number, number][] = [
 type VoiceKind = 'moan' | 'gurgle' | 'choke' | 'breath';
 const VOICE_KINDS: VoiceKind[] = ['moan', 'gurgle', 'choke', 'breath'];
 
+/** Per-material level of a bullet impact and of a break, levelled against each other in the lab (offline peaks). */
+const IMPACT_LEVEL: Partial<Record<ImpactMat, number>> = {
+  brick: 2.7,
+  plaster: 2.1,
+  concrete: 2.9,
+  wood: 1.9,
+  walnut: 2,
+  metal: 1.4,
+  brass: 0.7,
+  marble: 3,
+  travertine: 3,
+  glass: 0.9,
+  fabric: 1.8,
+  leather: 1.8,
+  ceramic: 2.8,
+  foliage: 5,
+};
+const BREAK_LEVEL: Partial<Record<ImpactMat, number>> = {
+  wood: 2.3,
+  walnut: 2.2,
+  metal: 2.4,
+  brass: 2.5,
+  glass: 4,
+  ceramic: 3.2,
+  foliage: 4.5,
+  fabric: 0.9,
+  leather: 0.85,
+};
+
 const STEP_LEVEL: Record<Surface, number> = { concrete: 1.4, wood: 0.75, tile: 1.8, mud: 0.8, metal: 1.5 };
 
 /** Early reflections off the room's walls: [delay s, gain, pan]. */
@@ -173,6 +208,10 @@ class Graph implements ZAudio {
   private whistleGain?: GainNode;
   private windFilter?: BiquadFilterNode;
   private voices = new Float64Array(MAX_VOICES);
+  /** End times of the impact voices, and the current burst (start time, count). */
+  private impacts = new Float64Array(MAX_IMPACTS);
+  private burstT = -1;
+  private burstN = 0;
   /** Zombie id -> time its current vocalisation ends. */
   private talking = new Map<number, number>();
   /** Start times of recent groans, to stagger a crowd. */
@@ -717,6 +756,13 @@ class Graph implements ZAudio {
       case 'impact': {
         // amount = size of what was hit off (0.5 a bullet chip, 1 a chunk).
         const size = Math.max(0.1, Math.min(1.5, amount));
+        const mat = o.mat && o.mat !== 'none' && o.mat !== 'flesh' ? o.mat : undefined;
+        if (mat) {
+          const out = r(mat === 'brass' ? 0.9 : 0.5, 0.3, (0.45 + size * 0.4) * (IMPACT_LEVEL[mat] ?? 1));
+          // Only audible impacts take a voice, so far-off fire never starves the hits next to you.
+          if (out && this.claimImpact(t, mat === 'brass' ? 0.8 : 0.4)) this.impactMat(out, t, mat, size);
+          return;
+        }
         const out = r(0.35 + size * 0.4, 0.3, 0.45 + size * 0.4);
         if (!out) return;
         this.noise(out, t, { f: (2200 + Math.random() * 2400) / (0.6 + size * 0.6), q: 1.5, dur: 0.035, gain: 0.5 });
@@ -785,8 +831,10 @@ class Graph implements ZAudio {
       }
       case 'crumble': {
         // amount = how much came down (0.1 a chunk, 1 a wall section).
-        const out = r(2.2, 0.6, 0.6 + amount * 0.6);
+        const bm = o.mat && o.mat !== 'none' && o.mat !== 'flesh' ? o.mat : undefined;
+        const out = r(2.2, 0.6, (0.6 + amount * 0.6) * (bm ? (BREAK_LEVEL[bm] ?? 1) : 1));
         if (!out) return;
+        if (bm && this.breakMat(out, t, bm, amount)) return;
         const dur = 0.6 + amount * 0.9;
         this.noise(out, t, { type: 'lowpass', f: 1900, f1: 380, q: 0.8, dur, gain: 0.45, attack: 0.03, buf: this.crackle });
         this.noise(out, t, { type: 'lowpass', f: 700, f1: 200, q: 0.7, dur, gain: 0.35, attack: 0.05, buf: this.brown });
@@ -973,6 +1021,220 @@ class Graph implements ZAudio {
         osc.start(t);
         osc.stop(t + 6);
         return;
+      }
+    }
+  }
+
+  // ---- materials ------------------------------------------------------------------------------------------------
+
+  /**
+   * An impact voice for `len` seconds; false when MAX_IMPACTS are ringing or this burst already has IMPACT_BURST
+   * (a shotgun blast into a wall sounds like a few hits, not twelve stacked ones, and costs a few dozen nodes).
+   */
+  private claimImpact(t: number, len: number) {
+    if (t - this.burstT > 0.04) {
+      this.burstT = t;
+      this.burstN = 0;
+    }
+    if (this.burstN >= IMPACT_BURST) return false;
+    for (let i = 0; i < MAX_IMPACTS; i++) {
+      if (this.impacts[i] <= t) {
+        this.impacts[i] = t + len;
+        this.burstN++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A bullet hitting `mat`; `size` ~0.5 for a bullet chip. Each is 3-6 short layers. */
+  private impactMat(out: AudioNode, t: number, mat: ImpactMat, size: number) {
+    const k = 0.9 + Math.random() * 0.2;
+    const rnd = Math.random;
+    switch (mat) {
+      case 'glass':
+        // A sharp crack, then a few high tinkles of the bits flying off.
+        this.noise(out, t, { type: 'highpass', f: 4500 * k, q: 0.8, dur: 0.03, gain: 0.7 });
+        this.noise(out, t, { f: 2800 * k, q: 2, dur: 0.02, gain: 0.4, buf: this.crackle });
+        for (let i = 0; i < 3; i++) this.tone(out, t + 0.012 + rnd() * 0.12, { f: 3600 + rnd() * 3800, dur: 0.07 + rnd() * 0.12, gain: 0.06 + rnd() * 0.04, attack: 0.001 });
+        return;
+      case 'marble':
+      case 'travertine': {
+        // Hard bright stone: a tick with a short pitched ring, then grit. Travertine is a little duller and grittier.
+        const tv = mat === 'travertine' ? 0.82 : 1;
+        this.noise(out, t, { f: 4200 * k * tv, q: 3, dur: 0.015, gain: 0.8 });
+        this.tone(out, t, { type: 'triangle', f: 2500 * k * tv, f1: 1900 * tv, dur: 0.045, gain: 0.12, attack: 0.001 });
+        this.noise(out, t + 0.008, { type: 'highpass', f: 2600 * tv, q: 0.7, dur: 0.1 + (1 - tv) * 0.3, gain: 0.16 + (1 - tv) * 0.4, buf: this.crackle });
+        this.thump(out, t, 260 * k, 140, 0.03, 0.15);
+        return;
+      }
+      case 'plaster':
+        // Soft and dusty: a muted crunch and a puff of hiss.
+        this.noise(out, t, { type: 'lowpass', f: 900 * k, q: 1, dur: 0.06, gain: 0.45, buf: this.crackle });
+        this.noise(out, t, { f: 1400 * k, q: 1.5, dur: 0.02, gain: 0.25 });
+        this.noise(out, t + 0.01, { type: 'highpass', f: 2800, q: 0.6, dur: 0.25, gain: 0.08, attack: 0.02 });
+        this.thump(out, t, 150 * k, 80, 0.04, 0.18);
+        return;
+      case 'concrete':
+      case 'brick': {
+        // A dull crunch with body; brick a touch brighter and grainier.
+        const br = mat === 'brick' ? 1.25 : 1;
+        this.noise(out, t, { f: 1200 * k * br, q: 1, dur: 0.07, gain: 0.6, buf: this.crackle });
+        this.noise(out, t, { type: 'lowpass', f: 900 * k, q: 1, dur: 0.08, gain: 0.4 });
+        this.noise(out, t, { f: 3000 * k * br, q: 1.5, dur: 0.02, gain: 0.25 });
+        this.thump(out, t, 180 * k, 80, 0.05, 0.3);
+        if (size > 0.6) this.noise(out, t + 0.06, { type: 'lowpass', f: 1300, dur: 0.12, gain: 0.15, buf: this.crackle });
+        return;
+      }
+      case 'wood':
+      case 'walnut': {
+        // A woody thock: a pitched knock, its hollow band, a splinter click. Walnut is denser and lower.
+        const wn = mat === 'walnut' ? 0.8 : 1;
+        this.thump(out, t, 330 * k * wn, 170 * wn, 0.06, 0.5);
+        this.noise(out, t, { f: 900 * k * wn, q: 4, dur: 0.05, gain: 0.45 });
+        this.noise(out, t, { f: 2600 * k, q: 2, dur: 0.015, gain: 0.25, buf: this.crackle });
+        return;
+      }
+      case 'metal': {
+        // A clang with a ping, and now and then the round whining away.
+        const f = (1800 + rnd() * 900) * k;
+        this.noise(out, t, { type: 'highpass', f: 5000, q: 0.7, dur: 0.015, gain: 0.5 });
+        this.bell(out, t, f, [1, 2.32, 4.25], 0.25, 0.15);
+        this.thump(out, t, 240 * k, 120, 0.04, 0.15);
+        if (rnd() < 0.18) {
+          const w = 2800 + rnd() * 1400;
+          this.tone(out, t + 0.02, { type: 'triangle', f: w, f1: w * 0.4, dur: 0.38, gain: 0.07, attack: 0.01 });
+        }
+        return;
+      }
+      case 'brass':
+        // Brighter and longer: the fittings ring on.
+        this.noise(out, t, { type: 'highpass', f: 5500, q: 0.7, dur: 0.012, gain: 0.4 });
+        this.bell(out, t, (1500 + rnd() * 500) * k, [1, 2.76, 5.4], 0.75, 0.13);
+        if (rnd() < 0.12) {
+          const w = 3200 + rnd() * 1200;
+          this.tone(out, t + 0.02, { type: 'triangle', f: w, f1: w * 0.45, dur: 0.34, gain: 0.06, attack: 0.01 });
+        }
+        return;
+      case 'fabric':
+        // A muffled thup and a soft puff of stuffing.
+        this.noise(out, t, { type: 'lowpass', f: 420 * k, q: 1, dur: 0.05, gain: 0.5 });
+        this.thump(out, t, 115 * k, 70, 0.05, 0.3);
+        this.noise(out, t + 0.008, { f: 1500, q: 0.7, dur: 0.2, gain: 0.12, attack: 0.015 });
+        return;
+      case 'leather':
+        // A slap on the skin, the cushion thudding under it.
+        this.noise(out, t, { f: 1100 * k, q: 1.5, dur: 0.025, gain: 0.6 });
+        this.thump(out, t, 140 * k, 80, 0.07, 0.4);
+        this.noise(out, t, { type: 'lowpass', f: 600, q: 1, dur: 0.06, gain: 0.3 });
+        return;
+      case 'ceramic':
+        // A high clink and the glaze cracking.
+        this.bell(out, t, (3300 + rnd() * 900) * k, [1, 2.3, 3.9], 0.12, 0.12);
+        this.noise(out, t, { f: 2500 * k, q: 2, dur: 0.04, gain: 0.5, buf: this.crackle });
+        this.noise(out, t, { type: 'highpass', f: 5000, q: 0.7, dur: 0.02, gain: 0.3 });
+        return;
+      case 'foliage':
+        // Leaves rustling and a twig or two snapping.
+        this.noise(out, t, { f: 3500 * k, f1: 2400, q: 0.8, dur: 0.18, gain: 0.5, attack: 0.01, buf: this.crackle });
+        this.noise(out, t + rnd() * 0.03, { f: 2000 * k, q: 3, dur: 0.015, gain: 1, buf: this.crackle });
+        if (rnd() < 0.5) this.noise(out, t + 0.04 + rnd() * 0.06, { f: 2400 * k, q: 3, dur: 0.012, gain: 0.7, buf: this.crackle });
+        return;
+    }
+  }
+
+  /**
+   * `mat` breaking (amount 0.1 a chunk .. 1 a section). Returns false for the stone family after its heavy crack, so
+   * the generic rubble in 'crumble' follows.
+   */
+  private breakMat(out: AudioNode, t: number, mat: ImpactMat, amount: number): boolean {
+    const rnd = Math.random;
+    switch (mat) {
+      case 'glass': {
+        // The shatter, then a cascade of tinkles falling over ~0.6 s, thinning out.
+        this.noise(out, t, { type: 'highpass', f: 3000, q: 0.7, dur: 0.12, gain: 0.9 });
+        this.noise(out, t, { f: 4000, q: 1, dur: 0.25, gain: 0.5, buf: this.crackle });
+        this.noise(out, t, { f: 1600, q: 1.5, dur: 0.05, gain: 0.4 });
+        const n = 8 + Math.round(amount * 10);
+        for (let i = 0; i < n; i++) {
+          const d = 0.03 + Math.pow(rnd(), 0.8) * 0.6;
+          this.tone(out, t + d, { f: 2600 + rnd() * 5400, dur: 0.05 + rnd() * 0.1, gain: (0.05 + rnd() * 0.05) * (1 - d), attack: 0.001 });
+        }
+        this.noise(out, t + 0.15, { type: 'highpass', f: 4500, q: 0.7, dur: 0.45, gain: 0.1, attack: 0.05, buf: this.crackle });
+        return true;
+      }
+      case 'ceramic': {
+        // A pot smashing, shards clinking, the soil pouring out.
+        this.noise(out, t, { f: 1800, q: 1, dur: 0.1, gain: 0.8, buf: this.crackle });
+        this.thump(out, t, 220, 90, 0.08, 0.45);
+        this.bell(out, t, 2400 + rnd() * 600, [1, 2.3], 0.1, 0.1);
+        for (let i = 0; i < 4; i++) this.bell(out, t + 0.05 + rnd() * 0.3, 2800 + rnd() * 1800, [1, 2.4], 0.06, 0.05);
+        this.noise(out, t + 0.08, { type: 'lowpass', f: 1200, f1: 400, q: 0.7, dur: 0.6 + amount * 0.4, gain: 0.35, attack: 0.08, buf: this.brown });
+        this.noise(out, t + 0.1, { type: 'lowpass', f: 2500, q: 0.7, dur: 0.5 + amount * 0.3, gain: 0.15, attack: 0.06, buf: this.crackle });
+        return true;
+      }
+      case 'fabric':
+      case 'leather': {
+        // A soft rip and the piece thudding down; leather tears lower and lands heavier.
+        const lt = mat === 'leather';
+        this.noise(out, t, { f: lt ? 1200 : 1800, f1: lt ? 2000 : 3200, q: 1.5, dur: lt ? 0.28 : 0.22, gain: 0.45, attack: 0.02, buf: this.crackle });
+        this.noise(out, t, { f: lt ? 700 : 1000, q: 2, dur: lt ? 0.24 : 0.18, gain: 0.2, attack: 0.03 });
+        const land = t + (lt ? 0.3 : 0.26);
+        this.thump(out, land, lt ? 100 : 90, 50, 0.15, lt ? 0.6 : 0.45);
+        this.noise(out, land, { type: 'lowpass', f: 300, q: 1, dur: 0.12, gain: 0.4 });
+        return true;
+      }
+      case 'metal':
+      case 'brass': {
+        // A low clang, then the bits clattering down.
+        const br = mat === 'brass';
+        this.bell(out, t, br ? 700 : 600, [1, 2.32, 4.25], br ? 0.7 : 0.5, 0.2);
+        this.thump(out, t, 120, 60, 0.12, 0.4);
+        const n = 5 + Math.round(amount * 6);
+        for (let i = 0; i < n; i++) {
+          const d = 0.06 + rnd() * 0.5;
+          this.bell(out, t + d, (br ? 1100 : 1500) + rnd() * (br ? 1400 : 2000), [1, 2.4], 0.08 + rnd() * 0.1, 0.05 + rnd() * 0.05);
+          this.noise(out, t + d, { f: 4000, q: 2, dur: 0.012, gain: 0.12 });
+        }
+        return true;
+      }
+      case 'wood':
+      case 'walnut': {
+        // A splintering crack stuttering along the grain, then the pieces knocking on the floor.
+        const wn = mat === 'walnut' ? 0.85 : 1;
+        this.noise(out, t, { f: 1400 * wn, q: 1, dur: 0.18, gain: 0.8, buf: this.crackle });
+        this.noise(out, t, { type: 'highpass', f: 3000, q: 0.7, dur: 0.25, gain: 0.25, buf: this.crackle });
+        this.noise(out, t, { f: 700 * wn, q: 2, dur: 0.06, gain: 0.5 });
+        this.thump(out, t, 180 * wn, 70, 0.12, 0.45);
+        for (let i = 0; i < 3; i++) this.noise(out, t + 0.04 + i * (0.03 + rnd() * 0.04), { f: (1800 + rnd() * 900) * wn, q: 2, dur: 0.02, gain: 0.35, buf: this.crackle });
+        const m = 2 + Math.round(amount * 2);
+        for (let i = 0; i < m; i++) this.thump(out, t + 0.3 + rnd() * 0.3, (240 + rnd() * 80) * wn, 120, 0.05, 0.15 + rnd() * 0.1);
+        return true;
+      }
+      case 'foliage': {
+        // A branch snapping, the leaves shushing down.
+        this.noise(out, t, { f: 1600, q: 2, dur: 0.03, gain: 1.4, buf: this.crackle });
+        this.thump(out, t, 260, 140, 0.04, 0.3);
+        this.noise(out, t + 0.05 + rnd() * 0.05, { f: 2200, q: 2.5, dur: 0.02, gain: 0.45, buf: this.crackle });
+        this.noise(out, t + 0.02, { f: 4000, f1: 2500, q: 0.6, dur: 0.5 + amount * 0.5, gain: 0.4, attack: 0.05, buf: this.crackle });
+        this.noise(out, t + 0.04, { type: 'highpass', f: 3000, q: 0.6, dur: 0.4 + amount * 0.4, gain: 0.06, attack: 0.08 });
+        return true;
+      }
+      case 'plaster':
+        // Plaster comes down softly, in a cloud: a light crack and a long dusty hiss over the rubble.
+        this.noise(out, t, { f: 1100, q: 1, dur: 0.05, gain: 0.45, buf: this.crackle });
+        this.noise(out, t + 0.02, { type: 'highpass', f: 2500, q: 0.6, dur: 0.7 + amount * 0.5, gain: 0.09, attack: 0.05 });
+        return false;
+      default: {
+        // Stone: a heavy crack, brighter for the polished stones, before the rubble.
+        const hard = mat === 'marble' || mat === 'travertine';
+        this.noise(out, t, { f: hard ? 1800 : 900, q: 1, dur: 0.06, gain: 0.8, buf: this.crackle });
+        this.thump(out, t, 80, 35, 0.25, 0.7);
+        if (hard) {
+          this.noise(out, t, { f: 4200, q: 3, dur: 0.015, gain: 0.6 });
+          for (let i = 0; i < 3; i++) this.noise(out, t + 0.1 + rnd() * 0.6, { f: 3500 + rnd() * 1500, q: 3, dur: 0.012, gain: 0.25 });
+        }
+        return false;
       }
     }
   }
@@ -1401,6 +1663,11 @@ export function createZAudio(ctx?: BaseAudioContext): ZAudio {
     const noop = () => undefined;
     return { unlock: noop, listen: noop, play: noop, playAt: noop, setTension: noop, setHurt: noop, dispose: noop };
   }
+}
+
+/** A bullet impact on, or a break of, a material (its own voice per material). Safe on the silent stand-in. */
+export function playMatAt(audio: ZAudio, name: 'impact' | 'crumble', pos: Vec3, mat: ImpactMat, amount?: number) {
+  (audio as unknown as { playAt(n: ZSound, p: Vec3, o: Opts): void }).playAt(name, pos, { mat, amount });
 }
 
 /**
