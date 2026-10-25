@@ -46,7 +46,7 @@ const MAX_LOOPS = 6;
 const OPEN = 20000;
 
 /** Roughly how long each sound holds a voice, in seconds. */
-const LENGTH: Partial<Record<Sfx, number>> = { boom: 1.3, fire: 0.5, die: 0.6, pad: 0.45, win: 0.8 };
+const LENGTH: Partial<Record<Sfx, number>> = { boom: 2.5, fire: 1.1, die: 0.6, pad: 0.45, win: 0.8 };
 
 interface Loop {
   src: AudioBufferSourceNode;
@@ -331,21 +331,24 @@ class Audio {
     const r = 0.94 + Math.random() * 0.12; // a little pitch variety so repeats do not machine-gun
     switch (name) {
       case 'fire':
-        // Kick (body), a gritty saw drop (launcher), a bright crack (ignition) and the motor whoosh rising away.
-        this.tone(out, t, 150 * r, 0.16, 'sine', 0.75 * a, 0.3);
-        this.tone(out, t, 210 * r, 0.22, 'sawtooth', 0.22 * a, 0.25);
-        this.noise(out, t, 0.06, 0.45 * a, 'highpass', 2500);
-        this.noise(out, t + 0.01, 0.42, 0.42 * a, 'bandpass', 700 * r, 2600 * r, 1.1, this.white, 0.05);
+        // A real launch: the backblast crack, a deep chest thump, then the motor's ragged roar tearing away.
+        this.noise(out, t, 0.09, 0.7 * a, 'highpass', 1800, 1800, 0.7, this.white, 0.001);
+        this.tone(out, t, 95 * r, 0.38, 'sine', 0.95 * a, 0.32);
+        this.noise(out, t, 0.32, 0.6 * a, 'lowpass', 1000, 110, 0.8, this.white, 0.002);
+        this.noise(out, t + 0.02, 1.1, 0.45 * a, 'lowpass', 3200 * r, 700, 0.6, this.white, 0.04);
+        this.noise(out, t + 0.02, 0.9, 0.4 * a, 'bandpass', 520 * r, 300, 0.6, this.crackle, 0.03);
         break;
       case 'boom': {
-        // Thump (felt), body (the roar) and crackle (debris). Up close the crackle sparkles; far off only the
-        // low thump and a rumble carry, which is how distance reads.
+        // A sharp crack, a sub-bass drop you feel, the roar, debris, a rolling tail and a late echo off the walls.
+        // Up close the crack and debris dominate; far off only the low rumble carries, which is how distance reads.
         const near = Math.max(0, 1 - d / 30);
-        this.tone(out, t, 120 * r, 0.55, 'sine', 0.95 * a, 0.28);
-        this.tone(out, t, 95 * r, 0.35, 'triangle', 0.4 * a, 0.4);
-        this.noise(out, t, 1.0, 0.75 * a, 'lowpass', 2400 * (0.4 + near * 0.6), 90, 0.9);
-        if (near > 0) this.noise(out, t + 0.03, 0.7, 0.5 * a * near, 'highpass', 1800, 1800, 0.7, this.crackle, 0.01);
-        if (d > 15) this.noise(out, t + 0.06, 1.2, 0.35 * a, 'lowpass', 260, 60, 1, this.white, 0.1);
+        this.noise(out, t, 0.12, 0.8 * a * (0.3 + near * 0.7), 'highpass', 1200, 1200, 0.7, this.white, 0.001);
+        this.tone(out, t, 72 * r, 1.1, 'sine', 1.0 * a, 0.3, 0.004);
+        this.tone(out, t, 55 * r, 0.8, 'triangle', 0.45 * a, 0.5);
+        this.noise(out, t, 1.8, 0.8 * a, 'lowpass', 3000 * (0.3 + near * 0.7), 80, 0.7, this.white, 0.005);
+        if (near > 0) this.noise(out, t + 0.03, 1.1, 0.5 * a * near, 'highpass', 1600, 1600, 0.7, this.crackle, 0.01);
+        this.noise(out, t + 0.05, 2.4, (0.3 + 0.2 * (1 - near)) * a, 'lowpass', 220, 40, 1, this.white, 0.25);
+        this.noise(out, t + 0.22 + 0.1 * r, 0.9, 0.25 * a, 'lowpass', 900, 100, 0.8, this.white, 0.02);
         break;
       }
       case 'hit': {
@@ -469,11 +472,11 @@ class Audio {
     const dop = Math.min(1.6, Math.max(0.6, SOUND_SPEED / (SOUND_SPEED + vr)));
     const t = ctx.currentTime;
     loop.src.playbackRate.setTargetAtTime(dop, t, 0.04);
-    loop.band.frequency.setTargetAtTime(1500 * dop, t, 0.04);
-    loop.osc.frequency.setTargetAtTime(78 * dop, t, 0.04);
+    loop.band.frequency.setTargetAtTime(800 * dop, t, 0.04);
+    loop.osc.frequency.setTargetAtTime(52 * dop, t, 0.04);
     loop.lp.frequency.setTargetAtTime(this.sc, t, 0.04);
     loop.pan.pan.setTargetAtTime(this.sp, t, 0.04);
-    loop.gain.gain.setTargetAtTime(this.sa < 0.03 ? 0 : 0.3 * this.sa, t, 0.04);
+    loop.gain.gain.setTargetAtTime(this.sa < 0.03 ? 0 : 0.4 * this.sa, t, 0.04);
   }
 
   /** Stops a rocket's flight loop (it exploded or was removed). */
@@ -495,14 +498,15 @@ class Audio {
     src.loop = true;
     const band = ctx.createBiquadFilter();
     band.type = 'bandpass';
-    band.frequency.value = 1500;
-    band.Q.value = 1.4;
-    // A low motor rumble under the hiss, so the rocket has a body as well as a sizzle.
+    // A broad, low roar rather than a whistle: a real motor is mostly rushing air.
+    band.frequency.value = 800;
+    band.Q.value = 0.5;
+    // A deep motor rumble under the roar, so the rocket has weight as well as a rush.
     const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.value = 78;
+    osc.type = 'triangle';
+    osc.frequency.value = 52;
     const oscGain = ctx.createGain();
-    oscGain.gain.value = 0.25;
+    oscGain.gain.value = 0.35;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = OPEN;

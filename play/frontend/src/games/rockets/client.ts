@@ -162,13 +162,16 @@ const ITEM_LOOK: Record<ItemKind, { model: 'armor' | 'mega'; scale: number; colo
 };
 
 const ROCKET_COLOR = 0xffa14a;
-/** Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the crosshair. */
-const VM_POS = { x: 0.43, y: -0.33, z: -0.68 };
-const VM_YAW = 0.38;
-const VM_PITCH = 0.06;
-const VM_SCALE = 1.0;
+/**
+ * Viewmodel placement relative to the camera: Quake-style, big and low on the right, barrel angled in at the
+ * crosshair. Pulled back so the receiver runs off the bottom-right corner, as if it sits on your shoulder.
+ */
+const VM_POS = { x: 0.4, y: -0.42, z: -0.68 };
+const VM_YAW = 0.1;
+const VM_PITCH = 0.05;
+const VM_SCALE = 1.2;
 /** The bore's mouth in launcher model space (see models.ts buildLauncher). */
-const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.93);
+const VM_MUZZLE = new THREE.Vector3(0, 0.07, -0.84);
 /** The viewmodel draws last, after a depth clear, so it never pokes into walls. */
 const VM_ORDER = 100;
 /** How fast a fired rocket's visual offset from its true path fades (seconds). */
