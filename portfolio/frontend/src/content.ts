@@ -191,8 +191,9 @@ export const skills = {
 };
 
 /**
- * Full-width pictures between the sections, each with one quiet line over it.
- * The image is src/art/interlude-<name>.webp (see ART.md); without it the band is left out.
+ * Pictures between the sections, each with one quiet line. The first is a full-width band;
+ * the later ones use other layouts (see Interlude.tsx) so the page doesn't repeat itself.
+ * The image is src/art/interlude-<name>.webp (see ART.md); without it the interlude is left out.
  */
 export const interludes = {
   morning: {
@@ -200,6 +201,7 @@ export const interludes = {
     alt: 'A desk by a window in soft morning light, with a laptop, a notebook and a cup of coffee.',
   },
   evening: {
+    label: 'End of the day',
     line: 'And the best software is the kind nobody has to think about at the end of the day.',
     alt: 'A canal in the evening with warm light in the windows of old houses.',
   },

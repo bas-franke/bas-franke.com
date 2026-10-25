@@ -17,15 +17,16 @@ function Page() {
       <a className="skip" href="#about">
         Skip to content
       </a>
+      <div className="progress" aria-hidden="true" />
       <Nav />
       <main id="top">
         <Hero />
         <About />
         <Interlude name="morning" {...interludes.morning} />
         <Work />
-        <Interlude name="evening" {...interludes.evening} />
+        <Interlude name="evening" layout="split" {...interludes.evening} />
         <Skills />
-        <Interlude name="fireside" {...interludes.fireside} />
+        <Interlude name="fireside" layout="arch" {...interludes.fireside} />
         <Contact />
       </main>
       <Footer />

@@ -18,8 +18,8 @@ export default function About() {
             <p key={text.slice(0, 32)}>{text}</p>
           ))}
           <dl className="facts">
-            {about.facts.map(([label, value]) => (
-              <div key={label}>
+            {about.facts.map(([label, value], i) => (
+              <div key={label} style={{ '--i': i } as CSSProperties}>
                 <dt>{label}</dt>
                 <dd>{value}</dd>
               </div>

@@ -144,6 +144,18 @@ p {
   padding-right: var(--gutter);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .skip {
   position: absolute;
   left: 16px;
@@ -308,13 +320,72 @@ h3 {
 [data-reveal] {
   opacity: 0;
   transform: translateY(18px);
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  filter: blur(6px);
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    filter var(--dur) var(--ease);
   transition-delay: var(--d, 0ms);
 }
 
 [data-reveal].in {
   opacity: 1;
   transform: none;
+  filter: none;
+}
+
+/* Section headings rise out of a mask and their eyebrow rule draws itself. */
+.section__head h2 {
+  clip-path: polygon(-5% 0, 105% 0, 105% 0, -5% 0);
+  translate: 0 0.5em;
+  transition:
+    clip-path 1.2s var(--ease) 0.12s,
+    translate 1.2s var(--ease) 0.12s;
+}
+
+.section__head.in h2 {
+  clip-path: polygon(-5% -30%, 105% -30%, 105% 130%, -5% 130%);
+  translate: 0 0;
+}
+
+.section__head .eyebrow::before {
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 1s var(--ease) 0.3s;
+}
+
+.section__head.in .eyebrow::before {
+  transform: none;
+}
+
+/* Lists inside a revealed block come in one item after another. */
+.tier,
+.principle,
+.facts > div {
+  opacity: 0;
+  translate: 0 14px;
+  transition:
+    opacity 0.8s var(--ease),
+    translate 0.8s var(--ease);
+  transition-delay: calc(var(--d, 0ms) + 200ms + var(--i, 0) * 90ms);
+}
+
+.in .tier,
+.in .principle,
+.in .facts > div {
+  opacity: 1;
+  translate: 0 0;
+}
+
+/* Work pictures are uncovered from the left as their row comes in. */
+.work__art {
+  clip-path: inset(0 100% 0 0 round var(--radius));
+  transition: clip-path 1.3s var(--ease);
+  transition-delay: calc(var(--d, 0ms) + 250ms);
+}
+
+.in .work__art {
+  clip-path: inset(0 0 0 0 round var(--radius));
 }
 
 /* ----------------------------------------------------------------- nav */
@@ -630,13 +701,18 @@ h3 {
   transition: filter 0.5s var(--ease);
 }
 
+.portrait img {
+  position: relative;
+  z-index: 1;
+}
+
 .portrait::after {
   content: '';
   position: absolute;
   inset: 0;
   border: 1px solid var(--line-2);
   border-radius: var(--radius);
-  transform: translate(14px, 14px);
+  translate: 14px 14px;
   pointer-events: none;
   opacity: 0.6;
 }
@@ -812,19 +888,26 @@ a.work__row:hover .arrow {
 
 /* ----------------------------------------------------------- interlude */
 
-/* A full-width picture between sections. It fades into the paper at the top and
-   bottom, so it reads as part of the page rather than a box on it. */
 .interlude {
   position: relative;
   isolation: isolate;
   margin: clamp(96px, 12vw, 168px) 0 0;
+}
+
+.interlude--dimmed .interlude__img {
+  filter: brightness(0.62) saturate(0.85);
+}
+
+/* band: a full-width picture between sections. It fades into the paper at the top and
+   bottom, so it reads as part of the page rather than a box on it. */
+.interlude--band {
   height: clamp(420px, 78vh, 820px);
   display: flex;
   align-items: flex-end;
   overflow: hidden;
 }
 
-.interlude__img {
+.interlude--band .interlude__img {
   position: absolute;
   inset: -8% 0;
   z-index: -1;
@@ -836,7 +919,7 @@ a.work__row:hover .arrow {
 }
 
 /* a soft pool of paper behind the line, so it stays readable on any picture */
-.interlude::after {
+.interlude--band::after {
   content: '';
   position: absolute;
   inset: auto 0 0 0;
@@ -846,39 +929,380 @@ a.work__row:hover .arrow {
   pointer-events: none;
 }
 
-.interlude--dimmed .interlude__img {
-  filter: brightness(0.62) saturate(0.85);
-}
-
-.interlude__text {
+.interlude--band .interlude__text {
   padding-bottom: clamp(24px, 4vw, 48px);
 }
 
-.interlude__text p {
+.interlude--band .interlude__text p,
+.interlude__line,
+.interlude__half {
   margin: 0;
-  max-width: 26ch;
   font-family: var(--serif);
   font-style: italic;
   font-weight: 300;
-  font-size: clamp(1.6rem, 3.4vw, 2.7rem);
-  line-height: 1.2;
   font-variation-settings: 'opsz' 48;
   color: var(--ink);
 }
 
-/* a slow drift as the picture scrolls past, where the browser can tie it to scrolling */
+.interlude--band .interlude__text p {
+  max-width: 26ch;
+  font-size: clamp(1.6rem, 3.4vw, 2.7rem);
+  line-height: 1.2;
+}
+
+/* split: the line on the left, a framed picture on the right */
+.interlude__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: center;
+}
+
+.interlude--split .interlude__text {
+  display: grid;
+  gap: 24px;
+}
+
+.interlude__line {
+  max-width: 17ch;
+  font-size: clamp(1.9rem, 3.7vw, 3.2rem);
+  line-height: 1.16;
+  letter-spacing: -0.01em;
+}
+
+.interlude__frame {
+  position: relative;
+  aspect-ratio: 5 / 4;
+  border-radius: calc(var(--radius) * 2);
+  overflow: hidden;
+  background: var(--paper-2);
+  box-shadow: 0 50px 90px -60px rgba(60, 35, 15, 0.6);
+}
+
+.interlude__frame .interlude__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 72% center;
+}
+
+/* arch: a window onto the evening, the line split around it */
+/* clipped sideways only, so the sliding words never widen the page but the glow can spill */
+.interlude--arch {
+  overflow-x: clip;
+  padding: 24px 0;
+}
+
+.interlude__stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: clamp(16px, 3vw, 44px);
+  align-items: center;
+}
+
+/* lamplight spilling out of the window onto the paper */
+.interlude__stage::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(900px, 90vw);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  z-index: -1;
+  background: radial-gradient(closest-side, var(--warm-soft), transparent 70%);
+  pointer-events: none;
+}
+
+.interlude__window {
+  position: relative;
+  width: clamp(220px, 28vw, 380px);
+  aspect-ratio: 3 / 4;
+  border-radius: 999px 999px calc(var(--radius) * 2) calc(var(--radius) * 2);
+  overflow: hidden;
+  background: var(--paper-2);
+  box-shadow: 0 50px 90px -50px rgba(60, 35, 15, 0.55);
+}
+
+.interlude__window::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent);
+  pointer-events: none;
+}
+
+.interlude__window .interlude__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 62% center;
+}
+
+.interlude__half {
+  font-size: clamp(2.4rem, 6.2vw, 5.8rem);
+  line-height: 1;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+.interlude__half--left {
+  text-align: right;
+}
+
+.interlude__half--right {
+  color: var(--warm);
+}
+
+/* ------------------------------------------------------- scroll motion */
+
+/* A hairline along the top that fills as the page is read. */
+.progress {
+  display: none;
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 60;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--warm));
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+
+/* Everything here is tied to the scroll position, where the browser supports it; elsewhere
+   the page simply shows its resting state. The individual `translate`/`scale` properties
+   are used so these never fight the `transform` of reveals and hovers. */
 @supports (animation-timeline: view()) {
-  .interlude__img {
-    animation: interlude-drift linear both;
+  .progress {
+    display: block;
+    animation: progress linear both;
+    animation-timeline: scroll(root);
+  }
+
+  @keyframes progress {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  /* the hero lifts away and its picture sinks back as you leave it */
+  .hero {
+    view-timeline: --hero;
+  }
+
+  .hero__text {
+    animation: hero-text-out linear both;
+    animation-timeline: --hero;
+    animation-range: exit 0% exit 100%;
+  }
+
+  .hero__art > .art {
+    animation: hero-art-out linear both;
+    animation-timeline: --hero;
+    animation-range: exit 0% exit 100%;
+  }
+
+  @keyframes hero-text-out {
+    to {
+      translate: 0 -90px;
+      opacity: 0;
+    }
+  }
+
+  @keyframes hero-art-out {
+    from {
+      scale: 1.02;
+    }
+    to {
+      translate: 0 12%;
+      scale: 1.16;
+    }
+  }
+
+  /* pictures drift a little inside their frames */
+  .work__art .art__img,
+  .work__art .motif {
+    animation: drift-in-frame linear both;
     animation-timeline: view();
   }
 
-  @keyframes interlude-drift {
+  @keyframes drift-in-frame {
+    from {
+      translate: 0 -4%;
+      scale: 1.1;
+    }
+    to {
+      translate: 0 4%;
+      scale: 1.1;
+    }
+  }
+
+  .portrait::after {
+    animation: portrait-frame linear both;
+    animation-timeline: view();
+    animation-range: cover 10% cover 70%;
+  }
+
+  @keyframes portrait-frame {
+    from {
+      translate: -14px -14px;
+    }
+    to {
+      translate: 14px 14px;
+    }
+  }
+
+  .interlude--band .interlude__img {
+    animation: band-drift linear both;
+    animation-timeline: view();
+  }
+
+  @keyframes band-drift {
     from {
       transform: translateY(-5%) scale(1.04);
     }
     to {
       transform: translateY(5%) scale(1.04);
+    }
+  }
+
+  /* split: the frame opens up, then the picture settles while the line lights up */
+  .interlude__frame {
+    animation: frame-open linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 45%;
+  }
+
+  @keyframes frame-open {
+    from {
+      clip-path: inset(18% 14% 18% 14% round 40px);
+    }
+    to {
+      clip-path: inset(0 round calc(var(--radius) * 2));
+    }
+  }
+
+  .interlude__frame .interlude__img {
+    animation: frame-settle linear both;
+    animation-timeline: view();
+  }
+
+  @keyframes frame-settle {
+    from {
+      scale: 1.35;
+      translate: 0 -4%;
+    }
+    to {
+      scale: 1.05;
+      translate: 0 4%;
+    }
+  }
+
+  .interlude__line {
+    view-timeline: --line;
+  }
+
+  .interlude__line .word {
+    animation: word-lit linear both;
+    animation-timeline: --line;
+    animation-range: cover calc(12% + var(--i) * 2%) cover calc(20% + var(--i) * 2%);
+  }
+
+  @keyframes word-lit {
+    from {
+      opacity: 0.14;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* arch: the window grows into place and the two halves of the line slide in to meet it */
+  .interlude--arch {
+    view-timeline: --arch;
+  }
+
+  .interlude__window {
+    animation: window-grow linear both;
+    animation-timeline: --arch;
+    animation-range: entry 0% cover 50%;
+  }
+
+  @keyframes window-grow {
+    from {
+      scale: 0.7;
+      translate: 0 12%;
+    }
+    to {
+      scale: 1;
+      translate: 0 0;
+    }
+  }
+
+  .interlude__window .interlude__img {
+    animation: window-view linear both;
+    animation-timeline: --arch;
+  }
+
+  @keyframes window-view {
+    from {
+      scale: 1.3;
+    }
+    to {
+      scale: 1.04;
+    }
+  }
+
+  .interlude__stage::before {
+    animation: glow-up linear both;
+    animation-timeline: --arch;
+    animation-range: entry 20% cover 55%;
+  }
+
+  @keyframes glow-up {
+    from {
+      opacity: 0;
+      scale: 0.5;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+    }
+  }
+
+  .interlude__half {
+    animation: half-left linear both;
+    animation-timeline: --arch;
+    animation-range: entry 10% cover 50%;
+  }
+
+  .interlude__half--right {
+    animation-name: half-right;
+  }
+
+  @keyframes half-left {
+    from {
+      translate: -22vw 0;
+      opacity: 0;
+    }
+    to {
+      translate: 0 0;
+      opacity: 1;
+    }
+  }
+
+  @keyframes half-right {
+    from {
+      translate: 22vw 0;
+      opacity: 0;
+    }
+    to {
+      translate: 0 0;
+      opacity: 1;
     }
   }
 }
@@ -1188,6 +1612,14 @@ a.work__row:hover .arrow {
     max-width: 360px;
   }
 
+  .interlude__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .interlude__line {
+    max-width: 22ch;
+  }
+
   .work__row {
     grid-template-columns: 44px minmax(0, 1fr);
   }
@@ -1261,8 +1693,24 @@ a.work__row:hover .arrow {
     display: none;
   }
 
-  .interlude {
+  .interlude--band {
     height: clamp(360px, 70svh, 560px);
+  }
+
+  .interlude__stage {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 18px;
+  }
+
+  .interlude__half,
+  .interlude__half--left {
+    text-align: center;
+    font-size: clamp(2.4rem, 13vw, 3.6rem);
+  }
+
+  .interlude__window {
+    width: min(72vw, 320px);
   }
 
   .hero .lead {
@@ -1337,9 +1785,20 @@ a.work__row:hover .arrow {
     transition-duration: 0.01ms !important;
   }
 
-  [data-reveal] {
+  [data-reveal],
+  .tier,
+  .principle,
+  .facts > div {
     opacity: 1;
     transform: none;
+    translate: none;
+    filter: none;
+  }
+
+  .section__head h2,
+  .work__art {
+    clip-path: none;
+    translate: none;
   }
 
   .scroll-cue__dot {

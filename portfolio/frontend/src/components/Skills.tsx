@@ -10,8 +10,8 @@ export default function Skills() {
       </div>
       <div className="skills">
         <div className="tiers" data-reveal>
-          {skills.tiers.map((tier) => (
-            <div className="tier" key={tier.name}>
+          {skills.tiers.map((tier, i) => (
+            <div className="tier" key={tier.name} style={{ '--i': i } as CSSProperties}>
               <div>
                 <p className="tier__name">{tier.name}</p>
                 <p className="tier__note">{tier.note}</p>
@@ -25,8 +25,8 @@ export default function Skills() {
           ))}
         </div>
         <ol className="principles" data-reveal style={{ '--d': '140ms' } as CSSProperties}>
-          {skills.principles.map((p) => (
-            <li className="principle" key={p.title}>
+          {skills.principles.map((p, i) => (
+            <li className="principle" key={p.title} style={{ '--i': i } as CSSProperties}>
               <h3>{p.title}</h3>
               <p>{p.text}</p>
             </li>
