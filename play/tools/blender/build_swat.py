@@ -1428,6 +1428,8 @@ def preview_sheet(arm):
     scene.view_settings.look = "AgX - Medium High Contrast"
     act = bpy.data.actions.get("idle")
     arm.animation_data_create()
+    # Previews run after the export: show only the idle action, not every clip's NLA track blended together.
+    arm.animation_data.use_nla = False
     arm.animation_data.action = act
     try:
         if act.slots:
@@ -1501,6 +1503,34 @@ def preview_sheet(arm):
     out = bpy.data.images.new("sheet", w * 4, h, alpha=False)
     out.pixels.foreach_set(sheet.ravel())
     out.filepath_raw = str(PREVIEW / "op_sheet.png")
+    out.file_format = "PNG"
+    out.save()
+    # The same four views in the rest (A-like) pose without the rifle, like the reference sheet, so plates, patches
+    # and pouches are not hidden behind the arms.
+    arm.animation_data.action = None
+    for pb in arm.pose.bones:
+        pb.rotation_euler = (0, 0, 0)
+        pb.location = (0, 0, 0)
+    for o in gun:
+        o.hide_render = True
+    scene.render.resolution_x = 520
+    scene.render.resolution_y = 900
+    afiles = []
+    for name, ang in (("front", 0), ("left", -90), ("back", 180), ("34", 35)):
+        a_ = math.radians(ang)
+        cam.location = (math.sin(a_) * 5.2, math.cos(a_) * 5.2, 1.05)
+        cam.rotation_euler = (Vector((0, 0, 0.95)) - cam.location).to_track_quat("-Z", "Y").to_euler()
+        path = str(PREVIEW / f"op_a_{name}.png")
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        afiles.append(path)
+    imgs = [bpy.data.images.load(f) for f in afiles]
+    sheet = np.zeros((h, w * 4, 4), dtype=np.float32)
+    for i, im in enumerate(imgs):
+        sheet[:, i * w:(i + 1) * w] = np.array(im.pixels[:], dtype=np.float32).reshape(h, w, 4)
+    out = bpy.data.images.new("sheet_a", w * 4, h, alpha=False)
+    out.pixels.foreach_set(sheet.ravel())
+    out.filepath_raw = str(PREVIEW / "op_sheet_a.png")
     out.file_format = "PNG"
     out.save()
     for o in [floor, cam] + lights + gun:

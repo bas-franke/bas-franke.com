@@ -613,7 +613,7 @@ def wrinkles(obj, regions, seed):
             nz = noise.noise(q)
             # Sharpen to ridges: folds are creases, not soft bumps.
             # Cloth creases: |noise| has sharp V valleys at its zero lines and broad rounded tops between them.
-            crease = abs(nz) ** 0.65 * 1.6 - 0.55
+            crease = abs(nz) ** 0.5 * 1.7 - 0.7
             total += amp * w * crease
         return n * total if total else None
 
@@ -736,6 +736,34 @@ def split_legs(trousers):
     return smooth(trousers)
 
 
+def blouse(trousers):
+    """Bloused hems: the last ~10 cm of each leg puffs out over the boot collar with gathered vertical pleats, and the
+    very hem tucks in under it (the boot top hides it at ~0.33 m)."""
+    rnd = random.Random(23)
+    phase = [rnd.random() * 6.3 for _ in range(4)]
+
+    def fn(co, n):
+        z = co.z / S
+        if z > 0.42 or z < 0.28:
+            return None
+        x = 1 if co.x > 0 else -1
+        kn, an = P(x * 0.11, 0.01, 0.51), P(x * 0.12, -0.02, 0.1)
+        leg = (an - kn).normalized()
+        axis_pt = kn + leg * ((co - kn).dot(leg))
+        radial = co - axis_pt
+        radial = radial - leg * radial.dot(leg)
+        if radial.length < 1e-6:
+            return None
+        rdir = radial.normalized()
+        ang = math.atan2(rdir.y, rdir.x)
+        t = (z - 0.31) / 0.11  # 0 at the hem, 1 at the top of the blouse
+        puff = 0.014 * math.sin(math.pi * max(0.0, min(1.0, t))) if t > 0 else -0.006 * min(1.0, -t / 0.25)
+        pleat = 0.005 * math.sin(ang * 9 + phase[0] + 2.5 * math.sin(ang * 2 + phase[1])) * max(0.0, 1 - abs(t - 0.4) / 0.8)
+        return rdir * (puff + pleat)
+
+    bz.push_verts(trousers, fn)
+
+
 def build_uniform(body, mats):
     log("garment volume")
     g = garment_volume(mats)
@@ -806,12 +834,12 @@ def build_uniform(body, mats):
         kn = P(x * 0.11, 0.01, 0.51)
         an = P(x * 0.12, -0.02, 0.1)
         sh_regions += [
-            (sh.lerp(el, 0.6), el.lerp(wr, 0.35), 0.07, 0.013, 30.0, 7.0),  # elbow compression folds
+            (sh.lerp(el, 0.6), el.lerp(wr, 0.35), 0.07, 0.02, 30.0, 7.0),  # elbow compression folds
             (el.lerp(wr, 0.6), wr, 0.06, 0.011, 34.0, 8.0),  # bunching above the cuff
             (sh, el, 0.08, 0.007, 6.0, 15.0),  # drape along the upper arm
         ]
         tr_regions += [
-            (hip.lerp(kn, 0.7), kn.lerp(an, 0.25), 0.1, 0.016, 24.0, 6.0),  # knee folds
+            (hip.lerp(kn, 0.7), kn.lerp(an, 0.25), 0.1, 0.024, 24.0, 6.0),  # knee folds
             (kn.lerp(an, 0.5), an, 0.09, 0.018, 28.0, 6.0),  # bloused above the boot
             (hip, kn, 0.11, 0.009, 5.0, 13.0),  # drape lines down the thigh
             (P(x * 0.03, 0.04, 0.88), hip.lerp(kn, 0.25), 0.08, 0.01, 22.0, 8.0),  # crotch pull
@@ -822,6 +850,7 @@ def build_uniform(body, mats):
     ]
     wrinkles(shirt, sh_regions, 11)
     wrinkles(trousers, tr_regions, 17)
+    blouse(trousers)
     for gobj in (shirt, trousers):
         sm = gobj.modifiers.new("Soften", "SMOOTH")
         sm.factor = 0.5
@@ -854,8 +883,9 @@ def build_uniform(body, mats):
         out = (out - up_arm * out.dot(up_arm)).normalized()
         c = P(x * 0.26, 0.0, 1.29)
         extras_shirt.append(surface_panel(shirt, c, out, 0.085, 0.1, 0.008, mats["uniform"], f"sleevePocket{x}", up=up_arm, bevel=0.004))
-        extras_shirt.append(surface_panel(shirt, c + up_arm * 0.052, out, 0.09, 0.032, 0.006, mats["uniform"], f"sleeveFlap{x}", up=up_arm, bevel=0.003, offset=0.009))
-        extras_shirt.append(surface_panel(shirt, c - up_arm * 0.005, out, 0.07, 0.05, 0.002, mats["velcro"], f"sleeveVelcro{x}", up=up_arm, bevel=0.0, offset=0.0105))
+        extras_shirt.append(surface_panel(shirt, c + up_arm * 0.045, out, 0.095, 0.045, 0.01, mats["uniform"], f"sleeveFlap{x}", up=up_arm, bevel=0.003, offset=0.011))
+        # Velcro field on the pocket face (the SWAT patch sits on the left one).
+        extras_shirt.append(surface_panel(shirt, c - up_arm * 0.012, out, 0.075, 0.055, 0.003, mats["velcro"], f"sleeveVelcro{x}", up=up_arm, bevel=0.001, offset=0.011))
         # Cuff with a hook-and-loop tab.
         arm_axis = (P(x * 0.44, 0.03, 0.94) - P(x * 0.33, 0, 1.17)).normalized()
         wr = P(x * 0.44, 0.03, 0.94) - arm_axis * 0.022
@@ -889,27 +919,14 @@ def build_uniform(body, mats):
         ctr = c.copy()
         bz.push_verts(pocket, lambda co, n, ctr=ctr, nrm=nrm: (nrm * 0.014 + Vector((0, 0, -0.006))) * max(0.0, min(1.0, (ctr.z - co.z) / 0.085 + 0.2)) if (co - ctr).dot(nrm) > 0.004 else None)
         extras_trousers.append(smooth(pocket))
-        extras_trousers.append(surface_panel(trousers, c + Vector((0, 0, 0.093)), nrm, 0.14, 0.04, 0.006, mats["uniform"], f"cargoFlap{x}", bevel=0.004, offset=0.019))
+        extras_trousers.append(surface_panel(trousers, c + Vector((0, 0, 0.088)), nrm, 0.15, 0.056, 0.011, mats["uniform"], f"cargoFlap{x}", bevel=0.003, offset=0.022))
+        # Snap tab under the flap's front edge.
+        extras_trousers.append(surface_panel(trousers, c + Vector((0, 0, 0.056)), nrm, 0.03, 0.022, 0.004, mats["velcro"], f"cargoTab{x}", bevel=0.002, offset=0.034))
         for dx in (-0.035, 0.035):
             extras_trousers.append(surface_panel(trousers, c + nrm.cross(Vector((0, 0, 1))).normalized() * dx, nrm, 0.006, 0.15, 0.003, mats["uniform"], f"pleat{x}{dx}", bevel=0.0, offset=0.018))
         # Small lower-leg pocket.
-        c2 = P(x * 0.16, 0.035, 0.33)
+        c2 = P(x * 0.155, 0.04, 0.45)
         extras_trousers.append(surface_panel(trousers, c2, Vector((x, 0.5, 0)).normalized(), 0.075, 0.09, 0.01, mats["uniform"], f"shinPocket{x}", bevel=0.005))
-        # Blousing: the hem is gathered in and tucked into the boot top at mid-shin, with a soft overhanging roll.
-        an = P(x * 0.12, -0.02, 0.1)
-        kn = P(x * 0.11, 0.01, 0.51)
-        leg = (an - kn).normalized()
-        hem = kn + leg * ((0.51 - 0.31) / (0.51 - 0.1)) * (an - kn).length
-        for k, (off, rr, mr) in enumerate(((0.0, 0.07, 0.012), (0.03, 0.074, 0.011))):
-            ring = bz.prim("torus", mats["uniform"], loc=tuple(hem - leg * off), major_radius=rr * S, minor_radius=mr, major_segments=30, minor_segments=8)
-            ring.rotation_mode = "QUATERNION"
-            ring.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(leg)
-            ring = apply_all(ring)
-            activate(ring)
-            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-            rnd = random.Random(31 + k + (x > 0))
-            bz.push_verts(ring, lambda co, n, r=rnd: n * 0.004 * math.sin(math.atan2(co.y, co.x - hem.x) * 7 + r.random() * 6))
-            extras_trousers.append(smooth(ring))
         # Knee reinforcement panel (sits under the LIMBS worker's knee pad).
         extras_trousers.append(surface_panel(trousers, P(x * 0.11, 0.07, 0.52), Vector((0, 1, 0)), 0.12, 0.15, 0.003, mats["uniform"], f"kneePanel{x}", bevel=0.004))
     # Mock collar: a soft band around the neck rising toward the jaw (under the balaclava).

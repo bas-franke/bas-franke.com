@@ -625,7 +625,7 @@ def add_parts(b, parts, M, m):
 def build_torso(fit, coll, m, bp):
     objs = []
     # Plate bags. Front: top below the sternal notch, bottom at the navel line; back a little taller.
-    front = Plate(fit, +1, 0.352, 0.38, 1.276)
+    front = Plate(fit, +1, 0.352, 0.39, 1.296)
     back = Plate(fit, -1, 0.362, 0.405, 1.29)
     T = 0.034
     for plate, name, cut in ((front, "Torso_FrontPlate", (0.055, 0.075)), (back, "Torso_BackPlate", (0.045, 0.06))):
@@ -641,20 +641,20 @@ def build_torso(fit, coll, m, bp):
 
     # MOLLE: lower front (behind and between the mag pouches), most of the back panel.
     b = Builder("Torso_Molle")
-    molle_on_plate(b, front, m["webbing"], fbot(front) + 0.01, ftop(front) - 0.29, -0.158, 0.158, T)
+    molle_on_plate(b, front, m["webbing"], fbot(front) + 0.01, ftop(front) - 0.252, -0.158, 0.158, T)
     molle_on_plate(b, back, m["webbing"], fbot(back) + 0.014, ftop(back) - 0.14, -0.162, 0.162, T)
     objs.append(b.finish(coll, smooth=False))
 
     # Velcro admin field on the front top (the patch sits on it) and the back top.
     b = Builder("Torso_Velcro")
-    for plate, w, h, dz in ((front, 0.21, 0.084, 0.046), (back, 0.275, 0.11, 0.086)):
+    for plate, w, h, dz in ((front, 0.21, 0.07, 0.04), (back, 0.275, 0.11, 0.086)):
         M = plate.frame(0, ftop(plate) - dz, T)
         b.add_bm(rbox_bm((w, 0.003, h), (0, 0.0015, 0), r=0.0012, seg=1), m["velcro"], M)
     objs.append(b.finish(coll, smooth=False))
 
     # SWAT patches: front, back (bigger), left sleeve.
     b = Builder("Torso_Patches")
-    for plate, w, h, th, dz in ((front, 0.19, 0.072, 0.052, 0.046), (back, 0.252, 0.094, 0.07, 0.086)):
+    for plate, w, h, th, dz in ((front, 0.196, 0.064, 0.048, 0.04), (back, 0.252, 0.094, 0.07, 0.086)):
         M = plate.frame(0, ftop(plate) - dz, T + 0.003)
         b.add_bm(rbox_bm((w, 0.003, h), (0, 0.0015, 0), r=0.002, seg=1), m["patch"], M)
         b.add_bm(text_bm("SWAT", th, 0.0), m["text"], M @ Matrix.Translation((0, 0.0036, -0.001)))
@@ -667,18 +667,19 @@ def build_torso(fit, coll, m, bp):
     objs.append(b.finish(coll, smooth=False))
     b = Builder("Torso_SleevePatch")  # weight entirely to upperarm.L
     M = frame(hit + out_dir * 0.002, out_dir, up=-axis)
-    b.add_bm(rbox_bm((0.098, 0.0028, 0.064), (0, 0.0014, 0), r=0.003, seg=1), m["patch"], M)
-    b.add_bm(text_bm("SWAT", 0.027, 0.0), m["text"], M @ Matrix.Translation((0, 0.0034, -0.0005)))
+    M = M @ Matrix.Translation((0, 0.003, 0))
+    b.add_bm(rbox_bm((0.11, 0.0035, 0.072), (0, 0.00175, 0), r=0.003, seg=1), m["patch"], M)
+    b.add_bm(text_bm("SWAT", 0.032, 0.0), m["text"], M @ Matrix.Translation((0, 0.0042, -0.0005)))
     ob = b.finish(coll, smooth=False)
     ob["bone"] = "upperarm.L"
     objs.append(ob)
 
     # Mag pouches: three 5.56 pouches on the lower front.
     b = Builder("Torso_MagPouches")
-    z0 = ftop(front) - 0.292  # patch, a small gap, the mag tops, then the pouches (top to bottom, as on the sheet)
+    z0 = ftop(front) - 0.072 - 0.05 - 0.125  # patch, the mag tops, then the pouches (top to bottom, as on the sheet)
     for x in (-0.096, 0.0, 0.096):
-        M = front.frame(x, z0, T + 0.004)
-        add_parts(b, mag_pouch_bm(0.09, 0.052, 0.15), M, m)
+        M = front.frame(x, z0, T + 0.008)
+        add_parts(b, mag_pouch_bm(0.09, 0.056, 0.125), M, m)
     objs.append(b.finish(coll, smooth=True))
 
     # Radio pouch with radio and antenna, upper front on the wearer's left (-X), under the shoulder strap.
@@ -731,12 +732,12 @@ def build_torso(fit, coll, m, bp):
 
     # Side pouches on the cummerbund.
     b = Builder("Torso_SidePouches")
-    for ang in (0.0, math.pi):
-        z = 1.11
-        cy = fit.axis_y(z + 0.06)
-        p, d = fit.radial(Vector((0, cy, z + 0.06)), ang, 0.16)
-        M = frame(p + d * 0.024 - Vector((0, 0, 0.06)), d)
-        add_parts(b, pouch_bm(0.095, 0.045, 0.13, flap=True, bungee=False), M, m)
+    for ang in (math.radians(-22), math.radians(202)):
+        z = 1.14
+        cy = fit.axis_y(z + 0.055)
+        p, d = fit.radial(Vector((0, cy, z + 0.055)), ang, 0.16)
+        M = frame(p + d * 0.022 - Vector((0, 0, 0.055)), d)
+        add_parts(b, pouch_bm(0.08, 0.04, 0.11, flap=True, bungee=False), M, m)
     objs.append(b.finish(coll, smooth=True))
 
     # Padded shoulder straps from the front plate top over the trapezius to the back plate top.
@@ -1021,11 +1022,57 @@ def previews(out_dir):
         "holster": ((1.15, 0.55, 0.95), (0.18, 0.0, 0.9), 60, (600, 760)),
     }
     skin = bpy.data.objects.get("Body_Skin")
+    hold_views = {
+        "front_hold": ((0, 3.3, 1.2), (0, 0, 1.05), 50, (700, 1000)),
+        "34_hold": ((-2.3, 2.4, 1.3), (0, 0, 1.05), 50, (700, 1000)),
+        "left_hold": ((-3.3, 0, 1.25), (0, 0, 1.05), 50, (700, 1000)),
+    }
     for name, (loc, tgt, lens, res) in views.items():
         if skin:
             skin.hide_render = name == "holster_side"  # the A-pose hand hangs in front of the holster
         shoot(cam, out_dir / f"torso_{name}.png", loc, tgt, lens, res)
         log(f"rendered {name}")
+    if skin:
+        skin.hide_render = False
+    saved = pose_hold()
+    if saved:
+        for name, (loc, tgt, lens, res) in hold_views.items():
+            shoot(cam, out_dir / f"torso_{name}.png", loc, tgt, lens, res)
+            log(f"rendered {name}")
+        # Back to the A-pose and unparented, exactly where the gear was built.
+        for o, mw in saved.items():
+            o.parent = None
+            o.matrix_world = mw
+        bpy.context.view_layer.update()
+
+
+def pose_hold():
+    """The rifle-hold idle pose from build_zombies.py (IK to the grip, torso aim), applied to the body's armature;
+    the carrier gear follows the chest bone, the belt gear stays on the hips. Preview only."""
+    arm = bpy.data.objects.get("Survivor")
+    if not arm or arm.type != "ARMATURE":
+        return None
+    g = bz.GRIP * S
+    saved = {o: o.matrix_world.copy() for o in bpy.data.collections["Torso"].objects}
+    for o in bpy.data.collections["Torso"].objects:
+        belt = any(k in o.name for k in ("Belt", "Medic", "Holster", "Thigh"))
+        bone = "upperarm.L" if o.get("bone") == "upperarm.L" else (None if belt else "chest")
+        if not bone:
+            continue
+        mw = o.matrix_world.copy()
+        o.parent = arm
+        o.parent_type = "BONE"
+        o.parent_bone = bone
+        o.matrix_world = mw
+    hold = bz.solve_hold(arm, bz.TORSO_AIM, right_wrist=g + Vector((0.025, -0.065, 0.045)), right_aim=g + Vector((-0.03, 0.02, -0.08)),
+                         left_wrist=g + Vector((-0.07, 0.2, 0.0)), left_aim=g + Vector((-0.01, 0.27, 0.06)))
+    pose = dict(bz.TORSO_AIM)
+    pose.update(hold)
+    for pb in arm.pose.bones:
+        pb.rotation_mode = "XYZ"
+        pb.rotation_euler = tuple(math.radians(a) for a in pose.get(pb.name, (0, 0, 0)))
+    bpy.context.view_layer.update()
+    return saved
 
 
 # ---- main ------------------------------------------------------------------------------------------------------------

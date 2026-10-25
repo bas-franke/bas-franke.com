@@ -1108,8 +1108,8 @@ def build_straps(M):
 
 # ---- goggles -------------------------------------------------------------------------------------------------------
 
-G_HALF = math.radians(76)
-G_V = (-0.025, 0.026)  # lens extent in metres around the eye line (down negative, up positive)
+G_HALF = math.radians(80)
+G_V = (-0.029, 0.029)  # lens extent in metres around the eye line (down negative, up positive)
 
 
 def lens_point(theta, v, grow=0.0):
@@ -1340,14 +1340,16 @@ def build_headset(M):
     parts.append(band)
     # Boom mic from the left cup (-X) round to the mouth.
     c = F.p(-0.099, -0.006, E + 0.014)
-    boom = [c + Vector((-0.012, 0.03, -0.022)) * F.s, F.p(-0.104, 0.05, E + 0.06), F.p(-0.084, 0.088, E + 0.082), F.p(-0.042, 0.108, E + 0.083)]
-    parts.append(curve_obj("boom", boom, depth=0.0022 * F.s, res=8))
+    # A long boom from the front of the left cup along the jaw, curving in front of the mouth.
+    boom = [c + Vector((-0.012, 0.03, -0.02)) * F.s, F.p(-0.106, 0.052, E + 0.058), F.p(-0.096, 0.082, E + 0.075),
+            F.p(-0.068, 0.108, E + 0.083), F.p(-0.034, 0.122, E + 0.082)]
+    parts.append(curve_obj("boom", boom, depth=0.0036 * F.s, res=10))
     set_mat(parts[-1], M["rail"])
     bm = bmesh.new()
     bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=12, radius=1.0)
-    tip = F.p(-0.036, 0.11, E + 0.083)
+    tip = F.p(-0.012, 0.124, E + 0.081)
     for v in bm.verts:
-        v.co = tip + Vector((v.co.x * 0.011, v.co.y * 0.009, v.co.z * 0.008)) * F.s
+        v.co = tip + Vector((v.co.x * 0.02, v.co.y * 0.014, v.co.z * 0.013)) * F.s
     foam = mesh_obj("micfoam", bm)
     set_mat(foam, M["foam"])
     parts.append(foam)

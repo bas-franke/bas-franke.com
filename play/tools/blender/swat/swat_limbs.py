@@ -95,10 +95,10 @@ def mats():
         "strap": material("Webbing", (0.026, 0.027, 0.030), 0.85, bump=0.6, bump_scale=1800),
         "buckle": material("Buckle", (0.022, 0.022, 0.023), 0.5),
         "leather": material("BootLeather", (0.026, 0.026, 0.027), 0.6, coat=0.04, bump=0.6, bump_scale=650),
-        "nylon": material("BootNylon", (0.030, 0.031, 0.034), 0.86, bump=0.6, bump_scale=1600),
+        "nylon": material("BootNylon", (0.040, 0.041, 0.045), 0.86, bump=0.6, bump_scale=1600),
         "sole": material("BootSole", (0.020, 0.020, 0.020), 0.88, bump=0.4, bump_scale=300),
-        "lace": material("Lace", (0.022, 0.022, 0.024), 0.85),
-        "metal": material("Eyelet", (0.06, 0.06, 0.062), 0.42, metal=1.0),
+        "lace": material("Lace", (0.011, 0.011, 0.012), 0.8),
+        "metal": material("Eyelet", (0.20, 0.20, 0.21), 0.34, metal=1.0),
         "padding": material("Padding", (0.030, 0.031, 0.035), 0.88, bump=0.5, bump_scale=1300),
     }
 
@@ -553,8 +553,8 @@ def knee_pad(side, M, coll, mt):
 # Local frame: origin on the ground under the ankle, toe along +Y, up +Z; side +1 is the right foot (outside = +X).
 # FIT is set per foot from the body before the boot is built.
 
-WIDTH = [(0.0, 0.033), (0.08, 0.041), (0.25, 0.042), (0.5, 0.044), (0.68, 0.049), (0.82, 0.047), (0.92, 0.038), (0.975, 0.022), (1.0, 0.004)]
-HEIGHT = [(0.0, 0.105), (0.28, 0.104), (0.42, 0.098), (0.55, 0.088), (0.7, 0.072), (0.85, 0.058), (0.95, 0.045), (1.0, 0.03)]
+WIDTH = [(0.0, 0.035), (0.08, 0.043), (0.25, 0.044), (0.5, 0.047), (0.68, 0.055), (0.82, 0.056), (0.92, 0.049), (0.975, 0.032), (1.0, 0.007)]  # wide forefoot, roomy toe box
+HEIGHT = [(0.0, 0.105), (0.28, 0.104), (0.42, 0.098), (0.55, 0.090), (0.7, 0.076), (0.85, 0.066), (0.95, 0.055), (1.0, 0.038)]
 SOLE_TOP = 0.044
 SHAFT_TOP = 0.335  # high tactical boot up the shin: the trousers end at ~0.31 m and blouse over the collar
 FIT = {"heel": -0.072, "toe": 0.236, "wscale": 1.0, "rx": 0.043, "ry": 0.051, "cx": 0.0, "cy": 0.0}
@@ -590,18 +590,18 @@ def arch(t):
     """Heel break: the outsole is lifted between the heel block and the forefoot."""
     up = min(max((t - 0.27) / 0.05, 0.0), 1.0)
     down = min(max((0.56 - t) / 0.08, 0.0), 1.0)
-    return 0.007 * min(up, down)
+    return 0.013 * min(up, down)
 
 
 def outline(side, n, notch=0.0, grow=0.0):
-    """Closed footprint outline; with `notch` every other point juts out, so the sole's side shows lug blocks."""
+    """Closed footprint outline; with `notch` every other pair of points juts out, so the sole's side shows lug blocks."""
     pts = []
     for i in range(n + 1):
         t = i / n
-        pts.append((foot_center_x(t, side) + foot_w(t) + grow + (notch if (i % 2 == 0 and 0 < i < n) else 0.0), foot_y(t) + grow * (2 * t - 1), t))
+        pts.append((foot_center_x(t, side) + foot_w(t) + grow + (notch if ((i // 2) % 2 == 0 and 0 < i < n) else 0.0), foot_y(t) + grow * (2 * t - 1), t))
     for i in range(n, -1, -1):
         t = i / n
-        pts.append((foot_center_x(t, side) - foot_w(t) - grow - (notch if (i % 2 == 1 and 0 < i < n) else 0.0), foot_y(t) + grow * (2 * t - 1), t))
+        pts.append((foot_center_x(t, side) - foot_w(t) - grow - (notch if ((i // 2) % 2 == 0 and 0 < i < n) else 0.0), foot_y(t) + grow * (2 * t - 1), t))
     return pts
 
 
@@ -661,9 +661,11 @@ def boot_shell(side, coll):
     for i in range(n_z + 1):
         f = i / n_z
         z = 0.06 + (SHAFT_TOP - 0.06) * f
-        waist = 0.12 * math.exp(-((f - 0.22) / 0.16) ** 2)  # narrowest just above the ankle bones
-        rx = FIT["rx"] * (0.97 + 0.08 * f - waist)
-        ry = FIT["ry"] * (1.0 + 0.05 * f - waist * 0.7)
+        # Padded ankle bulge round the ankle bones, a slimmer lower shin above it, a flare to the padded collar.
+        pad = math.exp(-((f - 0.2) / 0.11) ** 2)
+        shin = math.exp(-((f - 0.5) / 0.14) ** 2)
+        rx = FIT["rx"] * (0.98 + 0.12 * pad - 0.05 * shin + 0.07 * f * f)
+        ry = FIT["ry"] * (1.0 + 0.07 * pad - 0.03 * shin + 0.05 * f * f)
         yc = FIT["cy"] - 0.004 + 0.008 * f
         ring = [bm.verts.new((FIT["cx"] + rx * math.cos(2 * math.pi * k / 20), yc + ry * math.sin(2 * math.pi * k / 20), z)) for k in range(20)]
         rings.append(ring)
@@ -741,26 +743,40 @@ def boot(side, M, coll, mt):
             z = 0.075 + f * 0.035 + 0.012 * math.sin(math.pi * f)
             line.append(onto(Vector((FIT["cx"] + sx * 0.2, y, z)), Vector((FIT["cx"], y, z))))
         seams.append(line)
+    for z, r in ((0.082, 0.21), (0.178, 0.21)):
+        ring = []
+        for a in range(-120, 121, 12):
+            th = math.radians(a)
+            ring.append(onto(Vector((FIT["cx"] + 0.2 * math.sin(th), FIT["cy"] - 0.2 * math.cos(th), z)), Vector((FIT["cx"], FIT["cy"], z))))
+        seams.append(ring)
     bm = bmesh.new()
     for line in seams:
         line = [p for p in line if p is not None]
         if len(line) >= 3:
-            sweep_loop(bm, line, 0.0011, sides=3, closed=False)
+            sweep_loop(bm, line, 0.0016, sides=3, closed=False)
     parts.append((mesh_from_bm("seams", bm), 0))
+    bm = bmesh.new()
+    for sx in (-1, 1):
+        hit, n = ray(tree, Vector((FIT["cx"] + sx * 0.2, FIT["cy"] - 0.010, 0.128)), Vector((-sx, 0, 0)), 0.3)
+        if hit is not None:
+            ellipsoid(bm, hit - n * 0.0015, (0.034, 0.036, 0.0048), frame(n), segs=(12, 8))  # tall, long, flat
+    parts.append((mesh_from_bm("ankle_pads", bm), 6))
 
     # Lugged outsole with a heel break, and a plain midsole band.
     bm = bmesh.new()
-    extrude_outline(bm, outline(side, 20, notch=0.008, grow=0.007), 0.0, 0.021, lift_bottom=True)
-    prism(bm, outline(side, 20, grow=0.0065), outline(side, 20, grow=0.001), 0.020, SOLE_TOP + 0.001)
+    extrude_outline(bm, outline(side, 36, notch=0.008, grow=0.008), 0.0, 0.025, lift_bottom=True)
+    prism(bm, outline(side, 22, grow=0.0075), outline(side, 22, grow=0.002), 0.024, SOLE_TOP + 0.002)
+    ridge = [Vector((x, y, 0.034 + toe_spring(t))) for x, y, t in outline(side, 22, grow=0.0068)]
+    sweep_loop(bm, ridge, 0.0024, sides=4)
     parts.append((mesh_from_bm("sole", bm), 3))
 
     # Lacing: rows on the instep (cast down) and up the shaft front (cast backwards).
     rows = []
     for t in (0.70, 0.635, 0.57):
         y = foot_y(t)
-        rows.append([ray(tree, Vector((FIT["cx"] + sx * 0.0165, y, 0.4)), Vector((0, 0, -1)), 0.5) for sx in (-1, 1)])
+        rows.append([ray(tree, Vector((FIT["cx"] + sx * 0.020, y, 0.4)), Vector((0, 0, -1)), 0.5) for sx in (-1, 1)])
     for z in (0.128, 0.156, 0.184, 0.212, 0.240, 0.268, 0.296, 0.320):
-        rows.append([ray(tree, Vector((FIT["cx"] + sx * 0.0175, 0.4, z)), Vector((0, -1, 0)), 0.5) for sx in (-1, 1)])
+        rows.append([ray(tree, Vector((FIT["cx"] + sx * 0.0215, 0.4, z)), Vector((0, -1, 0)), 0.5) for sx in (-1, 1)])
     rows = [r for r in rows if r[0][0] is not None and r[1][0] is not None]
     # Padded tongue strip down the middle of the lacing.
     if len(rows) >= 2:
@@ -770,7 +786,7 @@ def boot(side, M, coll, mt):
             mid = (p0 + p1) / 2
             n = (n0 + n1).normalized()
             lat = (p1 - p0).normalized()
-            verts.append([bm.verts.new(mid + n * 0.0012 + lat * s * 0.012) for s in (-1, 1)])
+            verts.append([bm.verts.new(mid + n * 0.0012 + lat * s * 0.016) for s in (-1, 1)])
         (p0, n0), (p1, n1) = rows[-1]
         top = (p0 + p1) / 2 + (n0 + n1).normalized() * 0.0015 + Vector((0, 0.004, SHAFT_TOP + 0.016 - p0.z))
         lat = (p1 - p0).normalized()
@@ -779,24 +795,30 @@ def boot(side, M, coll, mt):
             bm.faces.new((a0, a1, b1, b0))
         parts.append((modified(mesh_from_bm("tongue", bm), coll, [("SOLIDIFY", {"thickness": 0.005, "offset": 1.0}), ("BEVEL", {"width": 0.0015, "segments": 1})]), 6))
     bm = bmesh.new()
-    for pair in rows:
+    for i, pair in enumerate(rows):
         for hit, n in pair:
-            bmesh.ops.create_cone(bm, cap_ends=False, segments=6, radius1=0.0033, radius2=0.0033, depth=0.0018, matrix=Matrix.Translation(hit + n * 0.0006) @ frame(n))
+            if hit.z < 0.2:
+                bmesh.ops.create_cone(bm, cap_ends=False, segments=8, radius1=0.0047, radius2=0.0042, depth=0.0026, matrix=Matrix.Translation(hit + n * 0.0010) @ frame(n))
+            else:
+                # Speed hook: a post standing off the shaft with a lip bent upwards.
+                tip = hit + n * 0.0070
+                tube(bm, hit, tip, 0.0026, 0.0024, segs=6)
+                tube(bm, tip - Vector((0, 0, 0.0015)), tip + Vector((0, 0, 0.0050)) - n * 0.0015, 0.0022, 0.0020, segs=6)
     parts.append((mesh_from_bm("eyelets", bm), 5))
     bm = bmesh.new()
-    lift = 0.0048
+    lift = 0.0062
     for a, b in zip(rows, rows[1:]):
         for (p0, n0), (p1, n1) in ((a[0], b[1]), (a[1], b[0])):
-            tube(bm, p0 + n0 * lift, p1 + n1 * lift, 0.0015, 0.0015, segs=5, cap=False)
+            tube(bm, p0 + n0 * lift, p1 + n1 * lift, 0.0025, 0.0025, segs=5, cap=False)
     if rows:
         (p0, n0), (p1, n1) = rows[0]
-        tube(bm, p0 + n0 * lift, p1 + n1 * lift, 0.0015, 0.0015, segs=5, cap=False)
+        tube(bm, p0 + n0 * lift, p1 + n1 * lift, 0.0025, 0.0025, segs=5, cap=False)
         (p0, n0), (p1, n1) = rows[-1]
         top = (p0 + p1) / 2 + n0 * 0.006
         for sx in (-1, 1):
             loop = Matrix.Translation(top + Vector((sx * 0.010, 0.002, 0.003))) @ Matrix.Rotation(math.pi / 2, 4, "X") @ Matrix.Rotation(sx * 0.5, 4, "Y") @ Matrix.Diagonal((0.011, 0.006, 0.011, 1))
             bmesh.ops.create_cone(bm, cap_ends=False, segments=8, radius1=1.0, radius2=1.0, depth=0.0025, matrix=loop)
-            tube(bm, top, top + Vector((sx * 0.007, 0.008, -0.05)), 0.0013, 0.0012, segs=5, cap=False)
+            tube(bm, top, top + Vector((sx * 0.007, 0.008, -0.05)), 0.0022, 0.0020, segs=5, cap=False)
     parts.append((mesh_from_bm("laces", bm), 4))
 
     # Padded collar and the pull loop at the back.
@@ -1078,8 +1100,10 @@ def load_parts():
         with bpy.data.libraries.load(path, link=False) as (src, dst):
             dst.objects = list(src.objects)
         for o in dst.objects:
-            if o is not None and o.type == "MESH" and not o.get("high"):
+            # Parents (armatures, empties) come along so parented parts land where they belong; only meshes render.
+            if o is not None and not o.get("high"):
                 bpy.context.scene.collection.objects.link(o)
+                o.hide_render = o.type != "MESH"
 
 
 def tuck_trousers(boots):
@@ -1152,12 +1176,12 @@ def previews(anch, objs):
     shoot("glove_palm", w + a * 0.085, -b * 1.0 + Vector((0, 0.5, 0)), -a, 0.60, res=(560, 900), key=(-1.0, 1.2, 1.3))
     shoot("kneepad", centre(objs["Limbs_KneePad.R"]), Vector((0.06, 1.0, 0.02)), Vector((0, 0, 1)), 0.62, res=(560, 900), key=(-0.8, 1.5, 1.0))
     bc = centre(objs["Limbs_Boot.R"])
-    shoot("boot", bc + Vector((0, 0.01, -0.01)), Vector((0.9, 0.85, 0.32)), Vector((0, 0, 1)), 0.72, res=(600, 900))
+    shoot("boot", bc + Vector((0, 0.02, 0.0)), Vector((0.55, 1.0, 0.32)), Vector((0, 0, 1)), 1.05, res=(600, 900))
     body = bpy.data.collections.get("BodyRef")
     if body:
         body.hide_render = True
     # Boot on its own, like the sheet's equipment shot: three-quarters from the front-outside.
-    shoot("boot_side", bc + Vector((0, 0, 0.04)), Vector((0.85, 0.75, 0.25)), Vector((0, 0, 1)), 0.8, res=(900, 640))
+    shoot("boot_side", bc + Vector((0, 0.03, 0.0)), Vector((0.85, 0.75, 0.25)), Vector((0, 0, 1)), 1.25, res=(900, 640))
     if body:
         body.hide_render = False
     shoot("lower", Vector((0, 0, 0.62)), Vector((0.35, 1.0, 0.12)), Vector((0, 0, 1)), 3.2, lens=60, res=(900, 1100), key=(-1.0, 1.3, 1.2))
