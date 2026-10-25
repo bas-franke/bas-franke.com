@@ -475,6 +475,27 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, fade: Bucket, rand:
       line(0.06, tz - 0.08, b.max.x - 0.06, cz);
       continue;
     }
+    // Teal crates: dark frame posts on the vertical edges, a dark lid rim, and a glowing cyan panel on each open face.
+    if (b.kind === 'crate' && bh < 4) {
+      const tx = b.max.x - b.min.x;
+      const tz = b.max.z - b.min.z;
+      const cx = (b.min.x + b.max.x) / 2;
+      const cz = (b.min.z + b.max.z) / 2;
+      const cy = (b.min.y + b.max.y) / 2;
+      for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) solid.add(at(box(0.16, bh, 0.16), cx + sx * (tx / 2 - 0.06), cy, cz + sz * (tz / 2 - 0.06)), 0x1e2a36);
+      solid.add(at(box(tx + 0.04, 0.12, tz + 0.04), cx, b.max.y - 0.06, cz), 0x1e2a36);
+      for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const w = (nx ? tz : tx) * 0.5;
+        if (w < 0.5) continue;
+        const ox = cx + nx * ((nx ? tx : 0) / 2 + 0.3);
+        const oz = cz + nz * ((nz ? tz : 0) / 2 + 0.3);
+        if (blockedAt(map.boxes, b, ox, cy, oz)) continue;
+        const x = cx + nx * (tx / 2 + 0.03);
+        const z = cz + nz * (tz / 2 + 0.03);
+        glow.add(at(box(w, Math.min(0.18, bh * 0.12), 0.04), x, b.min.y + bh * 0.7, z, Math.atan2(nx, nz)), 0x7af6ff);
+      }
+      continue;
+    }
     if (b.kind === 'pillar' && bh >= 4) {
       const cx = (b.min.x + b.max.x) / 2;
       const cz = (b.min.z + b.max.z) / 2;

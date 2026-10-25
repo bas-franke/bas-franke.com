@@ -280,6 +280,26 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
         sky.add(puff);
       }
     }
+    // Steam pooling round the foot of the furnace tower and its dais.
+    let core: { x: number; z: number; y: number; r: number } | null = null;
+    for (const b of map.boxes) {
+      const cx = (b.min.x + b.max.x) / 2;
+      const cz = (b.min.z + b.max.z) / 2;
+      if (b.kind !== 'clip' && b.kind !== 'floor' && Math.abs(cx) < 1 && Math.abs(cz) < 1 && (!core || b.max.y > core.y)) core = { x: cx, z: cz, y: b.max.y, r: (b.max.x - b.min.x) / 2 };
+    }
+    if (core) {
+      const groundMat = new THREE.SpriteMaterial({ map: puffTex, color: 0xf0d8ff, transparent: true, opacity: 0.2, depthWrite: false });
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2 + rand() * 0.5;
+        const d = core.r + 4 + rand() * 4;
+        const puff = new THREE.Sprite(groundMat);
+        const s = 3.5 + rand() * 3;
+        puff.scale.set(s * 1.6, s, 1);
+        puff.position.set(core.x + Math.cos(a) * d, 0.8 + rand() * 1.2, core.z + Math.sin(a) * d);
+        sky.add(puff);
+      }
+      disposables.push(groundMat);
+    }
     disposables.push(puffTex, puffMat);
   }
 
