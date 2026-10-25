@@ -403,4 +403,13 @@ export const migrations: { name: string; sql?: string; run?: (client: pg.PoolCli
       ALTER TABLE runs ADD CONSTRAINT runs_kind_check CHECK (kind IN ('planned','trending','plan','radar','rewrite'));
     `,
   },
+  {
+    // Prompt version 3 writes like a news explainer or an encyclopedia lead (lead, mechanism, background,
+    // consequence, where it stands), which needs one or two paragraphs more than 200 words allowed.
+    name: '014_longer_stories',
+    sql: `
+      ALTER TABLE settings ALTER COLUMN target_words SET DEFAULT 280;
+      UPDATE settings SET target_words = 280, updated_at = now() WHERE target_words = 200;
+    `,
+  },
 ];

@@ -99,7 +99,7 @@ const PLAN_SCHEMA: Schema = {
               additionalProperties: false,
               required: ['title', 'brief'],
               properties: {
-                title: { type: 'string', description: 'The one idea a 200-word story makes click, as a concrete title of at most 60 characters.' },
+                title: { type: 'string', description: 'The one idea a short (about 280-word) story makes click, as a concrete title of at most 60 characters.' },
                 brief: { type: 'string', description: 'One sentence on what that story must explain.' },
               },
             },
@@ -114,7 +114,7 @@ const topicBrief = (topic: Pick<Topic, 'name' | 'description' | 'kind' | 'catego
   `Topic: ${topic.name}\nKind: ${topic.kind === 'event' ? 'event (something happening in the world)' : 'field (a lasting subject)'}\nCategory: ${topic.category}\nNotes: ${topic.description || '(none)'}`;
 
 const PLAN_RULES = [
-  'You design the curriculum of a learning feed. Readers scroll through very short stories (about 200 words each); every story must make exactly ONE idea click and be fully understandable on its own.',
+  'You design the curriculum of a learning feed. Readers scroll through short stories (about 280 words each); every story must make exactly ONE idea click and be fully understandable on its own.',
   'Sections go in order from "no knowledge needed" to "deeper". Each item title names the specific idea the story will make click (for example "Why a qubit can be 0 and 1 at once"), never a vague area ("Qubits").',
   'For an event (a war, a crisis, a crash): cover what is happening in plain terms, how it started (go back decades or centuries where the roots are), the people, countries and groups involved, the key moments, the consequences for ordinary people and the world economy, and what could happen next. Stay neutral and fair: describe what each side says and what is known.',
   'Do not add a "latest news" section; the site adds one automatically. Never repeat an idea across items.',
@@ -289,7 +289,7 @@ const SCOUT_SCHEMA: Schema = {
       required: ['subject', 'angle', 'why_now', 'topic_slug', 'new_topic'],
       properties: {
         subject: { type: 'string', description: 'The chosen subject.' },
-        angle: { type: 'string', description: 'The ONE thing a 200-word story should make the reader understand about it.' },
+        angle: { type: 'string', description: 'The ONE thing a short (about 280-word) story should make the reader understand about it.' },
         why_now: { type: 'string', description: 'One sentence for readers: why this is in the air. Any date in full with the year (\"Sunday, 25 October 2026\"); never \"this weekend\", \"on Saturday\", \"days before\" or another relative time.' },
         topic_slug: { type: 'string', description: 'Slug of the existing topic this belongs to, or empty when a new topic is needed.' },
         new_topic: {
@@ -373,13 +373,14 @@ export async function scoutTrends(opts: {
 const STORY_SCHEMA: Schema = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'hook', 'body_markdown', 'takeaway', 'section', 'difficulty', 'tags', 'images', 'sources'],
+  required: ['title', 'hook', 'paragraphs', 'takeaway', 'section', 'difficulty', 'tags', 'images', 'sources'],
   properties: {
     title: { type: 'string', description: 'At most 60 characters. Concrete and curiosity-making; no clickbait, no colon gimmicks.' },
     hook: { type: 'string', description: 'One sentence, at most 140 characters, saying what the reader will understand. Any date in full with the year.' },
-    body_markdown: {
-      type: 'string',
-      description: 'The story in Markdown: short paragraphs only, no headings, no links, no citation numbers, **bold** on the 1-3 terms to remember.',
+    paragraphs: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'The body, one paragraph per item, in that order. Markdown inside a paragraph: **bold** on the 1-3 terms to remember; no line breaks, HTML, headings, links or citation numbers.',
     },
     takeaway: { type: 'string', description: 'One plain sentence stating the key fact or idea, as a line the reader could repeat to a friend. Any date in full with the year.' },
     section: { type: 'string', description: 'The name of the topic section this story belongs to, chosen from the list given.' },
@@ -452,7 +453,7 @@ export function picturePolicy(settings: Settings, heat: number): PicturePolicy {
  * text.ts). Bump it with every change to them: stories written with an older version are rewritten in the background,
  * oldest text first (see rewriteOldest in generator.ts).
  */
-export const PROMPT_VERSION = 2;
+export const PROMPT_VERSION = 3;
 
 export async function writeStory(opts: {
   settings: Settings;
@@ -480,14 +481,23 @@ export async function writeStory(opts: {
     `You write for ${settings.site_name}, a learning feed: people scroll through very short stories, and each one makes a single complicated idea click.`,
     `Today is ${longDate(new Date(), settings.timezone || 'UTC')}.`,
     `Audience: ${settings.audience}. Tone: ${settings.tone}. Language: ${settings.language}.`,
-    `THE STORY. About ${settings.target_words} words in body_markdown: never fewer than ${Math.round(settings.target_words * 0.75)}, never more than ${maxWords}. Paragraphs of one to three sentences. No headings, no lists longer than three items, no links, no URLs, no citation numbers.`,
+    `THE STORY. About ${settings.target_words} words across the paragraphs: never fewer than ${Math.round(settings.target_words * 0.85)}, never more than ${maxWords}. Paragraphs of two or three sentences; sentences of one idea each, mostly under 25 words, as wire-service writers do. No semicolons joining two facts. No headings, no lists, no links, no URLs, no citation numbers.`,
     'Fully standalone: assume the reader has never heard of the topic and has read nothing else here. Define every term the moment you use it, in plain words. Never refer to other stories ("as we saw", "in the previous part").',
-    'SHAPE. The page shows the title, then the hook, then the body, then the takeaway, so the body never repeats the title or hook: its first sentence carries the next fact. Lead with what matters most: what happened or what is true, with who, where and when (at most twenty words). Then the mechanism or the why, then the concrete consequence. Every sentence states a checkable fact or explains one, and adds something new: no closing summary, no lesson, moral or "that is why it matters". Deliver everything the title and hook promise, then stop after the last new fact.',
+    'SHAPE. The page shows the title, then the hook, then the body, then the takeaway, so the body never repeats the title or hook: its first sentence carries the next fact. Build it like a good news explainer or the lead of an encyclopedia article, one job per paragraph:',
+    '1. The lead: the direct answer to the title in one or two sentences, with the single most important fact or figure (who, what, where, when). A reader who stops here knows the essential. For a subject in the news, the lead also names the dated event that makes it current (a vote, an attack, a ruling), as a news story would; never a lead that only restates the question ("X would happen if X happened"). Its first sentence names its subject in full, as an encyclopedia does ("The Strait of Hormuz is…"), never "It" or "This".',
+    '2. The mechanism: how or why it works, with the terms defined. Any reasoning about why it matters (leverage, incentives, trade-offs) goes here, never at the end.',
+    '3. The background: the history that explains the present, with its year. For a current crisis this paragraph must contain at least one fact dated in an earlier year than the crisis began (for a war that began in 2026, something from 2025 or long before): the earlier episode, precedent or long-running dispute it grows out of (decades back where that is where the roots are, as an encyclopedia article on the subject would tell it), then how it led to today. For a lasting idea: who found, named or first used it and when, or the real historical case that made it famous. Well-established history counts as a source when an encyclopedia or reference work states it; search for it like any other fact.',
+    '4. The consequence for ordinary people and the wider world: who is affected and how (prices, jobs, safety, rights), concretely, with a number where the sources give one. For a lasting idea, one real, dated example with its figures instead of "may" and "can". Not a list of incidents.',
+    '5. Where it stands: for anything in the news, the latest dated development, and the story ends on it or on the concrete thing still pending (a vote on a set date, talks, an investigation, a deadline). Never a stock ending such as "remains unresolved", "remains to be seen" or "only time will tell", and never your own forecast ("a close result could bring protests"): a prediction appears only when a named source made it, with its date. Leave this out for lasting ideas.',
+    'Each paragraph keeps to its job: a fact that belongs to another paragraph moves there.',
+    'WORDING, as in an encyclopedia. Each paragraph opens with its new fact, never with a framing sentence ("That makes this matter far beyond…", "The latest signals point to…", "The risks are visible…"). No puffery or superlatives ("huge", "one of the most important on Earth", "crucial") unless a source gives the ranking; let the number show the size. No editorialising adverbs ("notably", "clearly", "sadly") and no clichés or newsroom jargon ("flashpoint", "on edge", "sent shockwaves"). Attribute with "said"; never "admitted", "claimed" or "revealed" unless that is the fact.',
+    'Every sentence states a checkable fact or explains one, and adds something new: each fact and figure appears once in the body, no closing summary, no lesson, moral or "that is why it matters". Deliver everything the title and hook promise, then stop after the last new fact.',
     'FACTS. Use the handful of facts that matter most and that your sources state clearly; leave out side details, small disputed figures and anything only one source mentions. Never invent studies, quotes, figures or URLs, and never invent people, names, scenes or details for colour ("A nurse checks her gloves"); a made-up example is allowed only outside the news and plainly hypothetical ("Imagine you…"). At most one short analogy, and only an accurate one. Keep the sources’ qualifiers ("at least", "preliminary", "said"), say "roughly" for estimates and say plainly what is unknown. Name who reported a disputed number or claim ("the Associated Press"), never "reports say".',
-    'PEOPLE AND PLACES. Introduce every person by role, every organisation by full name and what it does, every place for a newcomer ("Hebron, a city in the Israeli-occupied West Bank"). Jobs change: give a title only when a source from the last few weeks confirms it, otherwise describe the person without one ("Aleksandar Vučić, who has led Serbian politics since 2012").',
-    `DATES. Stories are read months or years later, so in title, hook, body and takeaway every date is written in full with the year, every time ("Sunday, 25 October 2026", never "October 25" or "on 4 October"). Never "today", "tonight", "yesterday", "tomorrow", "this weekend", "last week", "now", "currently", "recently", "so far", "not yet", "days away", or a weekday without its full date ("Sunday’s vote" included). A recent event or statement gets its date when it first comes up; older background needs only the year. Tolls, counts, forecasts, warnings and unresolved matters say when they were true ("as of 24 October 2026"). Spans become start dates: "since 2012", not "for 14 years".`,
+    'PEOPLE AND PLACES. Name every war, law, deal or event on first mention with what it is and when it started ("the Iran war, which began on 28 February 2026"), never just "the war". Introduce every person by role, every organisation by full name and what it does, every place for a newcomer ("Hebron, a city in the Israeli-occupied West Bank"). Jobs change: give a title only when a source from the last few weeks confirms it, otherwise describe the person without one ("Aleksandar Vučić, who has led Serbian politics since 2012").',
+    `DATES. Stories are read months or years later, so in title, hook, body and takeaway every date is written in full with the year, every time ("Sunday, 25 October 2026", never "October 25" or "on 4 October"). Never "today", "tonight", "yesterday", "tomorrow", "this weekend", "last week", "now", "currently", "recently", "so far", "not yet", "days away", or a weekday without its full date ("Sunday’s vote" included). A recent event or statement gets its date when it first comes up; older background needs only the year. Tolls, counts, forecasts, warnings and unresolved matters say when they were true ("as of 24 October 2026"). Spans become start dates: "since 2012", not "for 14 years". Write so every sentence stays true later: dated events in the past tense ("Serbia held a parliamentary election on 25 October 2026"), never "will decide" or "is set to" about the news; what was planned or expected is stated as of its date ("as of 25 October 2026, results were expected on 26 October 2026").`,
     'Bold (**like this**) the one to three terms a reader should remember. On contested matters (wars, politics, economics): neutral and fair, claims attributed to who makes them, what each side says and what is known, no advocacy.',
-    `Title: at most 60 characters, concrete, no clickbait; title and hook are literally true and claim no more than the body shows. Hook: one sentence, at most 140 characters. Takeaway: the key fact or idea in one plain sentence. tags: 3 to 5 lowercase. Sources: 1 to 4 pages you relied on (in the sources field only).`,
+    `Title: at most 60 characters, concrete, no clickbait; title and hook are literally true and claim no more than the body shows. Hook: one sentence, at most 140 characters, as concrete as a news subheadline: a figure, a name or a cause, never a vague stake such as "a global risk". Takeaway: the answer to the title in one plain sentence (the core idea, not the example), with its concrete figure or name rather than "a large share", "many" or "a global concern". Hook, body and takeaway use the same figures, measured the same way, but the takeaway never repeats the hook's wording: the hook opens the question, the takeaway states the answer. Spell out abbreviations in title and hook. tags: 3 to 5 lowercase. Sources: 1 to 4 pages you relied on (in the sources field only).`,
+    'BEFORE YOU ANSWER, edit like a copy desk: delete every sentence that interprets instead of stating ("The precedent shows…", "This remains central…", "leaving its future tied to…"); check that the first sentence names the subject, that a current crisis has a fact from an earlier year, that disputed claims keep their attribution and caveat ("could not independently confirm"), that the last sentence is a fact, and that hook, body and takeaway agree on every figure.',
     pictureRules,
     opts.trend
       ? `THIS STORY is about something happening right now. Subject: ${opts.trend.subject}. The one thing to make click: ${opts.trend.angle}. Why people care today: ${opts.trend.why_now}. ` +
@@ -507,11 +517,19 @@ export async function writeStory(opts: {
     `ALREADY ON THE SITE (do not retell these)\n${opts.recentTitles.map((t) => `- ${t}`).join('\n') || '- (nothing yet)'}` +
     (opts.rewrite ? `\n\nTHE STORY TO REWRITE\nTitle: ${opts.rewrite.title}\nHook: ${opts.rewrite.hook}\n\n${opts.rewrite.body}` : '');
 
-  const webSearch = settings.web_search_enabled && (Boolean(opts.trend) || topic.kind === 'event');
-  const { data, usage, model } = await structured<StoryDraft>({ settings, name: 'story', schema: STORY_SCHEMA, instructions, input, webSearch, effort: 'medium' });
-  if (!data.title || !data.body_markdown) throw new Error('The model returned an incomplete story.');
+  // Every story searches: without it, lasting ideas lose their figures, dates and real examples.
+  const webSearch = settings.web_search_enabled;
+  // The body comes as an array of paragraphs: asked for one Markdown string, models sometimes end it at the first
+  // paragraph break or write "<br>" instead.
+  const { data: raw, usage, model } = await structured<Omit<StoryDraft, 'body_markdown'> & { paragraphs: string[] }>({ settings, name: 'story', schema: STORY_SCHEMA, instructions, input, webSearch, effort: 'medium' });
+  const { paragraphs, ...data } = raw;
+  const body = (paragraphs ?? []).map((p) => p.trim()).filter(Boolean).join('\n\n');
+  if (!data.title || !body) throw new Error('The model returned an incomplete story.');
+  const words = body.split(/\s+/).length;
+  if (words < settings.target_words / 2) throw new Error(`The model returned a story of only ${words} words.`);
   const draft: StoryDraft = {
     ...data,
+    body_markdown: body,
     title: cleanLine(data.title, 90) || data.title,
     hook: completeDates(cleanLine(data.hook, 200)),
     takeaway: completeDates(cleanLine(data.takeaway, 300)),

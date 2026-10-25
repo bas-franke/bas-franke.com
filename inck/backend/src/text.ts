@@ -68,11 +68,12 @@ export function completeDates(text: string, now = new Date()) {
 export const cleanLine = (text: string | null | undefined, max = 300) => stripCitations(String(text ?? '')).replace(/\s+/g, ' ').slice(0, max);
 
 /**
- * Cleans a story body: citations and links out, weekday dates get their year, headings become bold paragraphs, inline
- * citation numbers and horizontal rules vanish, blank lines collapse.
+ * Cleans a story body: citations and links out, weekday dates get their year, HTML line breaks become paragraph
+ * breaks, headings become bold paragraphs, inline citation numbers and horizontal rules vanish, blank lines collapse.
  */
 export function tidyBody(body: string, now = new Date()) {
   return completeDates(stripCitations(body), now)
+    .replace(/[ \t]*(?:<br\s*\/?>[ \t]*)+/gi, '\n\n')
     .replace(/^#{1,6}\s*(.+)$/gm, '**$1**')
     .replace(/\s?\[\d{1,2}\](?!\()/g, '')
     .replace(/^\s*(-{3,}|\*{3,}|_{3,})\s*$/gm, '')
