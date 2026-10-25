@@ -415,9 +415,11 @@ export function buildArena(map: MapData): ArenaView {
 
 export function addArenaLights(scene: THREE.Scene, map: MapData) {
   scene.background = new THREE.Color(map.fogColor);
-  // Light haze only: comic art keeps the far side readable.
-  scene.fog = new THREE.Fog(map.fogColor, map.half * 1.6, Math.max(120, map.half * 5.5));
   const theme = themeOf(map);
+  // Light haze only: comic art keeps the far side readable. Dusk maps haze in sooner, toward violet, for depth.
+  scene.fog = theme.dusk
+    ? new THREE.Fog(new THREE.Color(map.fogColor).lerp(new THREE.Color(map.skyColor), 0.35), map.half * 0.5, map.half * 4.5)
+    : new THREE.Fog(map.fogColor, map.half * 1.6, Math.max(120, map.half * 5.5));
   const SUN_DIR = sunDirOf(theme);
   const light = theme.light ?? { sky: 0xffffff, ground: 0x8a7a6a, hemi: 1.6, sun: 0xfff4e0, sunI: 2.4 };
   scene.add(new THREE.HemisphereLight(light.sky, light.ground, light.hemi));
