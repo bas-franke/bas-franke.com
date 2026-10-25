@@ -629,16 +629,26 @@ export function updateDroidPieces(pieces: DroidPiece[], dt: number, floorY: numb
 
 export type PickupKind = 'health' | 'armor' | 'mega';
 
-/** A chunky red plus standing proud of a cream plus backing, with comic shine marks on both faces. */
+/** A white med-cube with dark corner trim and a glowing red cross on every side and the top, with a shine mark. */
 function healthParts(k: Kit) {
-  k.add(box(0.58, 0.24, 0.12), CREAM);
-  k.add(box(0.24, 0.58, 0.12), CREAM);
-  k.add(box(0.5, 0.16, 0.2), RED, undefined, undefined, undefined, false);
-  k.add(box(0.16, 0.5, 0.2), RED, undefined, undefined, undefined, false);
-  for (const z of [-0.103, 0.103]) {
-    k.glowing(box(0.1, 0.028, 0.005), SHINE, [-0.15, 0.045, z]);
-    k.glowing(box(0.028, 0.1, 0.005), SHINE, [-0.045, 0.15, z]);
+  const s = 0.6;
+  k.add(box(s, s, s), 0xf4f2ee);
+  for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) k.add(box(0.07, s + 0.02, 0.07), DARK, [(x * s) / 2, 0, (z * s) / 2]);
+  for (const y of [-1, 1]) k.add(box(s + 0.02, 0.05, s + 0.02), DARK, [0, (y * s) / 2, 0]);
+  const faces: [V3, V3][] = [
+    [[0, 0, s / 2 + 0.004], [0, 0, 0]],
+    [[0, 0, -s / 2 - 0.004], [0, Math.PI, 0]],
+    [[s / 2 + 0.004, 0, 0], [0, Math.PI / 2, 0]],
+    [[-s / 2 - 0.004, 0, 0], [0, -Math.PI / 2, 0]],
+    [[0, s / 2 + 0.03, 0], [-Math.PI / 2, 0, 0]],
+  ];
+  for (const [pos, rot] of faces) {
+    inFrame(k, pos, rot, () => {
+      k.glowing(box(0.38, 0.13, 0.01), 0xff2a2a);
+      k.glowing(box(0.13, 0.38, 0.01), 0xff2a2a);
+    });
   }
+  k.glowing(box(0.12, 0.03, 0.005), SHINE, [-0.19, 0.22, s / 2 + 0.006]);
 }
 
 /** A yellow hex shield on a dark rim with a cream chevron and a shine stripe, both faces. */
