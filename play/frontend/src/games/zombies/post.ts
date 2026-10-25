@@ -1,29 +1,36 @@
-// Last Light's frame: a sunlit hotel lobby at golden hour. A lean custom chain (no EffectComposer):
-//   1. sun depth: an orthographic depth map along the sun direction (own pass, ~20 Hz). Glass and other transparent
-//      things are left out, so the fog can tell which air the sun reaches: shafts through the facade between the
-//      mullions, and new ones through every hole blasted in a wall, appear by themselves. (WorldView still calls the
-//      sun `moon`/`moonDir` from the earlier night maps.)
+// Last Light's frame: the hotel lobby at 2 am in thick fog. A lean custom chain (no EffectComposer):
+//   1. light depth maps (own passes, left out: glass and other transparent things, points, `noMoonShadow` objects, so
+//      light passes the glass but mullions, columns, people and furniture block it): a perspective map per street
+//      light with `shafts` (round-robin at a fixed rate), and the old orthographic sun map, only while the moon is
+//      bright enough to matter. (WorldView calls the sun `moon`/`moonDir`.)
 //   2. world (layer 0) -> linear HDR target with a depth texture (MSAA on medium/high)
 //   3. viewmodel (VIEWMODEL_LAYER) -> its own HDR target with alpha, composited after the haze so the gun stays crisp
-//   4. volumetric haze at half (or quarter) resolution: a thin warm dusty haze with drifting motes, in-scatter from the
-//      sun (shadowed, strong forward scattering), lamp cones, flashlights, flashes and dust/smoke puffs; temporal blend
-//   5. reflections on the polished floor (SSR at half or full resolution): world-space march of the mirrored view ray
-//      against the depth buffer, binary refinement, roughness-aware blur by sampling a small blur pyramid of the
-//      scene. Where the ray misses, the floor keeps the material's own environment reflection.
-//   6. combine: AO, reflections, scene * transmittance + in-scatter (depth-aware upsample), viewmodel over it
-//   7. auto exposure: average log luminance into a 1x1 target, adapted over time
-//   8. bloom (dual filter, on exposed values) and the grade: warm white balance and highlights, slightly lifted warm
-//      shadows, ACES, gentle vignette and grain, the hurt / hit / downed effects
+//   4. volumetric fog at half (or quarter) resolution: outside dense cold night fog (~5 m visibility, billowing, thinning
+//      with height) that creeps in behind the glass; inside a lighter dusty haze. In-scatter from the street lights
+//      (cone, range falloff, Henyey-Greenstein, shadowed for the shaft lamps: god rays between the mullions and lit
+//      cones in the fog), lamp cones, flashlights, flashes and dust/smoke puffs; analytic step integration, temporal
+//      blend
+//   5. reflections on the floor and the wet paving (SSR at half or full resolution): world-space march of the mirrored
+//      view ray against the depth buffer, binary refinement, roughness-aware blur from a small blur pyramid of the scene,
+//      faded by the fog the bounce crosses outside. Where the ray misses, the material's own environment reflection.
+//   6. combine: AO, reflections, scene * transmittance + in-scatter (depth-aware upsample that shortens far samples
+//      over thin near things), far fogged pixels smeared, lit windows and lamps glowing through as soft haloes (a
+//      transmittance floor for bright far pixels plus blurred light in the fog), viewmodel over it
+//   7. auto exposure: average log luminance into a 1x1 target, adapted over time; a low key and tight max for night
+//   8. bloom (dual filter, on exposed values) and the night grade: cold blue-grey shadows, sodium highlights, ACES,
+//      vignette, grain and dither against banding, the hurt / hit / downed effects
 
 import * as THREE from 'three';
 import { VIEWMODEL_LAYER, type CreatePipeline, type FrameParams, type Pipeline, type Quality } from './api';
-import type { WorldViewExt } from './world';
+import type { StreetLight, WorldViewExt } from './world';
 
 const MAX_LAMPS = 8;
 const MAX_FLASHLIGHTS = 10;
 const MAX_FLASHES = 10;
 const MAX_PUFFS = 24;
-const WARM = new THREE.Color(1.0, 0.92, 0.8);
+/** Street lights in the fog; the first MAX_SHAFTS of them (`shafts: true`) get a shadow map. */
+const MAX_STREET = 8;
+const MAX_SHAFTS = 3;
 
 interface Spec {
   samples: number;
@@ -35,12 +42,16 @@ interface Spec {
   steps: number;
   sunMap: number;
   bloomLevels: number;
+  /** Street lights with shadowed shafts, their depth map size, and depth renders per second shared among them. */
+  shafts: number;
+  shaftMap: number;
+  shaftRate: number;
 }
 
 const SPECS: Record<Quality, Spec> = {
-  low: { samples: 0, ssrDiv: 0, ssrSteps: 0, ao: 0, fogDiv: 4, steps: 16, sunMap: 1024, bloomLevels: 4 },
-  medium: { samples: 2, ssrDiv: 2, ssrSteps: 24, ao: 1, fogDiv: 2, steps: 24, sunMap: 1536, bloomLevels: 5 },
-  high: { samples: 4, ssrDiv: 1, ssrSteps: 32, ao: 1, fogDiv: 2, steps: 32, sunMap: 2048, bloomLevels: 6 },
+  low: { samples: 0, ssrDiv: 0, ssrSteps: 0, ao: 0, fogDiv: 4, steps: 16, sunMap: 1024, bloomLevels: 4, shafts: 1, shaftMap: 512, shaftRate: 10 },
+  medium: { samples: 2, ssrDiv: 2, ssrSteps: 24, ao: 1, fogDiv: 2, steps: 24, sunMap: 1536, bloomLevels: 5, shafts: 2, shaftMap: 768, shaftRate: 24 },
+  high: { samples: 4, ssrDiv: 1, ssrSteps: 32, ao: 1, fogDiv: 2, steps: 32, sunMap: 2048, bloomLevels: 6, shafts: 3, shaftMap: 1024, shaftRate: 36 },
 };
 
 const vert = /* glsl */ `
@@ -53,6 +64,9 @@ const fogFrag = /* glsl */ `
 uniform sampler2D tDepth;
 uniform sampler2D tHistory;
 uniform sampler2D tSun;
+uniform sampler2D tSL0;
+uniform sampler2D tSL1;
+uniform sampler2D tSL2;
 uniform mat4 projInv;
 uniform mat4 viewInv;
 uniform mat4 prevViewProj;
@@ -68,14 +82,26 @@ uniform vec3 sunDir;
 uniform vec3 sunColor;
 uniform vec3 shaftTint;
 uniform vec3 ambient;
+uniform vec3 ambientOut;
 uniform vec4 interior; // minX, maxX, minZ, maxZ
 uniform float ceiling;
 uniform float dust;
 uniform vec4 gain; // lamps, flashlights, sun, density
+uniform vec4 night; // outside density, inside density, creep depth (m), street-light gain
+uniform float inBoost;
+uniform float dbg; // street-light in-scatter inside, relative to outside
 uniform int lampCount;
 uniform vec3 lampPos[${MAX_LAMPS}];
 uniform vec3 lampColor[${MAX_LAMPS}];
 uniform vec2 lampCone[${MAX_LAMPS}];
+uniform int slCount;
+uniform int slShadows;
+uniform vec3 slPos[${MAX_STREET}];
+uniform vec3 slDir[${MAX_STREET}];
+uniform vec3 slColor[${MAX_STREET}];
+uniform vec3 slCone[${MAX_STREET}]; // cosOuter, cosInner, range
+uniform mat4 slMat[${MAX_SHAFTS}];
+uniform vec2 slClip[${MAX_SHAFTS}]; // near, far of the shadow camera
 uniform int flCount;
 uniform vec3 flPos[${MAX_FLASHLIGHTS}];
 uniform vec4 flDir[${MAX_FLASHLIGHTS}];
@@ -100,17 +126,24 @@ float noise3(vec3 p) {
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 float hg(float c, float g) { float g2 = g * g; return (1.0 - g2) / (12.566 * pow(max(1.0 + g2 - 2.0 * g * c, 1e-3), 1.5)); }
 
-bool isInside(vec3 p) { return p.x > interior.x && p.x < interior.y && p.z > interior.z && p.z < interior.w && p.y < ceiling; }
+// 1 inside the lobby, 0 outside. Hard at the solid walls and the ceiling; behind the glass facade (interior.z) the
+// outside fog creeps in over the first metres, further where it billows.
+float insideness(vec3 p, float n) {
+  if (p.x < interior.x || p.x > interior.y || p.z > interior.w || p.y > ceiling || p.z < interior.z) return 0.0;
+  return smoothstep(0.0, night.z * (0.5 + n), p.z - interior.z);
+}
 
-// A thin dusty haze: slow large-scale drift plus finer swirls, so the shafts look dusty rather than smooth, and a
-// little more dust low down where people walk. Outside the air is clearer.
-float density(vec3 p, out float puffShare) {
-  bool inside = isInside(p);
+// Outside: cold night fog, dense (visibility ~5 m), billowing on a large scale, thinning slowly with height. Inside:
+// a lighter dusty haze with finer swirls and more dust low down, so the street-light shafts read. Plus puffs.
+float density(vec3 p, out float puffShare, out float inside) {
   vec3 wind = vec3(time * 0.05, time * 0.012, time * 0.03);
+  float big = noise3(p * 0.09 + vec3(time * 0.035, time * 0.01, time * 0.02));
   float n = noise3(p * 0.35 + wind) * 0.6 + noise3(p * 1.7 - wind * 2.3) * 0.4;
-  float base = inside ? 0.011 * dust : 0.004;
-  float d = base * (0.25 + 1.6 * n * n);
-  d += (inside ? 0.008 : 0.003) * exp(-max(p.y, 0.0) / 1.4) * n;
+  inside = insideness(p, big);
+  float hy = max(p.y, 0.0);
+  float outD = night.x * (0.6 + 0.8 * big) * (0.8 + 0.4 * n) * (0.45 + 0.55 * exp(-hy / 14.0));
+  float inD = night.y * dust * (0.3 + 1.5 * n * n) + night.y * 0.7 * exp(-hy / 1.4) * n;
+  float d = mix(outD, inD, inside);
   float pd = 0.0;
   for (int i = 0; i < ${MAX_PUFFS}; i++) {
     if (i >= puffCount) break;
@@ -131,25 +164,43 @@ float sunVis(vec3 p) {
   return n.z - 0.0008 <= d ? 1.0 : 0.0;
 }
 
+// Street-light shadow maps (perspective): compare linear depths so one bias works near and far.
+float slVis(int k, vec3 p) {
+  vec4 c = slMat[k] * vec4(p, 1.0);
+  if (c.w <= 0.0) return 0.0;
+  vec2 uv = c.xy / c.w * 0.5 + 0.5;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
+  float d = k == 0 ? texture2D(tSL0, uv).r : (k == 1 ? texture2D(tSL1, uv).r : texture2D(tSL2, uv).r);
+  if (d >= 1.0) return 1.0;
+  float z = -perspectiveDepthToViewZ(d, slClip[k].x, slClip[k].y);
+  return c.w <= z + 0.08 ? 1.0 : 0.0;
+}
+
 void main() {
   float depth = texture2D(tDepth, vUv).r;
   vec4 ndc = vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
   vec4 vr = projInv * ndc;
   vec3 rayView = vr.xyz / vr.w;
   float dist;
-  if (depth >= 1.0) dist = 40.0;
+  if (depth >= 1.0) dist = 45.0;
   else {
     float viewZ = perspectiveDepthToViewZ(depth, near, far);
     dist = min(length(rayView * (viewZ / rayView.z)), MAX_DIST);
   }
   vec3 dir = normalize(mat3(viewInv) * rayView);
+  if (dbg > 0.5) {
+    vec3 P = camPos + dir * (dist - 0.03);
+    int k = int(dbg) - 1;
+    vec3 ld = normalize(P - slPos[k]);
+    float cone = smoothstep(slCone[k].x, slCone[k].y, dot(ld, slDir[k]));
+    gl_FragColor = vec4(vec3(slVis(k, P) * cone, cone * 0.3, 0.0), 0.0);
+    return;
+  }
   float jitter = ign(gl_FragCoord.xy + frame * 5.588238);
   vec3 scatter = vec3(0.0);
   float trans = 1.0;
   float prevT = 0.0;
   float cosSun = dot(dir, sunDir);
-  // Strong forward scattering (looking into the light the shafts glow), a little back scatter so they still read
-  // from the side.
   float phaseSun = hg(cosSun, 0.45) * 0.55 + 0.45 * 0.0796;
   for (int i = 0; i < STEPS; i++) {
     float a = (float(i) + jitter) / float(STEPS);
@@ -158,10 +209,27 @@ void main() {
     prevT = t;
     vec3 p = camPos + dir * t;
     float puffShare;
-    float sigma = density(p, puffShare) * gain.w;
+    float inside;
+    float sigma = density(p, puffShare, inside) * gain.w;
     if (sigma < 1e-5) continue;
-    vec3 L = ambient * (1.0 + puffShare * 2.0);
-    L += sunColor * shaftTint * gain.z * phaseSun * sunVis(p);
+    vec3 L = mix(ambientOut, ambient, inside) * (1.0 + puffShare * 2.0);
+    if (gain.z > 0.0) L += sunColor * shaftTint * gain.z * phaseSun * sunVis(p);
+    for (int k = 0; k < ${MAX_STREET}; k++) {
+      if (k >= slCount) break;
+      vec3 d = p - slPos[k];
+      float r2 = dot(d, d);
+      float rr = r2 / (slCone[k].z * slCone[k].z);
+      if (rr >= 1.0) continue;
+      vec3 ld = d * inversesqrt(r2);
+      float cone = smoothstep(slCone[k].x, slCone[k].y, dot(ld, slDir[k]));
+      if (cone <= 0.0) continue;
+      float fall = 1.0 - rr * rr;
+      float vis = k < slShadows ? slVis(k, p) : 1.0;
+      // Forward scattering makes the shafts glow when you look towards the lamp; the isotropic part keeps them
+      // readable from the side.
+      float ph = hg(dot(dir, ld), 0.55) * 0.6 + 0.4 * 0.0796;
+      L += slColor[k] * night.w * mix(1.0, inBoost, inside) * cone * fall * fall * vis * ph / (r2 + 0.6);
+    }
     for (int k = 0; k < ${MAX_LAMPS}; k++) {
       if (k >= lampCount) break;
       vec3 d = p - lampPos[k];
@@ -187,10 +255,11 @@ void main() {
       vec3 d = p - flashPos[k];
       L += flashColor[k] * 0.03 / (dot(d, d) + 0.3);
     }
+    // In-scatter integrated over the step analytically: stable however thick the fog gets.
     float ext = exp(-sigma * dt);
-    scatter += trans * L * sigma * dt;
+    scatter += trans * L * (1.0 - ext);
     trans *= ext;
-    if (trans < 0.01) break;
+    if (trans < 0.003) break;
   }
   vec4 cur = vec4(scatter, trans);
   vec3 endP = camPos + dir * min(dist, 30.0);
@@ -210,7 +279,12 @@ uniform sampler2D tScene;
 uniform sampler2D tHalf;
 uniform sampler2D tQuarter;
 uniform sampler2D tFloorRough;
+uniform sampler2D tYardRough;
 uniform float hasRough;
+uniform float yardMeters;
+uniform vec4 interior; // minX, maxX, minZ, maxZ
+uniform float fogOut; // outside fog density: what the reflected ray crosses fades out
+uniform vec2 quarterTexel;
 uniform float floorMeters;
 uniform float floorRough;
 uniform float strength;
@@ -238,7 +312,10 @@ void main() {
   vec3 W = (viewInv * vec4(P, 1.0)).xyz;
   // The floor only: polished stone everywhere (the wet patches of the old maps used the same path).
   if (W.y > 0.03 || W.y < -0.06) return;
+  bool outside = W.x < interior.x || W.x > interior.y || W.z < interior.z || W.z > interior.w;
   float rough = hasRough > 0.5 ? texture2D(tFloorRough, W.xz / floorMeters).g : floorRough;
+  // Wet paving: glossy puddles, but rougher than polished marble, so neon and lamps smear into streaks.
+  if (outside) rough = hasRough > 0.5 ? max(texture2D(tYardRough, W.xz / yardMeters).g * 0.8, 0.2) : 0.3;
   float gloss = 1.0 - smoothstep(0.08, 0.62, rough);
   if (gloss < 0.02) return;
   vec3 V = normalize(W - camPos);
@@ -272,11 +349,20 @@ void main() {
       vec2 edge = smoothstep(vec2(0.0), vec2(0.07), ub) * (1.0 - smoothstep(vec2(0.93), vec2(1.0), ub));
       float fade = edge.x * edge.y * (1.0 - smoothstep(16.0, 26.0, b));
       // Rougher stone and longer bounces blur the image: pick from the blur pyramid by the cone width.
-      float spread = clamp(rough * b * 2.2 + rough * 0.6, 0.0, 2.0);
+      float spread = clamp(rough * b * 2.2 + rough * 0.6, 0.0, outside ? 4.0 : 2.0);
       vec3 sharp = texture2D(tScene, ub).rgb;
       vec3 half_ = texture2D(tHalf, ub).rgb;
       vec3 quarter = texture2D(tQuarter, ub).rgb;
-      vec3 col = spread < 1.0 ? mix(sharp, half_, spread) : mix(half_, quarter, spread - 1.0);
+      vec3 col = spread < 1.0 ? mix(sharp, half_, spread) : mix(half_, quarter, min(spread - 1.0, 1.0));
+      if (spread > 2.0) {
+        // Beyond the pyramid: a few quarter-res taps stretched vertically (reflections streak along the view).
+        vec2 o = quarterTexel * (spread - 1.0) * 1.5;
+        vec3 w = texture2D(tQuarter, ub + vec2(o.x, o.y * 2.5)).rgb + texture2D(tQuarter, ub - vec2(o.x, o.y * 2.5)).rgb;
+        w += texture2D(tQuarter, ub + vec2(-o.x, o.y * 1.2)).rgb + texture2D(tQuarter, ub + vec2(o.x, -o.y * 1.2)).rgb;
+        col = mix(quarter, w * 0.25, min(spread - 2.0, 1.0));
+      }
+      // The bounce crosses fog the direct view never saw: far things fade out of the puddles.
+      if (outside) col *= exp(-fogOut * b);
       col = min(col, vec3(60.0));
       float k = gloss * (0.3 + 0.7 * fres) * fade * strength;
       gl_FragColor = vec4(col * k, k);
@@ -294,6 +380,10 @@ uniform sampler2D tDepth;
 uniform sampler2D tFog;
 uniform sampler2D tView;
 uniform sampler2D tSSR;
+uniform sampler2D tHalf;
+uniform sampler2D tQuarter;
+uniform vec2 blurTexel;
+uniform vec3 glow; // transmittance floor for bright far things, distance where it starts, blur strength
 uniform vec2 fogRes;
 uniform vec2 res;
 uniform float near;
@@ -383,12 +473,45 @@ void main() {
     vec2 uv = (f0 + o + 0.5) / fogRes;
     float sz = lin(texture2D(tDepth, uv).r);
     float bw = (i == 0 ? 1.0 - fr.x : fr.x) * (j == 0 ? 1.0 - fr.y : fr.y);
-    float w = bw / (0.02 + abs(sz - dz) / max(dz, 0.5));
-    sum += texture2D(tFog, uv) * w;
+    vec4 fs = texture2D(tFog, uv);
+    // A low-res sample that saw further than this pixel (thin arms and transoms against the fog) is shortened to the
+    // pixel's depth, assuming even fog along the ray: no bright fog dots over thin dark things.
+    // (The haze marched at most 60 m, 45 m for the sky; view-z ratios equal distance ratios along one ray.)
+    float sd = texture2D(tDepth, uv).r >= 1.0 ? 45.0 : min(sz, 60.0);
+    float rz = min(dz, 60.0) / max(sd, 1e-3);
+    if (rz < 0.98) {
+      float tt = pow(max(fs.a, 1e-4), rz);
+      fs.rgb *= (1.0 - tt) / max(1.0 - fs.a, 1e-4);
+      fs.a = tt;
+    }
+    float w = bw / (0.02 + (rz < 0.98 ? 0.15 : 1.0) * abs(sz - dz) / max(dz, 0.5));
+    sum += fs * w;
     wsum += w;
   }
   vec4 fog = mix(vec4(0.0, 0.0, 0.0, 1.0), sum / max(wsum, 1e-5), fogOn);
-  col = col * fog.a + fog.rgb;
+  // Thick fog smears what is behind it (multiple scattering). Only pixels deep in the fog take the blurred scene (so
+  // near alpha-tested leaves never pick up the windows behind them as outlines); everything else gets the blur as a
+  // soft additive glow in the fog in front of it, which turns lit windows and lamps into haloes.
+  float fogged = 1.0 - fog.a;
+  vec3 wide = vec3(0.0);
+  // A 12-tap Vogel disc on the quarter-res image, weighted towards the centre: round and soft, no rings.
+  float wsumB = 0.0;
+  for (int i = 0; i < 12; i++) {
+    float fi = float(i) + 0.5;
+    float rr = sqrt(fi / 12.0);
+    float a = fi * 2.39996;
+    float wb = 1.0 - 0.6 * rr;
+    wide += texture2D(tQuarter, vUv + vec2(cos(a), sin(a)) * rr * blurTexel * 3.2).rgb * wb;
+    wsumB += wb;
+  }
+  wide /= wsumB;
+  col = mix(col, wide, smoothstep(0.85, 0.995, fogged));
+  // Bright far things (the city's lit windows, lamp heads) glow through fog that would swallow them: a transmittance
+  // floor that only bright pixels reach, so dark towers stay lost in the murk. Never for the sky.
+  float bright = smoothstep(0.4, 4.0, dot(col, vec3(0.2126, 0.7152, 0.0722)));
+  float floorT = depth < 1.0 ? glow.x * bright * smoothstep(glow.y, glow.y + 12.0, dz) * (1.0 - 0.4 * smoothstep(40.0, 140.0, dz)) : 0.0;
+  fog.rgb += wide * glow.x * glow.z * fogged;
+  col = col * max(fog.a, floorT) + fog.rgb;
   vec4 vm = texture2D(tView, vUv);
   col = col * (1.0 - vm.a) + vm.rgb;
   gl_FragColor = vec4(col, 1.0);
@@ -506,6 +629,7 @@ uniform float hurt;
 uniform float hit;
 uniform float downed;
 uniform float grain;
+uniform vec3 tone; // cold shadows, sodium highlights, black lift
 uniform vec2 res;
 ${exposureGlsl}
 varying vec2 vUv;
@@ -522,17 +646,20 @@ float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx 
 void main() {
   vec3 col = texture2D(tSrc, vUv).rgb * autoExposure();
   col += texture2D(tBloom, vUv).rgb * bloom;
-  // Grade in exposed linear HDR before the tone curve: warm white balance, a touch more saturation, shadows lifted
-  // slightly towards a warm brown so dark corners still read as rich wood and stone rather than black.
+  // Night grade in exposed linear HDR before the tone curve: split toning, cold blue-grey shadows and sodium-orange
+  // highlights, a little less saturation in the dark, and a faint cold floor so the murk never crushes to pure black.
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col *= vec3(1.02, 1.0, 0.95);
-  float sat = mix(1.06, 0.35, max(hurt * 0.8, downed));
+  float shadowK = 1.0 - smoothstep(0.0, 0.35, l);
+  float hiK = smoothstep(0.3, 2.0, l);
+  col *= mix(vec3(1.0), vec3(0.86, 0.96, 1.14), shadowK * tone.x);
+  col *= mix(vec3(1.0), vec3(1.1, 0.98, 0.84), hiK * tone.y);
+  float sat = mix(mix(1.04, 0.85, shadowK), 0.35, max(hurt * 0.8, downed));
   col = max(mix(vec3(l), col, sat), 0.0);
-  col += vec3(0.008, 0.006, 0.004) * (1.0 - smoothstep(0.0, 0.12, l));
+  col += vec3(0.0035, 0.0045, 0.0065) * tone.z * (1.0 - smoothstep(0.0, 0.08, l));
   vec2 c = vUv - 0.5;
   float r = length(c * vec2(res.x / res.y, 1.0));
-  float vig = smoothstep(0.45, 1.2, r);
-  col *= 1.0 - vig * (0.32 + downed * 0.45);
+  float vig = smoothstep(0.4, 1.15, r);
+  col *= 1.0 - vig * (0.42 + downed * 0.4);
   // Hurt: a red pulse closing in from the edges.
   float pulse = 0.65 + 0.35 * sin(time * (6.0 + hurt * 4.0));
   vec3 red = vec3(0.6, 0.0, 0.0);
@@ -541,12 +668,15 @@ void main() {
   col += vec3(0.25, 0.0, 0.01) * hv * hv * hurt * pulse;
   col *= 1.0 - downed * 0.4;
   col = acesFit(col);
-  // Golden highlights after the curve, then fine grain (mostly in the mid-tones).
+  // Fine film grain (mostly in the mid-tones), then a triangular dither of one 8-bit step in output space: the dark
+  // smooth fog gradients would band without it.
   float tl = dot(col, vec3(0.299, 0.587, 0.114));
-  col = mix(col, col * vec3(1.02, 1.0, 0.95), smoothstep(0.5, 1.0, tl));
-  float g = h12(gl_FragCoord.xy + fract(time * 13.7) * 1000.0) - 0.5;
-  col += g * grain * (1.0 - 0.7 * smoothstep(0.4, 1.0, tl));
-  gl_FragColor = linearToOutputTexel(vec4(max(col, 0.0), 1.0));
+  vec2 seed = gl_FragCoord.xy + fract(time * 13.7) * 1000.0;
+  float g = h12(seed) - 0.5;
+  col += g * grain * (0.35 + 0.65 * smoothstep(0.0, 0.12, tl)) * (1.0 - 0.7 * smoothstep(0.4, 1.0, tl));
+  vec4 outC = linearToOutputTexel(vec4(max(col, 0.0), 1.0));
+  outC.rgb += (h12(seed + 17.3) + h12(seed + 41.9) - 1.0) / 255.0;
+  gl_FragColor = outC;
 }
 `;
 
@@ -630,6 +760,23 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     sunMat.multiplyMatrices(sunCam.projectionMatrix, sunCam.matrixWorldInverse);
   };
   placeSun();
+  // Street-light depth maps: a perspective camera at each shaft lamp's head, along its cone. A depth pass of the lobby
+  // costs about as much as a fifth of the world pass, so they are rendered round-robin at a fixed rate (the lamps
+  // never move; only people and debris need the refresh, and the haze's temporal blend hides the steps).
+  const shaftRTs: THREE.WebGLRenderTarget[] = [];
+  const shaftCams = Array.from({ length: MAX_SHAFTS }, () => {
+    const c = new THREE.PerspectiveCamera(90, 1, 0.45, 40);
+    c.layers.set(0);
+    return c;
+  });
+  const makeShaftRTs = () => {
+    for (const r of shaftRTs) r.dispose();
+    shaftRTs.length = 0;
+    for (let i = 0; i < spec.shafts; i++) shaftRTs.push(makeSunRT(spec.shaftMap));
+  };
+  makeShaftRTs();
+  let shaftNext = 0;
+  let shaftDue = 0;
   const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false });
 
   // Full-screen triangle.
@@ -649,6 +796,9 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     tDepth: { value: null },
     tHistory: { value: null },
     tSun: { value: sunRT.depthTexture },
+    tSL0: { value: sunRT.depthTexture },
+    tSL1: { value: sunRT.depthTexture },
+    tSL2: { value: sunRT.depthTexture },
     projInv: { value: new THREE.Matrix4() },
     viewInv: { value: new THREE.Matrix4() },
     prevViewProj: { value: new THREE.Matrix4() },
@@ -662,14 +812,31 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     history: { value: 0 },
     sunDir: { value: view.moonDir.clone() },
     sunColor: { value: new THREE.Color() },
-    // Dusty air scatters the low sun redder than the surfaces it lights: golden shafts.
-    shaftTint: { value: new THREE.Color(1.0, 0.78, 0.5) },
-    ambient: { value: new THREE.Color() },
+    // Faint cold moonlight, if the world has any left.
+    shaftTint: { value: new THREE.Color(0.8, 0.9, 1.0) },
+    // Fog lit by nothing in particular: inside the dark lobby, and the night outside (a little sodium city glow in the
+    // blue-grey), which is also the colour the far fog settles to.
+    ambient: { value: new THREE.Color(0.0016, 0.0019, 0.0024) },
+    ambientOut: { value: new THREE.Color(0.018, 0.021, 0.027) },
     interior: { value: new THREE.Vector4(ib.minX, ib.maxX, ib.minZ, ib.maxZ) },
     ceiling: { value: world.height },
     dust: { value: wext.dust ?? 1 },
     // lamps, flashlights, sun, density
     gain: { value: new THREE.Vector4(6, 0.6, 4, 1) },
+    // outside density (1/m, ~5 m visibility), inside density, fog creep behind the glass (m), street-light gain
+    night: { value: new THREE.Vector4(0.22, 0.028, 3.5, 0.08) },
+    // The shafts in the thin lobby haze would be far fainter than the lamp-lit fog outside; lift them so the lobby
+    // reads as lit by the street.
+    inBoost: { value: 8 },
+    dbg: { value: 0 },
+    slCount: { value: 0 },
+    slShadows: { value: 0 },
+    slPos: { value: arr3(MAX_STREET) },
+    slDir: { value: arr3(MAX_STREET) },
+    slColor: { value: arr3(MAX_STREET) },
+    slCone: { value: arr3(MAX_STREET) },
+    slMat: { value: Array.from({ length: MAX_SHAFTS }, () => new THREE.Matrix4()) },
+    slClip: { value: Array.from({ length: MAX_SHAFTS }, () => new THREE.Vector2(0.45, 40)) },
     lampCount: { value: 0 },
     lampPos: { value: arr3(MAX_LAMPS) },
     lampColor: { value: arr3(MAX_LAMPS) },
@@ -693,7 +860,12 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     tHalf: { value: halfRT.texture },
     tQuarter: { value: quarterRT.texture },
     tFloorRough: { value: null },
+    tYardRough: { value: null },
     hasRough: { value: 0 },
+    yardMeters: { value: 4 },
+    interior: { value: new THREE.Vector4(ib.minX, ib.maxX, ib.minZ, ib.maxZ) },
+    fogOut: { value: 0.15 },
+    quarterTexel: { value: new THREE.Vector2() },
     floorMeters: { value: 4 },
     floorRough: { value: 0.18 },
     strength: { value: 0.9 },
@@ -715,6 +887,10 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     tFog: { value: null },
     tView: { value: null },
     tSSR: { value: ssrRT.texture },
+    tHalf: { value: halfRT.texture },
+    tQuarter: { value: quarterRT.texture },
+    glow: { value: new THREE.Vector3(0.05, 14, 0.5) },
+    blurTexel: { value: new THREE.Vector2() },
     fogRes: { value: new THREE.Vector2() },
     near: { value: 0.05 },
     far: { value: 300 },
@@ -733,11 +909,12 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
   const expoUniforms = () => ({
     tLum: { value: lumRTs[0].texture },
     // key (target average luminance after exposure), min, max
-    expo: { value: new THREE.Vector3(0.2, 0.25, 6) },
+    // Night: a low key and a tight max, so a dark view stays dark instead of being lifted to day.
+    expo: { value: new THREE.Vector3(0.11, 0.2, 2.5) },
     exposure: { value: 1 },
   });
   const lum = pass(lumFrag, { tSrc: { value: combineRT.texture }, tPrev: { value: null }, adapt: { value: 1 } });
-  const prefilter = pass(prefilterFrag, { tSrc: { value: combineRT.texture }, texel: { value: new THREE.Vector2() }, threshold: { value: new THREE.Vector2(0.85, 0.5) }, ...expoUniforms() });
+  const prefilter = pass(prefilterFrag, { tSrc: { value: combineRT.texture }, texel: { value: new THREE.Vector2() }, threshold: { value: new THREE.Vector2(0.7, 0.45) }, ...expoUniforms() });
   const down = pass(downFrag, { tSrc: { value: null }, texel: { value: new THREE.Vector2() } });
   const up = pass(upFrag, { tSrc: { value: null }, texel: { value: new THREE.Vector2() } }, {
     blending: THREE.CustomBlending,
@@ -749,12 +926,13 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
   const final = pass(finalFrag, {
     tSrc: { value: combineRT.texture },
     tBloom: { value: null },
-    bloom: { value: 0.16 },
+    bloom: { value: 0.22 },
     time: { value: 0 },
     hurt: { value: 0 },
     hit: { value: 0 },
     downed: { value: 0 },
-    grain: { value: 0.014 },
+    grain: { value: 0.018 },
+    tone: { value: new THREE.Vector3(1, 1, 1) },
     res: { value: new THREE.Vector2() },
     ...expoUniforms(),
   });
@@ -793,6 +971,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     const sd = Math.max(1, spec.ssrDiv);
     ssrRT.setSize(Math.max(1, Math.round(w / sd)), Math.max(1, Math.round(h / sd)));
     combine.uniforms.ssrTexel.value.set(1 / ssrRT.width, 1 / ssrRT.height);
+    combine.uniforms.blurTexel.value.set(1 / quarterRT.width, 1 / quarterRT.height);
     const fw = Math.max(1, Math.round(w / spec.fogDiv));
     const fh = Math.max(1, Math.round(h / spec.fogDiv));
     for (const f of fogRTs) f.setSize(fw, fh);
@@ -824,8 +1003,9 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
   const hiddenScratch: THREE.Object3D[] = [];
   let fogCur = 0;
 
-  const renderSun = () => {
-    placeSun();
+  // Depth from a light: glass and other transparent things, points, lines, sprites and `noMoonShadow` objects (sky,
+  // lamp heads) are left out, so the light passes the glass but mullions, columns, people and furniture block it.
+  const renderDepth = (target: THREE.WebGLRenderTarget, cam: THREE.Camera) => {
     hiddenScratch.length = 0;
     scene.traverseVisible((o) => {
       const m = o as THREE.Mesh;
@@ -836,13 +1016,32 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     const bg = scene.background;
     scene.background = null;
     scene.overrideMaterial = depthOnly;
-    renderer.setRenderTarget(sunRT);
+    renderer.setRenderTarget(target);
     renderer.clear(false, true, false);
-    renderer.render(scene, sunCam);
+    renderer.render(scene, cam);
     scene.overrideMaterial = null;
     scene.background = bg;
     for (const o of hiddenScratch) o.visible = true;
   };
+
+  const renderSun = () => {
+    placeSun();
+    renderDepth(sunRT, sunCam);
+  };
+  const shaftLights = () => (wext.streetLights ?? []).filter((l) => l.shafts).slice(0, flags.shafts ? spec.shafts : 0);
+  const placeShaft = (i: number, L: StreetLight) => {
+    const c = shaftCams[i];
+    // The cone plus a margin, so the shadow map covers every lit point.
+    c.fov = Math.min(150, (Math.acos(L.cosOuter) * 2 * 180) / Math.PI + 8);
+    c.far = L.range;
+    c.position.copy(L.pos);
+    c.lookAt(tmp.copy(L.pos).add(L.dir));
+    c.updateProjectionMatrix();
+    c.updateMatrixWorld();
+    fogUniforms.slMat.value[i].multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse);
+    fogUniforms.slClip.value[i].set(c.near, c.far);
+  };
+  const baseIntensity = new WeakMap<THREE.SpotLight, number>();
 
   // Profiling (lab): GPU-synced pass timings.
   const gl = renderer.getContext();
@@ -857,8 +1056,9 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     tMark = now;
   };
 
+  const sunGain = fogUniforms.gain.value.z as number;
   /** Lab switches for profiling: multiply the quality spec's effects. */
-  const flags = { ssr: 1, ao: 1, glows: 1 };
+  const flags = { ssr: 1, ao: 1, glows: 1, shafts: 1 };
   const pipeline: Pipeline & {
     debug: Record<string, Record<string, THREE.IUniform>>;
     flags: typeof flags;
@@ -888,10 +1088,23 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
           if ((o as THREE.Light).isLight && o.userData.worldOnly !== true) o.layers.enableAll();
         });
       }
+      // The old golden-hour sun is a dim moon at night: its shafts (and its depth pass) only run while it is bright.
+      const sunOn = view.moon.intensity > 0.4;
       sunDue -= p.dt;
-      if (sunDue <= 0 || frame < 3) {
+      if (sunOn && (sunDue <= 0 || frame < 3)) {
         sunDue = 1 / 20;
         renderSun();
+      }
+      const shafts = shaftLights();
+      for (let i = 0; i < shafts.length; i++) placeShaft(i, shafts[i]);
+      if (shafts.length) {
+        shaftDue -= p.dt;
+        if (frame < 3) for (let i = 0; i < shafts.length; i++) renderDepth(shaftRTs[i], shaftCams[i]);
+        else if (shaftDue <= 0) {
+          shaftDue = Math.max(0, shaftDue) + 1 / spec.shaftRate;
+          renderDepth(shaftRTs[shaftNext % shafts.length], shaftCams[shaftNext % shafts.length]);
+          shaftNext++;
+        }
       }
       mark('sun');
       // World.
@@ -932,9 +1145,20 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       const sunI = view.moon.intensity;
       u.sunColor.value.copy(view.moon.color).multiplyScalar(sunI);
       u.sunDir.value.copy(view.moonDir).normalize();
-      // The air glows a little with the bounced light of a sunlit room: a warm fraction of the sun.
-      u.ambient.value.copy(view.moon.color).multiplyScalar(sunI * 0.012).multiply(WARM);
+      u.gain.value.z = sunOn ? sunGain : 0;
       u.dust.value = wext.dust ?? 1;
+      const sl = (wext.streetLights ?? []).slice().sort((a, b) => Number(b.shafts) - Number(a.shafts)).slice(0, MAX_STREET);
+      u.slCount.value = sl.length;
+      u.slShadows.value = shafts.length;
+      sl.forEach((L, i) => {
+        let base = baseIntensity.get(L.light);
+        if (base === undefined) baseIntensity.set(L.light, (base = L.light.intensity));
+        u.slPos.value[i].copy(L.pos);
+        u.slDir.value[i].copy(L.dir);
+        u.slColor.value[i].set(L.color.r, L.color.g, L.color.b).multiplyScalar(base * L.level);
+        u.slCone.value[i].set(L.cosOuter, L.cosInner, L.range);
+      });
+      for (let i = 0; i < MAX_SHAFTS; i++) u[`tSL${i}`].value = (shaftRTs[i] ?? sunRT).depthTexture;
       const lamps = view.lamps;
       const ln = Math.min(MAX_LAMPS, lamps.length);
       u.lampCount.value = ln;
@@ -986,14 +1210,15 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       mark('haze');
 
       // Floor reflections.
+      // Blur pyramid: rough reflections and the fog's smear of far things.
+      halve.uniforms.tSrc.value = sceneRT.texture;
+      halve.uniforms.texel.value.set(1 / width, 1 / height);
+      draw(halve, halfRT);
+      halve.uniforms.tSrc.value = halfRT.texture;
+      halve.uniforms.texel.value.set(1 / halfRT.width, 1 / halfRT.height);
+      draw(halve, quarterRT);
       const ssrOn = spec.ssrDiv > 0 && flags.ssr > 0;
       if (ssrOn) {
-        halve.uniforms.tSrc.value = sceneRT.texture;
-        halve.uniforms.texel.value.set(1 / width, 1 / height);
-        draw(halve, halfRT);
-        halve.uniforms.tSrc.value = halfRT.texture;
-        halve.uniforms.texel.value.set(1 / halfRT.width, 1 / halfRT.height);
-        draw(halve, quarterRT);
         const s = ssrUniforms;
         s.tDepth.value = sceneRT.depthTexture;
         s.tScene.value = sceneRT.texture;
@@ -1004,11 +1229,15 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
         s.viewInv.value.copy(camera.matrixWorld);
         s.viewMat.value.copy(camera.matrixWorldInverse);
         s.proj.value.copy(camera.projectionMatrix);
-        if (wext.floorSet) {
+        if (wext.floorSet && wext.yardSet) {
           s.tFloorRough.value = wext.floorSet.orm;
           s.floorMeters.value = wext.floorSet.meters;
+          s.tYardRough.value = wext.yardSet.orm;
+          s.yardMeters.value = wext.yardSet.meters;
           s.hasRough.value = 1;
         } else s.hasRough.value = 0;
+        s.fogOut.value = fogUniforms.night.value.x * 0.8;
+        s.quarterTexel.value.set(1 / quarterRT.width, 1 / quarterRT.height);
         renderer.setClearColor(0x000000, 0);
         draw(ssrMat, ssrRT);
         renderer.setClearColor(0x000000, 1);
@@ -1088,6 +1317,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       makeBloom();
       sunRT.dispose();
       sunRT = makeSunRT(spec.sunMap);
+      makeShaftRTs();
       fogMat.dispose();
       fogMat = makeFog();
       ssrMat.dispose();
@@ -1108,6 +1338,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
       for (const f of fogRTs) f.dispose();
       for (const r of bloomRTs) r.dispose();
       sunRT.dispose();
+      for (const r of shaftRTs) r.dispose();
       tri.dispose();
       depthOnly.dispose();
       for (const m of [fogMat, ssrMat, halve, combine, lum, prefilter, down, up, final]) m.dispose();
