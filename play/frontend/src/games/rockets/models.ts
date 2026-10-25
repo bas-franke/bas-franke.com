@@ -365,6 +365,43 @@ export function buildLauncher(accent = RED): THREE.Group {
   return t.clone(true);
 }
 
+const viewHands = new Map<number, THREE.Group>();
+/**
+ * The first-person support glove on the launcher (same model space as buildLauncher): palm flat on the barrel's left
+ * flank, fingers curled over the top, knuckle plates and the gauntlet in `color` over a black under-suit, the forearm
+ * running back, down and left off the screen. Only for the viewmodel: the robot has its own hands.
+ */
+export function buildViewHand(color = RED): THREE.Group {
+  let t = viewHands.get(color);
+  if (!t) {
+    const k = new Kit();
+    const SUIT = 0x1a1b20;
+    const z0 = -0.31;
+    // Palm against the flank, a back-of-hand plate outside it, a thumb lying along the side.
+    k.add(box(0.05, 0.13, 0.13), SUIT, [-0.205, BORE_Y + 0.04, z0]);
+    k.add(box(0.016, 0.1, 0.11), color, [-0.236, BORE_Y + 0.05, z0]);
+    k.add(box(0.03, 0.032, 0.1), SUIT, [-0.2, BORE_Y - 0.035, z0 + 0.06]);
+    // Four fingers over the top of the barrel, each with a knuckle plate.
+    for (let i = 0; i < 4; i++) {
+      const z = z0 - 0.045 + i * 0.03;
+      k.add(box(0.13, 0.03, 0.026), SUIT, [-0.13, BORE_Y + 0.2, z], [0, 0, -0.6]);
+      k.add(box(0.06, 0.012, 0.028), color, [-0.165, BORE_Y + 0.235, z], [0, 0, -0.6], undefined, false);
+    }
+    // Wrist cuff, then the gauntlet: armour over a suit sleeve, running back, down and left.
+    inFrame(k, [-0.215, BORE_Y - 0.03, z0 + 0.06], [-0.8, 0, -0.6], () => {
+      k.add(tube(0.065, 0.07, 0.06, 10), SUIT, [0, -0.02, 0]);
+      k.add(tube(0.068, 0.085, 0.55, 10), SUIT, [0, -0.32, 0]);
+      k.add(oct(0.15, 0.13, 0.34, 0.25, 0.92), color, [0, -0.26, 0.012], [Math.PI / 2, 0, 0]);
+      k.add(box(0.152, 0.02, 0.1), IRON, [0, -0.26, 0.08]);
+      k.glowing(box(0.06, 0.012, 0.03), 0xff8c1a, [0, -0.2, 0.083]);
+      for (const y of [-0.1, -0.42]) k.add(tube(0.084, 0.084, 0.025, 10), IRON, [0, y, 0]);
+    });
+    t = k.build('viewHand', false);
+    viewHands.set(color, t);
+  }
+  return t.clone(true);
+}
+
 // ---- rocket ------------------------------------------------------------------------------------------------------
 
 let rocketTemplate: THREE.Group | null = null;

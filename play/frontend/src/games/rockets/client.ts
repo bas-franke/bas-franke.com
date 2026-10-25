@@ -25,7 +25,7 @@ import { type CharacterPiece, type CharacterState, animateCharacter, buildCharac
 import { loadLook } from './look';
 import { type Bloom, createBloom } from './bloom';
 import { themeOf } from './arenaDecor';
-import { WARHEAD_REST_Z, buildLauncher, buildPickup, buildRocket, warmupModels } from './models';
+import { WARHEAD_REST_Z, buildLauncher, buildPickup, buildRocket, buildViewHand, warmupModels } from './models';
 import { QUALITY, type Quality, applyInput, applyQuality, settings, verticalFov } from './settings';
 
 export interface FeedLine {
@@ -983,6 +983,7 @@ export class RocketsClient implements GameClient {
     if (!engine) return;
     const mine = this.ctx.room().players.find((p) => p.id === this.ctx.you);
     const vm = buildLauncher(mine?.color);
+    vm.add(buildViewHand(mine?.color));
     // The viewmodel gets its own copies of the (shared, cached) materials so it can draw in a late pass: transparent
     // materials at full opacity sort by renderOrder after everything opaque, and a depth clear right before them
     // keeps the barrel from sinking into walls when you hug them.
