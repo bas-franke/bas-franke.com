@@ -142,8 +142,8 @@ DETAIL = {
 
 # Roughness per material: (low, high, noise scale).
 ROUGH = {
-    "Team": (0.6, 0.8, 12), "Uniform": (0.8, 0.95, 8), "Gear": (0.55, 0.75, 10), "Strap": (0.5, 0.68, 14),
-    "Polymer": (0.32, 0.5, 20), "Helmet": (0.7, 0.85, 14), "Rubber": (0.82, 0.96, 20), "Leather": (0.32, 0.58, 18),
+    "Team": (0.6, 0.8, 12), "Uniform": (0.8, 0.95, 8), "Gear": (0.8, 0.93, 10), "Strap": (0.72, 0.86, 14),
+    "Polymer": (0.55, 0.72, 20), "Helmet": (0.72, 0.86, 14), "Rubber": (0.85, 0.97, 20), "Leather": (0.45, 0.65, 18),
     "Glove": (0.48, 0.7, 16), "Balaclava": (0.9, 1.0, 10), "Lens": (0.03, 0.08, 6), "GearMetal": (0.25, 0.45, 30),
     "Buckle": (0.3, 0.5, 30), "SurvivorEyes": (0.05, 0.1, 6), "Patch": (0.6, 0.8, 20), "Skin": (0.4, 0.6, 30),
 }
@@ -740,7 +740,7 @@ def fitted_armband(p, arm, sleeve):
             if radial < 0.14:
                 rs.append(radial)
     r = (sorted(rs)[int(len(rs) * 0.92)] if rs else 0.06) + 0.004
-    o = baked(prim("cyl", p["team"], loc=tuple(c), radius=r, depth=0.045, vertices=32))
+    o = baked(prim("cyl", p["team"], loc=tuple(c), radius=r, depth=0.028, vertices=32))
     bz.delete_faces(o, lambda cc, n: abs(n.z) > 0.9)
     o = smooth(solidify(o, 0.004))
     o.data.transform(Matrix.Translation(c) @ axis.to_track_quat("Z", "Y").to_matrix().to_4x4() @ Matrix.Translation(-c))
@@ -1073,6 +1073,9 @@ def bake(meshes, size=ATLAS):
         nt.links.new(tr.outputs["Color"], sep.inputs["Color"])
         nt.links.new(sep.outputs["Green"], bsdf.inputs["Roughness"])
         nt.links.new(sep.outputs["Blue"], bsdf.inputs["Metallic"])
+        for l in list(bsdf.inputs["Alpha"].links):
+            nt.links.remove(l)
+        bsdf.inputs["Alpha"].default_value = 1.0
     if PREVIEW:
         PREVIEW.mkdir(parents=True, exist_ok=True)
         for img in (alb, nrm, orm, ao):
@@ -1275,6 +1278,16 @@ def build():
     for k in ("head", "torso", "limbs"):
         if k in found:
             parts[k] = meshes_of(load_part(found[k]))
+    # The head part brings its own face and eyes: drop the body's eyes. Brow cards are alpha-textured slivers behind
+    # the goggles; an alpha texture would make the exporter write a separate multi-MB PNG, so they go too.
+    if "head" in found and "body" in parts:
+        for m in [m for m in parts["body"] if "eye" in m.name.lower()]:
+            parts["body"].remove(m)
+            bpy.data.objects.remove(m, do_unlink=True)
+    if "head" in parts:
+        for m in [m for m in parts["head"] if "brow" in m.name.lower()]:
+            parts["head"].remove(m)
+            bpy.data.objects.remove(m, do_unlink=True)
     parts.update(standin_parts(p, [k for k in PART_FILES if k not in parts]))
     meshes = [m for ms in parts.values() for m in ms]
     if not any(mat and mat.name == "Team" for m in meshes for mat in m.data.materials):
