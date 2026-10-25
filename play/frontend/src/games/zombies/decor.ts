@@ -559,6 +559,10 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
   const ledMat = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1.0, 0.68, 0.36), emissiveIntensity: 0.6 }));
   const ledDead = keep(new THREE.MeshStandardMaterial({ color: 0x14110e, roughness: 0.4, emissive: new THREE.Color(1.0, 0.68, 0.36), emissiveIntensity: 0.04 }));
   const downlight = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1, 0.86, 0.66), emissiveIntensity: 1.8 }));
+  // The galleries' linear LED strips: steady and bright enough to bloom, like the lobby's working emergency circuit.
+  const mezzLed = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1.0, 0.5, 0.17), emissiveIntensity: 1.9 }));
+  // The reception desk's and the bar's underglow: bright enough to wash the counter fronts warm.
+  const deskLed = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1.0, 0.6, 0.28), emissiveIntensity: 3 }));
   const downDead = keep(new THREE.MeshStandardMaterial({ color: 0x1c1a17, roughness: 0.3, emissive: new THREE.Color(1, 0.86, 0.66), emissiveIntensity: 0.02 }));
   const darkMat = keep(new THREE.MeshStandardMaterial({ color: 0x0b0a09, roughness: 0.6 }));
   const potMat = keep(new THREE.MeshStandardMaterial({ color: 0x14130f, roughness: 0.35, metalness: 0.2, envMapIntensity: 0.8 }));
@@ -671,7 +675,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       group.add(slab);
       // Fascia: a taller travertine band with a brass reveal and a warm LED strip under its lip.
       const lip = wallPoint(w, mid, top - slabT - 0.03, depth - 0.02);
-      const led = new THREE.Mesh(keep(box(w.along === 'x' ? len : 0.04, 0.025, w.along === 'x' ? 0.04 : len)), li === 0 ? ledMat : ledDead);
+      const led = new THREE.Mesh(keep(box(w.along === 'x' ? len : 0.05, 0.05, w.along === 'x' ? 0.05 : len)), mezzLed);
       led.position.copy(lip);
       led.userData.noMoonShadow = true;
       group.add(led);
@@ -682,7 +686,10 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       const dl = keep(new THREE.CircleGeometry(0.07, 16).rotateX(Math.PI / 2));
       for (let a = a0 + 1.5; a < a1 - 1; a += 3) {
         const p = wallPoint(w, a, top - slabT - 0.002, depth * 0.55);
-        const d = new THREE.Mesh(dl, fixture(pickState(0.2, 0.08), downlight, downDead, p.clone().add(new THREE.Vector3(0, -0.15, 0)), WARM, 1.2, li === 0 ? 3 : 0, 5));
+        // Most still burn; only the ones that always did (the first 28 % of the draw) bid for a real point light.
+        const r = fixRnd();
+        const st: FixState = r < 0.08 ? 'flicker' : r < 0.8 ? 'lit' : 'dead';
+        const d = new THREE.Mesh(dl, fixture(st, downlight, downDead, p.clone().add(new THREE.Vector3(0, -0.15, 0)), WARM, 1.2, li === 0 && r < 0.28 ? 3 : 0, 5));
         d.position.copy(p);
         d.userData.noMoonShadow = true;
         group.add(d);
@@ -699,6 +706,18 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       hand.position.copy(wallPoint(w, mid, top + railH, depth - 0.06));
       hand.castShadow = true;
       group.add(hand);
+      // Warm LED bars tucked under the handrail, a 1.5 m bar in every 2 m bay (one merged mesh).
+      const bars: THREE.BufferGeometry[] = [];
+      for (let a = a0 + 1; a < a1 - 0.5; a += 2) {
+        const p = wallPoint(w, a, top + railH - 0.05, depth - 0.08);
+        bars.push(box(w.along === 'x' ? 1.5 : 0.04, 0.04, w.along === 'x' ? 0.04 : 1.5).translate(p.x, p.y, p.z));
+      }
+      if (bars.length) {
+        const hl = new THREE.Mesh(keep(mergeGeometries(bars)), mezzLed);
+        for (const g of bars) g.dispose();
+        hl.userData.noMoonShadow = true;
+        group.add(hl);
+      }
       const posts: THREE.BufferGeometry[] = [];
       for (let a = a0; a <= a1 + 0.01; a += 1.5) {
         const p = wallPoint(w, a, top + railH / 2, depth - 0.06);
@@ -742,8 +761,8 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     const dl = keep(new THREE.CircleGeometry(0.11, 16).rotateX(Math.PI / 2));
     for (let x = atrium.minX + 1.5; x < atrium.maxX; x += 3)
       for (let z = atrium.minZ + 1.5; z < atrium.maxZ; z += 3) {
-        // Nearly all dead; the odd one still burns.
-        const d = new THREE.Mesh(dl, fixRnd() < 0.12 ? downlight : downDead);
+        // Most still burn as small warm points; a few are dead.
+        const d = new THREE.Mesh(dl, fixRnd() < 0.75 ? downlight : downDead);
         d.position.set(x, atriumH - 0.01, z);
         d.userData.noMoonShadow = true;
         group.add(d);
@@ -1123,7 +1142,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     const len = alongX ? size.x : size.z;
     for (const side of [-1, 1]) {
       const off = (alongX ? size.z : size.x) / 2 + 0.02;
-      const strip = new THREE.Mesh(keep(box(alongX ? len : 0.03, 0.025, alongX ? 0.03 : len)), ledMat);
+      const strip = new THREE.Mesh(keep(box(alongX ? len : 0.03, 0.025, alongX ? 0.03 : len)), deskLed);
       strip.position.set(c.x + (alongX ? 0 : side * off), 0.06, c.z + (alongX ? side * off : 0));
       strip.userData.noMoonShadow = true;
       group.add(strip);
@@ -1139,7 +1158,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         prims: [strip, kick],
       });
     }
-    for (let k = -1; k <= 1; k++) addGlow(new THREE.Vector3(c.x + (alongX ? (k * len) / 3 : size.x / 2 + 0.2), 0.15, c.z + (alongX ? size.z / 2 + 0.2 : (k * len) / 3)), WARM, 0.15);
+    for (let k = -1; k <= 1; k++) addGlow(new THREE.Vector3(c.x + (alongX ? (k * len) / 3 : size.x / 2 + 0.2), 0.15, c.z + (alongX ? size.z / 2 + 0.2 : (k * len) / 3)), WARM, 0.4);
     const top = b.max.y;
     const at = (t: number, side = 0) => new THREE.Vector3(c.x + (alongX ? t * len : side), top, c.z + (alongX ? side : t * len));
     if (pr.kind === 'desk') {
@@ -1332,21 +1351,46 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     // Slim brass transoms every 3 m (square panes between the 3 m mullions), on the inside face of the glass so they
     // stay crisp in front of the misty panes, with a twin outside.
     for (let y = 3; y < facade.h - 0.5; y += 3) {
-      piece((facade.a0 + facade.a1) / 2, y, len, 0.06, 0.03, 0.05);
+      piece((facade.a0 + facade.a1) / 2, y, len, 0.12, 0.05, 0.09);
       piece((facade.a0 + facade.a1) / 2, y, len, 0.06, -(facade.thick + 0.05), 0.05);
     }
-    const gridMesh = new THREE.Mesh(keep(mergeGeometries(grid)), mats.brass);
+    // Mullions above the entrances where the map has none (the 3 m rhythm runs on across the revolving door).
+    const mullionAt = def.mullions?.wall === facade.id ? def.mullions.at : [];
+    for (let a = facade.a0 + 3; a < facade.a1 - 0.5; a += 3)
+      if (!mullionAt.some((m) => Math.abs(m - a) < 0.5)) piece(a, (3 + facade.h) / 2, 0.16, facade.h - 3, 0.04, 0.08);
+    // A bronze facing on the map's own mullions (they stand 8 cm proud of the glass), so the whole grid matches.
+    for (const m of mullionAt) piece(m, facade.h / 2, 0.21, facade.h, 0.09, 0.02);
+    // Dark weathered bronze, so the grid reads against the hazy, lit glass.
+    const gridMat = keep(new THREE.MeshStandardMaterial({ color: 0x4a3620, roughness: 0.4, metalness: 0.85, envMapIntensity: 0.6 }));
+    const gridMesh = new THREE.Mesh(keep(mergeGeometries(grid)), gridMat);
     for (const g of grid) g.dispose();
     gridMesh.castShadow = true;
     group.add(gridMesh);
+    // Warm haze on the inside of the glass above the gate: the city behind it reads softened, like through old,
+    // smoky panes, instead of crisp. One transparent sheet just inside the glass, behind the mullions and transoms.
+    {
+      const y0 = 2.5;
+      const sheet = new THREE.Mesh(
+        keep(new THREE.PlaneGeometry(len, facade.h - y0)),
+        keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(0.14, 0.085, 0.045), transparent: true, opacity: 0.3, depthWrite: false })),
+      );
+      sheet.position.copy(wallPoint(facade, (facade.a0 + facade.a1) / 2, (y0 + facade.h) / 2, 0.012));
+      // The plane faces +Z; turn it to face into the room.
+      sheet.rotation.y = ax ? (facade.out < 0 ? 0 : Math.PI) : facade.out < 0 ? Math.PI / 2 : -Math.PI / 2;
+      sheet.renderOrder = 3;
+      sheet.userData.noMoonShadow = true;
+      sheet.userData.noMerge = true;
+      group.add(sheet);
+    }
 
     // The gate: weathered planks nailed up inside the glass in front of the bars (which rise above them), framed into
     // panels with rails, stiles and an X brace, gaps between the planks letting the street light through. Only where
     // the bars run (never across an entrance). A warm emissive through the grain stands in for the lobby's bounce
     // light, so the boards read as lit wood rather than a silhouette against the glare.
     const woodSet = mats.texSet('wood');
-    const wood = keep(setMaterial(woodSet, { color: 0xa47c52, envMapIntensity: 0.25, metalness: 0, emissive: new THREE.Color(0.8, 0.45, 0.2), emissiveIntensity: 2.8 }));
-    const darkWood = keep(setMaterial(woodSet, { color: 0x6a4c30, envMapIntensity: 0.2, metalness: 0, emissive: new THREE.Color(0.8, 0.45, 0.2), emissiveIntensity: 2.1 }));
+    // Planks a mid weathered brown; the rails, stiles and X braces nailed over them paler, so the braces read.
+    const wood = keep(setMaterial(woodSet, { color: 0xa47c52, envMapIntensity: 0.25, metalness: 0, emissive: new THREE.Color(0.85, 0.55, 0.28), emissiveIntensity: 5 }));
+    const darkWood = keep(setMaterial(woodSet, { color: 0xc49a68, envMapIntensity: 0.2, metalness: 0, emissive: new THREE.Color(0.95, 0.66, 0.36), emissiveIntensity: 8.5 }));
     for (const m of [wood, darkWood]) m.emissiveMap = m.map;
     woodSet.onUpgrade((s) => {
       for (const m of [wood, darkWood]) m.emissiveMap = s.map;
@@ -1370,6 +1414,13 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     const bars = world.solids.filter((s) => (s.kind as string) === 'bars' && (s.max.x - s.min.x > s.max.z - s.min.z) === ax && (ax ? Math.abs((s.min.z + s.max.z) / 2 - facade.fixed) < 0.6 : Math.abs((s.min.x + s.max.x) / 2 - facade.fixed) < 0.6));
     const H = 2.5;
     const backOff = 0.04;
+    // Dark iron gate posts between the panels, rising past the boards to a top rail like a security gate.
+    const iron: THREE.BufferGeometry[] = [];
+    const ironPiece = (a: number, y: number, along: number, h: number, off: number, d: number) => {
+      const p = wallPoint(facade, a, y, off);
+      iron.push(box(ax ? along : d, h, ax ? d : along).translate(p.x, p.y, p.z));
+    };
+    const gateH = 3.4;
     for (const b of bars) {
       const s0 = ax ? b.min.x : b.min.z;
       const s1 = ax ? b.max.x : b.max.z;
@@ -1377,6 +1428,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       if (runLen < 0.6) continue;
       const n = Math.max(1, Math.round(runLen / 2.4));
       const pw = runLen / n;
+      for (let k = 0; k <= n; k++) ironPiece(s0 + pw * k, gateH / 2, 0.09, gateH, backOff + 0.2, 0.09);
       for (let k = 0; k < n; k++) {
         const c = s0 + pw * (k + 0.5);
         // Horizontal boards, a hand's width apart now and then.
@@ -1395,6 +1447,19 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         plank(braces, l, 0.16, 0.04, ang, c, (0.2 + H - 0.1) / 2, backOff + 0.08);
         plank(braces, l, 0.16, 0.04, -ang, c, (0.2 + H - 0.1) / 2, backOff + 0.12);
       }
+    }
+    // The gate's top rail runs on across the entrances; thin rods fill the band between the boards and the rail.
+    if (iron.length) {
+      ironPiece((facade.a0 + facade.a1) / 2, gateH - 0.04, len, 0.07, backOff + 0.2, 0.06);
+      for (let a = facade.a0 + 0.2; a < facade.a1 - 0.1; a += 0.2) ironPiece(a, (H + gateH) / 2, 0.025, gateH - H, backOff + 0.2, 0.025);
+      ironPiece((facade.a0 + facade.a1) / 2, H + 0.02, len, 0.05, backOff + 0.2, 0.05);
+    }
+    if (iron.length) {
+      const ironMat = keep(new THREE.MeshStandardMaterial({ color: 0x1b1712, roughness: 0.45, metalness: 0.8, envMapIntensity: 1.2 }));
+      const im = new THREE.Mesh(keep(mergeGeometries(iron)), ironMat);
+      for (const g of iron) g.dispose();
+      im.castShadow = true;
+      group.add(im);
     }
     if (planks.length) {
       const pm = new THREE.Mesh(keep(mergeGeometries(planks)), wood);
@@ -1538,7 +1603,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         }
         for (const o of f.prims) o.visible = false;
       }
-      instance(trim, places, ledMat);
+      instance(trim, places, deskLed);
     }
     // Mezzanine balustrades: 2 m glassRailing segments along each run, stretched to fit (panel 15).
     const rail = prop('glassRailing');
