@@ -450,13 +450,13 @@ def k_rock_c():
 
 def k_bush_a():
     b = B()
-    bush(b, (0, 0, 0), 0.62, 0.75, 21, (PINK, WHITE, YELLOW), 9, LEAF[1], 38, 4, leaf_scale=1.3)
+    bush(b, (0, 0, 0), 0.62, 0.75, 21, (PINK, WHITE, YELLOW), 9, LEAF[1], 50, 4, leaf_scale=1.35)
     return b.build("Kit_bush_a", ao=(0.0, 0.7, 0.45))
 
 
 def k_bush_b():
     b = B()
-    bush(b, (0, 0, 0), 0.5, 0.95, 22, (WHITE, PURPLE), 7, LEAF[0], 36, 4, leaf_scale=1.3)
+    bush(b, (0, 0, 0), 0.5, 0.95, 22, (WHITE, PURPLE), 7, LEAF[0], 48, 4, leaf_scale=1.35)
     return b.build("Kit_bush_b", ao=(0.0, 0.8, 0.45))
 
 
@@ -520,7 +520,7 @@ def k_tree_a():
 
 
 def k_tree_b():
-    """Blossom tree: spreading layered canopy, pink-tinted with flowers."""
+    """Blossom tree: spreading layered green canopy dotted with sparse pink and white blossoms."""
     b, rng = B(), random.Random(42)
     top = tree_trunk(b, rng, 1.7, 0.11)
     for a in (0.2, 2.3, 4.3):
@@ -530,27 +530,28 @@ def k_tree_b():
         b.add(v, f, BARK, "Kit", True)
     blossom = H("#f7a8c8")
     leafc = H("#6aa83c")
-    pinks = [H("#f59ac0"), H("#ee86b2"), H("#f8b6d0"), H("#e978a8"), H("#f7a8c8")]
+    greens = [H("#5c9c37"), H("#4f8f30"), H("#67a63d"), H("#55953a"), H("#6aab42")]
     pads = [((0, 0, 2.1), (1.15, 1.15, 0.55)), ((0.75, 0.3, 1.85), (0.6, 0.6, 0.4)),
             ((-0.7, 0.4, 1.9), (0.6, 0.6, 0.4)), ((0.1, -0.75, 1.85), (0.62, 0.62, 0.4)),
             ((0.1, 0.1, 2.55), (0.7, 0.7, 0.4))]
     for i, (p, s) in enumerate(pads):
         blob(b, (top.x + p[0], top.y + p[1], p[2]), s, 2, 9 + i * 1.9,
-             pinks[i % len(pinks)], rng, light=WHITE)
-    n_leaves = 20
+             greens[i % len(greens)], rng)
+    n_leaves = 26
     for i in range(n_leaves):
         th = i * 2.39996 + rng.uniform(-0.2, 0.2)
         e = math.asin(min(0.9, -0.25 + 1.15 * (i + rng.uniform(0.2, 0.8)) / n_leaves))
         p = Vector((1.06 * math.cos(e) * math.cos(th), 1.06 * math.cos(e) * math.sin(th), 2.1 + 0.6 * math.sin(e)))
         L = rng.uniform(0.42, 0.55)
         leaf(b, p + Vector((top.x, top.y, 0)), th, e * 0.8, L, L * 0.55, mix(leafc, LEAF[0], rng.random()), rng)
-    for i in range(10):
+    nb = 14
+    for i in range(nb):
         th = i * 2.39996 + 1.0
-        e = math.asin(min(0.95, (i + 0.5) / 10))
+        e = math.asin(min(0.95, (i + 0.5) / nb))
         n = Vector((math.cos(e) * math.cos(th), math.cos(e) * math.sin(th), math.sin(e)))
-        p = Vector((top.x + 1.18 * n.x, top.y + 1.18 * n.y, 2.12 + 0.6 * n.z))
-        flower(b, p, (n + Vector((0, 0, 1))).normalized(), rng.uniform(0.14, 0.18), rng.choice((PINK, WHITE, blossom)),
-               WHITE, 5, rng)
+        p = Vector((top.x + 1.17 * n.x, top.y + 1.17 * n.y, 2.12 + 0.6 * n.z))
+        flower(b, p, (n + Vector((0, 0, 1))).normalized(), rng.uniform(0.11, 0.14), (PINK, WHITE, blossom)[i % 3],
+               YELLOW, 5, rng)
     return b.build("Kit_tree_b", ao=(0.0, 2.3, 0.5))
 
 
@@ -667,6 +668,127 @@ def k_pebble():
     stone(b, (-0.12, 0.14, -0.02), (0.08, 0.07, 0.045), 0, 3.3, rng, moss=0)
     stone(b, (0.05, -0.16, -0.02), (0.07, 0.06, 0.04), 0, 4.4, rng, moss=0)
     return b.build("Kit_pebble")
+
+
+HEDGE_L = 2.0
+
+
+def hedge_noise(x, y, z, f, seed):
+    """Noise that repeats every HEDGE_L along X (x is mapped onto a circle), so hedge strips tile end to end."""
+    a = 2 * math.pi * x / HEDGE_L
+    r = HEDGE_L / (2 * math.pi) * f
+    return mnoise.noise(Vector((r * math.cos(a), r * math.sin(a), (y * 1.1 + z * 1.4) * f + seed)))
+
+
+def dot_flower(b, pos, normal, r, petal, center, rng):
+    """Tiny 5-tri flower: pentagon fan with a raised coloured centre (for hedges, where many are needed)."""
+    ph = rng.uniform(0, 6.28)
+    verts = [(0, 0, r * 0.3)] + [(r * math.cos(ph + 2 * math.pi * k / 5), r * math.sin(ph + 2 * math.pi * k / 5), 0)
+                                 for k in range(5)]
+    cols = [center] + [mix(petal, WHITE, 0.15 * (k % 2)) for k in range(5)]
+    b.add(verts, [(0, 1 + k, 1 + (k + 1) % 5) for k in range(5)], cols, "Kit", True,
+          Matrix.Translation(pos) @ align_z(normal))
+
+
+def k_hedge_strip():
+    """Low flowering hedge, 2 m along X, ~0.35 m tall, 0.5 m deep; tiles seamlessly end to end."""
+    b, rng = B(), random.Random(91)
+    L, nx = HEDGE_L, 14
+    prof = [(-0.2, 0.0), (-0.21, 0.11), (-0.165, 0.22), (0.0, 0.265), (0.165, 0.22), (0.21, 0.11), (0.2, 0.0)]
+    verts, cols, faces = [], [], []
+    for i in range(nx + 1):
+        x = -L / 2 + L * i / nx
+        for y, z in prof:
+            n = Vector((0, y, z - 0.08)).normalized()
+            # Big periodic lobes (clumps of shrub) plus finer noise; both repeat every HEDGE_L.
+            lobe = math.cos(2 * math.pi * 5 * x / L + 0.6 * hedge_noise(x, 0, 0, 1.2, 1.0))
+            d = 0.035 * lobe * min(1.0, z / 0.12) + 0.05 * hedge_noise(x, y, z, 2.4, 3.0)                 + 0.025 * hedge_noise(x, y, z, 6.0, 8.0)
+            p = Vector((x, y, z)) + n * d
+            if z == 0.0:
+                p.z = 0.0
+            verts.append(p)
+            t = min(1.0, max(0.0, p.z / 0.3))
+            c = mix(LEAF[2], LEAF[1], 0.5 + 0.5 * hedge_noise(x, y, z, 3.3, 5.0) + 0.25 * lobe)
+            cols.append(mix(c, LEAF_LIGHT, 0.28 * t * t))
+    m = len(prof)
+    for i in range(nx):
+        for k in range(m - 1):
+            faces.append((i * m + k, i * m + k + 1, (i + 1) * m + k + 1, (i + 1) * m + k))
+    b.add(verts, faces, cols, "Kit", True)
+    # End caps (identical at both ends, so neighbours hide each other's caps).
+    for i in (0, nx):
+        ring = [verts[i * m + k] for k in range(m)]
+        cv = [Vector((ring[0].x, 0, 0.12))] + ring
+        cc = [mul(LEAF[2], 0.8)] + [cols[i * m + k] for k in range(m)]
+        b.add(cv, [(0, k + 1, k + 2) for k in range(m - 1)], cc, "Kit", True)
+    # Broad leaves over the top and both faces.
+    nleaves = 24
+    for i in range(nleaves):
+        x = -0.86 + 1.72 * (i + rng.uniform(0.15, 0.85)) / nleaves
+        th = rng.uniform(-1.25, 1.25)
+        p = Vector((x, 0.16 * math.sin(th), 0.07 + 0.18 * math.cos(th)))
+        side = 1 if th > 0 else -1
+        yaw = side * math.pi / 2 + rng.uniform(-0.7, 0.7) if abs(th) > 0.3 else rng.uniform(0, 6.28)
+        pitch = (math.pi / 2 - abs(th)) * 0.75 + 0.05
+        Lf = rng.uniform(0.13, 0.17)
+        leaf(b, p, yaw, pitch, Lf, Lf * 0.6, LEAF[rng.randrange(len(LEAF))], rng)
+    # Small pink / white / yellow flowers dotted over the outside.
+    fl = [(PINK, YELLOW), (WHITE, YELLOW), (H("#f7a6c8"), WHITE), (YELLOW, ORANGE), (WHITE, ORANGE)]
+    nfl = 16
+    for i in range(nfl):
+        x = -0.92 + 1.84 * (i + rng.uniform(0.1, 0.9)) / nfl
+        th = rng.uniform(-1.3, 1.3)
+        n = Vector((0, math.sin(th), math.cos(th)))
+        p = Vector((x, 0.235 * math.sin(th), 0.07 + 0.215 * math.cos(th)))
+        petal, center = fl[i % len(fl)]
+        dot_flower(b, p, n, rng.uniform(0.04, 0.055), petal, center, rng)
+    return b.build("Kit_hedge_strip", ao=(0.0, 0.3, 0.55))
+
+
+def k_pad():
+    """Build-pad cue: cream ceramic ring around a green leaf inset with a cream leaf emblem (radius 0.8 m)."""
+    b = B()
+    ring = [(0.8, 0.0), (0.8, 0.035), (0.775, 0.058), (0.64, 0.06), (0.6, 0.042)]
+    v, f = revolve(ring, 28)
+    b.add(v, f, lambda p, i: mix(CREAM_SHADE, H("#F5E7D6"), min(1.0, p.z / 0.05)), "KitCeramic", True)
+    inset = H("#6BAF4B")
+    v, f = revolve([(0.6, 0.042), (0.0, 0.042)], 28)
+    b.add(v, f, lambda p, i: mix(mul(inset, 0.86), inset, min(1.0, 1 - p.xy.length / 0.6 + 0.35)), "KitCeramic", False)
+    # Leaf emblem pointing +Y: outline 0-9 around, midrib centre line slightly raised.
+    Lh, W, z = 0.42, 0.2, 0.05
+    outline = []
+    for k in range(5):
+        t = (k + 0.5) / 5
+        w = W * math.sin(math.pi * t) * (1.0 - 0.25 * t)
+        outline.append((t, w))
+    verts = [Vector((0, -Lh, z))]
+    for t, w in outline:
+        verts.append(Vector((-w, -Lh + 2 * Lh * t, z)))
+    verts.append(Vector((0, Lh, z)))
+    for t, w in reversed(outline):
+        verts.append(Vector((w, -Lh + 2 * Lh * t, z)))
+    mid = [Vector((0, -Lh + 2 * Lh * t, z + 0.006)) for t, _ in outline]
+    base = len(verts)
+    verts += mid
+    leafc = H("#F5E7D6")
+    cols = [leafc] * 12 + [mix(leafc, inset, 0.35)] * 5
+    faces = []
+    # left half: outline 0..6 (tip index 6), right half: 6..11 then back to 0
+    left = list(range(0, 7))
+    right = [6, 7, 8, 9, 10, 11, 0]
+    for k in range(5):
+        faces.append((left[k], left[k + 1], base + k))
+        faces.append((right[k], right[k + 1], base + 4 - k))
+    for k in range(4):
+        faces.append((base + k, left[k + 1], base + k + 1))
+        faces.append((base + 4 - k, right[k + 1], base + 3 - k))
+    faces.append((base + 0, right[5], 0))
+    # Stem
+    v2 = [Vector((-0.012, -Lh - 0.12, z)), Vector((0.012, -Lh - 0.12, z)), Vector((0.016, -Lh + 0.02, z)),
+          Vector((-0.016, -Lh + 0.02, z))]
+    b.add(verts, [f[::-1] for f in faces], cols, "KitCeramic", False)
+    b.add(v2, [(0, 1, 2, 3)], leafc, "KitCeramic", False)
+    return b.build("Kit_pad")
 
 
 # ---- ceramic props ------------------------------------------------------------------------------------------------------
@@ -1310,9 +1432,43 @@ def previews(objs):
     render(cam6, vis, "kit_preview_greenhouse")
 
 
+def kitfix_previews(objs):
+    """Lineup of the small pieces plus a peach path edged by hedge strips with build pads beside it."""
+    setup_render((1600, 900))
+    grass_m = preview_material("PrevGrass", H("#6fa243"))
+    path_m = preview_material("PrevPath", H("#f0c9a4"))
+    ground = plane("PrevGround", -60, 60, -60, 60, -0.002, grass_m)
+    lineup = []
+    small = [n for n in objs if n not in ("portal", "greenhouse", "bridge")]
+    for i, n in enumerate(small):
+        row, col = divmod(i, 8)
+        o = objs[n]
+        o.location = (-9.5 + col * 2.7, 0.5 + row * 3.4, 0)
+        lineup.append(o)
+    render(camera("CamFixLineup", (0, 3.6, 0.5), 30, 30, 0, ortho=23), lineup + [ground], "kitfix_lineup")
+    for o in lineup:
+        o.location = (0, 0, 0)
+    vis = [ground, plane("Path", -9, 9, -1.3, 1.3, 0.003, path_m)]
+    for k in range(9):
+        x = -8 + 2.0 * k
+        vis.append(inst(objs["hedge_strip"], (x, 1.55, 0)))
+        vis.append(inst(objs["hedge_strip"], (x, -1.55, 0), math.pi))
+    for x in (-5.0, 0.0, 5.0):
+        vis.append(inst(objs["pad"], (x, 3.0, 0)))
+    for x in (-2.5, 2.5):
+        vis.append(inst(objs["pad"], (x, -3.0, 0)))
+    rng = random.Random(9)
+    for p, n in (((-7.5, 4.6), "tree_b"), ((7.0, 5.0), "tree_a"), ((-1.0, 5.5), "tree_b"), ((3.8, -5.0), "tree_b"),
+                 ((-6.0, -4.6), "bush_a"), ((7.0, -3.6), "bush_b"), ((-3.6, 4.4), "bush_a"), ((2.6, 4.2), "bush_b"),
+                 ((-0.5, -4.4), "fern"), ((5.5, 3.3), "flowers_a"), ((-8.0, -3.0), "flowers_c")):
+        vis.append(inst(objs[n], (p[0], p[1], 0), rng.uniform(0, 6)))
+    render(camera("CamFixVig", (0, 0.5, 0), 40, 55, 15, ortho=17), vis, "kitfix_vignette")
+    render(camera("CamFixClose", (-1.0, 0.5, 0.3), 9, 28, 30), vis, "kitfix_close")
+
+
 NAMES = ["rock_a", "rock_b", "rock_c", "bush_a", "bush_b", "fern", "tree_a", "tree_b", "flowers_a", "flowers_b",
          "flowers_c", "grass_tuft", "reeds", "lilypad", "lamp", "solar", "bridge", "portal", "greenhouse",
-         "path_stone", "pebble"]
+         "path_stone", "pebble", "hedge_strip", "pad"]
 
 
 def build_all():
@@ -1327,7 +1483,7 @@ def build_all():
         "flowers_c": lambda: flower_bed("Kit_flowers_c", 203, (PURPLE, BLUE, WHITE), 6, big=True),
         "grass_tuft": k_grass, "reeds": k_reeds, "lilypad": k_lilypad, "lamp": k_lamp, "solar": k_solar,
         "bridge": k_bridge, "portal": k_portal, "greenhouse": k_greenhouse, "path_stone": k_path_stone,
-        "pebble": k_pebble,
+        "pebble": k_pebble, "hedge_strip": k_hedge_strip, "pad": k_pad,
     }
     objs = {n: builders[n]() for n in NAMES}
     for n, o in objs.items():
@@ -1337,7 +1493,10 @@ def build_all():
     export(list(objs.values()))
     if PREVIEW:
         PREVIEW.mkdir(parents=True, exist_ok=True)
-        previews(objs)
+        if len(ARGS) > 2 and ARGS[2] == "kitfix":
+            kitfix_previews(objs)
+        else:
+            previews(objs)
 
 
 if __name__ == "__main__":
