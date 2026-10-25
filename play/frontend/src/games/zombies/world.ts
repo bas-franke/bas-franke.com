@@ -404,6 +404,8 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   const travSet = texSet('travertine');
   const brassSet = texSet('brass');
   const floorMat = keep(projMaterial({ set: floorSet, env: 1.25 }));
+  // The black marble is lifted a little so the striped pools of street light read on it at night.
+  floorMat.color.setScalar(1.8);
   // Wet paving after rain: darker and glossy, so lamp pools and lit windows smear across it (not a mirror).
   const plazaMat = keep(projMaterial({ set: yardSet, env: 0.9, rough: 0.5, color: 0x9a948c }));
   const travMat = keep(projMaterial({ set: travSet, env: 0.45, grime: true }));
@@ -858,14 +860,16 @@ void main() {
     streetFx.push({ base: o.intensity, lens, lensBase: o.lens, seed: streetLights.length * 7.31 + 1.7, fail: o.fail ?? 0 });
     streetLights.push({ pos: o.pos.clone(), dir, color: o.color.clone(), cosOuter: Math.cos(o.outer), cosInner: Math.cos(o.inner), range: o.range, light, level: 1, shafts: o.shafts });
   };
-  // The plaza row, 7 m out from the glass: three lamps with shafts aim back at the facade so their light falls through
-  // the glass between the mullions deep into the lobby (and pools on the wet paving on the way), two more light the
-  // plaza's ends (the east one is failing). Shafts ones first.
+  // Three tall masts 10 m out from the glass carry the lamps with shafts: aimed low and long at the middle of the lobby,
+  // their light rakes in through the glass at ~17 degrees, so the mullions and transoms stripe it into long diagonal
+  // beams across the marble. A plaza row 7 m out lights the plaza's ends (the east one is failing). Shafts ones first.
   const rowZ = facadeZ - 7;
   const lampHeight = 7.2;
+  const mastZ = facadeZ - 10;
+  const mastHeight = 9.5;
   for (const x of [-7.5, 1.5, 9]) {
-    const pos = new THREE.Vector3(x, lampHeight, rowZ);
-    street({ pos, aim: new THREE.Vector3(x * 0.55, 0, facadeZ + 10), color: SODIUM, intensity: 4000, outer: 0.62, inner: 0.24, range: 45, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone(), 0, l) });
+    const pos = new THREE.Vector3(x, mastHeight, mastZ);
+    street({ pos, aim: new THREE.Vector3(x * 0.45, 0, facadeZ + 21), color: SODIUM, intensity: 12000, outer: 0.45, inner: 0.16, range: 60, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone(), 0, l, 1.8) });
   }
   for (const [x, fail] of [
     [-17, 0],
@@ -994,7 +998,7 @@ void main() {
     const lampsMat = new THREE.MeshBasicMaterial({ color: SODIUM.clone().multiplyScalar(5) });
     for (const x of [-7.5, 1.5, 9]) {
       const p = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), lampsMat);
-      p.position.set(x, 7, -19.4);
+      p.position.set(x, 9.5, -19.4);
       envScene.add(p);
     }
     // A couple of the hotel's lamps still burning.
