@@ -44,6 +44,10 @@ interface Member extends GamePlayer {
   socket?: WebSocket;
   ping: number;
   joinedAt: number;
+  /** The browser's `play_id` cookie (or `pid` query param): recognises a player who reconnects mid-match. */
+  playId?: string;
+  /** Joined while a match was running: in the room (list, chat) but not in the game until the next start. */
+  waiting?: boolean;
 }
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -59,6 +63,8 @@ const randomId = (prefix: string) => `${prefix}${randomBytes(4).toString('hex')}
 
 /** How long clients get to look at the results before the room goes back to the waiting state. */
 const RESULTS_LINGER_MS = 12_000;
+/** How long a match with only waiting humans left keeps running, so its last player can refresh and come back. */
+const ABANDON_GRACE_MS = 5_000;
 
 export class Room implements GameHost {
   readonly createdAt = Date.now();
@@ -70,6 +76,9 @@ export class Room implements GameHost {
   emptySince: number | null = Date.now();
   private everJoined = false;
   private endTimer?: NodeJS.Timeout;
+  private abandonTimer?: NodeJS.Timeout;
+  /** play_ids of the humans in the running match (seated at the start or rejoined); a reconnect with one goes back in. */
+  private readonly matchIds = new Set<string>();
   closed = false;
 
   constructor(
@@ -88,12 +97,19 @@ export class Room implements GameHost {
     return this.settings.botDifficulty;
   }
 
+  /** What the game sees: everyone seated, humans and bots; members waiting for the next match are left out. */
   players(): GamePlayer[] {
-    return [...this.members.values()].map(({ id, name, bot, color, team, look }) => ({ id, name, bot, color, team, look }));
+    return [...this.members.values()].filter((m) => !m.waiting).map(({ id, name, bot, color, team, look }) => ({ id, name, bot, color, team, look }));
   }
 
+  /** Every human in the room, seated or waiting. */
   humans() {
     return [...this.members.values()].filter((m) => !m.bot);
+  }
+
+  /** Humans waiting for the next match. */
+  waitingHumans() {
+    return [...this.members.values()].filter((m) => m.waiting);
   }
 
   bots() {
@@ -115,6 +131,7 @@ export class Room implements GameHost {
       ping: m.ping,
       ...(m.team !== undefined ? { team: m.team } : {}),
       ...(m.look ? { look: m.look } : {}),
+      ...(m.waiting ? { waiting: true } : {}),
     }));
     return {
       code: this.code,
@@ -136,6 +153,7 @@ export class Room implements GameHost {
       name: this.settings.name,
       game: this.settings.game,
       humans: this.humans().length,
+      waiting: this.waitingHumans().length,
       bots: this.bots().length,
       maxPlayers: this.settings.maxPlayers,
       state: this.state,
@@ -145,17 +163,22 @@ export class Room implements GameHost {
 
   // ---- membership ---------------------------------------------------------------------------------------------
 
-  addHuman(socket: WebSocket, rawName: string): Member {
+  /**
+   * A human joins. In the waiting state they are simply in. While a match runs they wait for the next one (listed,
+   * chatting, no game messages) unless their play_id was in this match: a refresh or reconnect goes straight back in.
+   * Only humans fill a room: bots never block a joiner (they are trimmed when the next match starts).
+   */
+  addHuman(socket: WebSocket, rawName: string, playId?: string): Member {
     if (this.closed) throw new RoomError('This room has closed.', 410);
-    if (this.members.size >= this.settings.maxPlayers) {
+    if (this.humans().length >= this.settings.maxPlayers) throw new RoomError('This room is full.', 409);
+    const playing = this.state === 'playing' && !!this.game;
+    const rejoin = playing && !!playId && this.matchIds.has(playId);
+    const seated = !playing || rejoin;
+    if (seated && this.members.size >= this.settings.maxPlayers) {
       // Humans take priority over bots: drop a bot to make space. A Garden Sentinels versus match in progress keeps
-      // its bots (each owns a board) and seats the joiner as a spectator over the limit, one per bot at most; the
-      // extra bots are trimmed when the match ends (stopGame).
+      // its bots (each owns a board) and seats a rejoiner over the limit; stopGame trims the extra bots.
       const bot = this.bots().pop();
-      if (!bot) throw new RoomError('This room is full.', 409);
-      if (this.gardenVersusPlaying()) {
-        if (this.members.size >= this.settings.maxPlayers + this.bots().length) throw new RoomError('This room is full.', 409);
-      } else this.removeMember(bot.id, 'replaced by a player');
+      if (bot && !this.gardenVersusPlaying()) this.removeMember(bot.id, 'replaced by a player');
     }
     const member: Member = {
       id: randomId('p'),
@@ -165,18 +188,35 @@ export class Room implements GameHost {
       socket,
       ping: 0,
       joinedAt: Date.now(),
+      ...(playId ? { playId } : {}),
+      ...(seated ? {} : { waiting: true }),
     };
-    if (this.teamMode()) member.team = this.smallerTeam();
+    if (seated && this.teamMode()) member.team = this.smallerTeam();
     this.members.set(member.id, member);
-    this.balanceBots();
+    if (seated) this.balanceBots();
     this.everJoined = true;
     this.emptySince = null;
     if (!this.hostId) this.hostId = member.id;
     this.sendTo(member, { t: 'welcome', you: member.id, room: this.view(), serverTime: Date.now() });
     this.broadcastRoom();
-    this.systemChat(`${member.name} joined`);
-    this.game?.addPlayer(member);
+    if (!seated) this.systemChat(`${member.name} joined and plays from the next match`);
+    else this.systemChat(rejoin ? `${member.name} is back` : `${member.name} joined`);
+    if (playing && seated) {
+      if (playId) this.matchIds.add(playId);
+      this.game?.addPlayer(member);
+    }
     return member;
+  }
+
+  /** Seats every waiting member (new match or back to the lobby) and trims bots so the room fits maxPlayers again. */
+  private seatWaiting() {
+    const waiting = this.waitingHumans();
+    for (const m of waiting) {
+      delete m.waiting;
+      if (this.teamMode()) m.team = this.smallerTeam();
+    }
+    if (waiting.length > 0 || this.members.size > this.settings.maxPlayers) this.setBots(this.bots().length);
+    else this.balanceBots();
   }
 
   private gardenVersusPlaying() {
@@ -197,7 +237,7 @@ export class Room implements GameHost {
     const member = this.members.get(id);
     if (!member) return;
     this.members.delete(id);
-    this.game?.removePlayer(id);
+    if (!member.waiting) this.game?.removePlayer(id);
     if (member.socket && member.socket.readyState === 1) {
       this.sendTo(member, { t: 'closed', reason });
       member.socket.close(1000, reason);
@@ -211,6 +251,19 @@ export class Room implements GameHost {
     if (this.humans().length === 0) this.emptySince ??= Date.now();
     this.balanceBots();
     this.broadcastRoom();
+    // The last player in the match left while others wait for the next one: end it (after a grace period for a page
+    // refresh) instead of leaving them behind an endless bot match.
+    if (!member.bot && this.abandoned() && !this.abandonTimer) {
+      this.abandonTimer = setTimeout(() => {
+        this.abandonTimer = undefined;
+        if (this.abandoned()) this.stopGame('Everyone in the match left: the next one can start.');
+      }, ABANDON_GRACE_MS);
+    }
+  }
+
+  /** A match is running with no seated human in it while somebody waits for the next one. */
+  private abandoned() {
+    return !this.closed && this.state === 'playing' && this.waitingHumans().length > 0 && !this.humans().some((m) => !m.waiting);
   }
 
   // ---- teams ----------------------------------------------------------------------------------------------------
@@ -221,7 +274,7 @@ export class Room implements GameHost {
 
   private teamCount(team: Team, onlyBots = false) {
     let n = 0;
-    for (const m of this.members.values()) if (m.team === team && (!onlyBots || m.bot)) n++;
+    for (const m of this.members.values()) if (m.team === team && !m.waiting && (!onlyBots || m.bot)) n++;
     return n;
   }
 
@@ -259,12 +312,12 @@ export class Room implements GameHost {
       for (const m of this.members.values()) delete m.team;
       return;
     }
-    for (const m of this.members.values()) if (m.team === undefined) m.team = this.smallerTeam();
+    for (const m of this.members.values()) if (m.team === undefined && !m.waiting) m.team = this.smallerTeam();
     this.balanceBots();
   }
 
   private setTeam(member: Member, team: Team) {
-    if (!this.teamMode() || (team !== 0 && team !== 1) || member.team === team) return;
+    if (!this.teamMode() || member.waiting || (team !== 0 && team !== 1) || member.team === team) return;
     this.moveTo(member, team);
     this.balanceBots();
     this.systemChat(`${member.name} joined ${TEAMS[team].name}`);
@@ -273,7 +326,9 @@ export class Room implements GameHost {
 
   setBots(count: number, difficulty?: BotDifficulty) {
     if (difficulty) this.settings.botDifficulty = difficulty;
-    const maxBots = Math.max(0, this.settings.maxPlayers - this.humans().length);
+    // Mid-match, members waiting for the next one do not take seats from bots yet (seatWaiting trims at the start).
+    const humans = this.state === 'playing' ? this.humans().filter((m) => !m.waiting).length : this.humans().length;
+    const maxBots = Math.max(0, this.settings.maxPlayers - humans);
     count = Math.min(Math.max(0, Math.floor(count)), maxBots);
     const bots = this.bots();
     while (bots.length > count) this.removeMember(bots.pop()!.id, 'bot removed');
@@ -295,10 +350,13 @@ export class Room implements GameHost {
 
   startGame() {
     if (this.state === 'playing') throw new RoomError('The game is already running.');
+    this.seatWaiting();
     const meta = GAMES[this.settings.game];
     if (this.members.size < meta.minPlayers) throw new RoomError(`${meta.name} needs at least ${meta.minPlayers} players. Add a bot or wait for a friend.`);
     this.game = gameFactories[this.settings.game](this);
     this.state = 'playing';
+    this.matchIds.clear();
+    for (const m of this.humans()) if (m.playId) this.matchIds.add(m.playId);
     this.broadcastRoom();
     this.game.start();
   }
@@ -306,14 +364,18 @@ export class Room implements GameHost {
   stopGame(reason: string) {
     clearTimeout(this.endTimer);
     this.endTimer = undefined;
+    clearTimeout(this.abandonTimer);
+    this.abandonTimer = undefined;
     if (!this.game) return;
     const game = this.game;
     this.game = undefined;
     game.stop();
     this.state = 'waiting';
+    this.matchIds.clear();
     this.systemChat(reason);
-    // Garden versus may have seated spectators over the limit (addHuman): drop bots until the room fits again.
-    if (this.settings.game === 'garden' && this.members.size > this.settings.maxPlayers) this.setBots(this.bots().length);
+    // Back in the lobby everyone is in: seat the waiting members and trim bots (also Garden versus rejoiners seated
+    // over the limit) until the room fits again.
+    this.seatWaiting();
     this.broadcastRoom();
   }
 
@@ -378,7 +440,7 @@ export class Room implements GameHost {
         if (this.state === 'playing') this.stopGame(`${member.name} ended the match`);
         return;
       case 'g':
-        this.game?.onMessage(id, msg.m);
+        if (!member.waiting) this.game?.onMessage(id, msg.m);
         return;
     }
   }
@@ -404,7 +466,7 @@ export class Room implements GameHost {
     if (member?.socket && (m as { k?: string }).k === 'snap' && member.socket.bufferedAmount > 64 * 1024) return;
     // Garden Sentinels: a re-sent full init ('sync') is not queued behind a socket that is already badly backed up.
     if (member?.socket && this.settings.game === 'garden' && (m as { k?: string }).k === 'init' && member.socket.bufferedAmount > 256 * 1024) return;
-    if (member) this.sendTo(member, { t: 'g', m });
+    if (member && !member.waiting) this.sendTo(member, { t: 'g', m });
   }
 
   /** Sends a room-level message to everyone connected. */
@@ -415,7 +477,8 @@ export class Room implements GameHost {
 
   /** GameHost.broadcast: wraps a game message in the envelope. */
   broadcast(m: GameServerMsg) {
-    this.broadcastAll({ t: 'g', m });
+    const data = JSON.stringify({ t: 'g', m } satisfies ServerMsg);
+    for (const p of this.members.values()) if (!p.waiting && p.socket && p.socket.readyState === 1) p.socket.send(data);
   }
 
   broadcastRoom() {
@@ -439,6 +502,7 @@ export class Room implements GameHost {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.endTimer);
+    clearTimeout(this.abandonTimer);
     this.game?.stop();
     this.game = undefined;
     for (const m of [...this.members.values()]) {

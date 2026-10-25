@@ -177,7 +177,10 @@ export interface RoomSummary {
   code: string;
   name: string;
   game: GameId;
+  /** Every human in the room, including those waiting for the next match. */
   humans: number;
+  /** Humans who joined during the running match and sit it out until the next one starts. */
+  waiting?: number;
   bots: number;
   maxPlayers: number;
   state: RoomState;
@@ -196,6 +199,8 @@ export interface PlayerInfo {
   team?: Team;
   /** Robot customisation (Rockets). */
   look?: Look;
+  /** Joined while a match was running: in the room (chat, list) but not in the game until the next match starts. */
+  waiting?: boolean;
 }
 
 export interface RoomView {

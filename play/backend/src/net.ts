@@ -1,4 +1,5 @@
-// WebSocket endpoint: /api/ws?room=CODE&name=Nick. One socket per player for the life of the session.
+// WebSocket endpoint: /api/ws?room=CODE&name=Nick[&pid=ID]. One socket per player for the life of the session. The
+// `play_id` cookie (or `pid`) lets the room put a player who reconnects mid-match straight back into the game.
 
 import type { IncomingMessage, Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -36,6 +37,22 @@ function simLane() {
     last = at;
     setTimeout(fn, at - now);
   };
+}
+
+/** The browser's `play_id` cookie (falls back to the `pid` query param): 8-64 url-safe characters, else undefined. */
+function playIdOf(req: IncomingMessage, url: URL): string | undefined {
+  let raw: string | null | undefined;
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const eq = part.indexOf('=');
+    if (eq > 0 && part.slice(0, eq).trim() === 'play_id') raw = part.slice(eq + 1).trim();
+  }
+  raw ||= url.searchParams.get('pid');
+  try {
+    raw = raw ? decodeURIComponent(raw) : raw;
+  } catch {
+    return undefined;
+  }
+  return raw && /^[A-Za-z0-9_-]{8,64}$/.test(raw) ? raw : undefined;
 }
 
 function closeWith(ws: WebSocket, code: number, message: string) {
@@ -82,7 +99,7 @@ export function attachWebSocket(server: Server, rooms: RoomManager) {
 
     let memberId: string;
     try {
-      memberId = room.addHuman(ws, name).id;
+      memberId = room.addHuman(ws, name, playIdOf(req, url)).id;
     } catch (err) {
       closeWith(ws, 4009, err instanceof Error ? err.message : 'Cannot join.');
       return;

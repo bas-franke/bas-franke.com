@@ -43,8 +43,9 @@
 //   Joiners: a rejoin under a parked name reclaims everything (board, gold, income, score, towers move to the new
 //   id; in versus every human gets a fresh init with the new owner); a new co-op name defends with start gold plus the clear
 //   bonuses paid so far (capped at the true median defender gold, never below start gold), at most
-//   MAX_COOP_PURSES purses per match (later new names start with 0). Versus joiners spectate; while a versus match
-//   is playing, rooms.ts seats a joiner over the limit instead of evicting a bot (bots are trimmed after the match).
+//   MAX_COOP_PURSES purses per match (later new names start with 0). New joiners wait in the room for the next match
+//   (rooms.ts); only a reconnect from this match comes in mid-match, and in versus rooms.ts seats it over the limit
+//   instead of evicting a bot (bots are trimmed after the match). A versus newcomer the sim sees anyway spectates.
 // - Flood limits per player: 'sync' at most once per SYNC_EVERY s, 'view' unlimited (cheap), every other action
 //   through a token bucket (ACTION_RATE/s, burst ACTION_BURST); excess is dropped silently.
 // - Versus: everyone gets the same base waves at once. Sends queue into the target's next wave (BoardSnap.inc),
