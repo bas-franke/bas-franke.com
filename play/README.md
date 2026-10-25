@@ -48,6 +48,14 @@ frontend/src/                          backend/src/
 - **Rooms close themselves.** A room with no connected humans is closed after 15 s (so a page refresh survives); a
   freshly created room nobody joins closes after 60 s. Bots do not keep a room alive. The host is the first human; it
   passes to the next human when they leave. At most 40 rooms run at once (`MAX_ROOMS`).
+- **Guests first, accounts optional.** Every page asks for a nickname (or a login) once; guests keep it in the
+  `play_name` cookie plus a random device id in `play_id`, which the server uses to put you straight back into a running
+  match after a refresh. An account (`backend/src/accounts.ts`, email + password, activated by mail) syncs the nickname
+  and a copy of this site's browser storage (settings, progress) to other devices. Activation and password reset mails
+  go through SendGrid (`mail.ts`); the session is an HttpOnly `play_sid` cookie on `/api`. Without `DATABASE_URL` the
+  site runs guests-only.
+- **Lobby links.** Every room is `/room/<CODE>`; the link is copyable in the waiting room and in every game's pause
+  menu. Joining while a match runs puts you in the room as *waiting* until the next match starts.
 - **Games are modules.** A game implements `GameServer` (backend `games/types.ts`) and `GameClient`
   (frontend `games/types.ts`) and is listed in both `games/registry.ts` files plus `GAMES` in `shared/protocol.ts`.
   Game messages travel inside the `{ t: 'g', m }` envelope; the room never looks inside them.
@@ -213,6 +221,12 @@ Nothing is required. Optional tuning:
 | `EMPTY_ROOM_GRACE_MS`  | `15000` | How long a room survives without a connected human            |
 | `UNCLAIMED_ROOM_MS`    | `60000` | How long a created room waits for its first player            |
 | `CREATE_RATE_LIMIT`    | `10`    | Room creations per IP per minute                              |
+| `DATABASE_URL`         | none    | PostgreSQL for accounts (written by the *Provision databases* workflow); without it: guests only |
+| `SENDGRID_API_KEY`     | none    | Activation and password reset mails (synced from the GitHub secret by the deploy workflow) |
+| `MAIL_FROM`            | `play@bas-franke.com` | Sender address; must be a verified sender in SendGrid (GitHub secret `MAIL_FROM`) |
+| `PUBLIC_URL`           | `https://play.bas-franke.com` | Base of the links in those mails                 |
+| `AUTH_ATTEMPTS`        | `20`    | Login/sign-up attempts per IP per 10 minutes                  |
+| `SIGNUPS_PER_HOUR`     | `5`     | New accounts per IP per hour                                  |
 
 A deploy restarts the backend and therefore closes every room; players get a message and can create a new one.
 
@@ -254,7 +268,16 @@ sudo nginx -t && sudo systemctl reload nginx
 The site file has a dedicated `location = /api/ws` block with the `Upgrade`/`Connection` headers and a one-hour read
 timeout; without it the lobby works but joining a room fails.
 
-## 3. Deploy
+## 3. Accounts: database and SendGrid (optional)
+
+- Database: GitHub → **Actions → Provision databases → Run workflow** with `play` in the list (needs the
+  `RDS_MASTER_PASSWORD` secret). It creates the `play` database and user and writes `DATABASE_URL` to the `.env`.
+  Tables are created by the backend on start (`backend/src/migrations.ts`).
+- Mail: in SendGrid verify a sender (Settings → Sender Authentication, or a single sender) and create an API key with
+  *Mail Send* permission. Add the repository secrets `SENDGRID_API_KEY` and `MAIL_FROM` (the verified address); the
+  next deploy writes them to `/srv/apps/play/.env`. Without them sign-ups wait for an activation mail that never comes.
+
+## 4. Deploy
 
 Push a change under `play/` to `master`, or GitHub → **Actions → Deploy play → Run workflow**. Then open
 <https://play.bas-franke.com>, host a room with a bot and start a game.
@@ -274,4 +297,7 @@ npm run dev
 - Backend: <http://localhost:3004/api/health>
 - Open the room URL in a second browser tab to play against yourself; bots are the quickest way to test a game alone.
 - In this browser's embedded preview pointer lock is refused; Rockets then switches to drag-to-look with `F` to fire.
+- Accounts locally: `npm --prefix backend run dev:db` starts a throwaway PostgreSQL on port 5436; put
+  `DATABASE_URL=postgres://play:play@127.0.0.1:5436/play?sslmode=disable` and `PUBLIC_URL=http://localhost:5173` in
+  `backend/.env.local`. Without `SENDGRID_API_KEY` the mail links are logged and shown on the page instead.
 - `npm run screenshots` refreshes the lobby screenshots ([SCREENSHOTS.md](SCREENSHOTS.md)).

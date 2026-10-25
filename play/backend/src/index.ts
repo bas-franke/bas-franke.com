@@ -1,6 +1,9 @@
 import http from 'node:http';
 import express, { type ErrorRequestHandler } from 'express';
+import { accounts, sweepAccounts } from './accounts.js';
 import { config } from './config.js';
+import { dbConfigured, dbReady, migrate } from './db.js';
+import { mailConfigured } from './mail.js';
 import { attachWebSocket } from './net.js';
 import { RoomError, RoomManager } from './rooms.js';
 import { GAMES } from './shared/protocol.js';
@@ -10,10 +13,20 @@ const rooms = new RoomManager();
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+// Optional accounts (guests never need one). Mounted before the small global body limit: saves carry browser storage.
+app.use('/api/account', express.json({ limit: '200kb' }), accounts);
 app.use(express.json({ limit: '8kb' }));
 
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', uptime: Math.round(process.uptime()), rooms: rooms.rooms.size, players: rooms.playerCount() });
+app.get('/api/health', async (_req, res) => {
+  res.json({
+    status: 'ok',
+    uptime: Math.round(process.uptime()),
+    rooms: rooms.rooms.size,
+    players: rooms.playerCount(),
+    accounts: dbConfigured(),
+    database: await dbReady(),
+    mail: mailConfigured(),
+  });
 });
 
 app.get('/api/games', (_req, res) => {
@@ -77,6 +90,13 @@ setInterval(() => {
   const cutoff = Date.now() - 60_000;
   for (const [ip, times] of createLog) if (!times.some((t) => t > cutoff)) createLog.delete(ip);
 }, 60_000).unref();
+
+setInterval(sweepAccounts, 3_600_000).unref();
+
+if (dbConfigured()) {
+  // Keep serving while migrations run or fail: rooms and guests do not need the database.
+  migrate().then(sweepAccounts, (err) => console.error('migrations failed', err));
+} else console.log('DATABASE_URL is not set: accounts disabled, everybody plays as a guest');
 
 server.listen(config.port, config.host, () => {
   console.log(`play backend listening on http://${config.host}:${config.port}`);
