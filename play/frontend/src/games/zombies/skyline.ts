@@ -137,14 +137,14 @@ if (skKind < 1.5 || skKind > 3.5) {
   vec2 cell = floor(g);
   vec2 f = g - cell;
   vec2 fw = max(fwidth(g), vec2(1e-4));
-  vec2 lo = office ? vec2(0.04, 0.24) : shop ? vec2(0.05, 0.06) : vec2(0.2, 0.3);
-  vec2 hi = office ? vec2(0.96, 0.9) : shop ? vec2(0.95, 0.78) : vec2(0.8, 0.86);
+  vec2 lo = office ? vec2(0.1, 0.3) : shop ? vec2(0.05, 0.06) : vec2(0.22, 0.32);
+  vec2 hi = office ? vec2(0.9, 0.84) : shop ? vec2(0.95, 0.78) : vec2(0.78, 0.84);
   // Far away a window shrinks under a pixel: fade from the filtered shape to its average coverage.
   // Past ~40 m the fog smears everything anyway: drop the room detail too, so a window is one even glow (the fog's
   // bright-pass would otherwise punch holes where curtains and sash bars darken it).
   float dist = length(vViewPosition);
   float far = smoothstep(0.3, 0.8, max(fw.x, fw.y));
-  float fd = max(far, smoothstep(35.0, 70.0, dist));
+  float fd = max(far, smoothstep(14.0, 40.0, dist));
   vec2 cv = skCover(f, fw, lo, hi);
   float area = (hi.x - lo.x) * (hi.y - lo.y);
   float m = cv.x * cv.y;
@@ -158,14 +158,14 @@ if (skKind < 1.5 || skKind > 3.5) {
   // Whole floors are lit or dark (the cleaners' floor, the late tenants), and tenant blocks of a few bays go dark.
   float fh = skHash(vec2(cell.y, skSeed * 13.7));
   float zone = skHash(vec2(floor(cell.x / 4.0) + cell.y * 17.0, skSeed * 5.3 + 5.0));
-  float p = fh < vWin.z ? 0.8 : 0.07;
-  p *= zone < 0.22 ? 0.25 : 1.0;
+  float p = fh < vWin.z ? 0.62 : 0.06;
+  p *= zone < 0.32 ? 0.2 : 1.0;
   if (shop) p = cell.y < 0.5 ? 0.25 : 0.05;
   float wh = skHash(cell + skSeed * 7.13);
   float lit = step(wh, p);
   float th = skHash(cell.yx * 1.7 + skSeed * 3.3 + 11.0);
-  float coolShare = office ? 0.42 : 0.12;
-  vec3 c = th < coolShare ? vec3(0.72, 0.86, 1.0) : mix(vec3(1.0, 0.6, 0.28), vec3(1.0, 0.8, 0.52), skHash(cell + skSeed * 4.1));
+  float coolShare = office ? 0.16 : 0.06;
+  vec3 c = th < coolShare ? vec3(0.8, 0.86, 0.95) : mix(vec3(1.0, 0.62, 0.3), vec3(1.0, 0.84, 0.6), skHash(cell + skSeed * 4.1));
   if (!office && !shop && th > 0.92) {
     float tv = 0.6 + 0.4 * sin(skTime * (6.0 + 9.0 * wh) + wh * 50.0) * sin(skTime * (1.3 + 2.0 * th) + 4.0 * wh);
     c = vec3(0.28, 0.42, 1.0) * tv;
@@ -425,8 +425,8 @@ export function buildSkyline(o: SkylineOpts): Skyline {
     const office = L.tier !== 'low' ? r() < 0.65 : r() < 0.2;
     const kind = office ? OFFICE : HOME;
     const floorH = office ? 3.8 + r() * 0.4 : 3.0 + r() * 0.4;
-    const bay = office ? 1.6 + r() * 0.6 : 2.6 + r() * 0.8;
-    const lit = office ? 0.28 + r() * 0.27 : 0.4 + r() * 0.3;
+    const bay = office ? 1.3 + r() * 0.5 : 2.1 + r() * 0.7;
+    const lit = office ? 0.22 + r() * 0.25 : 0.32 + r() * 0.26;
     let x0 = L.x - L.w / 2;
     let x1 = L.x + L.w / 2;
     let z0 = L.z - L.d / 2;

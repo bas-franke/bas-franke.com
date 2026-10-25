@@ -923,12 +923,12 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     ceiling: { value: world.height },
     dust: { value: wext.dust ?? 1 },
     // lamps, flashlights, sun, density
-    gain: { value: new THREE.Vector4(6, 0.6, 4, 1) },
+    gain: { value: new THREE.Vector4(3.5, 0.6, 4, 1) },
     // outside density (1/m, ~20 m visibility: the city stays crisp behind the glass), inside density, fog creep behind the glass (m), street-light gain
     night: { value: new THREE.Vector4(0.05, 0.036, 3.5, 0.08) },
     // The shafts in the thin lobby haze would be far fainter than the lamp-lit fog outside; lift them so the lobby
     // reads as lit by the street.
-    inBoost: { value: 14 },
+    inBoost: { value: 22 },
     dbg: { value: 0 },
     cookieOut: { value: 0.5 },
     cityGlow: { value: new THREE.Color(0.02, 0.013, 0.007) },
@@ -1031,7 +1031,7 @@ export const createPipeline: CreatePipeline = (renderer, scene, camera, world, v
     tSrc: { value: combineRT.texture },
     tBloom: { value: null },
     // Bloom only on the light sources (high threshold), a touch stronger there.
-    bloom: { value: 0.18 },
+    bloom: { value: 0.12 },
     time: { value: 0 },
     hurt: { value: 0 },
     hit: { value: 0 },
