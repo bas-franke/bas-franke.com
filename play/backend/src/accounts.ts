@@ -225,6 +225,14 @@ const validPassword = (p: unknown): p is string => typeof p === 'string' && p.le
 const tooMany = (res: Response) => res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' });
 /** The mail link itself, returned only while there is no SendGrid key (local development). */
 const devLink = (link: string) => (mailConfigured() ? {} : { devLink: link });
+/**
+ * Whether account mails can reach people: SendGrid is set up, or this is local development (links come back in the
+ * response). In production without SendGrid, sign-ups and resets are refused: handing out the link would let anyone
+ * activate any address.
+ */
+const mailAvailable = () => mailConfigured() || process.env.NODE_ENV !== 'production';
+const noMail = (res: Response) =>
+  res.status(503).json({ error: 'We cannot send mail right now, so new accounts and password resets are paused. You can keep playing as a guest.' });
 
 export const accounts = Router();
 
@@ -241,14 +249,18 @@ accounts.use((req, res, next) => {
 accounts.get('/', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!dbConfigured()) {
-    res.json({ enabled: false, mail: mailConfigured(), user: null, save: null });
+    res.json({ enabled: false, mail: mailAvailable(), user: null, save: null });
     return;
   }
   const user = await currentUser(req);
-  res.json({ enabled: true, mail: mailConfigured(), user: user ? view(user) : null, save: user ? await loadSave(user.id) : null });
+  res.json({ enabled: true, mail: mailAvailable(), user: user ? view(user) : null, save: user ? await loadSave(user.id) : null });
 });
 
 accounts.post('/register', async (req, res) => {
+  if (!mailAvailable()) {
+    noMail(res);
+    return;
+  }
   const ip = req.ip ?? 'unknown';
   const { password, nickname } = body(req);
   const email = cleanEmail(body(req).email);
@@ -314,6 +326,10 @@ accounts.post('/activate', async (req, res) => {
 });
 
 accounts.post('/resend', async (req, res) => {
+  if (!mailAvailable()) {
+    noMail(res);
+    return;
+  }
   const ip = req.ip ?? 'unknown';
   const email = cleanEmail(body(req).email);
   if (mailLimited(ip, email)) {
@@ -360,6 +376,10 @@ accounts.post('/logout', async (req, res) => {
 });
 
 accounts.post('/forgot', async (req, res) => {
+  if (!mailAvailable()) {
+    noMail(res);
+    return;
+  }
   const ip = req.ip ?? 'unknown';
   const email = cleanEmail(body(req).email);
   if (mailLimited(ip, email)) {
