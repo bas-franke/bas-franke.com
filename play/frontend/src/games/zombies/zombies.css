@@ -1,5 +1,5 @@
 /* Last Light HUD: sparse, dirty, red chalk. Everything sits on the dark scene, so text gets a soft shadow, not a box. */
-@import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Oswald:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Oswald:wght@400;600&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;1,500;1,600;1,700&display=swap');
 
 .hud.ll {
   --ll-red: #c8463a;
@@ -9,6 +9,8 @@
   color: var(--ll-bone);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
   pointer-events: none;
+  /* HUD unit: 1px on a ~900px tall screen, scaling with the height and never too small to read */
+  --u: clamp(0.95px, 0.11vh, 1.6px);
 }
 .hud.ll button,
 .hud.ll input,
@@ -149,69 +151,68 @@
   background: radial-gradient(ellipse at 50% 100%, rgba(200, 20, 10, 0.85), transparent 70%);
 }
 
-/* Wave tally, bottom left */
+/* Wave tally, bottom left: bright red chalk strokes with the zombies left under them */
 .ll-wave {
   position: absolute;
-  left: 32px;
-  bottom: 28px;
+  left: calc(20 * var(--u));
+  bottom: calc(12 * var(--u));
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: calc(3 * var(--u));
 }
 .ll-tally {
   display: flex;
-  gap: 9px;
-  height: 64px;
+  gap: calc(6.5 * var(--u));
+  height: calc(42 * var(--u));
+  padding-left: calc(3 * var(--u));
   align-items: flex-end;
   position: relative;
-  filter: drop-shadow(0 0 6px rgba(140, 10, 0, 0.6));
+  filter: drop-shadow(0 0 calc(2 * var(--u)) rgba(200, 20, 10, 0.22)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.8));
 }
 .ll-tally i {
   display: block;
-  width: 7px;
-  height: 62px;
-  border-radius: 3px 2px 4px 2px;
-  background: linear-gradient(180deg, #9e1d14, #6d0f0a 60%, #8a1810);
-  -webkit-mask: repeating-linear-gradient(170deg, #000 0 5px, rgba(0, 0, 0, 0.75) 5px 7px);
-  mask: repeating-linear-gradient(170deg, #000 0 5px, rgba(0, 0, 0, 0.75) 5px 7px);
+  width: calc(4 * var(--u));
+  height: calc(41 * var(--u));
+  border-radius: 2px 2px 3px 2px;
+  background: linear-gradient(180deg, #ff2a1e, #e4170f 55%, #d01810);
 }
 .ll-tally i.cross {
   position: absolute;
-  left: -8px;
-  bottom: 26px;
-  width: 78px;
-  height: 7px;
-  transform: rotate(-24deg) !important;
+  left: calc(-5 * var(--u));
+  bottom: calc(12 * var(--u));
+  width: calc(56 * var(--u));
+  height: calc(4.5 * var(--u));
+  transform: rotate(-22deg) !important;
 }
 .ll-tally.num {
-  font: 400 76px/1 'Special Elite', monospace;
-  color: #a51c12;
-  text-shadow: 0 0 14px rgba(150, 10, 0, 0.7), 0 2px 3px #000;
+  font: 400 calc(52 * var(--u)) / 1 'Special Elite', monospace;
+  color: #e3221a;
+  text-shadow: 0 0 12px rgba(200, 20, 10, 0.55), 0 2px 3px #000;
 }
 .ll-tally.empty {
   color: transparent;
 }
 .ll-sub {
-  font-size: 13px;
-  letter-spacing: 0.12em;
+  font: italic 600 calc(11.5 * var(--u)) / 1.1 'Barlow Condensed', Oswald, sans-serif;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ll-dim);
+  color: #e4e0d8;
 }
 
-/* Points, right side above the ammo */
+/* Points and the squad scoreboard, right side above the ammo */
 .ll-points {
   position: absolute;
-  right: 34px;
-  bottom: 168px;
+  right: calc(22 * var(--u));
+  bottom: calc(110 * var(--u));
   display: flex;
   flex-direction: column;
   align-items: flex-end;
 }
 .ll-pts {
-  font: 600 34px/1 Oswald, sans-serif;
-  color: #f1d48a;
-  letter-spacing: 0.02em;
+  font: 700 calc(24 * var(--u)) / 1 'Barlow Condensed', Oswald, sans-serif;
+  color: #ecd18e;
+  letter-spacing: 0.01em;
 }
 .ll-popups {
   position: relative;
@@ -231,53 +232,55 @@
   color: #ff9a6a;
 }
 .ll-team {
-  margin-top: 8px;
+  margin-top: calc(5 * var(--u));
   display: grid;
-  gap: 2px;
-  font-size: 13px;
-  color: var(--ll-dim);
+  gap: 0;
+  font: italic 600 calc(10.5 * var(--u)) / 1 'Barlow Condensed', Oswald, sans-serif;
+  color: #b9bfcc;
   text-align: right;
 }
 .ll-team div {
   display: flex;
-  gap: 8px;
+  gap: calc(6 * var(--u));
   align-items: center;
   justify-content: flex-end;
 }
 .ll-team i {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+  width: calc(6 * var(--u));
+  height: calc(6 * var(--u));
+  border-radius: 1px;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.7);
 }
 .ll-team b {
-  color: var(--ll-bone);
-  font-weight: 600;
-  min-width: 46px;
+  color: #f2f0ea;
+  font-weight: 700;
+  min-width: calc(38 * var(--u));
 }
 .ll-team .down {
   color: #ff6b5a;
 }
 
-/* Health: a thin bar bottom centre */
+/* Health: a thin pale line bottom centre */
 .ll-health {
   position: absolute;
   left: 50%;
-  bottom: 30px;
-  width: 260px;
+  bottom: calc(15 * var(--u));
+  width: max(140px, 10vw);
   transform: translateX(-50%);
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 .ll-bar {
-  height: 5px;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 3px;
+  height: calc(3 * var(--u));
+  min-height: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
   overflow: hidden;
 }
 .ll-bar i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #b9b2a2, #e6dccb);
+  background: linear-gradient(90deg, #d8d4cc, #f4f1ea);
   transition: width 0.2s;
 }
 .ll-bar i.low {
@@ -287,56 +290,80 @@
   background: linear-gradient(90deg, #4f6a86, #8fb2d6);
 }
 
-/* Ammo, bottom right */
+/* Ammo, bottom right: gun name with a boxed tag, big mag count, grenades and fire mode in small type */
 .ll-ammo {
   position: absolute;
-  right: 34px;
-  bottom: 26px;
+  right: calc(18 * var(--u));
+  bottom: calc(5 * var(--u));
   text-align: right;
+  font-family: 'Barlow Condensed', Oswald, sans-serif;
 }
 .ll-gun {
-  font-size: 15px;
-  letter-spacing: 0.1em;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: calc(7 * var(--u));
+  font: italic 600 calc(15 * var(--u)) / 1 'Barlow Condensed', Oswald, sans-serif;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ll-dim);
+  color: #cfccc6;
 }
-.ll-era {
-  margin-left: 8px;
-  font-size: 10px;
-  padding: 1px 5px;
-  border: 1px solid rgba(230, 220, 203, 0.3);
-  border-radius: 3px;
+.ll-tag {
+  font: 700 calc(7.5 * var(--u)) / 1 'Barlow Condensed', Oswald, sans-serif;
+  letter-spacing: 0.08em;
+  padding: calc(2 * var(--u)) calc(5 * var(--u));
+  border: 1px solid rgba(230, 226, 218, 0.55);
+  border-radius: 2px;
+  color: #e6e2da;
+  background: rgba(0, 0, 0, 0.25);
 }
 .ll-count {
-  font: 600 52px/1 Oswald, sans-serif;
+  font: 700 calc(41 * var(--u)) / 0.86 'Barlow Condensed', Oswald, sans-serif;
+  color: #f4f2ee;
+  margin-bottom: calc(-2 * var(--u));
 }
 .ll-count span {
-  font-size: 22px;
-  color: var(--ll-dim);
-  margin-left: 6px;
+  font-size: calc(21 * var(--u));
+  font-weight: 500;
+  color: #bdb9b2;
+  margin-left: calc(6 * var(--u));
 }
 .ll-count.low {
   color: #ff7a5c;
 }
 .ll-gear {
   display: flex;
-  gap: 12px;
+  gap: calc(8 * var(--u));
   justify-content: flex-end;
   align-items: center;
-  font-size: 12px;
-  color: var(--ll-dim);
+  margin-top: 0;
+  font: italic 600 calc(9 * var(--u)) / 1.1 'Barlow Condensed', Oswald, sans-serif;
+  color: #c9c5bd;
+}
+.ll-nades {
+  display: flex;
+  gap: calc(2 * var(--u));
 }
 .ll-gear i {
   display: inline-block;
-  width: 9px;
-  height: 11px;
-  margin-left: 3px;
-  border-radius: 4px 4px 3px 3px;
-  border: 1px solid rgba(230, 220, 203, 0.4);
+  width: calc(6.5 * var(--u));
+  height: calc(6.5 * var(--u));
+  border-radius: 50%;
+  border: 1px solid rgba(220, 216, 208, 0.5);
 }
 .ll-gear i.on {
-  background: #7d8a5a;
-  border-color: #a9b77c;
+  background: radial-gradient(circle at 40% 35%, #c9c4b8, #6d6a62);
+  border-color: rgba(230, 226, 218, 0.8);
+}
+.ll-mode {
+  margin-top: calc(1 * var(--u));
+  font: italic 500 calc(8.5 * var(--u)) / 1.1 'Barlow Condensed', Oswald, sans-serif;
+  letter-spacing: 0.02em;
+  color: #c9c5bd;
+  white-space: nowrap;
+}
+.ll-mode::first-letter {
+  text-transform: uppercase;
 }
 .ll-reload {
   margin-top: 6px;
@@ -344,6 +371,15 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #ffcf8a;
+}
+
+/* The key hint moves to the top right, out of the ammo corner */
+.hud.ll .menu-hint {
+  top: 12px;
+  bottom: auto;
+  right: 16px;
+  font-size: 11px;
+  color: rgba(230, 220, 203, 0.4);
 }
 
 /* Use prompt */
@@ -398,17 +434,18 @@
 }
 .ll-banner h2 {
   margin: 0;
-  font: 400 64px/1 'Special Elite', monospace;
-  color: #b3241a;
-  text-shadow: 0 0 22px rgba(150, 10, 0, 0.7), 0 3px 4px #000;
-  letter-spacing: 0.04em;
+  font: 400 calc(42 * var(--u)) / 1 'Special Elite', monospace;
+  color: #dc231b;
+  -webkit-text-stroke: calc(0.6 * var(--u)) #dc231b;
+  text-shadow: 0 0 2px #2a0302, 0 2px 1px rgba(30, 3, 2, 0.9), 0 0 16px rgba(160, 10, 0, 0.3);
+  letter-spacing: 0.06em;
 }
 .ll-banner p {
-  margin: 10px 0 0;
-  font-size: 15px;
-  letter-spacing: 0.3em;
+  margin: calc(10 * var(--u)) 0 0;
+  font: italic 500 calc(11 * var(--u)) / 1 'Barlow Condensed', Oswald, sans-serif;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
-  color: var(--ll-dim);
+  color: #ddd9d2;
 }
 
 .ll-downed {

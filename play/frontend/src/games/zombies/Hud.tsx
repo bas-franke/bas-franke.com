@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { GAMES, colorHex } from '@shared/protocol';
 import { ZB } from '@shared/zombies/constants';
 import type { ZScore } from '@shared/zombies/protocol';
-import { WEAPONS } from '@shared/zombies/weapons';
+import { WEAPONS, type WeaponId, type WeaponKind } from '@shared/zombies/weapons';
 import { VolumeControl } from '../../ui/VolumeControl';
 import { type ClientContext, useStore } from '../types';
 import type { Quality } from './api';
@@ -11,6 +11,9 @@ import { LoadingScreen } from './LoadingScreen';
 import './zombies.css';
 
 const WHY: Record<string, string> = { hit: '', kill: '', head: 'headshot', knife: 'knife', fix: 'barrier', revive: 'revive' };
+/** The boxed tag next to the gun name; guns without one show their era. */
+const TAG: Partial<Record<WeaponId, string>> = { mp7: 'suppressed', kar98k: 'scoped', barrett: 'scoped', m249: 'belt-fed' };
+const KIND: Record<WeaponKind, string> = { pistol: 'sidearm', smg: 'sub-machine gun', rifle: 'rifle', shotgun: 'shotgun', sniper: 'sniper', lmg: 'light machine gun' };
 
 export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: ClientContext }) {
   const s = useStore(client.hud);
@@ -110,7 +113,7 @@ export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: Client
             .map((r) => (
               <div key={r.id} className={s.downed.some((d) => d.id === r.id) ? 'down' : ''}>
                 <i style={{ background: colorOf(r.id) }} />
-                {nameOf(r.id)}
+                <span>{nameOf(r.id)}</span>
                 <b>{r.points}</b>
               </div>
             ))}
@@ -131,20 +134,23 @@ export function ZombiesHud({ client, ctx }: { client: ZombiesClient; ctx: Client
       <div className="ll-ammo">
         <div className="ll-gun">
           {w.name}
-          <span className="ll-era">{w.era === 'classic' ? 'classic' : 'modern'}</span>
+          <span className="ll-tag">{TAG[w.id] ?? w.era}</span>
         </div>
         <div className={`ll-count ${lowAmmo ? 'low' : ''}`}>
           {s.mag}
           <span>/ {s.res}</span>
         </div>
         <div className="ll-gear">
-          <span title="Frag grenades (G)">
+          <span className="ll-nades" title="Frag grenades (G)">
             {Array.from({ length: ZB.nadeMax }, (_, i) => (
               <i key={i} className={i < s.nades ? 'on' : ''} />
             ))}
           </span>
           {other && <span className="ll-other">2nd: {WEAPONS[other].name}</span>}
           {!s.flashlight && <span className="ll-other">flashlight off (F)</span>}
+        </div>
+        <div className="ll-mode">
+          {w.auto ? 'full-auto' : w.perShell ? 'pump action' : 'semi-auto'} · {w.rpm} rpm · {KIND[w.kind]}
         </div>
         {s.reloading && <div className="ll-reload">Reloading</div>}
         {!s.reloading && s.mag === 0 && s.res > 0 && <div className="ll-reload">Press R to reload</div>}
