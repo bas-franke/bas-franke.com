@@ -927,6 +927,9 @@ export class RocketsClient implements GameClient {
     if (themeOf(map).neon) {
       const bloom = (this.bloom = createBloom(engine.renderer));
       engine.renderHook = () => bloom.render(engine.scene, engine.camera);
+      // Neon trails: a hot pink streak cooling into lavender haze.
+      this.effects?.trailColors.hot.set(0xff6ad8);
+      this.effects?.trailColors.smoke.set(0xb8a0ff);
     }
     for (const pos of map.packs) {
       const pack = buildPickup('health');

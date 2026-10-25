@@ -423,6 +423,8 @@ export class Effects {
   private readonly sceneBeforeRender: THREE.Scene['onBeforeRender'];
 
   // Smoke puffs: fill and ink share one instanceMatrix. Live puffs are slots 0..livePuffs-1.
+  /** Rocket-trail colours (hot start, cooled smoke); a game may retint them, e.g. neon trails on a neon map. */
+  readonly trailColors = { hot: TRAIL_HOT.clone(), smoke: TRAIL_SMOKE.clone() };
   private readonly puffGeo = new THREE.IcosahedronGeometry(1, 1);
   private readonly puffHull = hullGeometry(this.puffGeo);
   private readonly toonMat = glowToonMaterial();
@@ -1025,9 +1027,10 @@ export class Effects {
       writeTRS(m, i * 16, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], q[i * 4], q[i * 4 + 1], q[i * 4 + 2], q[i * 4 + 3], r);
       // Hot for the first moments (when the rocket is fresh), then pale smoke thinning out to nothing.
       const hot = this.tHeat[i] * Math.max(0, 1 - t / 0.12);
-      col[i * 3] = TRAIL_SMOKE.r + (TRAIL_HOT.r - TRAIL_SMOKE.r) * hot;
-      col[i * 3 + 1] = TRAIL_SMOKE.g + (TRAIL_HOT.g - TRAIL_SMOKE.g) * hot;
-      col[i * 3 + 2] = TRAIL_SMOKE.b + (TRAIL_HOT.b - TRAIL_SMOKE.b) * hot;
+      const { hot: th, smoke: ts } = this.trailColors;
+      col[i * 3] = ts.r + (th.r - ts.r) * hot;
+      col[i * 3 + 1] = ts.g + (th.g - ts.g) * hot;
+      col[i * 3 + 2] = ts.b + (th.b - ts.b) * hot;
       const fade = (1 - t) * (1 - t);
       this.trailAlpha[i] = (TRAIL_ALPHA + (TRAIL_HOT_ALPHA - TRAIL_ALPHA) * hot) * fade * Math.min(1, d / 1.5);
       i++;
