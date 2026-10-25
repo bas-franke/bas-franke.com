@@ -2135,6 +2135,41 @@ fieldset.panel {
   padding-right: 40px;
 }
 
+/* On wide screens the strip is a centred panel instead of an edge-to-edge band: the chips wrap onto at most two
+   lines (the rest is cut off) and the panel sits on a soft, slightly translucent surface. */
+@media (min-width: 1100px) {
+  .trend-strip {
+    top: 68px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(820px, calc(100% - 48px));
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    /* Two rows plus padding; the padding is smaller than the gap so a third row never peeks in. */
+    max-height: calc(2 * 28px + 8px + 2 * 7px);
+    padding: 7px 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--paper-2), transparent 12%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 10px 30px -18px rgb(0 0 0 / 0.45);
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  .trend-chip {
+    background: var(--surface);
+  }
+
+  .feed-has-strip .story {
+    padding-top: 160px;
+  }
+}
+
 /* With the trending strip on screen, the "newer stories" pill sits below it instead of on top of it. */
 .feed-has-strip .before-pill {
   top: 100px;
@@ -2142,7 +2177,7 @@ fieldset.panel {
 
 @media (min-width: 1100px) {
   .feed-has-strip .before-pill {
-    top: 106px;
+    top: 162px;
   }
 }
 
