@@ -81,32 +81,43 @@ async function currentUser(req: Request): Promise<User | undefined> {
   );
 }
 
-/** Creates a one-time mail link for `purpose`, replacing older ones of the same kind. */
-async function mailToken(userId: string, purpose: 'activate' | 'reset') {
+/** The password and nickname a sign-up chose; they only take effect when its own activation link is opened. */
+interface Pending {
+  passwordHash: string;
+  nickname: string;
+}
+
+/**
+ * Creates a one-time mail link for `purpose`. A reset link replaces older ones. Activation links each carry the
+ * credentials of the sign-up that asked for them, so signing up again with somebody else's unactivated address
+ * cannot change what that person's own link activates.
+ */
+async function mailToken(userId: string, purpose: 'activate' | 'reset', pending?: Pending) {
   const token = randomBytes(32).toString('base64url');
   const hours = purpose === 'activate' ? ACTIVATE_HOURS : RESET_HOURS;
-  await query('DELETE FROM email_tokens WHERE user_id = $1 AND purpose = $2', [userId, purpose]);
-  await query('INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at) VALUES ($1, $2, $3, $4)', [
+  if (purpose === 'reset') await query("DELETE FROM email_tokens WHERE user_id = $1 AND purpose = 'reset'", [userId]);
+  await query('INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at, password_hash, nickname) VALUES ($1, $2, $3, $4, $5, $6)', [
     tokenHash(token),
     userId,
     purpose,
     new Date(Date.now() + hours * 3_600_000),
+    pending?.passwordHash ?? null,
+    pending?.nickname ?? null,
   ]);
   return `${config.publicUrl}/account/${purpose}/${token}`;
 }
 
-/** Spends a mail link; returns the user it belongs to, or undefined when it is unknown, used or expired. */
+/** Spends a mail link; returns its row, or undefined when it is unknown, used or expired. */
 async function useToken(token: unknown, purpose: 'activate' | 'reset') {
   if (typeof token !== 'string' || token.length < 20 || token.length > 100) return undefined;
-  const row = await one<{ user_id: string }>('DELETE FROM email_tokens WHERE token_hash = $1 AND purpose = $2 AND expires_at > now() RETURNING user_id', [
-    tokenHash(token),
-    purpose,
-  ]);
-  return row?.user_id;
+  return one<{ user_id: string; password_hash: string | null; nickname: string | null }>(
+    'DELETE FROM email_tokens WHERE token_hash = $1 AND purpose = $2 AND expires_at > now() RETURNING user_id, password_hash, nickname',
+    [tokenHash(token), purpose],
+  );
 }
 
-async function sendActivation(user: User) {
-  const link = await mailToken(user.id, 'activate');
+async function sendActivation(user: User, pending?: Pending) {
+  const link = await mailToken(user.id, 'activate', pending);
   const sent = await sendMail({
     to: user.email,
     subject: 'Activate your play account',
@@ -138,15 +149,16 @@ type Save = Record<string, string>;
 function sanitizeSave(raw: unknown): Save {
   const out: Save = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  let bytes = 0;
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value !== 'string' || !key || key.length > SAVE_KEY_MAX) continue;
-    bytes += key.length + value.length;
-    if (bytes > SAVE_MAX_BYTES) break;
-    out[key] = value;
+    if (typeof value === 'string' && key && key.length <= SAVE_KEY_MAX) out[key] = value;
   }
   return out;
 }
+
+const saveBytes = (save: Save) => Object.entries(save).reduce((n, [k, v]) => n + Buffer.byteLength(k) + Buffer.byteLength(v), 0);
+
+/** Thrown when a merged save would pass the cap; answered with 413 so the device stops retrying the same upload. */
+class SaveTooLarge extends Error {}
 
 async function loadSave(userId: string): Promise<Save> {
   const row = await one<{ data: unknown }>('SELECT data FROM saves WHERE user_id = $1', [userId]);
@@ -160,7 +172,21 @@ async function loadSave(userId: string): Promise<Save> {
 async function mergeSave(userId: string, incoming: unknown, deviceWins: boolean): Promise<Save> {
   const current = await loadSave(userId);
   const device = sanitizeSave(incoming);
-  const next = sanitizeSave(deviceWins ? { ...current, ...device } : { ...device, ...current });
+  let next: Save;
+  if (deviceWins) {
+    next = { ...current, ...device };
+    if (saveBytes(next) > SAVE_MAX_BYTES) throw new SaveTooLarge();
+  } else {
+    // At login the account's keys come first; device-only keys are added while they fit.
+    next = { ...current };
+    let bytes = saveBytes(next);
+    for (const [k, v] of Object.entries(device)) {
+      if (k in next) continue;
+      bytes += Buffer.byteLength(k) + Buffer.byteLength(v);
+      if (bytes > SAVE_MAX_BYTES) break;
+      next[k] = v;
+    }
+  }
   await query(
     `INSERT INTO saves (user_id, data, updated_at) VALUES ($1, $2, now())
      ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
@@ -186,6 +212,12 @@ setInterval(() => {
   const cutoff = Date.now() - 3_600_000;
   for (const [k, times] of attempts) if (!times.some((t) => t > cutoff)) attempts.delete(k);
 }, 600_000).unref();
+
+/** A wrong password and an unknown email should take equally long, so timing does not reveal who has an account. */
+const DUMMY_HASH = hashPassword(randomBytes(16).toString('hex'));
+
+/** Mail sends per address per hour on top of the per-IP limit, so nobody can flood one inbox from many IPs. */
+const mailLimited = (ip: string, email: string) => limited(`mail:${ip}`, 5, 600_000) || (!!email && limited(`mailto:${email}`, 4, 3_600_000));
 
 const body = (req: Request) => (req.body ?? {}) as Record<string, unknown>;
 const cleanEmail = (raw: unknown) => (typeof raw === 'string' ? raw.trim().toLowerCase() : '');
@@ -218,7 +250,7 @@ accounts.get('/', async (req, res) => {
 
 accounts.post('/register', async (req, res) => {
   const ip = req.ip ?? 'unknown';
-  const { password, nickname, save } = body(req);
+  const { password, nickname } = body(req);
   const email = cleanEmail(body(req).email);
   if (!EMAIL.test(email)) {
     res.status(400).json({ error: 'That does not look like an email address.', field: 'email' });
@@ -242,22 +274,39 @@ accounts.post('/register', async (req, res) => {
     res.status(409).json({ error: 'There is already an account with that email. Log in, or reset the password.', field: 'email' });
     return;
   }
-  // Signing up again before activating replaces the unfinished account (new password, fresh link).
-  const user = existing
-    ? await one<User>(`UPDATE users SET nickname = $2, password_hash = $3 WHERE id = $1 RETURNING ${USER_COLUMNS}`, [existing.id, nick, await hashPassword(password)])
-    : await one<User>(`INSERT INTO users (email, nickname, password_hash) VALUES ($1, $2, $3) RETURNING ${USER_COLUMNS}`, [email, nick, await hashPassword(password)]);
-  await mergeSave(user.id, save, true);
-  const { link } = await sendActivation(user);
+  if (limited(`mailto:${email}`, 4, 3_600_000)) {
+    tooMany(res);
+    return;
+  }
+  // Signing up again before activating leaves the account as it is: the new password and nickname travel with the
+  // new activation link only. No save is stored yet; the device uploads it once the account is active.
+  const pending = { passwordHash: await hashPassword(password), nickname: nick };
+  const user =
+    existing ??
+    (await one<User>(`INSERT INTO users (email, nickname, password_hash) VALUES ($1, $2, $3) RETURNING ${USER_COLUMNS}`, [email, nick, pending.passwordHash]));
+  const { link } = await sendActivation({ ...user, nickname: nick }, pending);
   console.log(`[account] registered ${user.id} (${ip})`);
   res.status(201).json({ pending: true, email, ...devLink(link) });
 });
 
 accounts.post('/activate', async (req, res) => {
-  const userId = await useToken(body(req).token, 'activate');
-  const user = userId && (await one<User>(`UPDATE users SET verified_at = coalesce(verified_at, now()) WHERE id = $1 RETURNING ${USER_COLUMNS}`, [userId]));
+  const row = await useToken(body(req).token, 'activate');
+  // Only the first activation sets the credentials; a stray older link for an active account just logs in.
+  const fresh = row && (await one<{ id: string }>('SELECT id FROM users WHERE id = $1 AND verified_at IS NULL', [row.user_id]));
+  const user = !row
+    ? undefined
+    : fresh && row.password_hash
+      ? await one<User>(`UPDATE users SET verified_at = now(), password_hash = $2, nickname = $3 WHERE id = $1 RETURNING ${USER_COLUMNS}`, [row.user_id, row.password_hash, row.nickname])
+      : await one<User>(`UPDATE users SET verified_at = coalesce(verified_at, now()) WHERE id = $1 RETURNING ${USER_COLUMNS}`, [row.user_id]);
   if (!user) {
     res.status(400).json({ error: 'This activation link is used up or has expired. Log in to get a new one.' });
     return;
+  }
+  if (fresh) {
+    // A brand-new account starts empty (whatever an earlier unactivated sign-up stored is dropped), and the other
+    // pending activation links stop working.
+    await query('DELETE FROM saves WHERE user_id = $1', [user.id]);
+    await query("DELETE FROM email_tokens WHERE user_id = $1 AND purpose = 'activate'", [user.id]);
   }
   await startSession(req, res, user.id);
   console.log(`[account] activated ${user.id}`);
@@ -266,11 +315,11 @@ accounts.post('/activate', async (req, res) => {
 
 accounts.post('/resend', async (req, res) => {
   const ip = req.ip ?? 'unknown';
-  if (limited(`mail:${ip}`, 5, 600_000)) {
+  const email = cleanEmail(body(req).email);
+  if (mailLimited(ip, email)) {
     tooMany(res);
     return;
   }
-  const email = cleanEmail(body(req).email);
   const user = email ? await one<User>(`SELECT ${USER_COLUMNS} FROM users WHERE lower(email) = $1 AND verified_at IS NULL`, [email]) : undefined;
   // Same answer whether or not the address has an account, so this cannot be used to look up who plays here.
   const link = user ? (await sendActivation(user)).link : undefined;
@@ -289,10 +338,12 @@ accounts.post('/login', async (req, res) => {
     email && typeof password === 'string'
       ? await one<User & { password_hash: string; verified_at: Date | null }>(`SELECT ${USER_COLUMNS}, password_hash, verified_at FROM users WHERE lower(email) = $1`, [email])
       : undefined;
-  if (!row || !(await verifyPassword(password as string, row.password_hash))) {
+  const ok = await verifyPassword(typeof password === 'string' ? password : '', row?.password_hash ?? (await DUMMY_HASH));
+  if (!row || (!ok && row.verified_at)) {
     res.status(401).json({ error: 'Wrong email or password.' });
     return;
   }
+  // An unactivated account's stored password may not be the one this person picked (see register), so it is not checked.
   if (!row.verified_at) {
     res.status(403).json({ error: 'Activate your account first: open the link in the mail we sent you.', unverified: true });
     return;
@@ -310,11 +361,11 @@ accounts.post('/logout', async (req, res) => {
 
 accounts.post('/forgot', async (req, res) => {
   const ip = req.ip ?? 'unknown';
-  if (limited(`mail:${ip}`, 5, 600_000)) {
+  const email = cleanEmail(body(req).email);
+  if (mailLimited(ip, email)) {
     tooMany(res);
     return;
   }
-  const email = cleanEmail(body(req).email);
   const user = email ? await one<User>(`SELECT ${USER_COLUMNS} FROM users WHERE lower(email) = $1`, [email]) : undefined;
   const link = user ? (await sendReset(user)).link : undefined;
   res.json({ ok: true, ...(link ? devLink(link) : {}) });
@@ -326,7 +377,7 @@ accounts.post('/reset', async (req, res) => {
     res.status(400).json({ error: 'Pick a password of at least 8 characters.', field: 'password' });
     return;
   }
-  const userId = await useToken(token, 'reset');
+  const userId = (await useToken(token, 'reset'))?.user_id;
   // Getting the reset mail proves the address too, so this also activates an account that never was.
   const user =
     userId &&
@@ -366,7 +417,12 @@ accounts.put('/save', async (req, res) => {
     res.status(401).json({ error: 'Not logged in.' });
     return;
   }
-  res.json({ save: await mergeSave(user.id, body(req).save, true) });
+  try {
+    res.json({ save: await mergeSave(user.id, body(req).save, true) });
+  } catch (err) {
+    if (!(err instanceof SaveTooLarge)) throw err;
+    res.status(413).json({ error: `Your saved data is over ${SAVE_MAX_BYTES / 1024} KB; the newest changes were not synced.`, tooLarge: true });
+  }
 });
 
 accounts.post('/password', async (req, res) => {

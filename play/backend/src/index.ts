@@ -77,6 +77,10 @@ const onError: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(400).json({ error: 'Invalid JSON.' });
     return;
   }
+  if (err && typeof err === 'object' && 'type' in err && (err as { type?: string }).type === 'entity.too.large') {
+    res.status(413).json({ error: 'That request is too large.', tooLarge: true });
+    return;
+  }
   console.error(err);
   res.status(500).json({ error: 'Internal error' });
 };

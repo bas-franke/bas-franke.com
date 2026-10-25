@@ -101,7 +101,7 @@ jobs:
           # Values go over stdin so they never show up in a command line; umask keeps the temp file private.
           printf '%s\n%s\n' "$SENDGRID_API_KEY" "$MAIL_FROM" | ssh server "umask 077 && read -r key && { read -r from || true; } \
             && f=/srv/apps/$PROJECT/.env && touch \$f \
-            && { grep -v -e '^SENDGRID_API_KEY=' -e '^MAIL_FROM=' \$f || true; printf 'SENDGRID_API_KEY=%s\n' \"\$key\"; \
+            && { grep -v -e '^SENDGRID_API_KEY=' \${from:+-e '^MAIL_FROM='} \$f || true; printf 'SENDGRID_API_KEY=%s\n' \"\$key\"; \
                  if [ -n \"\$from\" ]; then printf 'MAIL_FROM=%s\n' \"\$from\"; fi; } > \$f.new \
             && mv \$f.new \$f"
 

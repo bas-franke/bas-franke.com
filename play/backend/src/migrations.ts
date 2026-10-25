@@ -44,4 +44,11 @@ export const migrations: { name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    name: '002_pending_signup',
+    sql: `
+      -- An activation link carries the password and nickname of the sign-up that asked for it (see accounts.ts).
+      ALTER TABLE email_tokens ADD COLUMN password_hash text, ADD COLUMN nickname text;
+    `,
+  },
 ];
