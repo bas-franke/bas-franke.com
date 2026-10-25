@@ -39,14 +39,22 @@ const SMOKE_W = new Float32Array(PART_IDS.map((id) => {
   if (id.startsWith('arm')) return 0.15;
   return id === 'cockpitNose' || id === 'tail' ? 0.5 : 0.35;
 }));
-/** Engine parts that catch fire once nearly gone (the cockpit only burns on a wreck). */
-const BURNS = PART_IDS.map((id) => /^(nacelle|intake|nozzle)/.test(id));
+/** Parts that catch fire as they wear down: the engines, and the cockpit hull once it is badly hurt (BURN_AT). */
+const BURNS = PART_IDS.map((id) => /^(nacelle|intake|nozzle|fan)/.test(id) || id === 'hull');
 /** 1 = an energy binder (arcs in its colour), 2 = a steering cable (spits hot sparks), 0 = neither. */
 const ARCS = PART_IDS.map((id) => (id.startsWith('binder') ? 1 : id.startsWith('cable') ? 2 : 0));
 const HULL = PART_IDS.indexOf('hull');
 const NACELLE = PART_IDS.map((id) => id.startsWith('nacelle'));
-/** Below this health an engine part burns, and a binder or cable starts to crackle. */
-const FIRE_AT = 0.3;
+/**
+ * Below this health a part catches fire: a lick of flame at first, growing into a blaze that pours off the pod as the
+ * part goes (burnOf). The hull, being armoured, holds out longer.
+ */
+const BURN_AT = new Float32Array(PART_IDS.map((id) => (id === 'hull' ? 0.45 : 0.6)));
+/** How fiercely a part with health `hv` burns, 0 (not yet) .. 1 (nearly gone), eased so it builds late. */
+function burnOf(i: number, hv: number): number {
+  const x = Math.min(1, Math.max(0, (BURN_AT[i] - hv) / BURN_AT[i]));
+  return x * (0.4 + 0.6 * x);
+}
 
 /**
  * How heavy the smoke of a part with damage `d` (1 - health) is, 0..1: thin grey wisps through moderate damage
@@ -92,7 +100,7 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
   const trails = new TrailSystem(MAX_TRAILS);
   const air = new AirSystem(Math.round(150 * Math.max(0.35, qs)), Math.round(420 * qs), new THREE.Color(theme.sand), new THREE.Color(theme.sunColor));
   const bursts = new BurstSystem(Math.round(700 * Math.max(0.35, qs)), 24, MAX_PODS);
-  const fireCount = Math.round(900 * Math.max(0.4, qs));
+  const fireCount = Math.round(1400 * Math.max(0.4, qs));
   const fire = new FireSystem(fireCount);
   // Smoke is grey here and darkened per puff with the damage; it streaks more than dust so it reads as speed.
   const smokeCount = Math.round(2600 * Math.max(0.4, qs));
@@ -399,22 +407,24 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
     // Tongues start on the part's skin (its top half and sides), so the fire looks attached to it.
     flame.pos.copy(src).addScaledVector(fp.velocity, -Math.random() * frameDt);
     flame.pos.x += (Math.random() - 0.5) * r * 1.2;
-    flame.pos.y += Math.random() * r * 0.7;
+    // (From the top of its skin, not its centre, or a big part's flames would burn inside it until they were huge.)
+    flame.pos.y += r * (0.45 + 0.5 * Math.random());
     flame.pos.z += (Math.random() - 0.5) * r * 0.8;
     // The gas falls back off the pod a little (the flame licks backwards); the player's rides closer, so its fire
     // stays on the engine instead of streaming into the lens.
-    flame.vel.copy(fp.velocity).multiplyScalar(own ? 0.97 - 0.05 * sp : 0.9 - 0.12 * sp);
+    // A blaze is torn off harder and trails further back than a lick of flame.
+    flame.vel.copy(fp.velocity).multiplyScalar(own ? 0.97 - (0.05 + 0.12 * f) * sp : 0.9 - (0.12 + 0.18 * f) * sp);
     flame.vel.x += (Math.random() - 0.5) * 1.2;
     flame.vel.z += (Math.random() - 0.5) * 1.2;
     flame.size0 = r * (0.14 + 0.1 * Math.random());
-    flame.size1 = r * (0.35 + 0.25 * Math.random()) * (0.7 + 0.6 * f) * (fp.wrecked ? 1.4 : 1);
-    flame.life = 0.16 + Math.random() * 0.14 + 0.06 * f;
+    flame.size1 = r * (0.35 + 0.25 * Math.random()) * (0.5 + 2.2 * f) * (fp.wrecked ? 1.4 : 1);
+    flame.life = 0.14 + Math.random() * 0.14 + 0.3 * f;
     flame.rise = 6 + Math.random() * 6;
     flame.drag = own ? 0.2 : 0.8;
     flame.heat = 0.75 + 0.5 * f;
     fire.emit(flame);
     // Embers spat out of the flames.
-    if (Math.random() < 0.08 * (0.5 + f)) {
+    if (Math.random() < 0.08 * (0.5 + 2 * f)) {
       v.copy(fp.velocity).multiplyScalar(0.75).add(q.set((Math.random() - 0.5) * 5, 3 + Math.random() * 5, (Math.random() - 0.5) * 5));
       bursts.spark(flame.pos, v, 0.4 + Math.random() * 0.4, 0.025 + Math.random() * 0.02);
     }
@@ -525,25 +535,29 @@ export function createSpeedFx(ctx: WorldContext): SpeedFx {
       }
     }
 
-    // Fire, nearer in only: engine parts nearly gone, and on a wreck everything that is left of the engines and hull.
+    // Fire, nearer in only: engine parts (and a badly hurt hull) burn harder the more they are damaged, the whole pod
+    // fiercer the more of it is hurt; a wreck burns from everything left of its engines and hull.
     if (dist < 450) {
       const far = dist > 220 ? 0.5 : 1;
       let burning = 0;
       const engineLeft = h.nacelleL > 0 || h.nacelleR > 0;
+      // How far gone the pod is overall (its worst engine and the hull): more parts get a full share of flames.
+      const worst = 1 - Math.min(h.nacelleL, h.nacelleR, h.hull);
+      const shares = 2 + Math.round(3 * worst);
       for (let i = 0; i < NP; i++) {
         const id = PART_IDS[i];
         const hv = h[id];
         // A wreck burns as an engine on fire (its nacelles; the hull only once both engines are gone), not as a
         // cluster of every engine part at once.
         const burns = (wreck ? NACELLE[i] || (i === HULL && !engineLeft) : BURNS[i]) && !(hv <= 0 && PARTS[id].detaches);
-        const f = wreck ? Math.max(0.6, (FIRE_AT - hv) / FIRE_AT) : (FIRE_AT - hv) / FIRE_AT;
+        const f = wreck ? Math.max(0.7, burnOf(i, hv)) : burnOf(i, hv);
         if (!burns || f <= 0) {
           s.partFire[i] = 0;
           continue;
         }
         // At most a few burning parts per pod get full rate; the rest flicker along at a fraction.
-        const share = burning++ < 2 ? 1 : 0.25;
-        s.partFire[i] += (fp.isPlayer ? 26 : 14) * (0.4 + 0.6 * Math.min(1, f)) * share * far * Math.max(0.5, qs) * dt;
+        const share = burning++ < shares ? 1 : 0.3;
+        s.partFire[i] += (fp.isPlayer ? 34 : 18) * (0.15 + 1.1 * f) * share * far * Math.max(0.5, qs) * dt;
         const a = an[id];
         while (s.partFire[i] >= 1) {
           s.partFire[i] -= 1;

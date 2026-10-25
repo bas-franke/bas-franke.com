@@ -981,6 +981,20 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
   // Damage: scars (flat scorch marks and bare-metal scrapes lying on the skin, scrapes running fore and aft) on the
   // parts, each shown once the damage of the parts near it passes its threshold, and the points smoke rises from.
   const anchors = partAnchors(design.shape);
+  // Rigid parts that work loose as they are hurt: each swings a little about a point between its centre and where it
+  // is mounted (its parent's centre), in its parent's space (an engine's is mirrored for the left one). Looks only:
+  // the handling never sees it.
+  const loose: { grp: THREE.Object3D; part: PartId; pivot: THREE.Vector3; k: number }[] = [];
+  for (const id of LOOSE) {
+    const grp = parts[id];
+    const parent = grp?.parent;
+    if (!grp || !parent) continue;
+    const [ax, ay, az] = anchors[id].pos;
+    const pivot = parent === cockpit
+      ? new THREE.Vector3(ax, ay, az)
+      : new THREE.Vector3((ax - parent.position.x) / parent.scale.x, ay - parent.position.y, az - parent.position.z);
+    loose.push({ grp, part: id, pivot: pivot.multiplyScalar(MOUNT_TOWARD), k: loose.length });
+  }
   const damagePoints: THREE.Object3D[] = [];
   const scars: Scar[] = [];
   const scarGeo = scarGeometry();
@@ -1390,6 +1404,22 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
         const peel = h >= 0.5 ? 0 : ((0.5 - h) / 0.5) ** 1.3;
         pl.grp.quaternion.setFromAxisAngle(pl.axis, -peel * (0.4 + Math.sin(t * (19 + 3 * pl.k)) * 0.06 * (0.3 + sp)));
       }
+      // Loose parts rattle on their mounts: nothing until they are scuffed, then a slow sway with a fast shiver on top,
+      // a few degrees at most when nearly gone, more at speed.
+      for (const l of loose) {
+        if (detached.has(l.part) || partBroken.has(l.part)) continue;
+        const d = Math.max(0, (1 - hp(l.part) - 0.2) / 0.8);
+        if (d <= 0 && l.grp.quaternion.w === 1) continue;
+        const a = LOOSE_SWING * d * (1 - dead) * (0.55 + 0.45 * Math.min(1, sp));
+        const ph = t + l.k * 1.7;
+        _e.set(
+          a * (Math.sin(ph * 2.3) * 0.7 + Math.sin(ph * 17.1) * 0.3),
+          a * (Math.sin(ph * 1.9 + 1) * 0.7 + Math.sin(ph * 13.7) * 0.3),
+          a * (Math.sin(ph * 2.7 + 2) * 0.7 + Math.sin(ph * 19.3) * 0.3),
+        );
+        l.grp.quaternion.setFromEuler(_e);
+        l.grp.position.copy(l.pivot).sub(_v.copy(l.pivot).applyQuaternion(l.grp.quaternion));
+      }
       // The antenna leans back, whips in the airflow at speed and bends further back (and over) as it is hit; its tip
       // light blinks.
       if (antenna && !detached.has('antenna')) {
@@ -1414,6 +1444,12 @@ export function createPod(design: PodDesign, quality: Quality = 'high'): PodVisu
 }
 
 const SIDES = ['L', 'R'] as const;
+/** Parts with no motion of their own that swing loose on their mounts as they are damaged, and how far (radians). */
+const LOOSE: PartId[] = ['intakeL', 'intakeR', 'clawsL', 'clawsR', 'nozzleL', 'nozzleR', 'cockpitNose', 'stabL', 'stabR', 'tail', 'mountL', 'mountR'];
+const LOOSE_SWING = 0.06;
+/** Where a loose part's pivot lies, from its parent's centre (0) to its own (1). */
+const MOUNT_TOWARD = 0.6;
+const _e = new THREE.Euler();
 /** How far the antenna leans back at rest (radians). */
 const ANTENNA_LEAN = 0.22;
 const BINDERS: BinderId[] = ['binderL', 'binderR', 'binderMid'];
