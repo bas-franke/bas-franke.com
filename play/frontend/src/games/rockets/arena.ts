@@ -39,8 +39,19 @@ export interface ArenaView {
   dispose(): void;
 }
 
-/** A toon material that picks a side texture or a top texture per face (attribute `aTop`), both in world metres. */
-function surfaceMaterial(color: number, surface: Surface, tex: (k: TexKey) => THREE.Texture): THREE.MeshToonMaterial {
+/** What a wet top surface reflects: the sky's horizon and zenith colours and the sun. */
+interface Wet {
+  horizon: THREE.Color;
+  zenith: THREE.Color;
+  sun: THREE.Color;
+  sunDir: THREE.Vector3;
+}
+
+/**
+ * A toon material that picks a side texture or a top texture per face (attribute `aTop`), both in world metres. With
+ * `wet`, top faces get a glossy sheen: the sky and the sun reflected, strongest at grazing angles (Fresnel).
+ */
+function surfaceMaterial(color: number, surface: Surface, tex: (k: TexKey) => THREE.Texture, wet?: Wet): THREE.MeshToonMaterial {
   const mat = new THREE.MeshToonMaterial({ color, gradientMap: toonRamp(), map: tex(surface.side), vertexColors: true });
   const crate = surface.side === 'crate';
   const topMap = tex(surface.top);
@@ -58,8 +69,31 @@ function surfaceMaterial(color: number, surface: Surface, tex: (k: TexKey) => TH
         `vec4 sampledDiffuseColor = mix(texture2D(map, vMapUv * sideScale), texture2D(topMap, vMapUv * topScale), vTop);
         diffuseColor *= sampledDiffuseColor;`,
       );
+    if (!wet) return;
+    shader.uniforms.wetHorizon = { value: wet.horizon };
+    shader.uniforms.wetZenith = { value: wet.zenith };
+    shader.uniforms.wetSun = { value: wet.sun };
+    shader.uniforms.wetSunDir = { value: wet.sunDir };
+    shader.fragmentShader =
+      'uniform vec3 wetHorizon;\nuniform vec3 wetZenith;\nuniform vec3 wetSun;\nuniform vec3 wetSunDir;\n' +
+      shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `{
+          vec3 viewDir = normalize(vViewPosition);
+          vec3 n = normalize(normal);
+          vec3 r = normalize((vec4(reflect(-viewDir, n), 0.0) * viewMatrix).xyz);
+          float fres = 0.12 + 0.88 * pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+          vec3 sky = mix(wetHorizon, wetZenith, smoothstep(0.0, 0.7, r.y));
+          float s = max(dot(r, wetSunDir), 0.0);
+          // Panel seams and grime stay dry: the sheen follows the texture's brightness.
+          float gloss = smoothstep(0.25, 0.75, dot(sampledDiffuseColor.rgb, vec3(0.333))) * vTop;
+          outgoingLight = mix(outgoingLight, sky, clamp(fres * 0.6, 0.0, 1.0) * gloss);
+          outgoingLight += wetSun * (pow(s, 60.0) * 3.0 + pow(s, 8.0) * 0.35) * gloss * (0.3 + fres);
+        }
+        #include <opaque_fragment>`,
+      );
   };
-  mat.customProgramCacheKey = () => 'arenaSurface';
+  mat.customProgramCacheKey = () => (wet ? 'arenaSurfaceWet' : 'arenaSurface');
   return mat;
 }
 
@@ -154,6 +188,10 @@ export function buildArena(map: MapData): ArenaView {
     return t;
   };
   const rand = mulberry(seed);
+  // Dusk maps have rain-wet decks.
+  const wet: Wet | undefined = theme.dusk
+    ? { horizon: new THREE.Color(map.fogColor), zenith: new THREE.Color(map.skyColor), sun: new THREE.Color(0xffb060), sunDir: sunDirOf(theme) }
+    : undefined;
 
   // ---- surfaces, merged per kind, plus one ink hull and one set of crease lines for everything ----
   const byKind = new Map<Visible, THREE.BufferGeometry[]>();
@@ -208,7 +246,7 @@ export function buildArena(map: MapData): ArenaView {
     const merged = mergeGeometries(list, false);
     for (const g of list) g.dispose();
     if (!merged) continue;
-    const mat = surfaceMaterial(map.tint?.[kind] ?? PALETTE[kind], theme.surfaces[kind] ?? BASE_SURFACES[kind], tex);
+    const mat = surfaceMaterial(map.tint?.[kind] ?? PALETTE[kind], theme.surfaces[kind] ?? BASE_SURFACES[kind], tex, kind === 'floor' ? wet : undefined);
     const mesh = new THREE.Mesh(merged, mat);
     mesh.receiveShadow = true;
     mesh.castShadow = kind !== 'floor' && kind !== 'wall';

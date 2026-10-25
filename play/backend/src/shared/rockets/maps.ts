@@ -19,8 +19,8 @@ function foundry(): MapData {
   const platH = 3;
   const ring = 4;
   const gantry = 6;
-  // The furnace blocks the views across the dais; its top and health pack are a rocket jump away.
-  b.block('platform', 0, 0, 8, 8, platH).block('stair', 0, 0, 2.5, 2.5, 8).pack(0, 8, 0);
+  // The furnace tower blocks the views across the dais; its top and health pack are a rocket jump away.
+  b.block('platform', 0, 0, 8, 8, platH).block('stair', 0, 0, 2.5, 2.5, 12).pack(0, 12, 0);
   b.pair((p) => p.stairs('z', -1, 0, 8 + B.run(0, platH), 5, 0, platH).pack(5, platH, 5));
   // Chimneys (pink and teal by quarter) straddle the wall ledges: walk under the arch, but nobody sees along the whole ring.
   marks(['tower', 'crate', 'tower', 'crate'], (p) => p.box('tower', 25, 0, -1.5, 27, 15, 1.5).box('tower', 27, ring + 2.4, -1.5, half, 15, 1.5));
@@ -44,7 +44,7 @@ function foundry(): MapData {
     half,
     skyColor: 0x22308e,
     fogColor: 0xc06c9e,
-    tint: { floor: 0x8e94aa, wall: 0xc23c8c, platform: 0xe2489e, stair: 0xf2c232, pillar: 0xf2c232, tower: 0xd8409a, crate: 0x2fbccc, ledge: 0xf2c232 },
+    tint: { floor: 0x5c6278, wall: 0xc23c8c, platform: 0xe2489e, stair: 0xf2c232, pillar: 0xf2c232, tower: 0xd8409a, crate: 0x2fbccc, ledge: 0xf2c232 },
   });
 }
 

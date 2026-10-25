@@ -479,20 +479,32 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number)
     }
   }
   if (core) {
-    const h = core.max.y - core.min.y;
-    const sx = core.max.x - core.min.x;
-    const slotH = h - 1.6;
-    const cy = core.min.y + 0.6 + slotH / 2;
+    // The furnace tower: the part that stands clear of the dais gets a tall glowing tube behind a dark frame on every
+    // face, yellow pilasters down the corners and dark steel bands, all flush with the walls (nothing to stand on).
+    const ex = (core.max.x - core.min.x) / 2;
+    const ez = (core.max.z - core.min.z) / 2;
+    const ccx = (core.min.x + core.max.x) / 2;
+    const ccz = (core.min.z + core.max.z) / 2;
+    let foot = core.min.y;
+    for (const o of map.boxes) if (o !== core && o.kind !== 'clip' && o.max.y > foot && o.max.y < core.max.y && ccx > o.min.x && ccx < o.max.x && ccz > o.min.z && ccz < o.max.z) foot = o.max.y;
+    const slotH = core.max.y - foot - 1.8;
+    const cy = foot + 0.9 + slotH / 2;
     for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const half = (nx ? sx : core.max.z - core.min.z) / 2;
-      const x = (core.min.x + core.max.x) / 2 + nx * (half + 0.03);
-      const z = (core.min.z + core.max.z) / 2 + nz * (half + 0.03);
+      const half = nx ? ex : ez;
+      const x = ccx + nx * (half + 0.03);
+      const z = ccz + nz * (half + 0.03);
       const yaw = Math.atan2(nx, nz);
-      const w = Math.min(half * 0.9, 1.6);
-      solid.add(at(box(w + 0.5, slotH + 0.5, 0.12), x, cy, z, yaw), 0x2a2634);
-      glow.add(at(box(w, slotH, 0.16), x, cy, z, yaw), 0xff7a1e);
-      glow.add(at(box(w * 0.35, slotH, 0.18), x, cy, z, yaw), 0xffe08a);
-      for (let y = cy - slotH / 2 + 0.8; y < cy + slotH / 2; y += 1.4) solid.add(at(box(w + 0.1, 0.1, 0.2), x, y, z, yaw), 0x2a2634);
+      const w = Math.min(half * 0.7, 1.4);
+      solid.add(at(box(w + 0.6, slotH + 0.6, 0.12), x, cy, z, yaw), 0x2a2634);
+      glow.add(at(box(w, slotH, 0.16), x, cy, z, yaw), 0xff6a14);
+      glow.add(at(box(w * 0.32, slotH, 0.18), x, cy, z, yaw), 0xffe6a0);
+      for (let y = cy - slotH / 2 + 1; y < cy + slotH / 2 - 0.3; y += 1.6) solid.add(at(box(w + 0.1, 0.12, 0.2), x, y, z, yaw), 0x2a2634);
     }
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const ph = core.max.y - foot - 0.3;
+      solid.add(at(box(0.7, ph, 0.7), ccx + sx * (ex - 0.25), foot + ph / 2, ccz + sz * (ez - 0.25)), 0xe8ac1c);
+      glow.add(at(box(0.08, ph * 0.6, 0.08), ccx + sx * (ex + 0.11), foot + ph * 0.45, ccz + sz * (ez + 0.11)), 0xffc040);
+    }
+    for (const y of [foot + 0.35, core.max.y - 0.3]) solid.add(at(box(ex * 2 + 0.24, 0.5, ez * 2 + 0.24), ccx, y, ccz), 0x34303e);
   }
 }

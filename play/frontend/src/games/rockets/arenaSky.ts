@@ -38,6 +38,8 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       haze: { value: horizon.clone().lerp(new THREE.Color(0xffffff), 0.22) },
       deep: { value: zenith.clone().multiplyScalar(0.45).lerp(horizon, 0.25) },
       hazeAmount: { value: space ? 0.3 : 0.7 },
+      // Printed bands in the sky; a dusk sky is one smooth wash instead.
+      bands: { value: dusk ? 0 : 1 },
       sunDir: { value: sunDir },
       sunColor: { value: new THREE.Color(map.id === 'canyon' || dusk ? 0xffd86a : 0xfff8dc) },
       sunSize: { value: Math.cos(map.id === 'canyon' ? 0.11 : dusk ? 0.09 : space ? 0.035 : 0.07) },
@@ -57,6 +59,7 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
       uniform vec3 horizon;
       uniform vec3 haze;
       uniform float hazeAmount;
+      uniform float bands;
       uniform vec3 deep;
       uniform vec3 sunDir;
       uniform vec3 sunColor;
@@ -71,7 +74,7 @@ export function buildSky(map: MapData, theme: Theme, disposables: Disposable[]):
           // Banded like a printed gradient higher up, darkening again toward the top; the lowest stretch is a smooth
           // ramp out of the horizon colour so no hard step sits right on the skyline.
           float x = smoothstep(0.0, 0.92, h);
-          float t = mix(x, floor(x * 7.0) / 7.0, smoothstep(0.12, 0.3, x));
+          float t = mix(x, floor(x * 7.0) / 7.0, smoothstep(0.12, 0.3, x) * bands);
           col = mix(horizon, zenith, min(t * 1.7, 1.0));
           col = mix(col, zenith * 0.62, smoothstep(0.55, 1.0, t));
           // A soft haze lifting off the horizon, smooth on both edges.
