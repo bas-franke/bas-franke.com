@@ -40,6 +40,9 @@ Per-project setup lives in each project's own `README.md`.
 7. **play: regenerate screenshots after graphical changes**: run `npm run screenshots -- --stale` in `play/` and commit
    the images, manifests and `screenshots.lock.json` with the change; `npm run screenshots:check` tells you which
    games are stale (see [play/SCREENSHOTS.md](../play/SCREENSHOTS.md)).
+8. **Push intermittently.** Commit and push each verified, working piece to `master` as it lands (per feature or step,
+   also mid-task and during multi-agent work), never one big commit at the end, so every iteration can be tested live.
+   Don't push broken builds or failing tests. Tell subagents to do the same.
 
 ## Screenshots of design changes
 
