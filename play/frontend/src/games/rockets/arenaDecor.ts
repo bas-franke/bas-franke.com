@@ -414,7 +414,7 @@ export function buildProps(map: MapData, theme: Theme, out: PropBuckets) {
     }
   }
 
-  if (theme.neon) neonTrim(map, solid, glow, rand, out.numbers);
+  if (theme.neon) neonTrim(map, solid, glow, out.fade, rand, out.numbers);
 
   if (theme.lava) {
     // A lava lake far down the pit: falling in is what kills you, so make it look like it.
@@ -439,8 +439,16 @@ const blockedAt = (boxes: MapBox[], self: MapBox, x: number, y: number, z: numbe
  * grilles and spots for stencilled numbers on the big faces, and a glowing furnace core in the tallest block at the
  * centre: vertical slots in a dark frame on every face.
  */
-function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number, numbers?: PropBuckets['numbers']) {
+function neonTrim(map: MapData, solid: Bucket, glow: Bucket, fade: Bucket, rand: () => number, numbers?: PropBuckets['numbers']) {
   let stencil = 0;
+  /**
+   * A reflection streak on the wet deck in front of a light: a flat additive strip running out from the wall face at
+   * (x, z) along the outward normal (nx, nz), brightest at the wall and gone after `len` metres.
+   */
+  const streak = (x: number, y: number, z: number, nx: number, nz: number, w: number, len: number, color: number, k = 0.3) => {
+    const g = new THREE.PlaneGeometry(w, len).rotateX(-Math.PI / 2).translate(0, 0, len / 2);
+    fade.add(at(g, x, y + 0.025, z, Math.atan2(nx, nz)), color, (px, _py, pz) => k * Math.max(0, 1 - Math.hypot(px - x, pz - z) / len) ** 1.5);
+  };
   const pink = 0xff5ac8;
   const cyan = 0x56f2ff;
   let core: MapBox | null = null;
@@ -477,6 +485,7 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number,
         if (blockedAt(map.boxes, b, ox, midY, oz)) continue;
         solid.add(at(box(0.26, barH + 0.16, 0.05), x, midY, z, yaw), 0x2a2634);
         glow.add(at(box(0.12, barH, 0.07), x, midY, z, yaw), color);
+        if (b.min.y < 0.05) streak(x, b.min.y, z, alongX ? 0 : out, alongX ? out : 0, 0.9, barH * 1.3, color, 0.8);
       }
       if (len >= 5) {
         const mid = (a0 + a1) / 2;
@@ -558,6 +567,7 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, rand: () => number,
       solid.add(at(box(w + 0.6, slotH + 0.6, 0.12), x, cy, z, yaw), 0x2a2634);
       glow.add(at(box(w, slotH, 0.16), x, cy, z, yaw), 0xff6a14);
       glow.add(at(box(w * 0.32, slotH, 0.18), x, cy, z, yaw), 0xffe6a0);
+      streak(x + nx * 0.1, foot, z + nz * 0.1, nx, nz, w * 1.4, 5, 0xff8a2a, 0.9);
       for (let y = cy - slotH / 2 + 1; y < cy + slotH / 2 - 0.3; y += 1.6) solid.add(at(box(w + 0.1, 0.12, 0.2), x, y, z, yaw), 0x2a2634);
     }
     for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
