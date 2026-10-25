@@ -85,7 +85,7 @@ export function createBloom(renderer: THREE.WebGLRenderer, opts: { threshold?: n
     depthWrite: false,
   });
   const combine = new THREE.ShaderMaterial({
-    uniforms: { src: { value: scene.texture }, bloom: { value: mips[0].texture }, strength: { value: opts.strength ?? 0.7 }, saturation: { value: opts.saturation ?? 1.25 } },
+    uniforms: { src: { value: scene.texture }, bloom: { value: mips[0].texture }, strength: { value: opts.strength ?? 0.7 }, saturation: { value: opts.saturation ?? 1.12 } },
     vertexShader: VERT,
     fragmentShader: /* glsl */ `
       uniform sampler2D src;
