@@ -13,6 +13,7 @@
 import { boostDuration } from './core/physics';
 import * as THREE from 'three';
 import { createStore, type Store } from '../games/types';
+import { MusicDirector } from './audio/director';
 import { RaceAudio } from './audio/sound';
 import { PARTS, type Hit, type PartHit, type PartId } from './core/damage';
 import { DISPLAY_KMH, type PodDesign } from './core/pods';
@@ -108,6 +109,7 @@ export class RaceView {
   private readonly chase: ChaseCamera;
   private readonly controls = new Controls();
   readonly audio: RaceAudio;
+  readonly music: MusicDirector;
   private readonly fxPods: FxPod[] = [];
   private readonly prevPos: THREE.Vector3[] = [];
   private raf = 0;
@@ -222,6 +224,7 @@ export class RaceView {
     this.post = createPostFx(this.ctx);
     this.chase = new ChaseCamera(this.camera);
     this.audio = new RaceAudio(this.race);
+    this.music = new MusicDirector(this.race);
 
     const player = this.race.player;
     this.hud = createStore<HudState>({
@@ -256,6 +259,7 @@ export class RaceView {
 
   start() {
     this.audio.start();
+    this.music.start();
     this.last = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
@@ -270,6 +274,7 @@ export class RaceView {
     this.paused = p;
     this.hud.set({ paused: p });
     this.audio.setMuted(p);
+    this.music.setPaused(p);
   }
 
   /** On-screen touch controls write here. */
@@ -336,6 +341,7 @@ export class RaceView {
     const h = player.parts.health;
     this.audio.setEngineHealth(Math.min(h.intakeL, h.fanL, h.nozzleL, h.nacelleL), Math.min(h.intakeR, h.fanR, h.nozzleR, h.nacelleR));
     this.audio.update(dt, this.camera.position);
+    this.music.update(dt);
     this.post.render(view);
     this.placeTags();
     this.publishHud(dt);
@@ -572,6 +578,7 @@ export class RaceView {
     this.observer.disconnect();
     this.controls.dispose();
     this.audio.dispose();
+    this.music.dispose();
     this.world.dispose();
     this.fx.dispose();
     this.debris.dispose();
