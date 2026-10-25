@@ -1466,7 +1466,8 @@ export class ZombiesClient implements GameClient {
         m.receiveShadow = true;
       }
     });
-    const label = makeLabel(info.name, colorHex(info.color));
+    // Bare bold name in the player's colour (no pill), like the HUD's condensed type.
+    const label = makeLabel(info.name, colorHex(info.color), { pill: false, font: '"Barlow Condensed", "Space Grotesk", sans-serif' });
     label.position.set(0, 2.05, 0);
     label.scale.multiplyScalar(0.42);
     inst.root.add(label);

@@ -360,10 +360,10 @@ function disposeMaterial(mat: THREE.Material) {
 }
 
 /** A canvas-drawn label sprite (player names). */
-export function makeLabel(text: string, color = '#ffffff'): THREE.Sprite {
+export function makeLabel(text: string, color = '#ffffff', opts: { pill?: boolean; font?: string } = {}): THREE.Sprite {
   const canvas = document.createElement('canvas');
   const scale = 2;
-  const font = `600 ${28 * scale}px "Space Grotesk", system-ui, sans-serif`;
+  const font = `600 ${28 * scale}px ${opts.font ?? '"Space Grotesk", system-ui, sans-serif'}`;
   const ctx = canvas.getContext('2d')!;
   ctx.font = font;
   const w = Math.ceil(ctx.measureText(text).width) + 36 * scale;
@@ -373,11 +373,12 @@ export function makeLabel(text: string, color = '#ffffff'): THREE.Sprite {
   ctx.font = font;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(0,0,0,0.75)';
-  const r = 14 * scale;
-  ctx.beginPath();
-  ctx.roundRect(0, 0, w, h, r);
-  ctx.fill();
+  if (opts.pill !== false) {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, 14 * scale);
+    ctx.fill();
+  }
   // Ink outline under the letters so dark player colours stay readable.
   ctx.lineWidth = 6 * scale;
   ctx.lineJoin = 'round';
