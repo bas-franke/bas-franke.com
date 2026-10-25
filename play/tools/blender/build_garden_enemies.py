@@ -4,13 +4,15 @@ Builds the Garden Sentinels enemies in Blender and exports them as one animated 
     blender --background --factory-startup --python build_garden_enemies.py -- <output-dir>
 
 Output: <output-dir>/enemies.glb. Conventions the frontend relies on (frontend/src/games/garden/api.ts, models.ts):
-  * One root per kind: Enemy_<kind> for runner, skitter, disruptor, brute, colossus. The root is an armature object
-    whose bones are all prefixed with the kind (runner_hips, ...); its single child mesh Enemy_<kind>_body is rigidly
-    skinned (every vertex 100 % on one bone), so the rig deforms like jointed parts.
+  * One root per kind: Enemy_<kind> for runner, skitter, disruptor, brute, colossus, moth, bloomkin. The root is an
+    armature object whose bones are all prefixed with the kind (runner_hips, ...); its single child mesh
+    Enemy_<kind>_body is rigidly skinned (every vertex 100 % on one bone), so the rig deforms like jointed parts.
   * Origin at the feet, facing Blender +Y (glTF -Z), real-world sizes: runner 0.8 m, skitter 0.5 m, disruptor 0.9 m,
-    brute 1.8 m, colossus 3 m (tallest crystal tip).
+    brute 1.8 m, colossus 3 m (tallest crystal tip), bloomkin 0.8 m. The flying moth (0.5 m body, 1.3 m wingspan)
+    has its origin at the body centre instead; the game lifts flyers to FLY_HEIGHT (2.4 m) and moth_die falls that far.
   * Clips <kind>_walk (in-place loop), <kind>_idle (loop), <kind>_die (one-shot, ends lying on its side) and
-    disruptor_cast (rear up + crest pulse), exported as separate glTF animations via NLA tracks.
+    disruptor_cast (rear up + crest pulse) / bloomkin_cast (bud opens + core pulse), exported as separate glTF
+    animations via NLA tracks.
   * Two materials per enemy: Body (vertex colours, COLOR_0) and Crystal (emissive crystals + eyes; base colour and
     emission from two small palette textures via TEXCOORD_0, the emission one dimmed per cell).
 Everything is procedural: bodies are low-res ellipsoids and tapered limbs, crystals are faceted pointed prisms.
@@ -58,6 +60,8 @@ def srgb(h):
 BODY_COLORS = {
     "orange": "#F2802E", "cream": "#F5E7D6", "char": "#2A211E", "teal": "#23797A", "deep": "#1B4A52",
     "violet": "#7440CC", "lilac": "#C9B2EE", "stone": "#2E3550", "plate": "#143840",
+    "fuzz": "#FBF1E2", "mlilac": "#A88BDC", "plum": "#5B3A8E",
+    "leaf": "#7CC25A", "leafdk": "#4E9A46", "moss": "#C6E69A", "blush": "#F4A3A8", "rootb": "#6B4A3A",
 }
 # Palette cell order: key -> (colour, emission factor). The emission texture is the base colour scaled by the factor,
 # so each cell glows at its own strength inside one material (strong glow + bloom blows faceted crystals out into
@@ -73,6 +77,12 @@ GLOW_COLORS = {
     "core": ("#FF9A2A", 1.0),       # colossus core
     "eyes": ("#FFF6D8", 0.8),
     "aeyes": ("#FFB347", 1.0),      # amber eyes (brute, colossus)
+    "wamber": ("#FFA444", 0.42),    # moth wing facets (amber)
+    "wmint": ("#62E2B4", 0.38),     # moth wing facets (mint)
+    "wspot": ("#FFE38A", 1.0),      # moth wing eye spots
+    "petal": ("#FF8FA6", 0.5),      # bloomkin bud petals (rose)
+    "peach": ("#FFC3A0", 0.6),      # bloomkin petal tips
+    "bcore": ("#D8FF6A", 1.0),      # bloomkin glow core (gold-green)
 }
 GLOW_CELLS = 16     # cells across the palette texture
 CELL_PX = 4
@@ -332,11 +342,14 @@ def build_rig(kind, spec):
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode="EDIT")
     eb = data.edit_bones
-    for name, h, t, parent in spec:
+    for name, h, t, parent, *roll in spec:
         b = eb.new(f"{kind}_{name}")
         b.head, b.tail = Vector(h), Vector(t)
         d = (b.tail - b.head).normalized()
-        b.align_roll(X.cross(d) if abs(d.x) < 0.9 else Vector((0, 0, 1)))
+        if roll:  # optional 5th entry: the direction the bone's local Z should face
+            b.align_roll(Vector(roll[0]))
+        else:
+            b.align_roll(X.cross(d) if abs(d.x) < 0.9 else Vector((0, 0, 1)))
         if parent:
             b.parent = eb[f"{kind}_{parent}"]
             b.use_connect = False
@@ -498,12 +511,12 @@ def pair(fn, p, *args, **kw):
 # ---- creatures -----------------------------------------------------------------------------------------------------------
 
 
-def eye_pair(b, P, x, y, z, r, socket=True, yaw=18):
+def eye_pair(b, P, x, y, z, r, socket=True, yaw=18, bone="head"):
     for sx in (-1, 1):
         if socket:
-            b.blob((sx * x, y - r * 0.2, z), (r * 1.3, r * 0.7, r * 1.0), "head", P["char"], rot=(0, sx * -12, sx * -yaw),
+            b.blob((sx * x, y - r * 0.2, z), (r * 1.3, r * 0.7, r * 1.0), bone, P["char"], rot=(0, sx * -12, sx * -yaw),
                    seg=10, rings=6)
-        b.blob((sx * (x + r * 0.05), y + r * 0.1, z + r * 0.08), (r * 1.08, r * 0.5, r * 0.72), "head", P["eyes"],
+        b.blob((sx * (x + r * 0.05), y + r * 0.1, z + r * 0.08), (r * 1.08, r * 0.5, r * 0.72), bone, P["eyes"],
                rot=(0, sx * -12, sx * -yaw), seg=10, rings=6)
 
 
@@ -820,6 +833,259 @@ def build_colossus(P):
     return finish(kind, b, spec, anims)
 
 
+def wing_shell(b, bone, root, outline, sx, outer, inner, spots, t=0.005, curl=0.05):
+    """Thin closed faceted wing (top and bottom skins share the outline, so it reads from both sides with backface
+    culling). `outline` is (x, y) around the wing for the +X side relative to `root`, mirrored by `sx`; the tip curls
+    up by `curl`. Outer facets alternate the `outer` palette keys, the inner fan takes `inner`; `spots` are
+    (x, y, radius) glowing eye spots with a plum ring on both skins."""
+    bm, g = b.bm, b.groups[bone]
+    root = Vector(root)
+    xmax = max(p[0] for p in outline)
+
+    def at(x, y, dz=0.0):
+        return root + Vector((sx * x, y, curl * (x / xmax) ** 2 + dz))
+
+    n = len(outline)
+    cx = sum(p[0] for p in outline) / n
+    cy = sum(p[1] for p in outline) / n
+    ring = [bm.verts.new(at(x, y)) for x, y in outline]
+    made = []
+    for side in (1, -1):
+        cen = bm.verts.new(at(cx, cy, side * t * 2.2))
+        inn = []
+        for x, y in outline:
+            ix, iy = cx + (x - cx) * 0.55, cy + (y - cy) * 0.55
+            inn.append(bm.verts.new(at(ix, iy, side * (t + b.rng.uniform(0.0, 0.003)))))
+        for i in range(n):
+            k = (i + 1) % n
+            for vs, key in (((cen, inn[i], inn[k]), inner), ((inn[i], ring[i], ring[k]), outer[i % len(outer)]),
+                            ((inn[i], ring[k], inn[k]), outer[(i + 1) % len(outer)])):
+                f = bm.faces.new(vs)
+                made.append((f, side, key))
+        for x, y, r in spots:
+            for rad, key, dz in ((r, "plum", 0.006), (r * 0.6, "wspot", 0.009)):
+                c = bm.verts.new(at(x, y, side * (t * 2.2 + dz)))
+                hexv = [bm.verts.new(at(x + rad * math.cos(a * math.tau / 6), y + rad * math.sin(a * math.tau / 6),
+                                        side * (t * 2.2 + dz))) for a in range(6)]
+                for a in range(6):
+                    made.append((bm.faces.new((c, hexv[a], hexv[(a + 1) % 6])), side, key))
+    for f, side, key in made:
+        f.normal_update()
+        if f.normal.z * side < 0:
+            f.normal_flip()
+        b._paint([f], key, False)
+        for v in f.verts:
+            v[b.dl].clear()
+            v[b.dl][g] = 1.0
+
+
+def build_moth(P):
+    """Glow Moth (flying): origin at the body centre (the game lifts flyers to FLY_HEIGHT); ~0.5 m body, ~1.3 m
+    wingspan. Wing bones point +Y, so their local Y is the body axis and a Y rotation flaps them."""
+    kind = "moth"
+    spec = [
+        ("root", (0, 0, 0), (0, 0.1, 0), None),
+        ("body", (0, 0, 0), (0, 0.12, 0), "root"),
+        ("head", (0, 0.1, 0.01), (0, 0.24, 0.02), "body"),
+        ("abdomen", (0, -0.06, 0), (0, -0.3, -0.03), "body"),
+    ]
+    wings = {"FL": (-0.05, 0.03, 0.035), "FR": (0.05, 0.03, 0.035), "HL": (-0.045, -0.04, 0.018),
+             "HR": (0.045, -0.04, 0.018)}
+    for w, p in wings.items():
+        spec.append((f"wing{w}", p, (p[0], p[1] + 0.12, p[2]), "body"))
+    b = Body(kind, [s[0] for s in spec])
+    F, L, ML, K = P["fuzz"], P["lilac"], P["mlilac"], P["char"]
+    # fuzzy thorax with a cream ruff, lilac head, striped abdomen
+    b.blob((0, 0.02, 0.0), (0.095, 0.11, 0.09), "body", F)
+    for i in range(12):
+        a = math.tau * i / 12
+        d = (math.cos(a), 0.5, math.sin(a))
+        b.crystal((0.075 * math.cos(a), 0.075, 0.07 * math.sin(a)), d, 0.05, 0.034, "body", F if i % 2 else L,
+                  sides=4, tipf=0.45, embed=0.4)
+    b.blob((0, -0.01, 0.045), (0.07, 0.075, 0.05), "body", F, seg=10, rings=6)
+    b.blob((0, 0.15, 0.015), (0.075, 0.065, 0.068), "head", L)
+    b.blob((0, 0.19, -0.01), (0.04, 0.03, 0.03), "head", F, seg=8, rings=5)
+    eye_pair(b, P, 0.04, 0.185, 0.03, 0.03, yaw=30)
+    for sx in (-1, 1):
+        # feathery antennae: thin stalk + a broad plume (flat side up so it reads from above), glowing tip
+        b.limb((sx * 0.025, 0.18, 0.065), (sx * 0.1, 0.3, 0.15), 0.008, 0.006, "head", ML, seg=6, joint=False)
+        b.crystal((sx * 0.03, 0.19, 0.07), (sx * 0.55, 1, 0.75), 0.21, 0.04, "head", L, tip=P["wamber"], sides=4,
+                  tipf=0.3, wide=(1, -0.3, 0.3), flat=0.18, taper=1.0)
+    for i, (y, r, key) in enumerate(((-0.09, 0.075, L), (-0.16, 0.068, ML), (-0.225, 0.055, L), (-0.28, 0.04, ML))):
+        b.blob((0, y, -0.01 - 0.008 * i), (r, 0.05, r * 0.9), "abdomen", key, seg=10, rings=6)
+    b.crystal((0, -0.3, -0.03), (0, -1, 0.1), 0.06, 0.03, "abdomen", F, sides=4, tipf=0.6)
+    # little dangling legs
+    for sx in (-1, 1):
+        for y in (0.07, 0.02, -0.03):
+            b.limb((sx * 0.04, y, -0.06), (sx * 0.08, y + 0.01, -0.12), 0.01, 0.007, "body", K, seg=6, joint=False)
+    # crystal wings: amber forewings with a mint heart, mint hindwings with an amber heart, glowing eye spots
+    fore = [(0.0, 0.05), (0.14, 0.12), (0.33, 0.17), (0.5, 0.19), (0.59, 0.13), (0.58, 0.03), (0.49, -0.07),
+            (0.34, -0.1), (0.19, -0.07), (0.05, -0.04)]
+    hind = [(0.0, 0.02), (0.15, 0.0), (0.31, -0.04), (0.42, -0.12), (0.41, -0.23), (0.31, -0.31), (0.18, -0.31),
+            (0.07, -0.22), (0.0, -0.08)]
+    WA, WM = P["wamber"], P["wmint"]
+    for w, p in wings.items():
+        sx = -1 if w[1] == "L" else 1
+        if w[0] == "F":
+            wing_shell(b, f"wing{w}", p, fore, sx, (WA, WA, WM), WM, [(0.37, 0.05, 0.065)])
+        else:
+            wing_shell(b, f"wing{w}", p, hind, sx, (WM, WM, WA), WA, [(0.25, -0.17, 0.05)], curl=0.03)
+
+    def flap(fore_a, hind_a, w, base=12.0):
+        ff = base + fore_a * math.sin(w)
+        hf = base * 0.6 + hind_a * math.sin(w - 0.55)
+        return {"wingFL": {"r": (0, ff, 0)}, "wingFR": {"r": (0, -ff, 0)},
+                "wingHL": {"r": (0, hf, 0)}, "wingHR": {"r": (0, -hf, 0)}}
+
+    def fly(t):
+        w = math.tau * t
+        return merge(flap(42, 36, w), {
+            "body": {"l": (0, 0, -0.035 * math.cos(w)), "r": (3 * math.cos(w), 0, 0)},
+            "abdomen": {"r": (6 * math.sin(w - 0.8), 0, 0)},
+            "head": {"r": (-3 * math.cos(w), 0, 0)},
+        })
+
+    def hover(t):
+        w = math.tau * t
+        return merge(flap(26, 22, 3 * w, base=16), {
+            "body": {"l": (0, 0, 0.03 * math.sin(w)), "r": (2 * math.sin(w), 0, 3 * math.sin(w + 1))},
+            "abdomen": {"r": (5 * math.sin(3 * w - 0.8), 0, 0)},
+            "head": {"r": (0, 0, 10 * math.sin(w))},
+        })
+
+    def die(t):
+        """Wings snap shut over the back, it tumbles 2.4 m down and lands on its side."""
+        fold = smooth01(t / 0.25)
+        fall = smooth01((t - 0.12) / 0.66)
+        drop = -2.31 * min(1.0, max(0.0, (t - 0.12) / 0.66) ** 1.8)
+        land = smooth01((t - 0.78) / 0.22)
+        bounce = 0.06 * math.sin(math.pi * min(1.0, max(0.0, (t - 0.78) / 0.12))) if t > 0.78 else 0.0
+        ff = 12 + (78 - 12) * fold - 10 * land
+        hf = 7 + (72 - 7) * fold - 8 * land
+        return {
+            "root": {"l": (0, 0, drop + bounce), "r": (25 * math.sin(math.pi * fall), 90 * fall + 360 * fall, 0)},
+            "wingFL": {"r": (0, ff, 0)}, "wingFR": {"r": (0, -ff, 0)},
+            "wingHL": {"r": (0, hf, 0)}, "wingHR": {"r": (0, -hf, 0)},
+            "abdomen": {"r": (-14 * fold + 10 * land, 0, 0)},
+            "head": {"r": (12 * fold, 0, 0)},
+        }
+
+    anims = [("walk", 10, fly), ("idle", 30, hover), ("die", 42, die)]
+    return finish(kind, b, spec, anims)
+
+
+def build_bloomkin(P):
+    """Bloomkin (healer): round leafy body on stubby legs, a rose bud on its head that opens on bloomkin_cast.
+    Petal bones point up with their local Z facing outwards, so +X rotation opens a petal."""
+    kind = "bloomkin"
+    NP = 5
+    spec = [
+        ("root", (0, 0, 0), (0, 0.15, 0), None),
+        ("hips", (0, 0, 0.33), (0, 0.15, 0.33), "root"),
+        ("bud", (0, 0, 0.56), (0, 0, 0.66), "hips"),
+        ("core", (0, 0, 0.7), (0, 0, 0.78), "bud"),
+    ]
+    for i in range(NP):
+        a = math.tau * i / NP + math.pi / 2
+        rad = (math.cos(a), math.sin(a), 0)
+        spec.append((f"petal{i}", (0.035 * rad[0], 0.035 * rad[1], 0.63), (0.035 * rad[0], 0.035 * rad[1], 0.73),
+                     "bud", rad))
+    for side, sx in (("L", -1), ("R", 1)):
+        spec.append((f"leg{side}", (sx * 0.1, 0, 0.17), (sx * 0.11, 0.01, 0.04), "root"))
+        spec.append((f"arm{side}", (sx * 0.22, 0.03, 0.36), (sx * 0.34, 0.05, 0.28), "hips"))
+    b = Body(kind, [s[0] for s in spec])
+    LF, LD, MS, C = P["leaf"], P["leafdk"], P["moss"], P["cream"]
+    # round body, pale moss belly / face
+    b.blob((0, 0, 0.33), (0.25, 0.24, 0.23), "hips", LF, seg=14, rings=9)
+    b.blob((0, 0.135, 0.3), (0.17, 0.125, 0.15), "hips", MS, seg=12, rings=8)
+    eye_pair(b, P, 0.075, 0.225, 0.37, 0.042, yaw=22, bone="hips")
+    for sx in (-1, 1):
+        b.blob((sx * 0.13, 0.215, 0.3), (0.035, 0.012, 0.022), "hips", P["blush"], rot=(0, 0, sx * -32), seg=8, rings=5)
+    b.blob((0, 0.245, 0.315), (0.02, 0.01, 0.01), "hips", P["char"], seg=8, rings=4)
+    # leaf ruff around the waist and leaves on the back: broad blades, flat side out so they read from above
+    for i in range(11):
+        a = -math.pi / 2 + math.tau * (i + 0.5) / 11
+        if math.sin(a) > 0.8:       # keep the face clear
+            continue
+        r = (math.cos(a), math.sin(a), 0)
+        b.crystal((0.2 * r[0], 0.2 * r[1], 0.2), (r[0], r[1], -0.32), 0.2, 0.04, "hips", LD if i % 2 else LF,
+                  sides=4, tipf=0.42, embed=0.2, wide=(-r[1], r[0], 0), flat=0.16, taper=2.2)
+    # leaf rosette around the bud, lying back over the crown
+    for i in range(6):
+        a = math.tau * (i + 0.5) / 6 + math.pi / 2
+        if math.sin(a) > 0.8:
+            continue
+        r = (math.cos(a), math.sin(a), 0)
+        b.crystal((0.06 * r[0], 0.06 * r[1], 0.53), (r[0], r[1], 0.3), 0.21, 0.04, "hips", LF if i % 2 else LD,
+                  sides=4, tipf=0.42, embed=0.2, wide=(-r[1], r[0], 0), flat=0.16, taper=2.2)
+    # bud: stalk, sepals, glowing core, five rose petals closed into a tulip
+    b.limb((0, 0, 0.52), (0, 0, 0.64), 0.03, 0.025, "bud", LD, seg=6, joint=False)
+    for i in range(NP):
+        a = math.tau * (i + 0.5) / NP + math.pi / 2
+        r = (math.cos(a), math.sin(a), 0)
+        b.crystal((0.025 * r[0], 0.025 * r[1], 0.61), (r[0], r[1], 0.7), 0.09, 0.03, "bud", LF, sides=4, tipf=0.5,
+                  wide=(-r[1], r[0], 0), flat=0.3, taper=1.0)
+    b.gem((0, 0, 0.7), 0.05, "core", P["bcore"], subdiv=1)
+    for i in range(NP):
+        a = math.tau * i / NP + math.pi / 2
+        r = (math.cos(a), math.sin(a), 0)
+        b.crystal((0.035 * r[0], 0.035 * r[1], 0.63), (0.22 * r[0], 0.22 * r[1], 1), 0.21, 0.038, f"petal{i}",
+                  P["petal"], tip=P["peach"], sides=4, tipf=0.38, embed=0.1, wide=(-r[1], r[0], 0), flat=0.3, taper=2.1)
+    # stubby legs, leaf hands
+    for side, sx in (("L", -1), ("R", 1)):
+        b.limb((sx * 0.1, 0, 0.17), (sx * 0.11, 0.01, 0.06), 0.06, 0.05, f"leg{side}", LD, seg=8, joint=False)
+        b.blob((sx * 0.11, 0.035, 0.035), (0.065, 0.08, 0.04), f"leg{side}", P["rootb"], seg=10, rings=6)
+        b.crystal((sx * 0.2, 0.03, 0.37), (sx * 1, 0.15, -0.55), 0.17, 0.035, f"arm{side}", LF, sides=4,
+                  tipf=0.42, embed=0.2, wide=(0, 1, 0), flat=0.2, taper=2.0)
+
+    def petals(deg, wob=0.0, t=0.0):
+        return {f"petal{i}": {"r": (deg + wob * math.sin(math.tau * t * 2 + i * 1.3), 0, 0)} for i in range(NP)}
+
+    def walk(t):
+        w = math.tau * t
+        return merge(petals(3), {
+            "hips": {"l": (0, 0, 0.025 * abs(math.sin(w))), "r": (4, 9 * math.sin(w), 0)},
+            "bud": {"r": (-3, -12 * math.sin(w - 0.6), 0)},
+            "legL": {"r": (32 * math.sin(w), 0, 0)}, "legR": {"r": (-32 * math.sin(w), 0, 0)},
+            "armL": {"r": (-30 * math.sin(w), 0, 0)}, "armR": {"r": (30 * math.sin(w), 0, 0)},
+            "core": {"s": 1 + 0.05 * math.sin(2 * w)},
+        })
+
+    def idle(t):
+        w = math.tau * t
+        return merge(petals(5 + 4 * math.sin(w)), {
+            "hips": {"l": (0, 0, 0.008 * math.sin(2 * w)), "r": (2 * math.sin(2 * w), 0, 8 * math.sin(w))},
+            "bud": {"r": (4 * math.sin(w + 1.2), 6 * math.sin(w), 0)},
+            "armL": {"r": (8 * math.sin(w), 0, 0)}, "armR": {"r": (8 * math.sin(w + 0.5), 0, 0)},
+            "core": {"s": 1 + 0.08 * math.sin(2 * w)},
+        })
+
+    def cast(t):
+        env = smooth01(t / 0.3) * (1 - smooth01((t - 0.72) / 0.28))
+        pulse = math.exp(-((t - 0.45) / 0.09) ** 2) + 0.6 * math.exp(-((t - 0.62) / 0.07) ** 2)
+        return merge(petals(68 * env + 6 * pulse), {
+            "hips": {"l": (0, 0, -0.02 * env + 0.03 * pulse), "r": (-8 * env, 0, 0)},
+            "bud": {"r": (-6 * env, 0, 0), "s": 1 + 0.08 * pulse},
+            "core": {"s": 1 + 0.3 * env + 0.45 * pulse},
+            "armL": {"r": (-40 * env, 0, 0)}, "armR": {"r": (-40 * env, 0, 0)},
+        })
+
+    def die(t):
+        e = smooth01(t / 0.7)
+        hop = math.sin(math.pi * min(1.0, t / 0.3)) * 0.08 if t < 0.3 else 0.0
+        settle = smooth01((t - 0.7) / 0.3)
+        return merge(petals(55 * smooth01(t / 0.5) + 20 * settle), {
+            "root": {"r": (0, 84 * e, 0), "l": (0, 0, 0.24 * e + hop)},
+            "bud": {"r": (-20 * e, 0, 25 * e)},
+            "core": {"s": 1 - 0.55 * smooth01((t - 0.2) / 0.8)},
+            "legL": {"r": (25 * e - 8 * settle, 0, 0)}, "legR": {"r": (-20 * e, 0, 0)},
+            "armL": {"r": (30 * e, 0, 0)}, "armR": {"r": (-25 * e, 0, 0)},
+        })
+
+    anims = [("walk", 20, walk), ("idle", 60, idle), ("die", 30, die), ("cast", 24, cast)]
+    return finish(kind, b, spec, anims)
+
+
 # ---- export -----------------------------------------------------------------------------------------------------------------
 
 
@@ -861,7 +1127,8 @@ def export(objects):
 def build_all():
     clear_scene()
     P = palette()
-    roots = [build_runner(P), build_skitter(P), build_disruptor(P), build_brute(P), build_colossus(P)]
+    roots = [build_runner(P), build_skitter(P), build_disruptor(P), build_brute(P), build_colossus(P), build_moth(P),
+             build_bloomkin(P)]
     bpy.context.scene.frame_set(0)
     export(roots)
     return roots
