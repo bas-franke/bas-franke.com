@@ -2,13 +2,16 @@
 // box-projected PBR textures (travertine runs on across chunks, the marble floor across the whole room) and per-instance
 // damage that grows cracks; glass chunks are a clear instanced material that crazes as it takes damage. Around them:
 // the polished marble floor, a coffered ceiling, brass mullions, security shutters on locked wings, barricaded doors,
-// lockers, brass pendant lamps, and outside a sunlit plaza with trees and city blocks under a golden-hour sky. The low
-// sun (a shadow-casting DirectionalLight) pours through the glass facade. Furniture, the mezzanine galleries and the
-// smaller dressing live in decor.ts. Models from models.ts replace the primitive stand-ins as soon as they load.
+// lockers, brass pendant lamps and chandeliers (mostly failing: one is dark, the others burn low and stutter), and
+// outside a wet plaza at about 2 am under a dark, fog-coloured sky with the city's orange glow low on the horizon.
+// Sodium street lights (tapered poles, cobra heads with HDR lenses) and two brass lanterns by the revolving door are
+// the main light: the lamps across the plaza aim at the glass, so their light falls through the facade and the
+// mullions throw long shadows over the marble (those lamps cast three.js shadows on medium/high, and post.ts draws
+// shadowed fog shafts for them). The DirectionalLight is a faint cold moon. Furniture, the mezzanine galleries and
+// the smaller dressing live in decor.ts. Models from models.ts replace the primitive stand-ins as soon as they load.
 //
-// post.ts reads `group.userData.envScene` (a warm lobby-like scene it turns into the reflection environment) and skips
-// objects with `userData.noMoonShadow` in its own sun depth map. The `moon` / `moonDir` fields of the contract are the
-// sun here.
+// post.ts reads `group.userData.envScene` (a dark night lobby it turns into the reflection environment) and skips
+// objects with `userData.noMoonShadow` in its own depth map along `moonDir`.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -18,7 +21,7 @@ import { WEAPONS } from '@shared/zombies/weapons';
 import { ARMOR_PRICE, NADE_PRICE } from '@shared/zombies/weapons';
 import { type StationInfo, type World, SILL_Y, WALL_T, WINDOW_TOP } from '@shared/zombies/world';
 import type { CreateWorldView, LampLight, Models, Quality, WorldView } from './api';
-import { type Glow, buildDecor, mergeStatic } from './decor';
+import { type Glow, buildDecor, failing, mergeStatic } from './decor';
 import { buildMotes } from './motes';
 import { buildSkyline } from './skyline';
 import { DEFAULT_SIZE, type SetName, type TexSet, texSet as rawTexSet } from './textures';
@@ -72,13 +75,21 @@ const MAT_SET: Record<string, SetName> = {
   travertine: 'travertine',
   walnut: 'walnut',
 };
-const SUN_COLOR = new THREE.Color(1.0, 0.8, 0.56);
+/** Cold, faint moonlight: just enough to model the silhouettes outside. */
+const MOON_COLOR = new THREE.Color(0.62, 0.72, 1.0);
+const MOON_INTENSITY = 0.22;
+/** High-pressure sodium, a deep amber, and the hotel lanterns' warmer white. */
+const SODIUM = new THREE.Color(1.0, 0.5, 0.17);
+const LANTERN = new THREE.Color(1.0, 0.7, 0.4);
 
-/** Shadow-casting lamps and shadow map sizes per quality. */
-const QUALITY_SPEC: Record<Quality, { lampShadows: number; lampMap: number; sunMap: number; texScale: number }> = {
-  low: { lampShadows: 0, lampMap: 512, sunMap: 2048, texScale: 0.5 },
-  medium: { lampShadows: 1, lampMap: 512, sunMap: 4096, texScale: 1 },
-  high: { lampShadows: 2, lampMap: 1024, sunMap: 4096, texScale: 1 },
+/**
+ * Shadow-casting lamps and shadow map sizes per quality. The hotel's own lamps are failing, so their shadow budget went
+ * to the street lights with shafts (the mullion shadows on the marble); the dim moon gets a smaller map.
+ */
+const QUALITY_SPEC: Record<Quality, { lampShadows: number; lampMap: number; streetShadows: number; streetMap: number; sunMap: number; texScale: number }> = {
+  low: { lampShadows: 0, lampMap: 512, streetShadows: 0, streetMap: 512, sunMap: 1024, texScale: 0.5 },
+  medium: { lampShadows: 0, lampMap: 512, streetShadows: 3, streetMap: 512, sunMap: 2048, texScale: 1 },
+  high: { lampShadows: 0, lampMap: 1024, streetShadows: 3, streetMap: 1024, sunMap: 2048, texScale: 1 },
 };
 
 // ---- box-projected material -----------------------------------------------------------------------------------------
@@ -393,12 +404,13 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   const travSet = texSet('travertine');
   const brassSet = texSet('brass');
   const floorMat = keep(projMaterial({ set: floorSet, env: 1.25 }));
-  const plazaMat = keep(projMaterial({ set: yardSet, env: 0.5 }));
+  // Wet paving after rain: darker, glossier, so every lamp pool mirrors in it.
+  const plazaMat = keep(projMaterial({ set: yardSet, env: 1.1, rough: 0.32, color: 0x9a948c }));
   const travMat = keep(projMaterial({ set: travSet, env: 0.45, grime: true }));
   const ceilingMat = keep(projMaterial({ set: travSet, color: 0xf2eadc, env: 0.25, normalScale: 0.4 }));
-  // Light bouncing off the floor and walls keeps the coffers from going black.
-  ceilingMat.emissive.set(0x3a2a18);
-  ceilingMat.emissiveIntensity = 0.6;
+  // A trace of street light bounced off the floor keeps the coffers from going pure black.
+  ceilingMat.emissive.set(0x2a1a0e);
+  ceilingMat.emissiveIntensity = 0.12;
   const brass = keep(projMaterial({ set: brassSet, env: 1.3 }));
   const steel = keep(new THREE.MeshStandardMaterial({ color: 0x8c8f92, roughness: 0.38, metalness: 0.9, envMapIntensity: 1 }));
   const darkSteel = keep(new THREE.MeshStandardMaterial({ color: 0x2c2d2f, roughness: 0.45, metalness: 0.8 }));
@@ -629,8 +641,12 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   }
 
   // ---- pendant lamps (the map's lamps) -------------------------------------------------------------------------
-  type Lamp = LampLight & { bulb: THREE.MeshStandardMaterial; base: number; flicker: number; seed: number; holder: THREE.Group; fallback: THREE.Object3D; pendant: boolean };
+  // Night with failing power: `dim` scales the lamp's nominal output (the fog sees it through `level`), `fail` how
+  // badly it stutters. The first chandelier (nearest the glass) is dead so the street light owns the front of the room.
+  type Lamp = LampLight & { bulb: THREE.MeshStandardMaterial; base: number; bulbBase: number; dim: number; flicker: number; seed: number; holder: THREE.Group; fallback: THREE.Object3D; pendant: boolean };
   const lamps: Lamp[] = [];
+  let chandeliers = 0;
+  let pendants = 0;
   for (const l of world.lamps) {
     const holder = new THREE.Group();
     const zone = world.zones?.find((z) => z.id === l.zone);
@@ -675,16 +691,22 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
     spot.shadow.camera.far = 14;
     // Lamps in a closed wing burn low: the wing is seen only through the shutter slats.
     const lit = !zone || zone.open ? 1 : 0.12;
-    lamps.push({ pos: { x: l.pos.x, y: y - 0.3, z: l.pos.z }, light: spot, level: 1, color: lampColor.clone(), bulb, base: (chandelier ? 220 : 70) * lit, flicker: l.flicker * 0.3, seed: lamps.length * 13.7, holder, fallback: fb, pendant: !chandelier });
+    // [dim, fail]: chandeliers dead / a low ember / stuttering; pendants mostly low, one dead, flicker from the map.
+    const k = chandelier ? chandeliers++ : pendants++;
+    const [dim, fail] = chandelier ? ([[0, 0], [0.05, 0.25], [0.09, 0.85]] as const)[k % 3] : k === 3 ? [0, 0] : [0.3, Math.max(0.15, l.flicker)];
+    const base = (chandelier ? 220 : 70) * lit * dim;
+    // A dead lamp has no light at all (cheaper than one at zero).
+    spot.visible = base > 0;
+    lamps.push({ pos: { x: l.pos.x, y: y - 0.3, z: l.pos.z }, light: spot, level: dim * lit, color: lampColor.clone(), bulb, base, bulbBase: dim > 0 ? (chandelier ? 1.2 : 2.2) * Math.sqrt(lit) : 0.03, dim: dim * lit, flicker: fail, seed: lamps.length * 13.7, holder, fallback: fb, pendant: !chandelier });
   }
 
-  // ---- the sun, sky light, sky ---------------------------------------------------------------------------------
-  // Golden hour: low in the north-north-east, so it streams through the facade (z = min) deep into the lobby.
+  // ---- the moon, sky light, sky --------------------------------------------------------------------------------
+  // 2 am: a faint cold moon high behind the fog (still in the north, so its weak shadows fall into the room).
   const sunYaw = def.moon?.yaw ?? 0.35;
-  const sunElev = Math.min(0.5, Math.max(0.24, def.moon?.elev ?? 0.32));
+  const sunElev = 0.85;
   const facadeZ = ext.minZ;
   const moonDir = new THREE.Vector3(Math.sin(sunYaw) * Math.cos(sunElev), Math.sin(sunElev), -Math.cos(sunYaw) * Math.cos(sunElev)).normalize();
-  const moon = new THREE.DirectionalLight(SUN_COLOR, 4.6);
+  const moon = new THREE.DirectionalLight(MOON_COLOR, MOON_INTENSITY);
   moon.position.copy(moonDir).multiplyScalar(80);
   moon.target.position.set((ext.minX + ext.maxX) / 2, 0, (ext.minZ + ext.maxZ) / 2);
   moon.position.add(moon.target.position);
@@ -703,8 +725,8 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   moon.shadow.normalBias = 0.04;
   moon.layers.enableAll();
   scene.add(moon, moon.target);
-  // Warm skylight from above, warm bounce from the floor: shadows stay golden-brown and readable.
-  const hemi = new THREE.HemisphereLight(0xffe3c0, 0xa07a52, 1.35);
+  // A dim cold sky above, near-black wet ground below: shadows stay blue-grey and readable, never warm.
+  const hemi = new THREE.HemisphereLight(0x6a7c9c, 0x14110e, 0.32);
   hemi.layers.enableAll();
   scene.add(hemi);
 
@@ -717,15 +739,25 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
       fragmentShader: /* glsl */ `
 uniform vec3 uSun;
 varying vec3 vDir;
+float sHash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float sNoise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(sHash(i), sHash(i + vec2(1, 0)), f.x), mix(sHash(i + vec2(0, 1)), sHash(i + vec2(1, 1)), f.x), f.y);
+}
 void main() {
   vec3 d = normalize(vDir);
   float up = clamp(d.y, -0.2, 1.0);
-  // Golden horizon fading into a pale blue zenith.
-  vec3 col = mix(vec3(1.25, 0.95, 0.65), vec3(0.36, 0.56, 0.92), smoothstep(-0.02, 0.45, up));
-  col = mix(col, vec3(0.9, 0.75, 0.6), 1.0 - smoothstep(-0.2, 0.02, up));
-  float s = max(dot(d, uSun), 0.0);
-  col += vec3(2.4, 1.6, 0.8) * pow(s, 8.0) * 0.6 + vec3(3.0, 2.2, 1.3) * pow(s, 64.0);
-  col += vec3(40.0, 32.0, 22.0) * smoothstep(0.9993, 0.9996, s);
+  // Overcast night: the fog's blue-grey near the horizon fading to almost black overhead.
+  vec3 col = mix(vec3(0.05, 0.056, 0.066), vec3(0.008, 0.01, 0.016), smoothstep(0.0, 0.6, up));
+  // The city's sodium glow lit from below on the low cloud, patchy along the horizon.
+  vec2 hz = normalize(d.xz + vec2(1e-4));
+  float glowAmt = 0.6 + 0.4 * sNoise(hz * 3.0 + 5.0) + 0.25 * sNoise(hz * 9.0 + 1.7);
+  col += vec3(0.32, 0.14, 0.045) * exp(-max(up, 0.0) * 7.0) * glowAmt;
+  // Where the moon sits, the cloud is a touch paler (no disc).
+  col += vec3(0.02, 0.025, 0.035) * pow(max(dot(d, uSun), 0.0), 6.0);
+  col = mix(col, vec3(0.05, 0.04, 0.035), 1.0 - smoothstep(-0.2, 0.0, up));
+  // Dither: the dark gradient would band.
+  col += (sHash(gl_FragCoord.xy) - 0.5) * 0.004;
   gl_FragColor = vec4(col, 1.0);
 }`,
     }),
@@ -743,27 +775,136 @@ void main() {
   const skyline = buildSkyline({ facadeZ, ext, quality });
   outside.add(skyline.group);
   const streetLights: StreetLight[] = [];
-  // Sodium street lights across the plaza, aimed back at the glass so their light falls into the lobby.
-  for (const [x, shafts] of [
-    [-7.5, true],
-    [1.5, true],
-    [9, true],
-    [-17, false],
-    [17, false],
-  ] as const) {
-    const pos = new THREE.Vector3(x, 6.8, facadeZ - 7);
-    const aim = new THREE.Vector3(x * 0.6, 0, facadeZ + 9);
-    const dir = aim.clone().sub(pos).normalize();
-    const outer = 0.95;
-    const inner = 0.45;
-    const range = 40;
-    const color = new THREE.Color(1.0, 0.62, 0.3);
-    const light = new THREE.SpotLight(color, 900, range, outer, 1 - inner / outer, 2);
-    light.position.copy(pos);
-    light.target.position.copy(aim);
+  /** Per street light: nominal intensity, lens material and HDR strength, flicker seed and how badly it is failing. */
+  const streetFx: { base: number; lens: THREE.MeshStandardMaterial; lensBase: number; seed: number; fail: number }[] = [];
+  // Painted cast iron for the poles and housings; brass trim on the hotel's lanterns.
+  const poleMat = keep(new THREE.MeshStandardMaterial({ color: 0x1d2023, roughness: 0.42, metalness: 0.65, envMapIntensity: 0.8 }));
+  const poleParts: THREE.BufferGeometry[] = [];
+  const brassParts: THREE.BufferGeometry[] = [];
+  const lensMat = (color: THREE.Color, strength: number) => keep(new THREE.MeshStandardMaterial({ color: 0x0a0806, roughness: 0.25, emissive: color.clone(), emissiveIntensity: strength }));
+  const lensParts = new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>();
+  const addLens = (mat: THREE.MeshStandardMaterial, g: THREE.BufferGeometry) => {
+    const list = lensParts.get(mat) ?? [];
+    list.push(g);
+    lensParts.set(mat, list);
+  };
+  /**
+   * A cobra-head street light: plinth, tapered pole, a swan-neck arm reaching `reach` m towards `yaw` (0 = +z, the
+   * hotel), a flattened housing with a glowing drop lens. `head` is the lens centre; returns nothing, the light is
+   * placed by the caller there.
+   */
+  const cobra = (head: THREE.Vector3, yaw: number, lens: THREE.MeshStandardMaterial, reach = 1.5) => {
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const base = head.clone().addScaledVector(fwd, -reach).setY(0);
+    const hy = head.y;
+    const local: THREE.BufferGeometry[] = [];
+    local.push(new THREE.CylinderGeometry(0.19, 0.24, 0.5, 16).translate(0, 0.25, 0));
+    local.push(new THREE.CylinderGeometry(0.13, 0.17, 0.4, 16).translate(0, 0.7, 0));
+    local.push(new THREE.TorusGeometry(0.135, 0.02, 6, 20).rotateX(Math.PI / 2).translate(0, 0.9, 0));
+    local.push(new THREE.CylinderGeometry(0.06, 0.115, hy - 0.5, 16).translate(0, 0.9 + (hy - 0.5) / 2, 0));
+    local.push(new THREE.SphereGeometry(0.075, 12, 8).translate(0, hy + 0.42, 0));
+    const neck = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, hy - 0.2, 0), new THREE.Vector3(0, hy + 0.5, reach * 0.4), new THREE.Vector3(0, hy + 0.12, reach - 0.35));
+    local.push(new THREE.TubeGeometry(neck, 16, 0.04, 8));
+    // Housing: a long flattened shell, nose slightly down, with a small cooling fin on top.
+    local.push(new THREE.SphereGeometry(1, 28, 14).scale(0.25, 0.12, 0.56).rotateX(0.06).translate(0, hy + 0.1, reach));
+    local.push(new THREE.BoxGeometry(0.03, 0.05, 0.5).translate(0, hy + 0.23, reach - 0.05));
+    const m = new THREE.Matrix4().makeRotationY(yaw).setPosition(base);
+    for (const g of local) poleParts.push(g.applyMatrix4(m));
+    // The drop lens: the lower half of an ellipsoid just under the housing.
+    addLens(lens, new THREE.SphereGeometry(1, 24, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(0.2, 0.07, 0.44).rotateX(0.06).translate(0, hy + 0.06, reach).applyMatrix4(m));
+  };
+  /** An ornamental hotel lantern on a short fluted post: brass-trimmed iron, a frosted glowing body, a pyramid roof. */
+  const lantern = (x: number, z: number, lens: THREE.MeshStandardMaterial) => {
+    const parts: THREE.BufferGeometry[] = [];
+    const brassBits: THREE.BufferGeometry[] = [];
+    parts.push(new THREE.CylinderGeometry(0.2, 0.27, 0.6, 8).translate(0, 0.3, 0));
+    brassBits.push(new THREE.CylinderGeometry(0.215, 0.215, 0.05, 8).translate(0, 0.62, 0));
+    parts.push(new THREE.CylinderGeometry(0.075, 0.1, 0.4, 12).translate(0, 0.85, 0));
+    // Fluting: the post is a ring of thin staves around a core.
+    parts.push(new THREE.CylinderGeometry(0.045, 0.06, 2.0, 12).translate(0, 2.05, 0));
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      parts.push(new THREE.CylinderGeometry(0.012, 0.016, 1.9, 5).translate(Math.cos(a) * 0.055, 2.05, Math.sin(a) * 0.055));
+    }
+    brassBits.push(new THREE.SphereGeometry(0.09, 14, 10).translate(0, 3.05, 0));
+    brassBits.push(new THREE.CylinderGeometry(0.2, 0.12, 0.08, 4, 1).rotateY(Math.PI / 4).translate(0, 3.12, 0));
+    // Body: four frosted panes (one glowing tapered block) with iron corner posts.
+    addLens(lens, new THREE.CylinderGeometry(0.2, 0.15, 0.5, 4, 1).rotateY(Math.PI / 4).translate(x, 3.41, z));
+    for (let k = 0; k < 4; k++) {
+      const a = Math.PI / 4 + (k / 4) * Math.PI * 2;
+      parts.push(new THREE.CylinderGeometry(0.016, 0.016, 0.56, 5).translate(Math.cos(a) * 0.18, 3.41, Math.sin(a) * 0.18));
+    }
+    brassBits.push(new THREE.CylinderGeometry(0.27, 0.27, 0.04, 4, 1).rotateY(Math.PI / 4).translate(0, 3.68, 0));
+    parts.push(new THREE.ConeGeometry(0.3, 0.32, 4, 1).rotateY(Math.PI / 4).translate(0, 3.86, 0));
+    brassBits.push(new THREE.SphereGeometry(0.04, 10, 8).translate(0, 4.05, 0));
+    brassBits.push(new THREE.ConeGeometry(0.025, 0.14, 8).translate(0, 4.14, 0));
+    for (const g of parts) poleParts.push(g.translate(x, 0, z));
+    for (const g of brassBits) brassParts.push(g.translate(x, 0, z));
+  };
+  /** A real street light: SpotLight + its fixture. `fail` 0..1: how badly the sodium lamp is dying. */
+  const street = (o: { pos: THREE.Vector3; aim: THREE.Vector3; color: THREE.Color; intensity: number; outer: number; inner: number; range: number; shafts: boolean; fail?: number; lens: number; fixture: (lens: THREE.MeshStandardMaterial) => void }) => {
+    const dir = o.aim.clone().sub(o.pos).normalize();
+    const light = new THREE.SpotLight(o.color, o.intensity, o.range, o.outer, 1 - o.inner / o.outer, 2);
+    light.position.copy(o.pos);
+    light.target.position.copy(o.aim);
     light.layers.enableAll();
+    light.shadow.bias = -0.0004;
+    light.shadow.normalBias = 0.03;
+    light.shadow.camera.near = 0.5;
+    light.shadow.camera.far = o.range;
     scene.add(light, light.target);
-    streetLights.push({ pos, dir, color, cosOuter: Math.cos(outer), cosInner: Math.cos(inner), range, light, level: 1, shafts });
+    const lens = lensMat(o.color, o.lens);
+    o.fixture(lens);
+    streetFx.push({ base: o.intensity, lens, lensBase: o.lens, seed: streetLights.length * 7.31 + 1.7, fail: o.fail ?? 0 });
+    streetLights.push({ pos: o.pos.clone(), dir, color: o.color.clone(), cosOuter: Math.cos(o.outer), cosInner: Math.cos(o.inner), range: o.range, light, level: 1, shafts: o.shafts });
+  };
+  // The plaza row, 7 m out from the glass: three lamps with shafts aim back at the facade so their light falls through
+  // the glass between the mullions deep into the lobby (and pools on the wet paving on the way), two more light the
+  // plaza's ends (the east one is failing). Shafts ones first.
+  const rowZ = facadeZ - 7;
+  const lampHeight = 7.2;
+  for (const x of [-7.5, 1.5, 9]) {
+    const pos = new THREE.Vector3(x, lampHeight, rowZ);
+    street({ pos, aim: new THREE.Vector3(x * 0.55, 0, facadeZ + 10), color: SODIUM, intensity: 4000, outer: 0.62, inner: 0.24, range: 45, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone().setY(lampHeight + 0.06), 0, l) });
+  }
+  for (const [x, fail] of [
+    [-17, 0],
+    [17, 1],
+  ] as const) {
+    const pos = new THREE.Vector3(x, lampHeight, rowZ);
+    street({ pos, aim: new THREE.Vector3(x, 0, rowZ + 3), color: SODIUM, intensity: 700, outer: 0.95, inner: 0.4, range: 22, shafts: false, fail, lens: 60, fixture: (l) => cobra(pos.clone().setY(lampHeight + 0.06), 0, l) });
+  }
+  // The hotel's two lanterns flanking the revolving door: warm white, aimed down onto the steps.
+  const door = (def.entrances ?? []).find((e) => e.look === 'revolving');
+  const doorX = door?.at ?? 0;
+  for (const side of [-1, 1]) {
+    const x = doorX + side * 2.45;
+    const z = facadeZ - 1.25;
+    const pos = new THREE.Vector3(x, 3.3, z);
+    street({ pos, aim: new THREE.Vector3(x + side * 0.6, 0, z - 1.2), color: LANTERN, intensity: 40, outer: 1.25, inner: 0.6, range: 12, shafts: false, fail: side > 0 ? 0.12 : 0, lens: 14, fixture: (l) => lantern(x, z, l) });
+  }
+  // Emissive-only lamps further off (no light, just a lens to glow and bloom through the fog): the row continues
+  // along the street, and a row on the far side of the plaza faces back at the hotel.
+  {
+    const far = lensMat(SODIUM, 60);
+    for (const x of [-37, -27, 27, 37]) cobra(new THREE.Vector3(x, lampHeight + 0.06, rowZ), 0, far);
+    for (const x of [-15, -3, 9, 21]) cobra(new THREE.Vector3(x, lampHeight + 0.06, facadeZ - 24), Math.PI, far);
+  }
+  {
+    const pm = new THREE.Mesh(keep(mergeGeometries(poleParts, false)), poleMat);
+    pm.castShadow = pm.receiveShadow = true;
+    pm.name = 'streetPoles';
+    outside.add(pm);
+    const bm = new THREE.Mesh(keep(mergeGeometries(brassParts, false)), brass);
+    bm.castShadow = true;
+    outside.add(bm);
+    for (const [mat, list] of lensParts) {
+      const lm = new THREE.Mesh(keep(mergeGeometries(list, false)), mat);
+      lm.userData.noMoonShadow = true;
+      outside.add(lm);
+      for (const g of list) g.dispose();
+    }
+    for (const g of [...poleParts, ...brassParts]) g.dispose();
   }
   const motes = buildMotes({ interior: world.interior, ceiling: h, streetLights, quality });
   group.add(motes.group);
@@ -771,6 +912,13 @@ void main() {
   const treeSpots: { x: number; z: number; s: number; yaw: number }[] = [];
   for (let x = ext.minX - 4; x <= ext.maxX + 4; x += 6.5 + rnd() * 2) treeSpots.push({ x: x + (rnd() - 0.5), z: facadeZ - 6 - rnd() * 3, s: 0.9 + rnd() * 0.35, yaw: rnd() * 6.28 });
   for (let x = ext.minX + 2; x <= ext.maxX - 2; x += 9 + rnd() * 3) treeSpots.push({ x, z: facadeZ - 16 - rnd() * 4, s: 1 + rnd() * 0.4, yaw: rnd() * 6.28 });
+  // No canopy around a lamp head (or between a shafts lamp and the glass).
+  for (let i = treeSpots.length - 1; i >= 0; i--) {
+    const t = treeSpots[i];
+    const nearLamp = streetLights.some((S) => Math.abs(S.pos.x - t.x) < (S.shafts ? 4.5 : 3) && t.z > S.pos.z - 3.5 && S.pos.y > 5);
+    const nearFar = Math.abs(t.z - (facadeZ - 24)) < 3 && [-15, -3, 9, 21].some((x) => Math.abs(x - t.x) < 3);
+    if (nearLamp || nearFar) treeSpots.splice(i, 1);
+  }
   const leafTex = (() => {
     const c = document.createElement('canvas');
     c.width = c.height = 256;
@@ -791,8 +939,9 @@ void main() {
     t.colorSpace = THREE.SRGBColorSpace;
     return keep(t);
   })();
-  const leafMat = keep(new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75, color: 0xc8e090, emissive: 0x1a2a06, emissiveIntensity: 0.35 }));
-  const barkMat = keep(new THREE.MeshStandardMaterial({ color: 0x3a2f24, roughness: 0.9 }));
+  // Night: the canopies are dark silhouettes, picked out only where a lamp catches them (no fake leaf glow).
+  const leafMat = keep(new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8, color: 0x8a9a70 }));
+  const barkMat = keep(new THREE.MeshStandardMaterial({ color: 0x241e18, roughness: 0.75 }));
   const treeFallback = new THREE.Group();
   {
     const trunks: THREE.BufferGeometry[] = [];
@@ -829,37 +978,35 @@ void main() {
   decor.group.userData.noMerge = true;
   const allLamps: LampLight[] = [...lamps, ...decor.lamps];
 
-  // ---- reflection environment: a warm, sunlit lobby (post.ts turns it into a PMREM) -------------------------------
+  // ---- reflection environment: the lobby at night (post.ts turns it into a PMREM) ---------------------------------
   const envScene = new THREE.Scene();
   {
-    const shell = new THREE.Mesh(new THREE.BoxGeometry(40, 14, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.42, 0.34, 0.24), side: THREE.BackSide }));
+    const shell = new THREE.Mesh(new THREE.BoxGeometry(40, 14, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.022, 0.021, 0.022), side: THREE.BackSide }));
     shell.position.y = 6;
     envScene.add(shell);
-    const floorDark = new THREE.Mesh(new THREE.PlaneGeometry(40, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x0a0806 }));
+    const floorDark = new THREE.Mesh(new THREE.PlaneGeometry(40, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x030303 }));
     floorDark.position.y = -0.9;
     envScene.add(floorDark);
-    // The facade: a wall of bright golden daylight.
-    const day = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 2.5, 1.6) }));
-    day.position.set(0, 6, -19.5);
-    envScene.add(day);
-    const warm = new THREE.MeshBasicMaterial({ color: lampColor.clone().multiplyScalar(6) });
+    // The facade: foggy night glass lit dull orange by the street lights, brighter low down where the lamps are.
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.11, 0.05) }));
+    glow.position.set(0, 6, -19.5);
+    envScene.add(glow);
+    const lampsMat = new THREE.MeshBasicMaterial({ color: SODIUM.clone().multiplyScalar(5) });
+    for (const x of [-7.5, 1.5, 9]) {
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), lampsMat);
+      p.position.set(x, 7, -19.4);
+      envScene.add(p);
+    }
+    // A couple of the hotel's lamps still burning.
+    const warm = new THREE.MeshBasicMaterial({ color: lampColor.clone().multiplyScalar(1.6) });
     for (const [x, z] of [
-      [-8, -6],
       [8, -2],
       [-6, 8],
       [6, 10],
-      [0, 2],
     ]) {
-      const p = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), warm);
-      p.position.set(x, 4 + (x % 3), z);
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), warm);
+      p.position.set(x, 3 + (x % 3), z);
       envScene.add(p);
-    }
-    const bright = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.3, 0.9) });
-    for (const x of [-12, 12]) {
-      const strip = new THREE.Mesh(new THREE.PlaneGeometry(30, 0.4), bright);
-      strip.position.set(x * 0.98, 4.6, 0);
-      strip.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
-      envScene.add(strip);
     }
   }
   group.userData.envScene = envScene;
@@ -997,6 +1144,18 @@ void main() {
       moon.shadow.map = null;
     }
     moon.userData.shadowCaster = true;
+    // The plaza lamps with shafts throw the mullion shadows into the lobby.
+    let n = 0;
+    for (const S of streetLights) {
+      const on = S.shafts && n++ < spec.streetShadows;
+      S.light.castShadow = on;
+      S.light.userData.shadowCaster = on;
+      if (S.light.shadow.mapSize.x !== spec.streetMap) {
+        S.light.shadow.mapSize.set(spec.streetMap, spec.streetMap);
+        S.light.shadow.map?.dispose();
+        S.light.shadow.map = null;
+      }
+    }
   };
   applyQuality(quality);
 
@@ -1034,15 +1193,19 @@ void main() {
     },
     update(dt, time) {
       for (const L of lamps) {
-        let level = 0.97 + 0.03 * Math.sin(time * 2.1 + L.seed);
-        if (L.flicker > 0) {
-          const n = Math.sin(time * 9 + L.seed) * Math.sin(time * 13.7 + L.seed * 2);
-          if (n > 0.92 - L.flicker * 0.2) level *= 0.55;
-        }
-        L.level = level;
-        L.light.intensity = L.base * level;
-        L.bulb.emissiveIntensity = (L.base > 30 ? 9 : 2) * level;
+        const f = failing(time, L.seed, L.flicker);
+        L.level = L.dim * f;
+        L.light.intensity = L.base * f;
+        L.bulb.emissiveIntensity = L.bulbBase * (L.dim > 0 ? f : 1);
       }
+      streetLights.forEach((S, i) => {
+        const fx = streetFx[i];
+        // Sodium hums; the failing one cuts out, restrikes dull red-orange and slowly warms back up.
+        const f = fx.fail > 0 ? failing(time, fx.seed, fx.fail) : 0.985 + 0.015 * Math.sin(time * 1.3 + fx.seed);
+        S.level += (f - S.level) * Math.min(1, dt * (f < S.level ? 30 : 4));
+        S.light.intensity = fx.base * S.level;
+        fx.lens.emissiveIntensity = fx.lensBase * (0.04 + 0.96 * S.level);
+      });
       decor.update(dt, time);
       skyline.update(dt, time);
       motes.update(dt, time);
@@ -1059,7 +1222,10 @@ void main() {
       skyline.dispose();
       motes.dispose();
       scene.remove(group, moon, moon.target, hemi, sky);
-      for (const S of streetLights) scene.remove(S.light, S.light.target);
+      for (const S of streetLights) {
+        scene.remove(S.light, S.light.target);
+        S.light.shadow.map?.dispose();
+      }
       moon.shadow.map?.dispose();
       for (const L of lamps) L.light.shadow.map?.dispose();
       for (const d of disposables) d.dispose();

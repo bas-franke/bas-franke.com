@@ -1,5 +1,6 @@
-// Set dressing for the hotel lobby: everything that makes it read as a grand, sunlit hotel but never breaks (except
-// what is mounted on breakable chunks, which goes with them).
+// Set dressing for the hotel lobby: everything that makes it read as a grand hotel but never breaks (except what is
+// mounted on breakable chunks, which goes with them). It is 2 am and the power is failing: most fixtures are dead, a
+// few burn low and a handful stutter (`failing`), so the street light through the facade dominates the room.
 //
 // - Mezzanine galleries along the atrium's side walls (two levels: travertine slabs with a warm LED lip, glass
 //   balustrades with brass handrails, upper-floor doorways), a coffered ceiling with recessed downlights.
@@ -8,8 +9,8 @@
 // - Brass sconces on the columns and walls, the reception desk's underglow, flowers, desk lamps and a brass sign, a lit
 //   bottle wall behind the bar, brass elevator doors, the revolving door, transoms across the glass facade.
 //
-// Lights that should show in the fog are returned as `glows`. A handful of them are also real PointLights (budget per
-// quality); the rest only glow and bloom.
+// Lights that should show in the fog are returned as `glows` (a dead fixture's glow stays at 0). A handful of them are
+// also real PointLights (budget per quality, the flickering ones first); the rest only glow and bloom.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -165,26 +166,60 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
   const leather = keep(setMaterial(mats.texSet('leather'), { color: 0xffffff, envMapIntensity: 0.6 }, 3));
   const marble = keep(setMaterial(mats.texSet('marbleSlab'), { envMapIntensity: 1.1 }, 1));
   const walnut = keep(setMaterial(mats.texSet('walnut'), { envMapIntensity: 0.8 }, 1));
-  const shadeMat = keep(new THREE.MeshStandardMaterial({ color: 0xf3e6cc, roughness: 0.8, emissive: WARM.clone(), emissiveIntensity: 0.9, side: THREE.DoubleSide }));
-  const lampGlow = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: WARM.clone(), emissiveIntensity: 7 }));
-  const ledMat = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1.0, 0.68, 0.36), emissiveIntensity: 4 }));
-  const downlight = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1, 0.86, 0.66), emissiveIntensity: 5 }));
+  // Fixtures come in three states: lit (burning low on failing power), dead, and stuttering (own material clones).
+  const shadeMat = keep(new THREE.MeshStandardMaterial({ color: 0xf3e6cc, roughness: 0.8, emissive: WARM.clone(), emissiveIntensity: 0.45, side: THREE.DoubleSide }));
+  const shadeDead = keep(new THREE.MeshStandardMaterial({ color: 0x8a8070, roughness: 0.85, side: THREE.DoubleSide }));
+  const lampGlow = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: WARM.clone(), emissiveIntensity: 2.6 }));
+  const glowDead = keep(new THREE.MeshStandardMaterial({ color: 0x1a1612, roughness: 0.3, emissive: WARM.clone(), emissiveIntensity: 0.03 }));
+  const ledMat = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1.0, 0.68, 0.36), emissiveIntensity: 0.6 }));
+  const ledDead = keep(new THREE.MeshStandardMaterial({ color: 0x14110e, roughness: 0.4, emissive: new THREE.Color(1.0, 0.68, 0.36), emissiveIntensity: 0.04 }));
+  const downlight = keep(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1, 0.86, 0.66), emissiveIntensity: 1.8 }));
+  const downDead = keep(new THREE.MeshStandardMaterial({ color: 0x1c1a17, roughness: 0.3, emissive: new THREE.Color(1, 0.86, 0.66), emissiveIntensity: 0.02 }));
   const darkMat = keep(new THREE.MeshStandardMaterial({ color: 0x0b0a09, roughness: 0.6 }));
   const potMat = keep(new THREE.MeshStandardMaterial({ color: 0x14130f, roughness: 0.35, metalness: 0.2, envMapIntensity: 0.8 }));
   const soilMat = keep(new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 1 }));
-  const petal = keep(new THREE.MeshStandardMaterial({ color: 0xfbf6ec, roughness: 0.65, emissive: 0x2a2620, emissiveIntensity: 0.3 }));
+  const petal = keep(new THREE.MeshStandardMaterial({ color: 0xfbf6ec, roughness: 0.65 }));
   const stem = keep(new THREE.MeshStandardMaterial({ color: 0x4d6b2c, roughness: 0.7 }));
   const vase = keep(new THREE.MeshPhysicalMaterial({ color: 0xe8f0ec, roughness: 0.05, transmission: 0.6, transparent: true, opacity: 0.45, envMapIntensity: 1.5 }));
   const cloth = keep(new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 0.85 }));
   const bottleMats = [0x3d5a2a, 0x6a3a14, 0x8a6a30, 0x2c3a44, 0xb0b8a0].map((c) =>
-    keep(new THREE.MeshStandardMaterial({ color: c, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.85, emissive: new THREE.Color(c).multiplyScalar(0.25) })),
+    keep(new THREE.MeshStandardMaterial({ color: c, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.85, emissive: new THREE.Color(c).multiplyScalar(0.05) })),
   );
 
-  // Point lights from a shared pool; the strongest candidates get one.
-  const pointCandidates: { pos: THREE.Vector3; color: THREE.Color; power: number; range: number }[] = [];
+  // Point lights from a shared pool; the flickering candidates get one first, then the strongest.
+  type Fix = { mat: THREE.MeshStandardMaterial; matBase: number; glow: Glow; glowBase: number; seed: number; fail: number; light: THREE.PointLight | null; power: number };
+  const pointCandidates: { pos: THREE.Vector3; color: THREE.Color; power: number; range: number; fix?: Fix }[] = [];
+  const flickers: Fix[] = [];
   const addGlow = (pos: THREE.Vector3, color: THREE.Color, intensity: number, light = 0, range = 6) => {
-    glows.push({ pos: { x: pos.x, y: pos.y, z: pos.z }, color: color.clone(), intensity });
+    const glow: Glow = { pos: { x: pos.x, y: pos.y, z: pos.z }, color: color.clone(), intensity };
+    glows.push(glow);
     if (light > 0) pointCandidates.push({ pos: pos.clone(), color: color.clone(), power: light, range });
+    return glow;
+  };
+  // Which fixtures still work: a fixed draw per fixture, independent of the furniture's random stream.
+  const fixRnd = seeded(4242);
+  type FixState = 'lit' | 'dead' | 'flicker';
+  const pickState = (pLit: number, pFlicker: number): FixState => {
+    const r = fixRnd();
+    return r < pFlicker ? 'flicker' : r < pFlicker + pLit ? 'lit' : 'dead';
+  };
+  /**
+   * A light fixture in the given state: lit ones glow at `lit` x their nominal strength, dead ones not at all, and
+   * stuttering ones get their own material clone and are driven by `failing` in update. Returns the material to use.
+   */
+  const fixture = (state: FixState, mat: THREE.MeshStandardMaterial, dead: THREE.MeshStandardMaterial, pos: THREE.Vector3, color: THREE.Color, glowI: number, light = 0, range = 6, lit = 0.5) => {
+    if (state === 'dead') return dead;
+    if (state === 'lit') {
+      addGlow(pos, color, glowI * lit, light * lit, range);
+      return mat;
+    }
+    const own = keep(mat.clone());
+    own.emissiveIntensity = mat.emissiveIntensity * 1.6;
+    const glow = addGlow(pos, color, glowI, light, range);
+    const fix: Fix = { mat: own, matBase: own.emissiveIntensity, glow, glowBase: glowI, seed: flickers.length * 5.17 + 0.3, fail: 0.55 + fixRnd() * 0.45, light: null, power: light };
+    if (light > 0) pointCandidates[pointCandidates.length - 1].fix = fix;
+    flickers.push(fix);
+    return own;
   };
 
   // Decor mounted on chunks: chunk index -> objects to hide when it breaks.
@@ -240,7 +275,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       group.add(slab);
       // Fascia: a taller travertine band with a brass reveal and a warm LED strip under its lip.
       const lip = wallPoint(w, mid, top - slabT - 0.03, depth - 0.02);
-      const led = new THREE.Mesh(keep(box(w.along === 'x' ? len : 0.04, 0.025, w.along === 'x' ? 0.04 : len)), ledMat);
+      const led = new THREE.Mesh(keep(box(w.along === 'x' ? len : 0.04, 0.025, w.along === 'x' ? 0.04 : len)), li === 0 ? ledMat : ledDead);
       led.position.copy(lip);
       led.userData.noMoonShadow = true;
       group.add(led);
@@ -250,11 +285,11 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       // Recessed downlights in the soffit.
       const dl = keep(new THREE.CircleGeometry(0.07, 16).rotateX(Math.PI / 2));
       for (let a = a0 + 1.5; a < a1 - 1; a += 3) {
-        const d = new THREE.Mesh(dl, downlight);
-        d.position.copy(wallPoint(w, a, top - slabT - 0.002, depth * 0.55));
+        const p = wallPoint(w, a, top - slabT - 0.002, depth * 0.55);
+        const d = new THREE.Mesh(dl, fixture(pickState(0.2, 0.08), downlight, downDead, p.clone().add(new THREE.Vector3(0, -0.15, 0)), WARM, 1.2, li === 0 ? 3 : 0, 5));
+        d.position.copy(p);
         d.userData.noMoonShadow = true;
         group.add(d);
-        addGlow(d.position.clone().add(new THREE.Vector3(0, -0.15, 0)), WARM, 1.2, li === 0 ? 3 : 0, 5);
       }
       // Glass balustrade with brass posts and handrail.
       const railH = 1.08;
@@ -286,11 +321,11 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         const fr = new THREE.Mesh(keep(box(w.along === 'x' ? 1.24 : 0.05, 2.42, w.along === 'x' ? 0.05 : 1.24)), mats.brass);
         fr.position.copy(wallPoint(w, a, top + 1.2, 0.0));
         group.add(fr);
-        const sc = new THREE.Mesh(keep(box(w.along === 'x' ? 0.08 : 0.06, 0.38, w.along === 'x' ? 0.06 : 0.08)), lampGlow);
-        sc.position.copy(wallPoint(w, a + 2.25, top + 1.8, 0.05));
+        const sp = wallPoint(w, a + 2.25, top + 1.8, 0.05);
+        const sc = new THREE.Mesh(keep(box(w.along === 'x' ? 0.08 : 0.06, 0.38, w.along === 'x' ? 0.06 : 0.08)), fixture(pickState(0.25, 0.1), lampGlow, glowDead, sp, WARM, 0.8));
+        sc.position.copy(sp);
         sc.userData.noMoonShadow = true;
         group.add(sc);
-        addGlow(sc.position, WARM, 0.8);
       }
     }
   }
@@ -311,7 +346,8 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     const dl = keep(new THREE.CircleGeometry(0.11, 16).rotateX(Math.PI / 2));
     for (let x = atrium.minX + 1.5; x < atrium.maxX; x += 3)
       for (let z = atrium.minZ + 1.5; z < atrium.maxZ; z += 3) {
-        const d = new THREE.Mesh(dl, downlight);
+        // Nearly all dead; the odd one still burns.
+        const d = new THREE.Mesh(dl, fixRnd() < 0.12 ? downlight : downDead);
         d.position.set(x, atriumH - 0.01, z);
         d.userData.noMoonShadow = true;
         group.add(d);
@@ -359,10 +395,11 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         add(new THREE.CylinderGeometry(r, r, 0.03, 40), marble, 0, s.h - 0.015, 0);
         if (f.kind === 'sideTable') {
           add(new THREE.CylinderGeometry(0.012, 0.012, 0.42, 8), mats.brass, 0, s.h + 0.21, 0);
-          const sh = add(new THREE.CylinderGeometry(0.14, 0.17, 0.2, 24, 1, true), shadeMat, 0, s.h + 0.46, 0, false);
-          sh.userData.noMoonShadow = true;
           const p = new THREE.Vector3(f.x, s.h + 0.4, f.z);
-          addGlow(p, WARM, 1.6, 1.4, 4);
+          const state = pickState(0.3, 0.1);
+          g.userData.lit = { glow: fixture(state, lampGlow, glowDead, p, WARM, 1.6, 1.4, 4), shade: state === 'dead' ? shadeDead : shadeMat };
+          const sh = add(new THREE.CylinderGeometry(0.14, 0.17, 0.2, 24, 1, true), g.userData.lit.shade, 0, s.h + 0.46, 0, false);
+          sh.userData.noMoonShadow = true;
         } else {
           // A brass tray and a small bowl of flowers.
           add(new THREE.CylinderGeometry(0.18, 0.15, 0.03, 24), mats.brass, 0.15, s.h + 0.015, 0.1);
@@ -373,10 +410,12 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       case 'floorLamp': {
         add(new THREE.CylinderGeometry(0.16, 0.18, 0.03, 24), mats.brass, 0, 0.015, 0);
         add(new THREE.CylinderGeometry(0.014, 0.014, 1.4, 8), mats.brass, 0, 0.72, 0);
-        const sh = add(new THREE.CylinderGeometry(0.22, 0.26, 0.34, 28, 1, true), shadeMat, 0, 1.52, 0, false);
-        sh.userData.noMoonShadow = true;
+        // Floor lamps are the lobby's last working lights: most still on, low.
         const p = new THREE.Vector3(f.x, 1.45, f.z);
-        addGlow(p, WARM, 2.2, 2.2, 5);
+        const state = pickState(0.6, 0.2);
+        g.userData.lit = { glow: fixture(state, lampGlow, glowDead, p, WARM, 2.2, 2.2, 5, 0.6), shade: state === 'dead' ? shadeDead : shadeMat };
+        const sh = add(new THREE.CylinderGeometry(0.22, 0.26, 0.34, 28, 1, true), g.userData.lit.shade, 0, 1.52, 0, false);
+        sh.userData.noMoonShadow = true;
         break;
       }
       case 'planter': {
@@ -507,7 +546,10 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     plate.position.z = 0.01;
     plate.castShadow = true;
     g.add(plate);
-    const tube = new THREE.Mesh(keep(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 14)), lampGlow);
+    // A third still burn, a few stutter, the rest are dead.
+    const glowMat = fixture(pickState(0.3, 0.14), lampGlow, glowDead, p.clone().addScaledVector(normal, 0.25), WARM, 1.4, 1.6, 5);
+    g.userData.lit = { glow: glowMat, shade: glowMat === glowDead ? shadeDead : shadeMat };
+    const tube = new THREE.Mesh(keep(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 14)), glowMat);
     tube.position.z = 0.07;
     tube.userData.noMoonShadow = true;
     g.add(tube);
@@ -518,7 +560,6 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     }
     group.add(g);
     mount(g, p.clone().addScaledVector(normal, -0.1));
-    addGlow(p.clone().addScaledVector(normal, 0.25), WARM, 1.4, 1.6, 5);
   };
   for (const pr of def.props ?? []) {
     if (pr.kind !== 'column') continue;
@@ -575,7 +616,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         prims: [strip, kick],
       });
     }
-    for (let k = -1; k <= 1; k++) addGlow(new THREE.Vector3(c.x + (alongX ? (k * len) / 3 : size.x / 2 + 0.2), 0.15, c.z + (alongX ? size.z / 2 + 0.2 : (k * len) / 3)), WARM, 0.9);
+    for (let k = -1; k <= 1; k++) addGlow(new THREE.Vector3(c.x + (alongX ? (k * len) / 3 : size.x / 2 + 0.2), 0.15, c.z + (alongX ? size.z / 2 + 0.2 : (k * len) / 3)), WARM, 0.15);
     const top = b.max.y;
     const at = (t: number, side = 0) => new THREE.Vector3(c.x + (alongX ? t * len : side), top, c.z + (alongX ? side : t * len));
     if (pr.kind === 'desk') {
@@ -589,12 +630,13 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         const dome = new THREE.Mesh(keep(new THREE.SphereGeometry(0.17, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2)), mats.brass);
         dome.position.y = 0.42;
         dome.castShadow = true;
-        const glowDisc = new THREE.Mesh(keep(new THREE.CircleGeometry(0.15, 20).rotateX(Math.PI / 2)), lampGlow);
+        // One desk lamp left on (the night porter's), one stuttering, one dead.
+        const st: FixState = t < 0 ? 'lit' : t < 0.2 ? 'flicker' : 'dead';
+        const glowDisc = new THREE.Mesh(keep(new THREE.CircleGeometry(0.15, 20).rotateX(Math.PI / 2)), fixture(st, lampGlow, glowDead, p.clone().add(new THREE.Vector3(0, 0.35, 0)), WARM, 1.6, 1.2, 4, 0.8));
         glowDisc.position.y = 0.415;
         glowDisc.userData.noMoonShadow = true;
         lamp.add(stemM, dome, glowDisc);
         group.add(lamp);
-        addGlow(p.clone().add(new THREE.Vector3(0, 0.35, 0)), WARM, 1.6, 1.2, 4);
         mount(lamp, p.clone().add(new THREE.Vector3(0, -0.1, 0)));
       }
       // Staff stand on the wall side of the desk; their screens face them.
@@ -650,7 +692,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         g.fillText('G R A N D   M E R I D I A N', 512, 110);
         const tex = keep(new THREE.CanvasTexture(cv));
         tex.colorSpace = THREE.SRGBColorSpace;
-        const signMat = keep(new THREE.MeshStandardMaterial({ map: tex, transparent: true, color: 0xe6bd72, metalness: 1, roughness: 0.25, emissive: 0x5a3a12, emissiveMap: tex, emissiveIntensity: 1.2 }));
+        const signMat = keep(new THREE.MeshStandardMaterial({ map: tex, transparent: true, color: 0xe6bd72, metalness: 1, roughness: 0.25, emissive: 0x5a3a12, emissiveMap: tex, emissiveIntensity: 0.18 }));
         const sign = new THREE.Mesh(keep(new THREE.PlaneGeometry(5.5, 0.86)), signMat);
         sign.position.copy(wallPoint(wall, c.z, 3.6, 0.03));
         sign.rotation.y = wall.out < 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -676,7 +718,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
             bottle.position.copy(wallPoint(wall, c.x + x, y + bh / 2 + 0.013, 0.15));
             group.add(bottle);
           }
-          addGlow(wallPoint(wall, c.x, y, 0.4), WARM, 0.8);
+          addGlow(wallPoint(wall, c.x, y, 0.4), WARM, 0.25);
         }
       }
       const rail = new THREE.Mesh(keep(new THREE.CylinderGeometry(0.025, 0.025, len, 10).rotateZ(Math.PI / 2)), mats.brass);
@@ -713,7 +755,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       const ind = new THREE.Mesh(keep(box(w.along === 'x' ? 0.5 : 0.03, 0.08, w.along === 'x' ? 0.03 : 0.5)), ledMat);
       ind.position.copy(wallPoint(w, a, o.y1 - 0.2, 0.1));
       group.add(ind);
-      addGlow(wallPoint(w, a, o.y1 - 0.3, 0.4), WARM, 0.6);
+      addGlow(wallPoint(w, a, o.y1 - 0.3, 0.4), WARM, 0.2);
     }
   }
   const facade = walls.get('facade');
@@ -766,16 +808,18 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
 
   // ---- real lights from the strongest glow candidates ------------------------------------------------------------
   const points: THREE.PointLight[] = [];
-  pointCandidates.sort((a, b) => b.power - a.power);
+  pointCandidates.sort((a, b) => (b.fix ? 10 : 0) + b.power - ((a.fix ? 10 : 0) + a.power));
   const rebuildPoints = (q: Quality) => {
     for (const p of points) group.remove(p);
     points.length = 0;
+    for (const f of flickers) f.light = null;
     for (const c of pointCandidates.slice(0, POINT_BUDGET[q])) {
-      const p = new THREE.PointLight(c.color, c.power * 4, c.range, 2);
+      const p = new THREE.PointLight(c.color, c.power * 3, c.range, 2);
       p.position.copy(c.pos);
       p.layers.enableAll();
       group.add(p);
       points.push(p);
+      if (c.fix) c.fix.light = p;
     }
   };
   rebuildPoints(quality);
@@ -931,17 +975,18 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       }
     };
     /** Lamp shades and bulbs glow; the props carry materials named Shade / Bulb / SconceGlow. */
-    const lightUp = (m: THREE.Object3D) =>
+    // The model's bulb and shade take the stand-in's fixture state (lit, dead or its own stuttering material).
+    const lightUp = (m: THREE.Object3D, lit?: { glow: THREE.Material; shade: THREE.Material }) =>
       m.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh) return;
         const name = (mesh.material as THREE.Material).name;
         if (name === 'Bulb' || name === 'SconceGlow') {
-          mesh.material = lampGlow;
+          mesh.material = lit?.glow ?? lampGlow;
           mesh.castShadow = false;
           mesh.userData.noMoonShadow = true;
         } else if (name === 'Shade') {
-          mesh.material = shadeMat;
+          mesh.material = lit?.shade ?? shadeMat;
           mesh.castShadow = false;
         }
       });
@@ -962,7 +1007,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
         case 'luggageCart':
         case 'floorLamp': {
           const m = prop(f.kind);
-          if (m) lightUp(m);
+          if (m) lightUp(m, slot.fallback.userData.lit);
           swap(slot.holder, slot.fallback, [m]);
           break;
         }
@@ -972,7 +1017,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
           if (t && l) {
             const top = new THREE.Box3().setFromObject(t).max.y;
             l.position.y = top;
-            lightUp(l);
+            lightUp(l, slot.fallback.userData.lit);
           }
           swap(slot.holder, slot.fallback, [t, l]);
           break;
@@ -1020,7 +1065,7 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
     for (const g of sconces) {
       const m = prop('sconce');
       if (!m) break;
-      lightUp(m);
+      lightUp(m, g.userData.lit);
       m.rotation.y = Math.PI;
       g.clear();
       g.add(m);
@@ -1085,8 +1130,14 @@ export function buildDecor(world: World, mats: DecorMats, quality: Quality, mode
       for (const o of list) o.visible = false;
       onChunk.delete(i);
     },
-    update(dt) {
+    update(dt, time) {
       if (wings) wings.rotation.y += dt * 0.25;
+      for (const f of flickers) {
+        const l = failing(time, f.seed, f.fail);
+        f.mat.emissiveIntensity = f.matBase * (0.02 + 0.98 * l);
+        f.glow.intensity = f.glowBase * l;
+        if (f.light) f.light.intensity = f.power * 3 * l;
+      }
     },
     setQuality(q) {
       rebuildPoints(q);
