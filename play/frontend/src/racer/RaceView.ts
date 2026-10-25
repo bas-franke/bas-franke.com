@@ -325,7 +325,7 @@ export class RaceView {
       v.object.quaternion.setFromRotationMatrix(m);
       // Lean into turns, nose up a touch under thrust.
       // Lean into turns, nose up a touch under thrust; in the air the nose follows the flight path.
-      const roll = THREE.MathUtils.clamp(-st.yawRate * 0.45 + (st.phi - st.psi) * 0.6, -0.6, 0.6);
+      const roll = THREE.MathUtils.clamp(st.yawRate * 0.45 + (st.psi - st.phi) * 0.6, -0.6, 0.6);
       let pitch = (r.input.throttle - r.input.brake) * 0.03 + (st.boosting ? 0.03 : 0);
       if (st.air) pitch += THREE.MathUtils.clamp(Math.atan2(st.vy, Math.max(10, st.v)) - Math.asin(THREE.MathUtils.clamp(f.tangent.y, -1, 1)), -0.5, 0.5);
       v.object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, roll, 'ZXY')));
