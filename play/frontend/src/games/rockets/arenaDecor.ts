@@ -459,7 +459,39 @@ function neonTrim(map: MapData, solid: Bucket, glow: Bucket, fade: Bucket, rand:
     if (Math.abs(cx) < 1 && Math.abs(cz) < 1 && (!core || b.max.y > core.max.y)) core = b;
   }
   for (const b of map.boxes) {
-    if (b === core || (b.kind !== 'platform' && b.kind !== 'tower' && b.kind !== 'pillar' && b.kind !== 'ledge')) continue;
+    if (b === core) continue;
+    const bh = b.max.y - b.min.y;
+    // Yellow steel: steps get dark tread lines round their tops; pillars get dark bands and amber lights.
+    if (b.kind === 'stair' && bh < 2.5) {
+      const y = b.max.y + 0.012;
+      const tx = b.max.x - b.min.x;
+      const tz = b.max.z - b.min.z;
+      const cx = (b.min.x + b.max.x) / 2;
+      const cz = (b.min.z + b.max.z) / 2;
+      const line = (w: number, d: number, x: number, z: number) => solid.add(at(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2), x, y, z), 0x3a2e1a);
+      line(tx - 0.08, 0.06, cx, b.min.z + 0.06);
+      line(tx - 0.08, 0.06, cx, b.max.z - 0.06);
+      line(0.06, tz - 0.08, b.min.x + 0.06, cz);
+      line(0.06, tz - 0.08, b.max.x - 0.06, cz);
+      continue;
+    }
+    if (b.kind === 'pillar' && bh >= 4) {
+      const cx = (b.min.x + b.max.x) / 2;
+      const cz = (b.min.z + b.max.z) / 2;
+      const tx = b.max.x - b.min.x;
+      const tz = b.max.z - b.min.z;
+      for (let y = b.min.y + 2.4; y < b.max.y - 0.6; y += 2.6) {
+        if (blockedAt(map.boxes, b, cx, y, b.min.z - 0.2) && blockedAt(map.boxes, b, b.min.x - 0.2, y, cz)) continue;
+        solid.add(at(box(tx + 0.06, 0.2, tz + 0.06), cx, y, cz), 0x34303e);
+        for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ox = cx + nx * (tx / 2 + 0.05);
+          const oz = cz + nz * (tz / 2 + 0.05);
+          if (blockedAt(map.boxes, b, cx + nx * (tx / 2 + 0.3), y + 0.4, cz + nz * (tz / 2 + 0.3))) continue;
+          glow.add(at(box(0.3, 0.09, 0.05), ox, y + 0.35, oz, Math.atan2(nx, nz)), 0xffa640);
+        }
+      }
+    }
+    if (b.kind !== 'platform' && b.kind !== 'tower' && b.kind !== 'pillar' && b.kind !== 'ledge') continue;
     const h = b.max.y - b.min.y;
     if (h < 1.8) continue;
     const color = rand() < 0.22 ? cyan : pink;
