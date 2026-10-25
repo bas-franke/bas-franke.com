@@ -1195,6 +1195,29 @@ interface Rig {
   legYaw: number;
   ground: boolean;
   fallVy: number;
+  /** Jet flames under the thruster backpack, shown while airborne. */
+  flame?: THREE.Mesh;
+}
+
+let flameGeo: THREE.BufferGeometry | null = null;
+let flameMat: THREE.MeshBasicMaterial | null = null;
+/** Two flame cones (orange outer, hot inner) hanging 1 m down from the nozzles, scaled in y by the air blend. */
+function jetFlame(): THREE.Mesh {
+  if (!flameGeo) {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const x of [-0.12, 0.12]) {
+      parts.push(new THREE.ConeGeometry(0.05, 1, 8, 1, true).rotateX(Math.PI).translate(x, -0.5, 0));
+      parts.push(new THREE.ConeGeometry(0.025, 0.6, 6, 1, true).rotateX(Math.PI).translate(x, -0.3, 0));
+    }
+    flameGeo = mergeGeometries(parts, false);
+    for (const p of parts) p.dispose();
+    flameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 0.7, 0.25), transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+  }
+  const mesh = new THREE.Mesh(flameGeo, flameMat!);
+  mesh.name = 'jetFlame';
+  mesh.visible = false;
+  mesh.frustumCulled = false;
+  return mesh;
 }
 
 /**
@@ -1215,6 +1238,12 @@ export function buildCharacter(look: Look, teamColor?: number): THREE.Group {
   const b = {} as Record<BoneName, THREE.Bone>;
   for (const name of BONES) b[name] = root.getObjectByName(name) as THREE.Bone;
   const rig: Rig = { b, phase: Math.random() * 6, amp: 0, air: 0, squash: 0, legYaw: 0, ground: true, fallVy: 0 };
+  if ((look.backpack ?? DEFAULT_LOOK.backpack) === 'thrusters') {
+    // The nozzles sit at (±0.12, 1.028, 0.3) in the rest pose; the torso bone pivots at PIVOT.torso.
+    rig.flame = jetFlame();
+    rig.flame.position.set(0 - PIVOT.torso[0], 1.02 - PIVOT.torso[1], 0.3 - PIVOT.torso[2]);
+    b.torso.add(rig.flame);
+  }
   root.userData.rig = rig;
   root.userData.lookKey = characterKey(look, teamColor);
   animateCharacter(root, { speed: 0, vx: 0, vz: 0, yaw: 0, onGround: true, vy: 0, pitch: 0, t: 0, dt: 0 });
@@ -1299,6 +1328,12 @@ export function animateCharacter(obj: THREE.Object3D, s: CharacterState) {
   r.legYaw = damp(r.legYaw, -a * 0.8, 10, dt);
   if (s.onGround) r.phase += (dir * s.speed * Math.PI * 2 * dt) / (STRIDE + STRIDE_RUN * run);
   r.air = damp(r.air, s.onGround ? 0 : 1, s.onGround ? 14 : 7, dt);
+  if (r.flame) {
+    // Jets fire hardest while climbing, flickering.
+    const k = r.air * (s.vy > 0 ? 1 : 0.55);
+    r.flame.visible = k > 0.12;
+    r.flame.scale.set(1, k * (0.85 + 0.25 * Math.sin(s.t * 57)), 1);
+  }
   if (s.onGround && !r.ground && r.fallVy < -4) r.squash = Math.max(r.squash, clamp((-r.fallVy - 4) / 12, 0.25, 1));
   if (!s.onGround) r.fallVy = s.vy;
   r.ground = s.onGround;

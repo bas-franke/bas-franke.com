@@ -191,7 +191,8 @@ export function buildArena(map: MapData): ArenaView {
   const rand = mulberry(seed);
   // Dusk maps have rain-wet decks.
   const wet: Wet | undefined = theme.dusk
-    ? { horizon: new THREE.Color(map.fogColor), zenith: new THREE.Color(map.skyColor), sun: new THREE.Color(0xffb060), sunDir: sunDirOf(theme) }
+    ? // A bluer horizon than the fog: the decks read as blue-grey steel with warm sun glints, not lavender.
+      { horizon: new THREE.Color(map.fogColor).lerp(new THREE.Color(map.skyColor), 0.45), zenith: new THREE.Color(map.skyColor), sun: new THREE.Color(0xffb060), sunDir: sunDirOf(theme) }
     : undefined;
 
   // ---- surfaces, merged per kind, plus one ink hull and one set of crease lines for everything ----
