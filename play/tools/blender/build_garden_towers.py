@@ -1,23 +1,26 @@
 """
-Builds the Garden Sentinels towers (towers.glb) in Blender: five tower kinds, three levels each.
+Builds the Garden Sentinels towers (towers.glb) in Blender: six tower kinds, three levels each.
 
     blender --background --factory-startup --python build_garden_towers.py -- <output-dir> [preview-dir]
 
 Style: cozy "advanced ceramic tech". Every tower stands on a round stone-ringed planter overflowing with leaves,
 built from polished cream ceramic, warm bronze (joints, barrels, housings), gold trim (level 3) and a strong glow in
-the kind's colour: amber laser lens, orange-red missile tips, amber shield dome, mint flower, teal beacon crystal.
+the kind's colour: amber laser lens, orange-red missile tips, amber shield dome, mint flower, teal beacon crystal,
+water-blue sprinkler tank.
 Everything is procedural geometry with plain materials (no textures), so the GLB stays small.
 
 Conventions the frontend relies on (frontend/src/games/garden/api.ts, models.ts section):
-  * one root per kind and level: `Tower_<kind>_<lv>`, kind in laser, shield, slow, missile, beacon, lv 1..3;
+  * one root per kind and level: `Tower_<kind>_<lv>`, kind in laser, shield, slow, missile, beacon,
+    sprinkler, lv 1..3;
     origin at the ground centre, footprint inside a 1.8 m circle, front = Blender +Y (glTF -Z).
-  * laser and missile: child empty `<root>_head` at the yaw axis; everything that turns hangs under it, aim = +Y.
+  * laser, missile and sprinkler: child empty `<root>_head` at the yaw axis; everything that turns hangs under it, aim = +Y.
     Muzzle empties `<root>_muzzle` or `<root>_muzzle0..N` under the head at the barrel tips.
   * shield, slow and beacon: one `<root>_muzzle` empty where the effect emits (core, flower centre, crystal tip).
   * materials: `Team` (tinted per player, near white; only the small pennant on the planter rim), `Glow*` (emissive:
-    GlowAmber, GlowMissile, GlowShield (translucent dome), GlowMint, GlowPetal, GlowGreen, GlowYellow and the
-    kind-coloured plinth bands GlowBand_<kind>), Ceramic, Bronze, BronzeDark, Gold, Stone, StoneDark, Leaf, LeafDark,
-    Soil. Planter meshes are shared between kinds of the same level.
+    GlowAmber, GlowMissile, GlowShield (translucent dome), GlowMint, GlowPetal, GlowGreen, GlowYellow, GlowWater,
+    GlowWaterGlass (translucent sprinkler dome) and the
+    kind-coloured plinth bands GlowBand_<kind>), Ceramic, CeramicBlue (sprinkler tank), Bronze, BronzeDark, Copper,
+    Gold, Stone, StoneDark, Leaf, LeafDark, Soil. Planter meshes are shared between kinds of the same level.
 """
 
 import math
@@ -33,7 +36,7 @@ ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = Path(ARGS[0]) if ARGS else Path("models/garden")
 PREVIEW = Path(ARGS[1]) if len(ARGS) > 1 else None
 
-KINDS = ("laser", "shield", "slow", "missile", "beacon")
+KINDS = ("laser", "shield", "slow", "missile", "beacon", "sprinkler")
 TAU = math.tau
 
 
@@ -103,6 +106,13 @@ def palette():
         "GlowBand_shield": material("GlowBand_shield", "#FFC060", rough=0.3, emission="#FFB24A", strength=1.4),
         "GlowBand_slow": material("GlowBand_slow", "#4EE6D9", rough=0.3, emission="#4EE6D9", strength=1.3),
         "GlowBand_beacon": material("GlowBand_beacon", "#1FC79A", rough=0.3, emission="#22D8A4", strength=1.4),
+        # sprinkler cannon: glazed blue tank, copper pipes, water-blue glow (#2EB3FF)
+        "CeramicBlue": material("CeramicBlue", "#2F7FC4", rough=0.24, coat=0.5),
+        "Copper": material("Copper", "#C0703F", rough=0.3, metal=1.0),
+        "GlowWater": material("GlowWater", "#1E9BF0", rough=0.2, emission="#2EB3FF", strength=1.8),
+        "GlowWaterGlass": material("GlowWaterGlass", "#8FD8FF", rough=0.05, emission="#2EB3FF", strength=0.45,
+                                   alpha=0.4, double_sided=True),
+        "GlowBand_sprinkler": material("GlowBand_sprinkler", "#2EB3FF", rough=0.3, emission="#2EB3FF", strength=1.5),
     }
 
 
@@ -793,8 +803,189 @@ def build_beacon(mats, root, name, lv, z0):
     empty(name + "_muzzle", root, (0, 0, zb + ch + 0.03))
 
 
+# ---- sprinkler cannon --------------------------------------------------------------------------------------------------
+
+def pipe(b, pts, r, mat, seg=8, joints=True):
+    """Bent pipe through the given points: one cylinder per segment, balls at the bends."""
+    pts = [Vector(p) for p in pts]
+    for p0, p1 in zip(pts, pts[1:]):
+        d = p1 - p0
+        rot = d.to_track_quat("Z", "Y").to_euler()
+        cyl(b, r, r, d.length, mat, mat4((p0 + p1) / 2, rot), seg=seg)
+    if joints:
+        for p in pts[1:-1]:
+            sphere(b, r * 1.25, mat, mat4(p), seg=seg, rings=6)
+
+
+def bell_nozzle(h, P, x, z, k, lv, rad=0.12, length=0.26):
+    """Short wide bronze nozzle along local +Y of frame P: ceramic sleeve, flared bell, glowing water mouth.
+    Returns the tip position in head space."""
+    rot = (-math.pi / 2, 0, 0)            # lathe +Z -> +Y
+    L = length * k
+    R = rad * k
+    cyl(h, R * 0.74, R * 0.74, L * 0.45, "Ceramic", P @ mat4((x, L * 0.2, z), rot), seg=12)
+    lathe(h, [(R * 0.62, 0), (R * 0.64, L * 0.42), (R * 0.78, L * 0.7), (R * 0.96, L * 0.9), (R, L)],
+          "Bronze", P @ mat4((x, L * 0.05, z), rot), seg=14, cap_top=False)
+    trim = "Gold" if lv == 3 else "BronzeDark"
+    torus(h, R * 0.98, R * 0.14, trim, P @ mat4((x, L * 1.05, z), rot), seg=14, rseg=6)
+    torus(h, R * 0.66, R * 0.16, "GlowWater", P @ mat4((x, L * 1.04, z), rot), seg=14, rseg=6)
+    cyl(h, R * 0.8, R * 0.8, 0.012, "GlowWater", P @ mat4((x, L * 0.98, z), rot), seg=12)
+    cyl(h, R * 0.76, R * 0.76, 0.02 * k, trim, P @ mat4((x, L * 0.47, z), rot), seg=12)
+    return (P @ Vector((x, L * 1.1, z)))[:]
+
+
+# smoother shading threshold than the other towers: 6-sided tori and pipes stay smooth (one vertex per
+# corner instead of four), which keeps the GLB small
+SPRINKLER_SHARP = 64.0
+
+
+def build_sprinkler(mats, root, name, lv, z0):
+    s = (0.95, 1.0, 1.05)[lv - 1]
+    b = Builder(mats)
+    hoop = ("Ceramic", "Bronze", "Gold")[lv - 1]
+    # ceramic foot with the water-blue band
+    lathe(b, [(0.37 * s, z0 - 0.04), (0.38 * s, z0 + 0.05 * s), (0.34 * s, z0 + 0.1 * s), (0.3 * s, z0 + 0.12 * s)],
+          "Ceramic", seg=24)
+    kind_band(b, "sprinkler", 0.36 * s, z0 + 0.075 * s, lv)
+    team_pennant(b, z0, lv)
+    if lv >= 2:
+        cyl(b, 0.4 * s, 0.4 * s, 0.04, "BronzeDark", mat4((0, 0, z0)), seg=24)
+    # glazed blue water drum
+    TR = 0.32 * s
+    TH = (0.34, 0.37, 0.38)[lv - 1] * s
+    zt0 = z0 + 0.11 * s
+    zt1 = zt0 + TH
+    lathe(b, [(TR * 0.9, zt0), (TR * 0.98, zt0 + 0.05 * s), (TR * 1.04, zt0 + TH * 0.5), (TR * 0.98, zt1 - 0.05 * s),
+              (TR * 0.9, zt1)], "CeramicBlue", seg=24, cap_top=False)
+    for zz in (zt0 + 0.06 * s, zt1 - 0.06 * s):
+        torus(b, TR * 1.0, 0.026, hoop, mat4((0, 0, zz)), seg=24, rseg=6)
+    # rivets on the hoops
+    for i in range(8):
+        a = TAU * (i + 0.5) / 8
+        for zz in (zt0 + 0.06 * s, zt1 - 0.06 * s):
+            sphere(b, 0.014, "BronzeDark", mat4((math.cos(a) * TR * 1.03, math.sin(a) * TR * 1.03, zz)), seg=5, rings=3)
+    # lid: blue glaze with a glowing water ring round the rim (reads blue from the game camera)
+    torus(b, TR * 0.9, 0.03, "GlowWater", mat4((0, 0, zt1 + 0.004)), seg=24, rseg=6)
+    if lv < 3:
+        lathe(b, [(TR * 0.9, zt1), (TR * 0.84, zt1 + 0.04 * s), (TR * 0.55, zt1 + 0.08 * s), (0.16 * s, zt1 + 0.09 * s),
+                  (0.16 * s, zt1 + 0.1 * s)], "CeramicBlue", seg=24)
+        ztop = zt1 + 0.1 * s
+    else:
+        # Masterwork: glass water dome over the drum, water and bubbles inside, a bronze column carries the head
+        dr = TR * 0.88
+        dh = 0.2 * s
+        prof = []
+        for i in range(8):
+            t = (math.pi / 2) * i / 7
+            prof.append((dr * math.cos(t) if i < 7 else 0.0, zt1 + dh * math.sin(t)))
+        cyl(b, dr * 0.97, dr * 0.97, 0.05 * s, "GlowWater", mat4((0, 0, zt1 + 0.025 * s)), seg=24)
+        lathe(b, prof, "GlowWaterGlass", seg=24, cap_top=False)
+        torus(b, dr * 0.72, 0.016, "Gold", mat4((0, 0, zt1 + dh * 0.7)), seg=24, rseg=6)
+        rnd = random.Random(55)
+        for i in range(6):
+            a = rnd.uniform(0, TAU)
+            rr = rnd.uniform(0.1, dr * 0.75)
+            sphere(b, rnd.uniform(0.012, 0.024), "GlowWaterGlass",
+                   mat4((math.cos(a) * rr, math.sin(a) * rr, zt1 + rnd.uniform(0.06, 0.14) * s)), seg=6, rings=4)
+        cyl(b, 0.06 * s, 0.07 * s, dh + 0.02, "Bronze", mat4((0, 0, zt1 + dh / 2)), seg=14)
+        cyl(b, 0.13 * s, 0.1 * s, 0.04 * s, "Gold", mat4((0, 0, zt1 + dh + 0.01)), seg=20, bevel=0.006)
+        ztop = zt1 + dh + 0.03 * s
+    # side valve wheel
+    vx = TR * 1.04
+    vm = "Copper" if lv >= 2 else "Bronze"
+    cyl(b, 0.03, 0.03, 0.06, "BronzeDark", mat4((vx + 0.02, 0, zt0 + TH * 0.45), (0, math.pi / 2, 0)), seg=10)
+    torus(b, 0.055, 0.012, vm, mat4((vx + 0.055, 0, zt0 + TH * 0.45), (0, math.pi / 2, 0)), seg=16, rseg=6)
+    for i in range(3):
+        box(b, (0.008, 0.1, 0.012), vm, mat4((vx + 0.055, 0, zt0 + TH * 0.45), (TAU * i / 3, 0, 0)), segs=1)
+    if lv >= 2:
+        # water-level window on the front: bronze frame, glowing water up to two thirds
+        wy = TR * 1.035
+        wz = zt0 + TH * 0.5
+        wh = TH * 0.56
+        box(b, (0.12 * s, 0.03, wh + 0.04), "BronzeDark", mat4((0, wy, wz)), bevel=0.012, segs=1)
+        box(b, (0.075 * s, 0.03, wh * 0.62), "GlowWater", mat4((0, wy + 0.006, wz - wh * 0.19)), bevel=0.008, segs=1)
+        box(b, (0.075 * s, 0.026, wh * 0.36), "Soil", mat4((0, wy + 0.004, wz + wh * 0.31)), bevel=0.006, segs=1)
+        for j in range(3):
+            box(b, (0.03, 0.012, 0.006), "Gold" if lv == 3 else "Bronze",
+                mat4((0.055 * s, wy + 0.018, wz - wh * 0.4 + wh * 0.4 * j)), segs=1)
+        # copper pipes up the back flanks into the lid
+        for sx in (-1, 1):
+            a = math.radians(90 + sx * 128)
+            cx, cy = math.cos(a), math.sin(a)
+            r1 = TR * 1.12
+            pts = [(cx * TR * 1.0, cy * TR * 1.0, zt0 + 0.12 * s), (cx * r1, cy * r1, zt0 + 0.12 * s),
+                   (cx * r1, cy * r1, zt1 + 0.02), (cx * TR * 0.7, cy * TR * 0.7, zt1 + 0.06 * s)]
+            pipe(b, pts, 0.022, "Copper")
+            for zz in (zt0 + 0.12 * s, zt1 - 0.06 * s):
+                cyl(b, 0.032, 0.032, 0.02, "BronzeDark", mat4((cx * r1, cy * r1, zz)), seg=10)
+    if lv == 3:
+        # gold buttresses round the drum
+        for i in range(4):
+            a = TAU * (i + 0.5) / 4
+            box(b, (0.05, 0.08, TH * 0.7), "Gold",
+                mat4((math.cos(a) * TR * 1.04, math.sin(a) * TR * 1.04, zt0 + TH * 0.38), (0, 0, a + math.pi / 2)) @
+                mat4(rot=(0.08, 0, 0)), bevel=0.012, segs=1)
+    obj_from_mesh(name + "_body", b.mesh(name + "_body", sharp_angle=SPRINKLER_SHARP), root)
+
+    # ---- swivel head: everything that turns, aim = +Y; nozzle pitched up-forward for lobbed water bombs
+    head = empty(name + "_head", root, (0, 0, ztop))
+    h = Builder(mats)
+    k = (1.12, 1.16, 1.2)[lv - 1]
+    cyl(h, 0.17 * k, 0.15 * k, 0.05 * k, "BronzeDark", mat4((0, 0, 0.025 * k)), seg=20)
+    sphere(h, 0.12 * k, "Bronze", mat4((0, -0.02 * k, 0.1 * k), scale=(1, 1.05, 0.8)), seg=14, rings=8)
+    torus(h, 0.13 * k, 0.018, "Gold" if lv == 3 else "Ceramic", mat4((0, 0, 0.06 * k)), seg=24, rseg=6)
+    zc = 0.15 * k
+    pitch = math.radians(42)
+    P = mat4((0, -0.03 * k, zc), (pitch, 0, 0))
+    # yoke cheeks + trunnion caps
+    yw = (0.14, 0.22, 0.16)[lv - 1] * k
+    for sx in (-1, 1):
+        box(h, (0.045 * k, 0.15 * k, 0.17 * k), "Bronze", mat4((sx * yw, -0.03 * k, zc - 0.03 * k)), bevel=0.016 * k, segs=1)
+        cyl(h, 0.055 * k, 0.055 * k, 0.03, "Ceramic", mat4((sx * (yw + 0.03 * k), -0.03 * k, zc), (0, math.pi / 2, 0)),
+            seg=14, bevel=0.006)
+        sphere(h, 0.022 * k, "GlowWater", mat4((sx * (yw + 0.05 * k), -0.03 * k, zc), scale=(0.5, 1, 1)), seg=8, rings=5)
+    tips = []
+    if lv == 1:
+        sphere(h, 0.1 * k, "BronzeDark", P @ mat4((0, -0.02 * k, 0)), seg=14, rings=8)
+        tips.append(bell_nozzle(h, P, 0.0, 0.0, k, lv, rad=0.14, length=0.36))
+    elif lv == 2:
+        # copper manifold feeding twin nozzles
+        cyl(h, 0.055 * k, 0.055 * k, 2 * yw - 0.02, "Copper", P @ mat4((0, 0, 0), (0, math.pi / 2, 0)), seg=14)
+        box(h, (0.16 * k, 0.12 * k, 0.12 * k), "BronzeDark", P @ mat4((0, -0.04 * k, 0)), bevel=0.03 * k, segs=1)
+        for sx in (-1, 1):
+            tips.append(bell_nozzle(h, P, sx * 0.11 * k, 0.0, k, lv, rad=0.11, length=0.36))
+        pipe(h, [P @ Vector((-0.105 * k, -0.06 * k, -0.07 * k)), P @ Vector((0, -0.1 * k, -0.1 * k)),
+                 P @ Vector((0.105 * k, -0.06 * k, -0.07 * k))], 0.016, "Copper")
+    else:
+        # Masterwork: fat barrel ending in a rotating triple-nozzle rose
+        rot = (-math.pi / 2, 0, 0)
+        sphere(h, 0.1 * k, "BronzeDark", P @ mat4((0, -0.02 * k, 0)), seg=14, rings=8)
+        cyl(h, 0.085 * k, 0.095 * k, 0.24 * k, "Ceramic", P @ mat4((0, 0.1 * k, 0), rot), seg=18)
+        for yy in (0.02, 0.17):
+            torus(h, 0.09 * k, 0.014, "Gold", P @ mat4((0, yy * k, 0), rot), seg=20, rseg=6)
+        cyl(h, 0.075 * k, 0.15 * k, 0.07 * k, "Bronze", P @ mat4((0, 0.25 * k, 0), rot), seg=20)
+        cyl(h, 0.16 * k, 0.16 * k, 0.04 * k, "Gold", P @ mat4((0, 0.3 * k, 0), rot), seg=24, bevel=0.008)
+        cyl(h, 0.05 * k, 0.05 * k, 0.03, "GlowWater", P @ mat4((0, 0.325 * k, 0), rot), seg=12)
+        Q = P @ mat4((0, 0.24 * k, 0))
+        for i in range(3):
+            a = TAU * i / 3 + math.pi / 2
+            x, z = math.cos(a) * 0.095 * k, math.sin(a) * 0.095 * k
+            tips.append(bell_nozzle(h, Q, x, z, k, lv, rad=0.072, length=0.2))
+        # gold fins between the nozzles
+        for i in range(3):
+            a = TAU * (i + 0.5) / 3 + math.pi / 2
+            box(h, (0.012, 0.12 * k, 0.05 * k), "Gold",
+                P @ mat4((math.cos(a) * 0.12 * k, 0.3 * k, math.sin(a) * 0.12 * k), (0, -a + math.pi / 2, 0)), segs=1)
+    obj_from_mesh(name + "_nozzle", h.mesh(name + "_nozzle", sharp_angle=SPRINKLER_SHARP), head)
+    if len(tips) == 1:
+        empty(name + "_muzzle", head, tips[0])
+    else:
+        for i, t in enumerate(tips):
+            empty(f"{name}_muzzle{i}", head, t)
+
+
 BUILDERS = {"laser": build_laser, "shield": build_shield, "slow": build_slow, "missile": build_missile,
-            "beacon": build_beacon}
+            "beacon": build_beacon, "sprinkler": build_sprinkler}
 
 
 # ---- export / preview --------------------------------------------------------------------------------------------------
@@ -888,12 +1079,16 @@ def render_previews(roots):
     # lineup: kinds along X, levels along Y (lv1 in front)
     for r in roots:
         _, kind, lv = r.name.split("_")
-        r.location = (KINDS.index(kind) * 2.0 - 4.0, (int(lv) - 2) * 2.2, 0)
+        r.location = (KINDS.index(kind) * 2.0 - (len(KINDS) - 1), (int(lv) - 2) * 2.2, 0)
     # towers face the camera (-Y side) for the lineup; aim stays +Y in the export
     for r in roots:
         r.rotation_euler = (0, 0, math.pi)
-    shoot("towers_preview_lineup.png", (0, 0, 0.6), 15.5, 55, 0, 50, (1600, 1300))
-    shoot("towers_preview_lineup34.png", (0, 0, 0.7), 13.0, 28, 25, 50, (1600, 1100))
+    shoot("towers_preview_lineup.png", (0, 0, 0.6), 17.5, 55, 0, 50, (1800, 1300))
+    shoot("towers_preview_lineup34.png", (0.9, 0, 0.7), 15.5, 28, 25, 50, (1800, 1100))
+    # game camera with every tower aiming to the right (barrels and nozzles in profile)
+    for r in roots:
+        r.rotation_euler = (0, 0, -math.pi / 2)
+    shoot("towers_preview_lineup_side.png", (0, 0, 0.6), 17.5, 55, 0, 50, (1800, 1300))
     for r in roots:
         r.rotation_euler = (0, 0, math.radians(200))
     for kind in KINDS:

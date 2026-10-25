@@ -4,13 +4,13 @@ Renders the Garden Sentinels HUD portraits (tower purchase cards, enemy chips) f
     blender --background --factory-startup --python render_garden_portraits.py -- <garden-models-dir> [--stand-in] [--contact <png>]
 
 Inputs  (in <garden-models-dir>, normally frontend/public/models/garden):
-    towers.glb   roots Tower_<kind>_<lv>   kind = laser | shield | slow | missile | beacon, lv = 1 | 2 | 3
-    enemies.glb  roots Enemy_<kind>        kind = runner | skitter | disruptor | brute | colossus
+    towers.glb   roots Tower_<kind>_<lv>   kind = laser | shield | slow | missile | beacon | sprinkler, lv = 1 | 2 | 3
+    enemies.glb  roots Enemy_<kind>        kind = runner | skitter | disruptor | brute | colossus | moth | bloomkin
 
 Outputs (256x256, opaque: 3/4 top-down view on a warm dark radial backdrop (#3B3F2E centre -> #2B2A26 edge) with a
 soft halo in the kind's glow colour, warm key + cool rim + soft contact shadow):
-    <garden-models-dir>/portraits/tower_<kind>_<lv>.webp   (15)  e.g. /models/garden/portraits/tower_laser_3.webp
-    <garden-models-dir>/portraits/enemy_<kind>.webp        (5)   e.g. /models/garden/portraits/enemy_brute.webp
+    <garden-models-dir>/portraits/tower_<kind>_<lv>.webp   (18)  e.g. /models/garden/portraits/tower_laser_3.webp
+    <garden-models-dir>/portraits/enemy_<kind>.webp        (7)   e.g. /models/garden/portraits/enemy_brute.webp
     Files are WebP (lossy). If Pillow has no WebP support they are quantised PNGs (.png) instead.
 
 Framing: every model is fitted on its own so it fills ~85 % of the tile (the HUD cards are small; level differences
@@ -40,8 +40,8 @@ SRC = Path(POSITIONAL[0]) if POSITIONAL else Path(__file__).resolve().parents[2]
 OUT = SRC / "portraits"
 RAW = OUT / "_raw"
 
-TOWERS = [f"Tower_{k}_{lv}" for k in ("laser", "shield", "slow", "missile", "beacon") for lv in (1, 2, 3)]
-ENEMIES = [f"Enemy_{k}" for k in ("runner", "skitter", "disruptor", "brute", "colossus")]
+TOWERS = [f"Tower_{k}_{lv}" for k in ("laser", "shield", "slow", "missile", "beacon", "sprinkler") for lv in (1, 2, 3)]
+ENEMIES = [f"Enemy_{k}" for k in ("runner", "skitter", "disruptor", "brute", "colossus", "moth", "bloomkin")]
 
 SIZE = 256
 YAW = math.radians(-38)      # camera azimuth from the model's front (+Y), toward its right
@@ -272,8 +272,9 @@ contact = sys.argv[3] if len(sys.argv) > 3 else ""
 webp = features.check("webp")
 names = sorted(f[:-4] for f in os.listdir(raw) if f.endswith(".png"))
 HALO = {"laser": (255, 169, 64), "missile": (255, 122, 48), "shield": (255, 178, 74), "slow": (78, 230, 217),
-        "beacon": (47, 220, 180), "runner": (255, 150, 60), "skitter": (70, 220, 210), "disruptor": (170, 100, 255),
-        "brute": (70, 220, 230), "colossus": (160, 130, 255)}
+        "beacon": (47, 220, 180), "sprinkler": (46, 179, 255), "runner": (255, 150, 60), "skitter": (70, 220, 210), "disruptor": (170, 100, 255),
+        "brute": (70, 220, 230), "colossus": (160, 130, 255),
+        "moth": (255, 190, 90), "bloomkin": (255, 143, 166)}
 def backdrop(name, size):
     """Warm dark radial backdrop plus a soft halo in the kind's glow colour behind the model."""
     g = Image.radial_gradient("L").resize((size, size), Image.BILINEAR)   # 0 centre -> 255 edge
@@ -309,7 +310,8 @@ for n in names:
     print(f"[portraits] {os.path.basename(p)} {os.path.getsize(p) / 1024:.1f} KB")
 print(f"[portraits] total {total / 1024:.1f} KB")
 if contact:
-    kinds = ["laser", "shield", "slow", "missile", "beacon", "runner", "skitter", "disruptor", "brute", "colossus"]
+    kinds = ["laser", "shield", "slow", "missile", "beacon", "sprinkler", "runner", "skitter", "disruptor", "brute",
+             "colossus", "moth", "bloomkin"]
     order = sorted(names, key=lambda n: (n[0] != "t", [k in n for k in kinds].index(True) if any(k in n for k in kinds) else 99, n))
     cols, cell = 6, 140
     rows = (len(order) + cols - 1) // cols
