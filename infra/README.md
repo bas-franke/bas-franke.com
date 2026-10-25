@@ -69,6 +69,7 @@ environment named `main` (Settings → Environments → main). Any new `deploy-*
 | `EC2_HOST`    | The Elastic IP                                |
 | `EC2_USER`    | `ubuntu`                                      |
 | `EC2_SSH_KEY` | Full contents of the private key file `gh-deploy` (including the `BEGIN`/`END` lines) |
+| `RDS_MASTER_PASSWORD` | The RDS master password; only the **Provision databases** workflow uses it to create per-project databases (`infra/provision-db.sh`) |
 
 Also check **Settings → Actions → General → Actions permissions** allows actions to run.
 All `deploy-*.yml` workflows share these secrets.

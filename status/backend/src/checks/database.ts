@@ -62,6 +62,9 @@ export function databaseFix(project: Project): Fix {
   return {
     summary: `Create the "${db}" database and user in RDS and store the connection string on the server.`,
     steps: [
+      {
+        text: `Easiest: with the RDS master password stored as GitHub secret RDS_MASTER_PASSWORD, run the "Provision databases" workflow (Actions → Provision databases → Run workflow, projects "${project.name}"). Or by hand:`,
+      },
       { text: 'On the server, connect as the master user:', code: `psql "host=${config.rdsHost ?? '<endpoint>'} user=postgres dbname=postgres sslmode=require"` },
       { text: 'Create the user and database:', code: `CREATE USER ${db} WITH PASSWORD '<strong-password>';\nCREATE DATABASE ${db} OWNER ${db};\nREVOKE ALL ON DATABASE ${db} FROM PUBLIC;` },
       {

@@ -1,0 +1,57 @@
+name: Provision databases
+
+# Creates each project's RDS user + database and writes DATABASE_URL to /srv/apps/<project>/.env (skips projects
+# that already have one). Needs the RDS master password as secret RDS_MASTER_PASSWORD next to the EC2_* secrets.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'infra/provision-db.sh'
+      - '.github/workflows/provision-databases.yml'
+  workflow_dispatch:
+    inputs:
+      projects:
+        description: 'Space-separated projects that need a database'
+        default: 'status inck wordward'
+
+concurrency:
+  group: provision-databases
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-24.04
+    environment: main
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          RDS_MASTER_PASSWORD: ${{ secrets.RDS_MASTER_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "$EC2_HOST" ] || missing="$missing EC2_HOST"
+          [ -n "$EC2_USER" ] || missing="$missing EC2_USER"
+          [ -n "$SSH_KEY" ] || missing="$missing EC2_SSH_KEY"
+          [ -n "$RDS_MASTER_PASSWORD" ] || missing="$missing RDS_MASTER_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secret(s):$missing. Add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -T 15 -H "$EC2_HOST" >> ~/.ssh/known_hosts
+          printf 'Host server\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n' "$EC2_HOST" "$EC2_USER" > ~/.ssh/config
+
+      - name: Create databases
+        env:
+          RDS_MASTER_PASSWORD: ${{ secrets.RDS_MASTER_PASSWORD }}
+          PROJECTS: ${{ inputs.projects || 'status inck wordward' }}
+        run: |
+          scp infra/provision-db.sh server:/tmp/provision-db.sh
+          printf '%s\n' "$RDS_MASTER_PASSWORD" | ssh server "bash /tmp/provision-db.sh $PROJECTS; rc=\$?; rm -f /tmp/provision-db.sh; exit \$rc"

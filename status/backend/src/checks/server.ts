@@ -17,6 +17,20 @@ interface Pm2Process {
 
 const pm2List = memo(async () => JSON.parse(await run('pm2', ['jlist'])) as Pm2Process[], 5000);
 
+// restart_time also counts every deploy's reload, so the lifetime total says nothing about crashes. Remember recent
+// samples per process instead and look at how many restarts happened inside the window.
+const RESTART_WINDOW_MS = 10 * 60_000;
+const CRASH_LOOP_RESTARTS = 3;
+const restartSamples = new Map<string, { at: number; restarts: number }[]>();
+
+function recentRestarts(name: string, restarts: number): number {
+  const now = Date.now();
+  const samples = (restartSamples.get(name) ?? []).filter((s) => now - s.at <= RESTART_WINDOW_MS && s.restarts <= restarts);
+  samples.push({ at: now, restarts });
+  restartSamples.set(name, samples);
+  return restarts - samples[0].restarts;
+}
+
 const systemdActive = async (unit: string) => (await runLoose('systemctl', ['is-active', unit])) === 'active';
 
 export const nginxCheck: CheckDef = {
@@ -165,8 +179,11 @@ export function pm2ProcessCheck(project: Project): CheckDef {
       if (status !== 'online') return fail(`Status is "${status}".`);
       const uptimeMin = Math.round((Date.now() - pm_uptime) / 60_000);
       const memMb = proc.monit ? Math.round(proc.monit.memory / 1024 ** 2) : 0;
-      const detail = `online for ${uptimeMin} min, ${memMb} MB, ${restart_time} restarts`;
-      return restart_time > 10 && uptimeMin < 10 ? warn(`${detail}: it may be crash-looping.`) : ok(detail);
+      const recent = recentRestarts(project.name, restart_time);
+      const detail = `online for ${uptimeMin} min, ${memMb} MB, ${restart_time} restarts (incl. deploys)`;
+      return recent >= CRASH_LOOP_RESTARTS
+        ? warn(`${detail}, ${recent} in the last 10 min: it may be crash-looping.`)
+        : ok(detail);
     },
   };
 }
