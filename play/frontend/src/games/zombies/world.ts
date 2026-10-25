@@ -803,15 +803,15 @@ void main() {
     local.push(new THREE.TorusGeometry(0.135, 0.02, 6, 20).rotateX(Math.PI / 2).translate(0, 0.9, 0));
     local.push(new THREE.CylinderGeometry(0.06, 0.115, hy - 0.5, 16).translate(0, 0.9 + (hy - 0.5) / 2, 0));
     local.push(new THREE.SphereGeometry(0.075, 12, 8).translate(0, hy + 0.42, 0));
-    const neck = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, hy - 0.2, 0), new THREE.Vector3(0, hy + 0.5, reach * 0.4), new THREE.Vector3(0, hy + 0.12, reach - 0.35));
+    const neck = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, hy - 0.2, 0), new THREE.Vector3(0, hy + 0.55, reach * 0.4), new THREE.Vector3(0, hy + 0.16, reach - 0.35));
     local.push(new THREE.TubeGeometry(neck, 16, 0.04, 8));
     // Housing: a long flattened shell, nose slightly down, with a small cooling fin on top.
-    local.push(new THREE.SphereGeometry(1, 28, 14).scale(0.25, 0.12, 0.56).rotateX(0.06).translate(0, hy + 0.1, reach));
-    local.push(new THREE.BoxGeometry(0.03, 0.05, 0.5).translate(0, hy + 0.23, reach - 0.05));
+    local.push(new THREE.SphereGeometry(1, 28, 14).scale(0.25, 0.12, 0.56).rotateX(0.06).translate(0, hy + 0.14, reach));
+    local.push(new THREE.BoxGeometry(0.03, 0.05, 0.5).translate(0, hy + 0.27, reach - 0.05));
     const m = new THREE.Matrix4().makeRotationY(yaw).setPosition(base);
     for (const g of local) poleParts.push(g.applyMatrix4(m));
-    // The drop lens: the lower half of an ellipsoid just under the housing.
-    addLens(lens, new THREE.SphereGeometry(1, 24, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(0.2, 0.07, 0.44).rotateX(0.06).translate(0, hy + 0.06, reach).applyMatrix4(m));
+    // The drop lens: the lower half of an ellipsoid hanging just below the housing's rim.
+    addLens(lens, new THREE.SphereGeometry(1, 24, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(0.2, 0.08, 0.44).rotateX(0.06).translate(0, hy + 0.08, reach).applyMatrix4(m));
   };
   /** An ornamental hotel lantern on a short fluted post: brass-trimmed iron, a frosted glowing body, a pyramid roof. */
   const lantern = (x: number, z: number, lens: THREE.MeshStandardMaterial) => {
@@ -865,14 +865,14 @@ void main() {
   const lampHeight = 7.2;
   for (const x of [-7.5, 1.5, 9]) {
     const pos = new THREE.Vector3(x, lampHeight, rowZ);
-    street({ pos, aim: new THREE.Vector3(x * 0.55, 0, facadeZ + 10), color: SODIUM, intensity: 4000, outer: 0.62, inner: 0.24, range: 45, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone().setY(lampHeight + 0.06), 0, l) });
+    street({ pos, aim: new THREE.Vector3(x * 0.55, 0, facadeZ + 10), color: SODIUM, intensity: 4000, outer: 0.62, inner: 0.24, range: 45, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone(), 0, l) });
   }
   for (const [x, fail] of [
     [-17, 0],
     [17, 1],
   ] as const) {
     const pos = new THREE.Vector3(x, lampHeight, rowZ);
-    street({ pos, aim: new THREE.Vector3(x, 0, rowZ + 3), color: SODIUM, intensity: 700, outer: 0.95, inner: 0.4, range: 22, shafts: false, fail, lens: 60, fixture: (l) => cobra(pos.clone().setY(lampHeight + 0.06), 0, l) });
+    street({ pos, aim: new THREE.Vector3(x, 0, rowZ + 3), color: SODIUM, intensity: 700, outer: 0.95, inner: 0.4, range: 22, shafts: false, fail, lens: 60, fixture: (l) => cobra(pos.clone(), 0, l) });
   }
   // The hotel's two lanterns flanking the revolving door: warm white, aimed down onto the steps.
   const door = (def.entrances ?? []).find((e) => e.look === 'revolving');
@@ -887,8 +887,8 @@ void main() {
   // along the street, and a row on the far side of the plaza faces back at the hotel.
   {
     const far = lensMat(SODIUM, 60);
-    for (const x of [-37, -27, 27, 37]) cobra(new THREE.Vector3(x, lampHeight + 0.06, rowZ), 0, far);
-    for (const x of [-15, -3, 9, 21]) cobra(new THREE.Vector3(x, lampHeight + 0.06, facadeZ - 24), Math.PI, far);
+    for (const x of [-37, -27, 27, 37]) cobra(new THREE.Vector3(x, lampHeight, rowZ), 0, far);
+    for (const x of [-15, -3, 9, 21]) cobra(new THREE.Vector3(x, lampHeight, facadeZ - 24), Math.PI, far);
   }
   {
     const pm = new THREE.Mesh(keep(mergeGeometries(poleParts, false)), poleMat);
