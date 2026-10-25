@@ -660,11 +660,52 @@ code {
   margin: 2px 0 0;
 }
 
+/* One project per row. On wide screens each card lays out as a single bar: name, numbers, last change, health. */
 .project-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   transition: opacity 0.2s;
+}
+
+@media (min-width: 900px) {
+  .project-grid .pcard {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1.6fr) auto;
+    grid-template-areas: 'head stats change foot';
+    align-items: center;
+    gap: 20px;
+    padding: 14px 16px;
+  }
+
+  .project-grid .pcard-head {
+    grid-area: head;
+  }
+
+  .project-grid .pcard-stats,
+  .project-grid .pcard-none {
+    grid-area: stats;
+  }
+
+  .project-grid .pcard-change-cell {
+    grid-area: change;
+  }
+
+  .project-grid .pcard-foot {
+    grid-area: foot;
+    flex-direction: column;
+    align-items: flex-end;
+    padding-top: 0;
+    border-top: 0;
+  }
+}
+
+.pcard-change-cell {
+  min-width: 0;
+}
+
+.pcard-change-cell:empty {
+  display: none;
 }
 
 .pcard {

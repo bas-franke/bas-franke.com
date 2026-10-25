@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import Art from '../Art';
 import { usePoll, useTicker, type Polled } from '../api';
-import { Sparkline } from '../charts';
 import { compact, delta, duration, full, previousText, rangeText, timeAgo } from '../format';
 import { LatestChange } from '../sections/Changes';
 import { HEADLINE, HealthPill, LABEL, groupHealth, overallHealth } from '../health';
@@ -25,7 +24,14 @@ export default function Overview({ status, days }: { status: Polled<Report>; day
   const sites = new Map((analytics.data?.sites ?? []).map((s) => [s.site, s]));
   const groups = new Map((report?.groups ?? []).map((g) => [g.id, g]));
   const names = [...new Set([...groups.keys(), ...sites.keys()])].filter((n) => n !== 'shared');
-  names.sort((a, b) => (sites.get(b)?.totals.visitors ?? -1) - (sites.get(a)?.totals.visitors ?? -1) || a.localeCompare(b));
+  // Most recently changed first; projects without a known change fall back to visitors, then name.
+  const changedAt = (n: string) => Date.parse(changes.data?.sites[n]?.latest?.date ?? '') || 0;
+  names.sort(
+    (a, b) =>
+      changedAt(b) - changedAt(a) ||
+      (sites.get(b)?.totals.visitors ?? -1) - (sites.get(a)?.totals.visitors ?? -1) ||
+      a.localeCompare(b),
+  );
   const dim = analytics.loading && analytics.dataUrl !== url;
   const waiting = !names.length && (status.loading || analytics.loading);
   const all = [...sites.values()];
@@ -202,9 +208,9 @@ function ProjectCard({
         <p className="muted small pcard-none">No visitor numbers for this project.</p>
       )}
 
-      {site && <Sparkline values={site.daily.map((d) => d.visitors)} className="pcard-spark" />}
-
-      <LatestChange change={change} pending={changePending} />
+      <div className="pcard-change-cell">
+        <LatestChange change={change} pending={changePending} />
+      </div>
 
       <div className="pcard-foot">
         {group ? <HealthPill group={group} /> : <span />}
