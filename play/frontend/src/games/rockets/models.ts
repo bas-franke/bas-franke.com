@@ -1,5 +1,5 @@
-// Procedural low-poly models for Rockets in a cel-shaded comic style: the launcher (a heavy gunmetal hard-surface
-// launcher with the next rocket's nose deep in the bore), the rocket projectile, the player droid, its death debris and the
+// Procedural low-poly models for Rockets in a cel-shaded comic style: the launcher (a big round gunmetal launcher
+// with red armour bands, glowing orange vents and the next rocket's nose deep in the bore), the rocket projectile, the player droid, its death debris and the
 // pickups. Every part gets an ink outline.
 //
 // Draw calls are the budget: parts carry their colour as a vertex colour, so a whole sub-model merges into ONE lit
@@ -169,9 +169,6 @@ const GUN = 0x4d545e;
 const GUN_LIGHT = 0x707a87;
 const GUN_DARK = 0x30353c;
 const IRON = 0x1b1d21;
-/** Oxide red on the muzzle bands: the one warm colour on the steel. */
-const OXIDE = 0x9a3020;
-const HAZARD = 0xe0a81e;
 const METAL = 0x2a2d33;
 const BLACK = 0x111215;
 /** Hot ember behind vents and in the sights: reads as "live" without the toy-like cyan. */
@@ -186,16 +183,6 @@ function oct(w: number, h: number, len: number, cut = 0.25, taper = 1): THREE.Bu
   const b = h / 2;
   const c = cut * Math.min(w, h);
   return prism([[a, b - c], [a - c, b], [-a + c, b], [-a, b - c], [-a, -b + c], [-a + c, -b], [a - c, -b], [a, -b + c]], len, taper);
-}
-
-/**
- * A peaked prism along -Z, the launcher's triangular look: flat sides from `below` under the axis up to `shoulder`
- * above it, then two steep slopes meeting in a narrow ridge (`ridge` half-wide) at `top`. Chamfered underneath.
- */
-function peak(w: number, below: number, shoulder: number, top: number, len: number, ridge = 0.03, taper = 1): THREE.BufferGeometry {
-  const a = w / 2;
-  const c = 0.12 * w;
-  return prism([[a, shoulder], [ridge, top], [-ridge, top], [-a, shoulder], [-a, -below + c], [-a + c, -below], [a - c, -below], [a, -below + c]], len, taper);
 }
 
 /** A flat-shaded prism along -Z from a convex 8-point ring (counter-clockwise), its front end scaled by `taper`. */
@@ -250,98 +237,112 @@ function gripParts(k: Kit, w: number, h: number, d: number) {
   k.add(oct(w + 0.01, d + 0.014, 0.025, 0.25), GUN_DARK, [0, -h, 0], [Math.PI / 2, 0, 0]);
 }
 
-/** How far the muzzle head sits back from where its parts are written: a short barrel keeps it big on screen. */
-const HEAD_BACK = 0.16;
+/** Armour red on the barrel collars and the receiver plates. */
+const ARMOR = 0xc8361f;
+/** Bright orange in the vent slots: glows (and blooms on the neon maps). */
+const VENT = 0xff8c1a;
+
+/** A flat-shaded 12-sided drum along -Z: `front`/`back` radii, centred on the bore axis at `z`. */
+function drum(k: Kit, front: number, back: number, len: number, z: number, color: number, ink = true) {
+  k.add(tube(front, back, len, 12), color, [0, BORE_Y, z], ALONG_Z, undefined, ink);
+}
+
+/** A glowing slot on the drum's skin at angle `a` (0 = right, PI/2 = top): dark recess, orange light inside. */
+function slot(k: Kit, r: number, a: number, z: number, len: number, w = 0.022) {
+  const dx = Math.cos(a) * r;
+  const dy = Math.sin(a) * r;
+  const rot: V3 = [0, 0, a];
+  k.add(box(0.012, w + 0.014, len + 0.014), BLACK, [dx * 0.995, BORE_Y + dy * 0.995, z], rot, undefined, false);
+  k.glowing(box(0.012, w, len), VENT, [dx * 1.004, BORE_Y + dy * 1.004, z], rot);
+}
 
 /**
- * The launcher's parts, grip at the origin, pointing down -Z. The loaded rocket's nose goes into `nose`. A heavy
- * gunmetal launcher after the arena-shooter classics, every block peaked into a steep ridge so it reads triangular: a
- * fat muzzle head around a big round bore, a thick barrel under a slotted heat shield, an armoured receiver narrowing
- * toward the barrel, and a breech block at the back with the next rocket showing through its loading port. Ember glow only in the muzzle vents. `accent` paints a thin stripe.
+ * The launcher's parts, grip at the origin, pointing down -Z. The loaded rocket's nose goes into `nose`. A big round
+ * heavy launcher: a fat muzzle collar around a deep bore, a barrel wrapped in armour collars with red bands and rows of
+ * glowing orange vent slots, a squared receiver with red armour plates and a carry handle, and a drum at the back.
  */
 function launcherParts(k: Kit, accent: number, nose: Kit) {
-  // Grown 10% across (not along), about the bore axis, so the head steps out of the barrel.
-  inFrame(k, [0, -BORE_Y * 0.1, HEAD_BACK], [0, 0, 0], () => {
-    // Muzzle head (z -0.84..-0.53, built 16cm further out and pulled back): wider and taller than everything behind it, tapering a touch toward the face.
-    // Peaked like the rest of the gun: steep slopes up to a ridge well above the bore.
-    k.add(peak(0.29, 0.135, 0.09, 0.22, 0.28, 0.035, 0.95), GUN, [0, BORE_Y, -0.86]);
-    k.add(peak(0.3, 0.14, 0.094, 0.228, 0.03, 0.038), OXIDE, [0, BORE_Y, -0.735]);
-    k.add(peak(0.296, 0.138, 0.092, 0.225, 0.012, 0.037), IRON, [0, BORE_Y, -0.71]);
-    k.add(peak(0.25, 0.12, 0.08, 0.19, 0.022, 0.03), GUN_LIGHT, [0, BORE_Y, -0.692]);
-    // Face: an iron frame and a big round bore, recessed deep, with an iron inner ring.
-    k.add(peak(0.275, 0.128, 0.085, 0.208, 0.02, 0.033), IRON, [0, BORE_Y, -0.995]);
-    k.add(new THREE.CylinderGeometry(0.112, 0.112, 0.03, 16, 1, true), GUN_LIGHT, [0, BORE_Y, -1.015], ALONG_Z);
-    k.add(annulus(0.1, 0.112), GUN_LIGHT, [0, BORE_Y, -1.03], undefined, undefined, false);
-    k.glowing(boreWall(0.1, 0.05), METAL, [0, BORE_Y, -1.005]);
-    k.glowing(annulus(0.085, 0.1), IRON, [0, BORE_Y, -0.98]);
-    k.glowing(boreWall(0.085, 0.06), BLACK, [0, BORE_Y, -0.95]);
-    k.glowing(annulus(0, 0.085), BORE, [0, BORE_Y, -0.92]);
-    // Bolts in the face corners, and three ember vents down each flank of the head.
-    for (const sx of [-1, 1])
-      for (const sy of [-1, 1]) k.add(new THREE.CylinderGeometry(0.012, 0.012, 0.01, 6), GUN_LIGHT, [sx * 0.112, BORE_Y + sy * 0.1, -1.008], ALONG_Z, undefined, false);
-    for (const side of [-1, 1])
-      for (let i = 0; i < 3; i++) vent(k, [side * 0.144, BORE_Y, -0.94 + i * 0.055], [0.004, 0.14, 0.022], [side, 0, 0]);
-    // A vent along the ridge, so the head reads as live from the shooter's eye, and a front sight blade on its tip.
-    vent(k, [0, BORE_Y + 0.219, -0.84], [0.03, 0.004, 0.13], [0, 1, 0]);
-    k.add(box(0.014, 0.035, 0.06), IRON, [0, BORE_Y + 0.23, -0.95]);
-  }, [1.1, 1.1, 1]);
-
-  // Barrel (z -0.54..-0.34): short, thick and peaked, two thin clamp rings, a slotted heat shield capping the ridge.
-  k.add(peak(0.22, 0.105, 0.05, 0.155, 0.2, 0.03), IRON, [0, BORE_Y, -0.44]);
-  for (const z of [-0.5, -0.39]) k.add(peak(0.232, 0.111, 0.054, 0.163, 0.016, 0.034), GUN_LIGHT, [0, BORE_Y, z]);
-  k.add(box(0.07, 0.018, 0.17), GUN_DARK, [0, BORE_Y + 0.16, -0.45]);
-  for (let i = 0; i < 3; i++) k.add(box(0.05, 0.004, 0.035), BLACK, [0, BORE_Y + 0.1705, -0.505 + i * 0.055], undefined, undefined, false);
-
-  // Receiver (z -0.36..0.1): a peaked slab narrowing toward the barrel, an inset armour plate, bolts, a seam and the team stripe.
-  k.add(peak(0.21, 0.11, 0.03, 0.15, 0.46, 0.025, 0.92), GUN, [0, 0.06, -0.13]);
-  for (const side of [-1, 1]) {
-    k.add(oct(0.016, 0.1, 0.38, 0.25), GUN_LIGHT, [side * 0.111, 0.035, -0.13]);
-    k.add(box(0.004, 0.006, 0.36), IRON, [side * 0.12, -0.005, -0.13], undefined, undefined, false);
-    k.add(box(0.004, 0.016, 0.3), accent, [side * 0.12, 0.045, -0.13], undefined, undefined, false);
-    for (const z of [-0.3, -0.13, 0.04]) k.add(new THREE.CylinderGeometry(0.011, 0.011, 0.01, 6), IRON, [side * 0.122, 0.074, z], [0, 0, Math.PI / 2], undefined, false);
-  }
-  // One small hazard stripe on the right, ahead of the plate.
-  for (let i = 0; i < 3; i++) k.add(box(0.003, 0.03, 0.012), i % 2 ? BLACK : HAZARD, [0.121, 0.07, -0.345 + i * 0.012], [0.6, 0, 0], undefined, false);
-  // A low rear sight notch on the ridge.
-  for (const side of [-1, 1]) k.add(box(0.014, 0.03, 0.025), IRON, [side * 0.018, 0.212, 0.05]);
-
-  // Breech block (z 0.1..0.42): peaked and taller than the receiver, with a loading port showing the next rocket.
-  k.add(peak(0.23, 0.13, 0.05, 0.18, 0.32, 0.03), GUN_DARK, [0, BORE_Y, 0.26]);
-  k.add(peak(0.244, 0.137, 0.054, 0.19, 0.03, 0.034), IRON, [0, BORE_Y, 0.11]);
-  k.add(peak(0.236, 0.133, 0.052, 0.185, 0.025, 0.032), OXIDE, [0, BORE_Y, 0.14]);
-  // A loading port on the right face; the rocket behind it bulges just through.
-  k.add(box(0.004, 0.1, 0.18), BLACK, [0.116, BORE_Y, 0.23], undefined, undefined, false);
-  // The rocket in the port: a red nose cone, a dark ring, then the cream body.
-  k.add(tube(0.065, 0.065, 0.11, 12), CREAM, [0.057, BORE_Y, 0.265], ALONG_Z, undefined, false);
-  k.add(tube(0.067, 0.067, 0.014, 12), GUN_DARK, [0.057, BORE_Y, 0.203], ALONG_Z, undefined, false);
-  k.add(new THREE.CylinderGeometry(0.022, 0.066, 0.07, 12), RED, [0.057, BORE_Y, 0.161], ALONG_Z, undefined, false);
-  // A seam and two big bolts low on each flank, so the near face reads as machined metal.
-  for (const side of [-1, 1]) {
-    k.add(box(0.004, 0.006, 0.28), IRON, [side * 0.116, BORE_Y - 0.06, 0.27], undefined, undefined, false);
-    for (const z of [0.2, 0.36]) k.add(new THREE.CylinderGeometry(0.016, 0.016, 0.012, 6), GUN_LIGHT, [side * 0.118, BORE_Y - 0.095, z], [0, 0, Math.PI / 2]);
-  }
-  for (const z of [0.125, 0.335]) k.add(box(0.012, 0.1, 0.016), IRON, [0.118, BORE_Y, z]);
-  // End plate: iron, a thin oxide rim and a dark exhaust throat.
-  k.add(peak(0.24, 0.135, 0.053, 0.188, 0.03, 0.033), IRON, [0, BORE_Y, 0.435]);
-  k.add(peak(0.246, 0.138, 0.055, 0.192, 0.01, 0.035), OXIDE, [0, BORE_Y, 0.415]);
-  k.add(tube(0.08, 0.08, 0.03, 14), GUN, [0, BORE_Y, 0.46], ALONG_Z);
-  k.glowing(new THREE.CircleGeometry(0.065, 14), BORE, [0, BORE_Y, 0.476]);
-
-  // Pistol grip (leaning back) with a guard and trigger.
-  inFrame(k, [0, -0.04, 0], [-0.28, 0, 0], () => gripParts(k, 0.058, 0.17, 0.075));
-  k.add(box(0.02, 0.014, 0.12), GUN_DARK, [0, -0.13, -0.085]);
-  k.add(box(0.02, 0.085, 0.016), GUN_DARK, [0, -0.085, -0.142]);
-  k.add(box(0.012, 0.045, 0.014), GUN_LIGHT, [0, -0.075, -0.075], [0.3, 0, 0]);
-  // A charge pack ahead of the grip, bolted to the receiver.
-  k.add(oct(0.09, 0.1, 0.12, 0.15), GUN_DARK, [0, -0.07, -0.25]);
-  // Fore grip under the barrel on a clamp, raked forward.
-  k.add(box(0.12, 0.03, 0.1), GUN, [0, -0.05, -0.45]);
-  for (const side of [-1, 1]) k.add(new THREE.CylinderGeometry(0.018, 0.018, 0.012, 6), GUN_LIGHT, [side * 0.065, -0.05, -0.45], [0, 0, Math.PI / 2], undefined, false);
-  inFrame(k, [0, -0.065, -0.45], [0.32, 0, 0], () => gripParts(k, 0.05, 0.11, 0.065));
-
+  // Muzzle and barrel are grown 25% across (not along), about the bore axis, so they dwarf the receiver.
+  inFrame(k, [0, -BORE_Y * 0.25, 0], [0, 0, 0], () => barrelParts(k), [1.25, 1.25, 1]);
+  receiverParts(k, accent);
   // The next rocket's nose deep in the bore: a red tip on a cream body, like the rockets in flight.
-  nose.add(new THREE.CylinderGeometry(0.02, 0.07, 0.09, 14), RED, [0, BORE_Y, -0.715], ALONG_Z);
-  nose.add(tube(0.07, 0.07, 0.1, 14), CREAM, [0, BORE_Y, -0.62], ALONG_Z, undefined, false);
+  nose.add(new THREE.CylinderGeometry(0.02, 0.07, 0.09, 14), RED, [0, BORE_Y, -0.655], ALONG_Z);
+  nose.add(tube(0.07, 0.07, 0.1, 14), CREAM, [0, BORE_Y, -0.56], ALONG_Z, undefined, false);
+}
+
+function barrelParts(k: Kit) {
+  // Muzzle (z -0.85..-0.64): the widest part, a lip ring, a red band and a ring of short vents round its waist.
+  drum(k, 0.158, 0.165, 0.2, -0.745, GUN);
+  drum(k, 0.172, 0.172, 0.035, -0.832, IRON);
+  drum(k, 0.169, 0.169, 0.03, -0.69, ARMOR);
+  drum(k, 0.172, 0.172, 0.02, -0.655, IRON);
+  for (const a of [-0.35, 0.25, 0.85, 1.45, 2.05, 2.65]) slot(k, 0.161, a, -0.75, 0.07, 0.02);
+  // Bore: a light inner lip, then dark walls far down to the rocket's nose.
+  k.add(annulus(0.118, 0.172), GUN_LIGHT, [0, BORE_Y, -0.851], undefined, undefined, false);
+  k.glowing(boreWall(0.118, 0.06), METAL, [0, BORE_Y, -0.82]);
+  k.glowing(annulus(0.1, 0.118), IRON, [0, BORE_Y, -0.79]);
+  k.glowing(boreWall(0.1, 0.16), BLACK, [0, BORE_Y, -0.71]);
+  k.glowing(annulus(0, 0.1), BORE, [0, BORE_Y, -0.6]);
+  // Bolts round the face.
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    k.add(new THREE.CylinderGeometry(0.011, 0.011, 0.01, 6), GUN_LIGHT, [Math.cos(a) * 0.148, BORE_Y + Math.sin(a) * 0.148, -0.853], ALONG_Z, undefined, false);
+  }
+
+  // Barrel (z -0.64..-0.2): an iron core under three armour collars, each with a red band; vents between them.
+  drum(k, 0.128, 0.13, 0.44, -0.42, IRON);
+  for (const z of [-0.585, -0.43, -0.275]) {
+    drum(k, 0.15, 0.152, 0.085, z, GUN);
+    drum(k, 0.154, 0.154, 0.018, z + 0.03, ARMOR);
+    drum(k, 0.153, 0.153, 0.01, z - 0.036, GUN_LIGHT, false);
+  }
+  for (const z of [-0.507, -0.352]) for (const a of [-0.2, 0.35, 0.9, 1.45]) slot(k, 0.13, a, z, 0.05, 0.026);
+  // A long armour plate down the right flank with three tall slots, like a heat sink.
+  k.add(box(0.03, 0.12, 0.3), GUN_DARK, [0.15, BORE_Y - 0.01, -0.43]);
+  k.add(box(0.032, 0.02, 0.3), ARMOR, [0.151, BORE_Y + 0.058, -0.43]);
+  for (let i = 0; i < 3; i++) {
+    k.add(box(0.006, 0.085, 0.034), BLACK, [0.166, BORE_Y - 0.012, -0.53 + i * 0.1], undefined, undefined, false);
+    k.glowing(box(0.006, 0.07, 0.022), VENT, [0.168, BORE_Y - 0.012, -0.53 + i * 0.1]);
+  }
+  // A rail along the top with a glowing strip.
+  k.add(box(0.05, 0.02, 0.4), GUN_DARK, [0, BORE_Y + 0.158, -0.43]);
+  k.glowing(box(0.016, 0.006, 0.3), VENT, [0, BORE_Y + 0.169, -0.43]);
+}
+
+function receiverParts(k: Kit, accent: number) {
+  // Receiver (z -0.2..0.24): a squared block, gunmetal armour plates edged in red on the upper flanks, a team stripe, bolts.
+  k.add(oct(0.25, 0.25, 0.44, 0.22), GUN_DARK, [0, BORE_Y, 0.02]);
+  for (const side of [-1, 1]) {
+    k.add(oct(0.02, 0.1, 0.34, 0.25, 0.94), GUN, [side * 0.13, BORE_Y + 0.05, 0.0]);
+    k.add(box(0.022, 0.016, 0.3), ARMOR, [side * 0.131, BORE_Y + 0.105, 0.0], undefined, undefined, false);
+    k.add(box(0.004, 0.014, 0.32), accent, [side * 0.128, BORE_Y - 0.035, 0.02], undefined, undefined, false);
+    k.add(box(0.004, 0.006, 0.4), IRON, [side * 0.127, BORE_Y - 0.065, 0.02], undefined, undefined, false);
+    for (const z of [-0.14, 0.02, 0.18]) k.add(new THREE.CylinderGeometry(0.012, 0.012, 0.01, 6), GUN_LIGHT, [side * 0.142, BORE_Y + 0.05, z], [0, 0, Math.PI / 2], undefined, false);
+    vent(k, [side * 0.127, BORE_Y - 0.002, 0.15], [0.004, 0.03, 0.08], [side, 0, 0]);
+  }
+  // A low sight block on top with a glowing notch.
+  k.add(box(0.06, 0.03, 0.12), GUN, [0, BORE_Y + 0.138, 0.08]);
+  k.glowing(box(0.02, 0.006, 0.08), VENT, [0, BORE_Y + 0.154, 0.08]);
+  // The next rocket showing through a loading port on the right.
+  k.add(box(0.004, 0.09, 0.16), BLACK, [0.126, BORE_Y + 0.0, -0.1], undefined, undefined, false);
+  k.add(tube(0.06, 0.06, 0.1, 12), CREAM, [0.072, BORE_Y, -0.08], ALONG_Z, undefined, false);
+  k.add(new THREE.CylinderGeometry(0.02, 0.061, 0.06, 12), RED, [0.072, BORE_Y, -0.16], ALONG_Z, undefined, false);
+
+  // Rear drum (z 0.24..0.44): red band, iron end ring and a dark exhaust throat.
+  drum(k, 0.14, 0.135, 0.2, 0.34, GUN);
+  drum(k, 0.144, 0.144, 0.03, 0.27, ARMOR);
+  drum(k, 0.147, 0.147, 0.03, 0.43, IRON);
+  for (const a of [0.3, 1.0, 1.7, 2.4]) slot(k, 0.138, a, 0.35, 0.06, 0.02);
+  k.glowing(new THREE.CircleGeometry(0.09, 12), BORE, [0, BORE_Y, 0.4455]);
+
+  // Pistol grip (leaning back) with a guard and trigger, hanging under the receiver.
+  inFrame(k, [0, -0.06, 0.04], [-0.28, 0, 0], () => gripParts(k, 0.06, 0.17, 0.078));
+  k.add(box(0.02, 0.014, 0.12), GUN_DARK, [0, -0.15, -0.045]);
+  k.add(box(0.02, 0.085, 0.016), GUN_DARK, [0, -0.105, -0.102]);
+  k.add(box(0.012, 0.045, 0.014), GUN_LIGHT, [0, -0.095, -0.035], [0.3, 0, 0]);
+  // Fore grip under the barrel on a clamp, raked forward.
+  k.add(box(0.12, 0.03, 0.1), GUN, [0, -0.085, -0.43]);
+  inFrame(k, [0, -0.1, -0.43], [0.32, 0, 0], () => gripParts(k, 0.05, 0.11, 0.065));
 }
 
 const launchers = new Map<number, THREE.Group>();
