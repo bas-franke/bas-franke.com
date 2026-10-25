@@ -82,20 +82,28 @@ const MOON_INTENSITY = 0.16;
 const HEMI_SKY = 0x5c4630;
 const HEMI_GROUND = 0x0c0907;
 const HEMI_INTENSITY = 0.3;
+/** The warm fill lights (candela): the atrium's aisle key and the reception desk's glow. */
+const FILL_COLOR = new THREE.Color(1.0, 0.66, 0.36);
+const FILL_KEY = 30;
+const FILL_DESK = 120;
 /** High-pressure sodium, a deep amber, and the hotel lanterns' warmer white. */
 const SODIUM = new THREE.Color(1.0, 0.5, 0.17);
 const LANTERN = new THREE.Color(1.0, 0.7, 0.4);
 /** Floor: albedo lift and the gold veins' self-glow (linear, before exposure). */
-const FLOOR_LIFT = 1.4;
-const FLOOR_GLOW = 0.5;
+const FLOOR_LIFT = 2.2;
+const FLOOR_GLOW = 0.7;
 /** Travertine walls toned down to a warm taupe: the target's lobby is dark, its light comes from slots and strips. */
 const TRAV_TONE = 0x8a7c6c;
 /** The three shaft-casting mast lamps outside the facade. */
 const MAST_INTENSITY = 12000;
+/** Their lens glow: the glare that blooms round the columns' edges (60 was a wide white smear). */
+const MAST_LENS = 32;
 /** Window/door boards' warm self-glow through the grain (0: tried 1.6, no visible gain in the refshot). */
 const BOARD_GLOW = 0;
-/** The columns' light slots (linear emission). */
-const SLOT_COLOR = new THREE.Color(1.0, 0.62, 0.3).multiplyScalar(2.5);
+/** The columns' light slots (linear emission): a soft amber glow in the channel, not a white line. */
+const SLOT_COLOR = new THREE.Color(1.0, 0.5, 0.2).multiplyScalar(0.18);
+/** The slots as mirrored in the floor's reflection environment. */
+const SLOT_ENV = new THREE.Color(1.0, 0.62, 0.3).multiplyScalar(1.25);
 
 /**
  * Shadow-casting lamps and shadow map sizes per quality. The hotel's own lamps are failing, so their shadow budget went
@@ -886,6 +894,25 @@ export const createWorldView: CreateWorldView = (scene, world, models, quality) 
   const hemi = new THREE.HemisphereLight(HEMI_SKY, HEMI_GROUND, HEMI_INTENSITY);
   hemi.layers.enableAll();
   scene.add(hemi);
+  const fillLights: THREE.PointLight[] = [];
+  // Two warm unshadowed fills (cheap point lights): one over the reception desk so the lobby's west side and its floor
+  // read warm instead of black, one high over the atrium's middle so players and props in the aisle catch a warm key.
+  {
+    const I = world.interior;
+    const cx = (I.minX + I.maxX) / 2;
+    const cz = (I.minZ + I.maxZ) / 2;
+    const desk = def.props.find((p) => p.kind === 'desk');
+    const fills: [number, number, number, number][] = FILL_KEY > 0 ? [[cx + 1, 3.4, cz + 0.8, FILL_KEY]] : [];
+    if (desk) fills.push([desk.x + Math.sign(cx - desk.x) * 2.5, 3.4, desk.z + 3, FILL_DESK]);
+    for (const [x, y, z, power] of fills) {
+      const fill = new THREE.PointLight(FILL_COLOR, power, 18, 2);
+      fill.position.set(x, y, z);
+      // World only: the viewmodel keeps its own key and fill.
+      fill.userData.worldOnly = true;
+      scene.add(fill);
+      fillLights.push(fill);
+    }
+  }
 
   const skyMat = keep(
     new THREE.ShaderMaterial({
@@ -1024,7 +1051,7 @@ void main() {
   const mastHeight = 9.5;
   for (const x of [-7.5, 1.5, 9]) {
     const pos = new THREE.Vector3(x, mastHeight, mastZ);
-    street({ pos, aim: new THREE.Vector3(x * 0.45, 0, facadeZ + 21), color: SODIUM, intensity: MAST_INTENSITY, outer: 0.45, inner: 0.16, range: 60, shafts: true, lens: 60, fixture: (l) => cobra(pos.clone(), 0, l, 1.8) });
+    street({ pos, aim: new THREE.Vector3(x * 0.45, 0, facadeZ + 21), color: SODIUM, intensity: MAST_INTENSITY, outer: 0.45, inner: 0.16, range: 60, shafts: true, lens: MAST_LENS, fixture: (l) => cobra(pos.clone(), 0, l, 1.8) });
   }
   for (const [x, fail] of [
     [-17, 0],
@@ -1151,7 +1178,7 @@ void main() {
     glow.position.set(0, 6, -19.5);
     envScene.add(glow);
     // The columns' light slots and the galleries' LED strips: the warm streaks the floor mirrors where SSR is off.
-    const strip = new THREE.MeshBasicMaterial({ color: SLOT_COLOR.clone().multiplyScalar(0.5) });
+    const strip = new THREE.MeshBasicMaterial({ color: SLOT_ENV });
     for (const p of def.props) {
       if (p.kind !== 'column') continue;
       for (const sx of [-0.47, 0.47]) {
@@ -1399,7 +1426,7 @@ void main() {
       decor.dispose();
       skyline.dispose();
       motes.dispose();
-      scene.remove(group, moon, moon.target, hemi, sky);
+      scene.remove(group, moon, moon.target, hemi, sky, ...fillLights);
       for (const S of streetLights) {
         scene.remove(S.light, S.light.target);
         S.light.shadow.map?.dispose();

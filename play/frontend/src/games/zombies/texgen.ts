@@ -523,24 +523,41 @@ const mud: Gen = (u, v, px) => {
  * Black marble in the Nero Portoro style: a near-black body with faint warm clouds, cut by a crackle network of bold
  * cream veins with amber halos (cell edges of domain-warped cellular noise at two scales), plus fine hair veins.
  */
-function veinNetRaw(u: number, v: number, n: number, warp: number, seed: number) {
-  const wu = u + (cfbm(u, v, 3, 4, seed + 1) - 0.5) * warp + (cfbm(u, v, 9, 3, seed + 2) - 0.5) * warp * 0.25;
-  const wv = v + (cfbm(u, v, 3, 4, seed + 3) - 0.5) * warp + (cfbm(u, v, 9, 3, seed + 4) - 0.5) * warp * 0.25;
+function veinNetRaw(u: number, v: number, n: number, warp: number, seed: number, jag = 0.25) {
+  const wu = u + (cfbm(u, v, 3, 4, seed + 1) - 0.5) * warp + (cfbm(u, v, 9, 3, seed + 2) - 0.5) * warp * jag;
+  const wv = v + (cfbm(u, v, 3, 4, seed + 3) - 0.5) * warp + (cfbm(u, v, 9, 3, seed + 4) - 0.5) * warp * jag;
   const [f1, f2] = worley(wu - Math.floor(wu), wv - Math.floor(wv), n, seed + 5);
   return f2 - f1;
 }
 
-/** The vein distance field, cached on a 1024 grid (it is continuous, so bilinear sampling keeps the edges crisp). */
+/** The vein edge field, cached on a 1024 grid (it is continuous, so bilinear sampling keeps the edges crisp). */
 const veinCache = new Map<number, Float32Array>();
-function veinNet(u: number, v: number, n: number, warp: number, seed: number) {
+function veinGrid(n: number, warp: number, seed: number, jag: number, dist: boolean) {
   const g = 1024;
-  const key = n * 100003 + seed;
+  const key = n * 100003 + seed + jag * 7919 + (dist ? 0.5 : 0);
   let d = veinCache.get(key);
-  if (!d) {
+  if (d) return d;
+  if (!dist) {
     d = new Float32Array(g * g);
-    for (let y = 0; y < g; y++) for (let x = 0; x < g; x++) d[y * g + x] = veinNetRaw((x + 0.5) / g, (y + 0.5) / g, n, warp, seed);
-    veinCache.set(key, d);
+    for (let y = 0; y < g; y++) for (let x = 0; x < g; x++) d[y * g + x] = veinNetRaw((x + 0.5) / g, (y + 0.5) / g, n, warp, seed, jag);
+  } else {
+    // Approximate distance (uv units) to the edges: the field over its slope, so the veins keep one even width.
+    // One-sided slopes: the field has a V-shaped crease along the edge itself, where central differences cancel.
+    const e = veinGrid(n, warp, seed, jag, false);
+    d = new Float32Array(g * g);
+    for (let y = 0; y < g; y++)
+      for (let x = 0; x < g; x++) {
+        const c = e[y * g + x];
+        const gx = Math.max(Math.abs(e[y * g + wrap(x + 1, g)] - c), Math.abs(c - e[y * g + wrap(x - 1, g)])) * g;
+        const gy = Math.max(Math.abs(e[wrap(y + 1, g) * g + x] - c), Math.abs(c - e[wrap(y - 1, g) * g + x])) * g;
+        d[y * g + x] = c / Math.max(Math.hypot(gx, gy), n * 0.5);
+      }
   }
+  veinCache.set(key, d);
+  return d;
+}
+function sampleGrid(d: Float32Array, u: number, v: number) {
+  const g = 1024;
   const x = u * g - 0.5;
   const y = v * g - 0.5;
   const xi = Math.floor(x);
@@ -554,6 +571,13 @@ function veinNet(u: number, v: number, n: number, warp: number, seed: number) {
   const p = d[y0 + x0] + (d[y0 + x1] - d[y0 + x0]) * fx;
   const q = d[y1 + x0] + (d[y1 + x1] - d[y1 + x0]) * fx;
   return p + (q - p) * fy;
+}
+function veinNet(u: number, v: number, n: number, warp: number, seed: number, jag = 0.25) {
+  return sampleGrid(veinGrid(n, warp, seed, jag, false), u, v);
+}
+/** Distance-like (in uv units) to the vein network's edges, for even-width hairline veins. */
+function veinDist(u: number, v: number, n: number, warp: number, seed: number, jag: number) {
+  return sampleGrid(veinGrid(n, warp, seed, jag, true), u, v);
 }
 
 function marbleBody(u: number, v: number, px: Px, seed: number) {
@@ -602,23 +626,24 @@ function goldVeinMarble(u: number, v: number, px: Px, seed: number) {
   px.g = 0.016 + cloud * 0.022 + cloud2 * 0.007;
   px.b = 0.016 + cloud * 0.019 + cloud2 * 0.006;
   // Main crackle: edges of a warped cellular network, widths wandering along their length; not every edge is a vein.
-  const e1 = veinNet(u, v, 4, 0.18, seed + 10);
-  const w1 = 0.007 + Math.pow(cfbm(u, v, 5, 3, seed + 20), 2) * 0.006;
-  const keep1 = smooth(0.18, 0.3, cfbm(u, v, 3, 3, seed + 21));
-  const big = smooth(w1, w1 * 0.35, e1) * keep1;
-  const halo1 = smooth(w1 * 3.5, w1, e1) * keep1;
+  const e1 = veinDist(u, v, 4, 0.18, seed + 10, 0.9);
+  const w1 = 0.0008 + Math.pow(cfbm(u, v, 5, 3, seed + 20), 2) * 0.0009;
+  const keep1 = smooth(0.26, 0.38, cfbm(u, v, 3, 3, seed + 21));
+  const big = smooth(w1, w1 * 0.3, e1) * keep1;
+  const halo1 = smooth(w1 * 3, w1, e1) * keep1;
   // Finer branches between them, thinner and patchier.
-  const e2 = veinNet(u, v, 9, 0.2, seed + 30);
-  const w2 = 0.013 + Math.pow(cfbm(u, v, 8, 3, seed + 40), 2) * 0.006;
-  const keep2 = smooth(0.4, 0.52, cfbm(u, v, 4, 3, seed + 41));
+  const e2 = veinDist(u, v, 9, 0.2, seed + 30, 0.9);
+  const w2 = 0.0006 + Math.pow(cfbm(u, v, 8, 3, seed + 40), 2) * 0.0005;
+  const keep2 = smooth(0.48, 0.6, cfbm(u, v, 4, 3, seed + 41));
   const mid = smooth(w2, w2 * 0.35, e2) * keep2;
   const halo2 = smooth(w2 * 3, w2, e2) * keep2;
-  const core = Math.max(big, mid * 0.8);
-  const halo = Math.max(halo1, halo2 * 0.6);
-  tint(px, 0.1, 0.055, 0.02, halo * 0.45);
-  const hot = 0.75 + 0.25 * cloud2;
-  tint(px, 0.95 * hot, 0.78 * hot, 0.46 * hot, core);
-  px.glow = core * (0.55 + 0.45 * cfbm(u, v, 6, 3, seed + 50));
+  const core = Math.max(big, mid * 0.75);
+  const halo = Math.max(halo1, halo2 * 0.5);
+  tint(px, 0.08, 0.045, 0.018, halo * 0.3);
+  const hot = 0.7 + 0.3 * cloud2;
+  tint(px, 0.9 * hot, 0.7 * hot, 0.36 * hot, core);
+  // Glow patchy along the veins: most of the crackle only shines where the lamps catch its gilt.
+  px.glow = core * (0.45 + 0.55 * smooth(0.35, 0.75, cfbm(u, v, 5, 3, seed + 50)));
   px.h = 0.5 + cloud * 0.01 - core * 0.015;
   px.rough = 0.025 + cloud2 * 0.035 + core * 0.12;
   px.metal = core * 0.6;
