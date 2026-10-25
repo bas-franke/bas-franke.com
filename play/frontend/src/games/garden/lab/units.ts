@@ -1,10 +1,10 @@
 // Units lab: every tower (kind x level) aiming at a moving dummy, every enemy kind walking a loop with hits, slows,
-// stuns, casts and deaths, plus the selection ring and the placement ghost. /lab-garden-units.html?view=towers|enemies|all
+// stuns, casts, soaks, heals and deaths (moths fly at FLY_HEIGHT), plus the selection ring and the placement ghost. /lab-garden-units.html?view=towers|enemies|all
 // Extra: &n=600 enemies (stress test), &shadows=0.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { ENEMY_KINDS, type EnemyKind } from '@shared/garden/enemies';
+import { ENEMIES, ENEMY_KINDS, FLY_HEIGHT, type EnemyKind } from '@shared/garden/enemies';
 import type { GMapDef } from '@shared/garden/maps';
 import { EFlag, TFlag, type TowerInfo } from '@shared/garden/protocol';
 import { TOWER_KINDS, TOWERS, type Level } from '@shared/garden/towers';
@@ -112,7 +112,7 @@ if (q.get('kit') === '1')
 
 // Towers: kinds along x, levels along z.
 const towers: TowerInfo[] = [];
-const COLORS = [0x4fa3ff, 0xff7a59, 0x9b6bff, 0x3ccf8e, 0xffc94f];
+const COLORS = [0x4fa3ff, 0xff7a59, 0x9b6bff, 0x3ccf8e, 0xffc94f, 0x4fd8ff];
 if (showTowers) {
   let id = 1;
   TOWER_KINDS.forEach((k, i) => {
@@ -160,12 +160,13 @@ interface LabEnemy {
   lat: number;
   hp: number;
   stunT: number;
+  healedUntil: number;
   frame: EnemyFrame;
 }
 let nextId = 1000;
 const labEnemies: LabEnemy[] = [];
 function spawn(kind: EnemyKind, d: number) {
-  const e: LabEnemy = { id: nextId++, kind, d, lat: (Math.random() - 0.5) * 2.4, hp: 1, stunT: 0, frame: { id: 0, kind, b: 0, x: 0, z: 0, yaw: 0, hp: 1, f: 0, speed: 1 } };
+  const e: LabEnemy = { id: nextId++, kind, d, lat: (Math.random() - 0.5) * 2.4, hp: 1, stunT: 0, healedUntil: 0, frame: { id: 0, kind, b: 0, x: 0, z: 0, yaw: 0, hp: 1, f: 0, speed: 1 } };
   e.frame.id = e.id;
   labEnemies.push(e);
 }
@@ -179,7 +180,7 @@ if (showEnemies) {
   };
   for (let i = 0; i < enemyCount; i++) spawn(mix(i), (i / enemyCount) * 120);
 }
-const SPEED: Record<EnemyKind, number> = { runner: 3.2, skitter: 2.5, disruptor: 1.6, brute: 1.0, colossus: 0.65 };
+const SPEED: Record<EnemyKind, number> = { runner: 3.2, skitter: 2.5, disruptor: 1.6, brute: 1.0, colossus: 0.65, moth: 2.4, bloomkin: 1.5 };
 
 // Demo timeline.
 let t = 0;
@@ -188,6 +189,7 @@ let nextHit = 0;
 let nextSel = 1.5;
 let selIdx = 0;
 let nextCast = 2;
+let nextHeal = 1;
 const tmp = { x: 0, z: 0, yaw: 0 };
 const frames: EnemyFrame[] = [];
 let last = performance.now();
@@ -224,7 +226,11 @@ function tick() {
     f.yaw = tmp.yaw;
     f.hp = e.hp;
     f.speed = e.stunT > 0 ? 0 : mul;
-    f.f = (slowed ? EFlag.slowed : 0) | (e.stunT > 0 ? EFlag.stunned : 0);
+    f.y = ENEMIES[e.kind].fly ? FLY_HEIGHT : 0;
+    // The left side of the loop is a "sprinkler zone" (soaked); healed for a moment after each Bloomkin pulse.
+    const soaked = !f.y && f.x < -RX * 0.6;
+    const healed = t < e.healedUntil;
+    f.f = (slowed ? EFlag.slowed : 0) | (soaked ? EFlag.soaked | EFlag.slowed : 0) | (healed ? EFlag.healed : 0) | (e.stunT > 0 ? EFlag.stunned : 0);
     frames.push(f);
   }
   units.syncEnemies(frames);
@@ -252,6 +258,15 @@ function tick() {
       nextCast = t + 2.5;
       for (const e of labEnemies) if (e.kind === 'disruptor') units.cast(e.id);
     }
+    if (t > nextHeal) {
+      nextHeal = t + 2;
+      // Bloomkin pulse: cast + everything within 4 m (itself included) flashes green.
+      for (const b of labEnemies) {
+        if (b.kind !== 'bloomkin') continue;
+        units.cast(b.id);
+        for (const e of labEnemies) if (Math.hypot(e.frame.x - b.frame.x, e.frame.z - b.frame.z) <= 4) e.healedUntil = t + 1;
+      }
+    }
   }
 
   // Tower aims: the nearest enemy in range, or the dummy.
@@ -265,10 +280,11 @@ function tick() {
         const range = TOWERS[tw.k].levels[tw.lv - 1].range;
         let best = range * range;
         for (const f of frames) {
+          if (f.y && !TOWERS[tw.k].air) continue;
           const d2 = (f.x - p.x) ** 2 + (f.z - p.z) ** 2;
           if (d2 < best) {
             best = d2;
-            aim = { x: f.x, y: 0.4, z: f.z };
+            aim = units.enemyPos(f.id) ?? { x: f.x, y: 0.4, z: f.z };
           }
         }
       }

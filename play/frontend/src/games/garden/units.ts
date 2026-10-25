@@ -2,7 +2,8 @@
 // next level's model on upgrade, yaw their heads smoothly toward the aim point (slow scan when idle) and droop with a
 // flickering glow while disabled. Enemies follow their interpolated EnemyFrame, walk with a clip whose speed follows
 // their real ground speed (bobbing when the GLB has no clip), flash white on hits, wobble when stunned, tint blue
-// when slowed and play their death before going back to a per-kind pool.
+// when slowed, darken and shiver when soaked, flash green when healed and play their death before going back to a per-kind
+// pool. Flyers (Glow Moths) cruise at EnemyFrame.y with a gentle bob above a soft ground shadow and fall when they die.
 //
 // Cheap by construction: every enemy health bar is one instanced, shader-billboarded draw; every blob shadow is one
 // instanced draw; materials are cloned once per pooled view and only touched when their state changes; no per-frame
@@ -17,9 +18,14 @@ import { TOWERS, type Level, type TowerKind } from '@shared/garden/towers';
 import type { CreateUnits, EnemyFrame, EnemyModel, GardenModels, P3, TowerModel, Units } from './api';
 
 /** Model heights (m) per enemy kind (api.ts GLB conventions). */
-const ENEMY_H: Record<EnemyKind, number> = { runner: 0.8, skitter: 0.5, disruptor: 0.9, brute: 1.8, colossus: 3 };
-const BAR_W: Record<EnemyKind, number> = { runner: 0.6, skitter: 0.45, disruptor: 0.65, brute: 1.0, colossus: 1.6 };
-const TOWER_H: Record<TowerKind, number> = { laser: 1.35, shield: 1.25, slow: 1.4, missile: 1.3, beacon: 1.9 };
+/** Flyers (origin at the body centre): height of the model's top above its origin. */
+const ENEMY_H: Record<EnemyKind, number> = { runner: 0.8, skitter: 0.5, disruptor: 0.9, brute: 1.8, colossus: 3, moth: 0.35, bloomkin: 1.1 };
+const BAR_W: Record<EnemyKind, number> = { runner: 0.6, skitter: 0.45, disruptor: 0.65, brute: 1.0, colossus: 1.6, moth: 0.55, bloomkin: 0.75 };
+const TOWER_H: Record<TowerKind, number> = { laser: 1.35, shield: 1.25, slow: 1.4, missile: 1.3, beacon: 1.9, sprinkler: 1.45 };
+/** Flyer bob: amplitude (m) and rate (rad/s). */
+const BOB_A = 0.16;
+const BOB_W = 2.3;
+const GRAVITY = 14;
 
 const TAU = Math.PI * 2;
 /** Above this many enemies, small ones stop casting real shadows. */
@@ -232,8 +238,21 @@ interface EnemyView {
   speedMul: number;
   vel: number;
   flash: number;
+  /** Slow tint 0..1 (eases towards 1 while slowed). */
   tint: number;
-  /** 1 while slowed (target of `tint`). */
+  /** Soak 0..1 (eases towards 1 while soaked: darker, bluer, a dripping shiver). */
+  soak: number;
+  /** Heal flash 1 -> 0 (set when the healed flag appears). */
+  heal: number;
+  /** Whether it flies (ENEMIES[kind].fly), its target and shown height, fall speed while dying. */
+  fly: boolean;
+  ty: number;
+  y: number;
+  vy: number;
+  /** Shown height without the bob (eased towards ty). */
+  baseY: number;
+  /** Wing pivots of primitive / GLB models without a walk clip (flapped by hand). */
+  wings: THREE.Object3D[];
   dying: number;
   dieDur: number;
   castT: number;
@@ -254,6 +273,8 @@ const UP = new THREE.Vector3(0, 1, 0);
 const WHITE = new THREE.Color(1, 1, 1);
 const SLOW_TINT = new THREE.Color(0x5a9cff);
 const SLOW_GLOW = new THREE.Color(0x0a1e3a);
+const SOAK_TINT = new THREE.Color(0x24486e);
+const HEAL_GLOW = new THREE.Color(0x6dff8a);
 
 export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origins: BoardOrigin[], models: GardenModels): Units => {
   const root = new THREE.Group();
@@ -442,6 +463,10 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
       }
       const group = new THREE.Group();
       group.add(model.root);
+      const wings: THREE.Object3D[] = [];
+      model.root.traverse((o) => {
+        if (o !== model.root && /_wing[LR]?\d*$/i.test(o.name)) wings.push(o);
+      });
       // Per-instance material clones (glow ones already are) so flashes and tints are per enemy. Meshes draw with the
       // shared template materials while nothing is flashing or tinted (fewer material switches in big crowds) and
       // swap to the clones only while a hit flash or slow tint is showing.
@@ -493,6 +518,14 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
         vel: 0,
         flash: 0,
         tint: 0,
+        soak: 0,
+        heal: 0,
+        fly: !!ENEMIES[kind].fly,
+        ty: 0,
+        y: 0,
+        vy: 0,
+        baseY: 0,
+        wings,
         dying: 0,
         dieDur: 0,
         castT: 0,
@@ -507,6 +540,12 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
     v.dying = 0;
     v.flash = 0;
     v.tint = 0;
+    v.soak = 0;
+    v.heal = 0;
+    v.vy = 0;
+    v.y = 0;
+    v.baseY = -1;
+    v.f = 0;
     v.castT = 0;
     v.vel = 0;
     v.hp = 1;
@@ -517,6 +556,7 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
     v.model.root.position.set(0, 0, 0);
     v.model.root.rotation.set(0, 0, 0);
     v.model.root.scale.setScalar(1);
+    for (const w of v.wings) w.rotation.set(0, 0, 0);
     const a = v.model.actions;
     v.model.mixer.stopAllAction();
     if (a.walk) {
@@ -542,7 +582,7 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
 
   /** Applies hit flash and slow tint to the instance materials (only when they changed). */
   function paint(v: EnemyView, force = false) {
-    const active = v.flash > 0.001 || v.tint > 0.001;
+    const active = v.flash > 0.001 || v.tint > 0.001 || v.soak > 0.001 || v.heal > 0.001;
     if (!active && !v.painted && !force) return;
     if (active !== v.painted || force) for (const w of v.swaps) w.mesh.material = active ? w.own : w.base;
     if (!active) {
@@ -551,7 +591,13 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
     }
     for (const s of v.mats) {
       s.mat.color.copy(s.color).lerp(SLOW_TINT, v.tint * 0.4);
-      if (v.flash > 0.001) {
+      // Soaked: darker and bluer (wet).
+      if (v.soak > 0.001) s.mat.color.lerp(SOAK_TINT, v.soak * 0.45).multiplyScalar(1 - v.soak * 0.25);
+      if (v.heal > 0.001) {
+        // Healed: a brief green glow (over any other state).
+        s.mat.emissive.copy(s.emissive).lerp(HEAL_GLOW, Math.min(1, v.heal * 1.2));
+        s.mat.emissiveIntensity = Math.max(s.ei, 0.25) + v.heal * 1.2;
+      } else if (v.flash > 0.001) {
         if (s.mat.emissiveMap) {
           // Palette-mapped crystals: the map colours the emissive, so the flash is a strong intensity boost.
           s.mat.emissive.copy(s.emissive);
@@ -588,7 +634,13 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
     v.px = v.x;
     v.pz = v.z;
     v.yaw += wrapAngle(v.tyaw - v.yaw) * damp(9, dt);
-    v.group.position.set(v.x, 0, v.z);
+    if (v.fly) {
+      // Cruise height with a gentle bob; a fresh flyer rises out of the portal into the air.
+      if (v.baseY < 0) v.baseY = v.ty * 0.35;
+      v.baseY += (v.ty - v.baseY) * damp(2.5, dt);
+      v.y = v.baseY + Math.sin(time * BOB_W + v.id) * BOB_A;
+    } else v.y = v.ty;
+    v.group.position.set(v.x, v.y, v.z);
     v.group.rotation.y = v.yaw;
     const rate = clamp(v.vel / def.speed, 0, 2.2);
     const moving = clamp(rate * 3, 0, 1);
@@ -598,6 +650,17 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
       a.walk.timeScale = stunned ? 0 : Math.max(0.25, rate);
       a.walk.setEffectiveWeight(a.idle ? moving : 1);
       if (a.idle) a.idle.setEffectiveWeight(1 - moving);
+    } else if (v.fly) {
+      // Flyer without a clip: flap the wings (when it has some) and bank gently.
+      v.phase += dt * (stunned ? 0.5 : 3.2 + rate);
+      const s = Math.sin(v.phase * TAU);
+      for (let i = 0; i < v.wings.length; i++) {
+        const w = v.wings[i];
+        const side = /L\d*$/i.test(w.name) ? 1 : -1;
+        w.rotation.z = side * s * 0.7;
+      }
+      v.model.root.rotation.z = Math.sin(time * 1.3 + v.id) * 0.12;
+      v.model.root.position.y = s * 0.04;
     } else {
       // Bob fallback: hops scaled with speed.
       v.phase += dt * rate * (v.kind === 'skitter' ? 4 : v.kind === 'brute' || v.kind === 'colossus' ? 1.3 : 2.6);
@@ -624,8 +687,16 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
         v.model.root.rotation.y = t * TAU;
       }
     }
-    const slowed = (v.f & EFlag.slowed) !== 0 ? 1 : 0;
+    const soaked = (v.f & EFlag.soaked) !== 0 ? 1 : 0;
+    // Soaked enemies read as wet, not frozen: the soak tint replaces the icy slow tint.
+    const slowed = (v.f & EFlag.slowed) !== 0 && !soaked ? 1 : 0;
     v.tint += (slowed - v.tint) * damp(6, dt);
+    v.soak += (soaked - v.soak) * damp(soaked ? 8 : 2.5, dt);
+    if (v.soak > 0.05 && !v.fly && !stunned) {
+      // Dripping: a small shiver while wet.
+      v.group.rotation.z = Math.sin(time * 23 + v.id * 3) * 0.04 * v.soak;
+    }
+    if (v.heal > 0) v.heal = Math.max(0, v.heal - dt * 2.2);
     if (v.flash > 0) v.flash = Math.max(0, v.flash - dt * 6);
     paint(v);
     if (mixDt > 0) v.model.mixer.update(mixDt);
@@ -635,6 +706,15 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
     v.dying += dt;
     const a = v.model.actions;
     const t = v.dying / v.dieDur;
+    if (v.fly && !a.die) {
+      // Flyers without a die clip drop to the ground (the GLB moth_die clip tumbles down by itself).
+      const floor = hOf(v.kind) * 0.5;
+      if (v.y > floor) {
+        v.vy += GRAVITY * dt;
+        v.y = Math.max(floor, v.y - v.vy * dt);
+      }
+      v.group.position.y = v.y;
+    }
     if (!a.die) {
       // Tip over and shrink.
       const k = Math.min(1, v.dying / 0.35);
@@ -646,7 +726,7 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
       const after = v.dying - (v.dieDur - CORPSE_SINK);
       if (after > 0) {
         const k = Math.min(1, after / CORPSE_SINK);
-        v.group.position.y = -k * k * hOf(v.kind) * 0.6;
+        v.group.position.y = (v.fly ? v.y : 0) - k * k * hOf(v.kind) * 0.6;
         v.group.scale.setScalar(Math.max(0.001, 1 - k * 0.5));
       }
     }
@@ -794,6 +874,9 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
         v.z = e.z;
         v.tyaw = e.yaw;
         v.hp = e.hp;
+        v.ty = e.y ?? 0;
+        // Healed (rising edge): a brief green flash.
+        if (e.f & EFlag.healed && !(v.f & EFlag.healed)) v.heal = 1;
         v.f = e.f;
         v.speedMul = e.speed;
       }
@@ -831,9 +914,10 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
     enemyPos(id, out) {
       const v = enemies.get(id);
       if (!v) return null;
-      if (!out) return { x: v.x, y: hOf(v.kind) * 0.5, z: v.z };
+      const y = v.fly ? v.y : hOf(v.kind) * 0.5;
+      if (!out) return { x: v.x, y, z: v.z };
       out.x = v.x;
-      out.y = hOf(v.kind) * 0.5;
+      out.y = y;
       out.z = v.z;
       return out;
     },
@@ -924,7 +1008,7 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
         }
         const mixDt = half ? ((i + frame) & 1 ? dt * 2 : 0) : dt;
         const h = hOf(v.kind);
-        cullSphere.center.set(v.x, h * 0.5, v.z);
+        cullSphere.center.set(v.x, v.y + h * 0.5, v.z);
         cullSphere.radius = h + 3;
         const vis = frustum.intersectsSphere(cullSphere);
         v.group.visible = vis;
@@ -947,11 +1031,12 @@ export const createUnits: CreateUnits = (scene: THREE.Scene, def: GMapDef, origi
       const offs = bars.offs.array as Float32Array;
       const data = bars.data.array as Float32Array;
       for (const v of enemies.values()) {
-        const r = ENEMIES[v.kind].radius * 1.25;
+        // Flyers: a wider, softer shadow that breathes with the bob.
+        const r = ENEMIES[v.kind].radius * (v.fly ? 1.55 - (v.y - v.baseY) * 0.8 : 1.25);
         setBlob(b++, v.x, v.z, r);
         if (v.hp < 0.995) {
           offs[nb * 3] = v.x;
-          offs[nb * 3 + 1] = hOf(v.kind) + 0.25;
+          offs[nb * 3 + 1] = v.y + hOf(v.kind) + 0.25;
           offs[nb * 3 + 2] = v.z;
           data[nb * 2] = clamp(v.hp, 0, 1);
           data[nb * 2 + 1] = BAR_W[v.kind];

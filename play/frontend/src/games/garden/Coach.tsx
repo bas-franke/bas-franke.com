@@ -1,8 +1,9 @@
 // Garden Sentinels first-time coach: short, friendly, dismissible tips driven by the HUD state, shown once per player
 // (localStorage `garden.coach.v1`). Rendered by Hud.tsx as <GardenCoach state={state} actions={actions} />.
 //
-// Tips: build (wave 1 build phase), upgrade (after the first build), early (gold to spare while the build timer runs),
-// roster (first time each enemy kind shows up), send (versus), leak (first enemy reaching the greenhouse).
+// Tips: build (wave 1 build phase), upgrade (after the first build), sun (holding a Sunburst charge from wave 1),
+// early (gold to spare while the build timer runs), roster (first time each enemy kind shows up), sprinkler (skitter
+// packs coming again after their roster card), send (versus), leak (first enemy reaching the greenhouse).
 // The overlay is pointer-events: none; only the cards take clicks. Desktop: every card sits centred just above the
 // build bar (clear of the portals at the map edges, the toasts and the NEXT strip up top). Phones: a slim card docked
 // under the wave block (portrait) or bottom-left (landscape), hidden while a sheet or drawer is open (garden.css).
@@ -16,7 +17,7 @@ import './coach.css';
 
 const KEY = 'garden.coach.v1';
 
-type TipId = 'build' | 'upgrade' | 'early' | 'send' | 'leak';
+type TipId = 'build' | 'upgrade' | 'early' | 'send' | 'leak' | 'sun' | 'sprinkler';
 
 interface Saved {
   seen: TipId[];
@@ -49,13 +50,18 @@ function save(s: Saved) {
 const CHEAPEST = Math.min(...TOWER_KINDS.map((k) => TOWERS[k].levels[0].cost));
 
 // Checked against towers.ts / enemies.ts: lasers (and shields, flowers) ignore armour (pierce 1), missiles do not
-// (pierce 0); brutes have 50% armour, the colossus 40%, disruptors 10%, runners and skitters none.
+// (pierce 0), sprinklers half (pierce 0.5); brutes have 50% armour, the colossus 40%, disruptors and bloomkin 10%,
+// runners, skitters and moths none. Only towers with `air` (laser, shield, missile) can hit moths, and moths ignore
+// slow fields and soak. Strong targeting picks the most health, so with brutes about it shoots the brutes first.
 const COUNTER: Record<EnemyKind, string> = {
   runner: 'Quick but fragile. Lasers melt them, and Slow Flowers keep them in range.',
-  skitter: 'They come in packs. Missile Pod splash pops a whole pack at once.',
+  skitter: 'They come in packs. Missile Pod or Sprinkler Cannon splash pops a whole pack at once.',
   disruptor: 'Zaps your towers offline. Bubble Shields block the bolts and protect nearby towers.',
   brute: 'Thick crystal armour halves missile damage. Lasers burn straight through it, and Slow Flowers keep it in the beam.',
   colossus: 'Lasers ignore its armour. It sheds skitters every time it cracks: keep a Missile Pod near the path to pop them.',
+  moth: 'Flies over the paths: only Lasers, Missile Pods and Bubble Shields can hit it. Build them near the greenhouse.',
+  bloomkin:
+    'Heals the enemies around it. Focus it first: drop a Sunburst on its group, or use Strong targeting (it picks the most health, so Brutes come first).',
 };
 
 // ---- touch detection ------------------------------------------------------------------------------------------------
@@ -76,7 +82,7 @@ export function useCoarse(): boolean {
 
 const bossFirst = (r: EnemyKind[]) => (r.includes('colossus') ? ['colossus' as EnemyKind, ...r.filter((k) => k !== 'colossus')] : r);
 
-const TAG_CLASS: Record<string, string> = { Fast: 'fast', Swarm: 'swarm', Support: 'support', Armored: 'armored', Boss: 'boss' };
+const TAG_CLASS: Record<string, string> = { Fast: 'fast', Swarm: 'swarm', Support: 'support', Armored: 'armored', Boss: 'boss', Flying: 'flying', Healer: 'healer' };
 
 // ---- portraits ------------------------------------------------------------------------------------------------------
 // Flat cel shapes, no gradients or ids, so many copies never clash.
@@ -216,6 +222,56 @@ const PORTRAITS: Record<EnemyKind, () => JSX.Element> = {
       <path d="M14 46 l3 -4 M50 46 l-3 -4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" opacity="0.7" />
     </g>
   ),
+  moth: () => (
+    <g>
+      {/* glow */}
+      <circle cx="32" cy="34" r="26" fill="#FFA940" opacity="0.18" />
+      {/* wings: amber uppers, mint lowers */}
+      <path d="M29 30 C20 10 6 8 4 18 C2 28 14 33 29 34 z" fill="#FFA940" />
+      <path d="M35 30 C44 10 58 8 60 18 C62 28 50 33 35 34 z" fill="#FFA940" />
+      <path d="M29 34 C18 34 9 40 12 48 C15 55 24 50 29 38 z" fill="#4EE6D9" />
+      <path d="M35 34 C46 34 55 40 52 48 C49 55 40 50 35 38 z" fill="#4EE6D9" />
+      <circle cx="14" cy="19" r="4" fill="#fff2d6" />
+      <circle cx="50" cy="19" r="4" fill="#fff2d6" />
+      <circle cx="17" cy="45" r="2.4" fill="#d6fffb" />
+      <circle cx="47" cy="45" r="2.4" fill="#d6fffb" />
+      {/* fuzzy body */}
+      <ellipse cx="32" cy="42" rx="6" ry="13" fill="#7d5aa3" />
+      <path d="M27 40 h10 M27 46 h10" stroke="#6a4a8c" strokeWidth="1.6" strokeLinecap="round" />
+      {/* head */}
+      <circle cx="32" cy="27" r="9" fill="#9a77c2" />
+      <ellipse cx="32" cy="30" rx="6" ry="4.2" fill={CREAM} />
+      <Eyes y={26} l={28.5} r={35.5} s={1.9} />
+      <path d="M30.5 31 q1.5 1.2 3 0" stroke={INK} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+      {/* antennae */}
+      <path d="M28 19 C26 13 22 10 18 9 M36 19 C38 13 42 10 46 9" stroke="#6a4a8c" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <circle cx="18" cy="9" r="2.4" fill="#FFA940" />
+      <circle cx="46" cy="9" r="2.4" fill="#FFA940" />
+    </g>
+  ),
+  bloomkin: () => (
+    <g>
+      {/* leaves */}
+      <path d="M14 40 C2 38 0 24 4 18 C12 20 17 30 14 40 z" fill="#6BAF4B" />
+      <path d="M50 40 C62 38 64 24 60 18 C52 20 47 30 50 40 z" fill="#6BAF4B" />
+      <path d="M14 39 C10 32 7 26 5 20 M50 39 C54 32 57 26 59 20" stroke="#4d8a33" strokeWidth="1.4" fill="none" />
+      {/* glowing bud */}
+      <circle cx="32" cy="12" r="10" fill="#ffe36b" opacity="0.35" />
+      <path d="M32 22 V15" stroke="#4d8a33" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M32 3 C38 5 39 12 32 16 C25 12 26 5 32 3 z" fill="#ff9fd0" />
+      <path d="M32 3 C35 5 35.5 10 32 13 z" fill="#ffc6e4" />
+      <circle cx="32" cy="10.5" r="2.6" fill="#fff6b0" />
+      {/* leafy body */}
+      <path d="M10 44 C10 30 19 22 32 22 C45 22 54 30 54 44 C54 54 44 60 32 60 C20 60 10 54 10 44 z" fill="#5fbf4a" />
+      <path d="M16 36 C18 29 23 26 28 25" stroke="#a6e98c" strokeWidth="2.6" fill="none" strokeLinecap="round" />
+      <path d="M18 44 q14 -5 28 0 q-4 12 -14 13 q-10 -1 -14 -13 z" fill="#e9ffd9" />
+      <Eyes y={40} l={25} r={39} s={2.5} />
+      <path d="M29 48 q3 2.2 6 0" stroke={INK} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <Blush y={45} l={19} r={45} />
+      {/* healing sparkles */}
+      <path d="M56 10 v6 M53 13 h6 M8 8 v5 M5.5 10.5 h5" stroke="#fff6b0" strokeWidth="2" strokeLinecap="round" />
+    </g>
+  ),
 };
 
 export function CoachPortrait({ kind }: { kind: EnemyKind }) {
@@ -256,7 +312,7 @@ const TEXT: Record<TipId, TipText> = {
         <>Tap a tower card, then tap a grass tile next to the path to preview it. Tap the same tile again to plant.</>
       ) : (
         <>
-          Pick a tower below (or press <Kbd>1</Kbd>–<Kbd>5</Kbd>), then click a grass tile next to the path.
+          Pick a tower below (or press <Kbd>1</Kbd>–<Kbd>6</Kbd>), then click a grass tile next to the path.
         </>
       ),
   },
@@ -299,6 +355,31 @@ const TEXT: Record<TipId, TipText> = {
         <>Send enemies at your rivals from the Send panel. Sending raises your income every wave.</>
       ),
     ttl: 16,
+  },
+  sun: {
+    where: 'bar',
+    title: 'Sunburst ready',
+    body: (touch) =>
+      touch ? (
+        <>
+          Tap the <b>sun button</b>, then tap the map to aim and tap again to call down a Sunburst. You get another charge every 5 waves.
+        </>
+      ) : (
+        <>
+          Press <Kbd>G</Kbd> (or the <b>sun button</b>) and click to call down a Sunburst. You get another charge every 5 waves.
+        </>
+      ),
+    ttl: 16,
+  },
+  sprinkler: {
+    where: 'side',
+    title: 'Skitter packs',
+    body: () => (
+      <>
+        A <b>Sprinkler Cannon</b> lobs water bombs that splash a whole pack and soak it slow. It can't hit flyers, though.
+      </>
+    ),
+    ttl: 14,
   },
   leak: {
     where: 'top',
@@ -383,6 +464,15 @@ export function GardenCoach({ state, actions }: { state: GHudState; actions: Gar
     else if (roster.length) card = rosterCard(roster[0]);
     else if (!seen('build') && !built && state.phase === 'build' && state.wave <= 1) card = pick('build');
     else if (built && !seen('upgrade')) card = pick('upgrade');
+    else if (!seen('sun') && seen('build') && (state.sun ?? 0) >= 1 && state.wave >= 1 && !state.placing && !state.aimingSun) card = pick('sun');
+    else if (
+      !seen('sprinkler') &&
+      saved.kinds.includes('skitter') &&
+      state.phase === 'build' &&
+      state.wave >= 3 &&
+      state.next.some((n) => n.kind === 'skitter')
+    )
+      card = pick('sprinkler');
     else if (state.mode === 'vs' && !seen('send') && seen('build') && state.wave >= 1) card = pick('send');
     else if (!seen('early') && seen('build') && state.phase === 'build' && state.left > 3 && state.gold >= CHEAPEST && !state.placing)
       card = pick('early');
@@ -393,6 +483,11 @@ export function GardenCoach({ state, actions }: { state: GHudState; actions: Gar
     if (card.kind) markKind(card.kind);
     else markSeen(card.key as TipId);
   };
+
+  // Sunburst tip: aiming one means the lesson landed.
+  useEffect(() => {
+    if (state.aimingSun && !saved.seen.includes('sun')) markSeen('sun');
+  }, [state.aimingSun]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Early tip: once the wave starts it has done its job.
   const showingEarly = card?.key === 'early';

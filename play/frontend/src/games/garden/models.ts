@@ -113,7 +113,7 @@ function prepareShadows(root: THREE.Object3D) {
  */
 function bake(root: THREE.Object3D, collapse = false): THREE.Object3D {
   root.updateMatrixWorld(true);
-  const isPivot = (o: THREE.Object3D) => o === root || /_head$/.test(o.name);
+  const isPivot = (o: THREE.Object3D) => o === root || /_(head|wing[LR])$/.test(o.name);
   const buckets = new Map<THREE.Object3D, Map<THREE.Material, THREE.BufferGeometry[]>>();
   const meshes: THREE.Mesh[] = [];
   const inv = new THREE.Matrix4();
@@ -326,6 +326,42 @@ function buildTower(kind: TowerKind, lv: Level): THREE.Object3D {
       muzzle(top, 0, 0, 0.8, 0);
       break;
     }
+    case 'sprinkler': {
+      // Brass standpipe with a water tank head and a stubby mortar barrel tilted up (twin barrels at Masterwork).
+      mesh(G_.cyl(0.26, 0.34, 0.26, 12), M.metal(), 0, 0.13, 0, top);
+      mesh(G_.cyl(0.07, 0.07, 0.3, 8), trim, 0, 0.38, 0, top);
+      const head = new THREE.Group();
+      head.name = `${name}_head`;
+      head.position.y = 0.66;
+      top.add(head);
+      const tank = mesh(G_.sphere(0.3, 16, 12), glowMat('Glow_water', 0x7fd0ff, 0x2a90e0, 0.9, { roughness: 0.12, metalness: 0.05, transparent: true, opacity: 0.8 }), 0, 0.02, 0.12, head);
+      tank.scale.set(1, 0.85, 1);
+      mesh(G_.torus(0.3, 0.035, 24), trim, 0, 0.02, 0.12, head).rotation.x = Math.PI / 2;
+      mesh(G_.cyl(0.1, 0.12, 0.08, 10), M.shell(), 0, 0.27, 0.12, head);
+      const barrels = new THREE.Group();
+      barrels.rotation.x = 0.55; // aims up and forward (-Z)
+      barrels.position.set(0, 0.06, -0.08);
+      head.add(barrels);
+      const n = lv === 3 ? 2 : 1;
+      const len = 0.42 + lv * 0.05;
+      for (let i = 0; i < n; i++) {
+        const x = n === 1 ? 0 : (i - 0.5) * 0.26;
+        const b = mesh(G_.cyl(0.11, 0.14, len, 12), M.copper(), x, 0, -len / 2, barrels);
+        b.rotation.x = Math.PI / 2;
+        mesh(G_.torus(0.11, 0.03, 16), lv === 3 ? M.gold() : M.shell(), x, 0, -len, barrels);
+        const cap = mesh(G_.cyl(0.085, 0.085, 0.02, 12), glowMat('Glow_water', 0, 0, 0), x, 0, -len + 0.02, barrels);
+        cap.rotation.x = Math.PI / 2;
+        muzzle(barrels, i, x, 0, -len - 0.04);
+      }
+      if (lv >= 2) {
+        // Spray nozzles around the plinth.
+        for (let i = 0; i < 3; i++) {
+          const a = (i / 3) * Math.PI * 2 + 0.5;
+          mesh(G_.cyl(0.03, 0.05, 0.16, 6), trim, Math.cos(a) * 0.3, 0.32, Math.sin(a) * 0.3, top);
+        }
+      }
+      break;
+    }
   }
   return root;
 }
@@ -347,9 +383,99 @@ const LOOKS: Record<EnemyKind, EnemyLook> = {
   disruptor: { h: 0.9, body: 0x6a3ab0, belly: 0xd0b8f0, crystal: 0xb070ff, glow: 0x9a40ff, spikes: 6, long: 1 },
   brute: { h: 1.8, body: 0x1f5f66, belly: 0x5a8a88, crystal: 0x7ff4ee, glow: 0x30d8e0, spikes: 7, long: 1.05 },
   colossus: { h: 3, body: 0x2a3a6a, belly: 0x6a7ab0, crystal: 0xd8a8ff, glow: 0x8a70ff, spikes: 9, long: 1 },
+  // Stand-ins with their own builders below (buildMoth / buildBloomkin); colours only.
+  moth: { h: 0.7, body: 0x6a5a8a, belly: 0xe8dcc0, crystal: 0xfff0a0, glow: 0xffd860, spikes: 0, long: 1 },
+  bloomkin: { h: 1.1, body: 0x4f8a3a, belly: 0xc8e8a0, crystal: 0xff9ad0, glow: 0xff70b8, spikes: 0, long: 1 },
 };
 
+/** Glow Moth stand-in: origin at the body centre (it flies), wings on `_wingL` / `_wingR` pivots for the flap. */
+function buildMoth(): THREE.Object3D {
+  const L = LOOKS.moth;
+  const root = new THREE.Group();
+  root.name = 'Enemy_moth';
+  const body = mat('p_e_moth', L.body, { roughness: 0.8 });
+  const fuzz = mat('p_eb_moth', L.belly, { roughness: 0.95 });
+  const glow = glowMat('Crystal_moth', L.crystal, L.glow, 1.4, { roughness: 0.3 });
+  const wingMat = glowMat('Crystal_mothwing', 0xfff4d8, 0xffc860, 0.55, { roughness: 0.5, side: THREE.DoubleSide });
+  const eyes = glowMat('Eyes', 0xffffff, 0xfff4d0, 1.2);
+  // Body along -Z (head forward), glowing abdomen at the back.
+  const thorax = mesh(G_.sphere(0.14, 12, 8), fuzz, 0, 0, -0.04, root);
+  thorax.scale.set(1, 0.95, 1.1);
+  const abdomen = mesh(G_.sphere(0.13, 12, 8), glow, 0, -0.02, 0.2, root);
+  abdomen.scale.set(0.85, 0.8, 1.5);
+  mesh(G_.sphere(0.1, 10, 8), body, 0, 0.02, -0.2, root);
+  for (const sx of [-1, 1]) {
+    mesh(G_.sphere(0.035, 8, 6), eyes, sx * 0.06, 0.05, -0.27, root);
+    const ant = mesh(G_.cyl(0.008, 0.012, 0.22, 4), body, sx * 0.05, 0.14, -0.3, root);
+    ant.rotation.set(-0.7, 0, -sx * 0.4);
+    mesh(G_.sphere(0.025, 6, 4), glow, sx * 0.1, 0.22, -0.38, root);
+  }
+  for (const side of ['L', 'R'] as const) {
+    const sx = side === 'L' ? -1 : 1;
+    const pivot = new THREE.Group();
+    pivot.name = `Enemy_moth_wing${side}`;
+    pivot.position.set(sx * 0.08, 0.06, -0.02);
+    root.add(pivot);
+    // Fore and hind wing: flat discs swept back.
+    const fore = mesh(G_.sphere(0.3, 12, 6), wingMat, sx * 0.3, 0, -0.06, pivot);
+    fore.scale.set(1, 0.04, 0.62);
+    fore.rotation.y = sx * 0.35;
+    const hind = mesh(G_.sphere(0.2, 10, 6), wingMat, sx * 0.2, -0.01, 0.2, pivot);
+    hind.scale.set(1, 0.04, 0.8);
+    hind.rotation.y = -sx * 0.4;
+    mesh(G_.sphere(0.05, 8, 6), glow, sx * 0.36, 0.015, -0.06, pivot).scale.set(1, 0.3, 1);
+  }
+  return root;
+}
+
+/** Bloomkin stand-in: a waddling flower bulb with a glowing petal crown (the healer). */
+function buildBloomkin(): THREE.Object3D {
+  const L = LOOKS.bloomkin;
+  const root = new THREE.Group();
+  root.name = 'Enemy_bloomkin';
+  const body = mat('p_e_bloomkin', L.body, { roughness: 0.6 });
+  const belly = mat('p_eb_bloomkin', L.belly, { roughness: 0.6 });
+  const petal = glowMat('Crystal_bloomkin', L.crystal, L.glow, 0.8, { roughness: 0.35, flatShading: true });
+  const core = glowMat('Crystal_bloomcore', 0xfff2a0, 0xffd040, 1.6);
+  const eyes = glowMat('Eyes', 0xffffff, 0xfff4d0, 1.2);
+  const leg = M.dark();
+  const bulb = mesh(G_.sphere(0.36, 14, 10), body, 0, 0.42, 0, root);
+  bulb.scale.set(1, 0.95, 1);
+  const bel = mesh(G_.sphere(0.3, 12, 8), belly, 0, 0.38, -0.1, root);
+  bel.scale.set(0.85, 0.85, 0.8);
+  for (const sx of [-1, 1]) {
+    mesh(G_.sphere(0.05, 8, 6), eyes, sx * 0.12, 0.52, -0.3, root);
+    const l = mesh(G_.cyl(0.05, 0.07, 0.24, 6), leg, sx * 0.16, 0.1, 0, root);
+    l.rotation.z = sx * 0.12;
+    const arm = mesh(G_.sphere(0.12, 8, 6), body, sx * 0.36, 0.42, -0.02, root);
+    arm.scale.set(0.5, 1.2, 0.35);
+    arm.rotation.z = sx * 0.6;
+  }
+  mesh(G_.cyl(0.04, 0.06, 0.2, 6), M.stem(), 0, 0.84, 0, root);
+  const crown = new THREE.Group();
+  crown.position.y = 0.94;
+  root.add(crown);
+  for (let i = 0; i < 7; i++) {
+    const p = new THREE.Group();
+    p.rotation.y = (i / 7) * Math.PI * 2;
+    crown.add(p);
+    const pm = mesh(G_.sphere(0.16, 10, 6), petal, 0.17, 0.05, 0, p);
+    pm.scale.set(1.3, 0.25, 0.65);
+    pm.rotation.z = 0.5;
+  }
+  mesh(G_.sphere(0.09, 10, 8), core, 0, 0.08, 0, crown);
+  for (let i = 0; i < 3; i++) {
+    const a = i * 2.1;
+    const lf = mesh(G_.sphere(0.12, 8, 4), M.leaf(), Math.cos(a) * 0.3, 0.72, Math.sin(a) * 0.3, root);
+    lf.scale.set(1.3, 0.2, 0.6);
+    lf.rotation.y = -a;
+  }
+  return root;
+}
+
 function buildEnemy(kind: EnemyKind): THREE.Object3D {
+  if (kind === 'moth') return buildMoth();
+  if (kind === 'bloomkin') return buildBloomkin();
   const L = LOOKS[kind];
   const root = new THREE.Group();
   root.name = `Enemy_${kind}`;
@@ -664,7 +790,9 @@ export const createModels: CreateModels = () => {
           ['idle', `${kind}_idle`],
           ['die', `${kind}_die`],
         ];
-        if (kind === 'disruptor') want.push(['cast', 'disruptor_cast']);
+        // Any `<kind>_cast` clip maps to the cast action (disruptor, bloomkin); only casters are expected to have one.
+        const castName = `${kind}_cast`;
+        if (kind === 'disruptor' || kind === 'bloomkin' || enemiesG.animations.some((a) => a.name.startsWith(castName))) want.push(['cast', castName]);
         for (const [slot, clipName] of want) {
           const c = enemiesG.animations.find((a) => a.name === clipName) ?? enemiesG.animations.find((a) => a.name.startsWith(clipName));
           note(`clip ${clipName}`, !!c);
@@ -722,9 +850,9 @@ export const createModels: CreateModels = () => {
           root.add(m);
         }
         muzzles.push(m);
-        if (towersG && (kind === 'laser' || kind === 'missile')) note(`${name}_muzzle`, false);
+        if (towersG && (kind === 'laser' || kind === 'missile' || kind === 'sprinkler')) note(`${name}_muzzle`, false);
       }
-      if (towersG && (kind === 'laser' || kind === 'missile')) note(`${name}_head`, !!head);
+      if (towersG && (kind === 'laser' || kind === 'missile' || kind === 'sprinkler')) note(`${name}_head`, !!head);
       return {
         root,
         head,

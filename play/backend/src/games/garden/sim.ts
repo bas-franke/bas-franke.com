@@ -6,9 +6,9 @@
 import { rng as makeRng } from '../../shared/math.js';
 import type { BotDifficulty } from '../../shared/protocol.js';
 import { G, type GMode, coopBountyShare, coopCount, coopEarly, coopHp } from '../../shared/garden/constants.js';
-import { ENEMIES, type EnemyDef, type EnemyKind, SENDS, SENT_BOUNTY, SKITTER_PACK, isEnemyKind, sendCap, vsHpRamp, waveBounty, waveHp, waveSpawns } from '../../shared/garden/enemies.js';
+import { ENEMIES, type EnemyDef, type EnemyKind, FLY_HEIGHT, SENDS, SENT_BOUNTY, SKITTER_PACK, isEnemyKind, sendCap, vsHpRamp, waveBounty, waveHp, waveSpawns } from '../../shared/garden/enemies.js';
 import type { GMapDef } from '../../shared/garden/maps.js';
-import { type BoardOrigin, type RouteGeom, type RoutePos, boardOrigin, cellToWorld, routeGeom, routePos } from '../../shared/garden/board.js';
+import { type BoardOrigin, type RouteGeom, type RoutePos, allRoutes, boardOrigin, cellToWorld, routeGeom, routePos } from '../../shared/garden/board.js';
 import {
   type BoardInfo,
   type BoardSnap,
@@ -45,6 +45,17 @@ const SHED_AT = [0.75, 0.5, 0.25];
 const MAX_COOP_PURSES = 12;
 /** Versus: seconds a leaver's board, gold and score stay reserved for a rejoin under the same name. */
 export const VS_RECLAIM = 60;
+/** Height of a tower's muzzle (m): ranges against flyers are 3D, from here up to FLY_HEIGHT. */
+const MUZZLE = 1.2;
+/** Vertical gap a tower reaches across to hit a flyer (ground enemies keep plain 2D ranges). */
+const AIR_DY = FLY_HEIGHT - MUZZLE;
+/**
+ * Flyers take at least this long (s) to cross their air route: on a map whose portal sits near the greenhouse the
+ * straight air line is short, so the moth flutters slower there instead of arriving in a few seconds.
+ */
+export const AIR_MIN_TIME = 20;
+/** Seconds EFlag.healed stays on after a Bloomkin pulse. */
+const HEALED_FLAG = 1;
 const CHEAPEST_TOWER = Math.min(...TOWER_KINDS.map((k) => TOWERS[k].levels[0].cost));
 
 export interface SimPlayerInit {
@@ -70,6 +81,8 @@ export interface SimPlayer {
   pingT: number;
   /** Sends made since the last wave start (capped by sendCap). */
   sends: number;
+  /** Sunburst charges held (G.sun). */
+  sun: number;
 }
 
 interface Enemy {
@@ -87,8 +100,17 @@ interface Enemy {
   speed: number;
   x: number;
   z: number;
-  /** Strongest slow on it this tick. */
+  /** Strongest slow field on it this tick (sprinkler soak is kept apart, see soak). */
   slow: number;
+  /** Glow Moth: flies its air route at FLY_HEIGHT (y), immune to slow fields and soak, only `air` towers hit it. */
+  fly: boolean;
+  y: number;
+  /** Sprinkler soak: slow share and seconds left. */
+  soak: number;
+  soakT: number;
+  /** Bloomkin: seconds to the next heal pulse. Any enemy: seconds EFlag.healed stays on. */
+  healT: number;
+  healedT: number;
   zapT: number;
   stun: number;
   disT: number;
@@ -136,7 +158,10 @@ interface Board {
   out: boolean;
   place: number;
   origin: BoardOrigin;
+  /** Ground routes, then their air routes (wire order, board.ts allRoutes). */
   routes: RouteGeom[];
+  /** Number of ground routes (air route of ground route r = ground + r). */
+  ground: number;
   /** Tower id per cell (row * W + col), 0 = free. */
   cells: Int32Array;
   buildable: Uint8Array;
@@ -160,10 +185,16 @@ interface Missile {
   owner: string;
   en: number;
   x: number;
+  /** Blast height: FLY_HEIGHT when aimed at a flyer, else 0 (splash reaches flyers in 3D). */
+  y: number;
   z: number;
   t: number;
   dmg: number;
   splash: number;
+  pierce: number;
+  /** Sprinkler water bomb: soak share and seconds (0 = a missile); a bomb never touches flyers. */
+  soak: number;
+  soakTime: number;
 }
 
 export interface SimEnd {
@@ -247,7 +278,8 @@ export class GardenSim {
         out: false,
         place: 0,
         origin,
-        routes: o.def.routes.map((rt) => routeGeom(o.def, origin, rt)),
+        routes: allRoutes(o.def).map((rt) => routeGeom(o.def, origin, rt)),
+        ground: o.def.routes.length,
         cells: new Int32Array(this.W * this.H),
         buildable,
         en: [],
@@ -286,6 +318,7 @@ export class GardenSim {
       sendRR: 0,
       pingT: 0,
       sends: 0,
+      sun: G.sun.start,
     };
     if (p.bot && board >= 0) sp.brain = this.createBot(p.id, this.difficulty, Math.floor(this.rng() * 1e9));
     this.players.set(p.id, sp);
@@ -415,9 +448,45 @@ export class GardenSim {
         this.events.push({ k: 'ping', id, b: Math.max(0, p.board), x: r2(x), z: r2(z) });
         return true;
       }
+      case 'sun':
+        return this.sunburst(p, msg.x, msg.z);
       default:
         return false;
     }
+  }
+
+  /**
+   * Sunburst: a charge spent at world x/z on the player's own board (co-op: the shared board) deals G.sun.base +
+   * perWave x wave to every enemy within G.sun.radius (2D, flyers included), ignoring armour.
+   */
+  private sunburst(p: SimPlayer, x: unknown, z: unknown): boolean {
+    const bd = this.canAct(p);
+    if (!bd) return this.deny(p, 'You are not defending a garden');
+    if (typeof x !== 'number' || typeof z !== 'number' || !Number.isFinite(x) || !Number.isFinite(z)) return false;
+    const hw = (this.W * G.cell) / 2;
+    const hh = (this.H * G.cell) / 2;
+    if (Math.abs(x - bd.origin.x) > hw || Math.abs(z - bd.origin.z) > hh) return this.deny(p, 'Aim at your own garden');
+    if (p.sun < 1) return this.deny(p, 'No Sunburst charges');
+    p.sun--;
+    const R = G.sun.radius;
+    const dmg = G.sun.base + G.sun.perWave * Math.max(1, this.wave);
+    this.events.push({ k: 'sun', by: p.id, b: bd.b, x: r2(x), z: r2(z), r: R });
+    const en = bd.en;
+    // Skitters a colossus sheds under the strike are not hit by it.
+    for (let i = 0, n = en.length; i < n; i++) {
+      const e = en[i];
+      if (e.dead) continue;
+      const dx = e.x - x;
+      const dz = e.z - z;
+      if (dx * dx + dz * dz > (R + e.def.radius) * (R + e.def.radius)) continue;
+      this.hurt(e, dmg, 1, null, p.id);
+    }
+    return true;
+  }
+
+  /** Sunburst: one more charge (capped at G.sun.max) for every G.sun.every waves cleared. */
+  private grantSun(p: SimPlayer, wave: number) {
+    if (wave > 0 && wave % G.sun.every === 0) p.sun = Math.min(G.sun.max, p.sun + 1);
   }
 
   private deny(p: SimPlayer, why: string): false {
@@ -570,7 +639,7 @@ export class GardenSim {
   }
 
   private queueSent(bd: Board, kind: EnemyKind, hpMul: number, at: number, from: string) {
-    const r = bd.rr++ % bd.routes.length;
+    const r = this.wireRoute(bd, kind, bd.rr++ % bd.ground);
     if (kind === 'skitter') this.queuePack(bd, r, at, hpMul, from);
     else bd.pending.push({ at, kind, r, hpMul, o: this.lat(), from });
   }
@@ -580,6 +649,11 @@ export class GardenSim {
       const o = SKITTER_PACK > 1 ? -0.8 + (1.6 * k) / (SKITTER_PACK - 1) : 0;
       bd.pending.push({ at, kind: 'skitter', r, hpMul, o, from });
     }
+  }
+
+  /** Route index on the wire for an enemy of `kind` spawning on ground route r (flyers take its air route). */
+  private wireRoute(bd: Board, kind: EnemyKind, r: number) {
+    return ENEMIES[kind].fly ? bd.ground + r : r;
   }
 
   private lat() {
@@ -633,13 +707,13 @@ export class GardenSim {
     }
     for (const bd of this.boards) {
       if (bd.out) continue;
-      const routes = bd.routes.length;
+      const routes = bd.ground;
       for (const g of waveSpawns(n, routes)) {
         const boss = g.kind === 'colossus';
         const count = boss ? g.count : Math.max(1, Math.round(g.count * cMul));
         const gap = boss ? g.gap : g.gap / cMul;
         for (let i = 0; i < count; i++) {
-          const r = g.route < 0 ? bd.rr++ % routes : Math.min(g.route, routes - 1);
+          const r = this.wireRoute(bd, g.kind, g.route < 0 ? bd.rr++ % routes : Math.min(g.route, routes - 1));
           const at = this.time + g.at + i * gap;
           if (at > this.lastSpawnAt) this.lastSpawnAt = at;
           if (g.kind === 'skitter') this.queuePack(bd, r, at, hpMul, null);
@@ -683,6 +757,7 @@ export class GardenSim {
     if (all || this.time > this.lastSpawnAt + G.vsOvertime) {
       this.phase = 'build';
       this.left = G.betweenWaves;
+      for (const p of this.holders()) if (p.board >= 0 && !this.boards[p.board].out) this.grantSun(p, this.wave);
     }
   }
 
@@ -736,6 +811,7 @@ export class GardenSim {
       if (p.board >= 0) {
         p.gold += bonus;
         this.events.push({ k: 'gold', id: p.id, n: bonus, why: 'clear' });
+        this.grantSun(p, this.wave);
       }
   }
 
@@ -770,6 +846,7 @@ export class GardenSim {
       this.auras(bd, dt);
       this.fields(bd, dt);
       this.move(bd, dt);
+      this.heals(bd, dt);
       this.disruptors(bd, dt);
       this.fire(bd, dt);
     }
@@ -810,10 +887,16 @@ export class GardenSim {
       hp,
       maxHp: hp,
       hpMul,
-      speed: def.speed * (0.95 + this.rng() * 0.1),
+      speed: def.speed * (0.95 + this.rng() * 0.1) * (def.fly ? Math.min(1, bd.routes[r].length / AIR_MIN_TIME / def.speed) : 1),
       x: 0,
       z: 0,
       slow: 0,
+      fly: !!def.fly,
+      y: def.fly ? FLY_HEIGHT : 0,
+      soak: 0,
+      soakT: 0,
+      healT: def.heal ? def.heal.every : 0,
+      healedT: 0,
       zapT: 0,
       stun: 0,
       disT: def.disrupt ? def.disrupt.every * (0.5 + this.rng() * 0.5) : 0,
@@ -870,12 +953,23 @@ export class GardenSim {
     }
   }
 
-  /** Slow fields and shield pulses. */
+  /** Squared distance from tower t to enemy e for range checks (3D up to a flyer), or Infinity when t cannot hit it. */
+  private reach2(t: Tower, e: Enemy): number {
+    const dx = e.x - t.x;
+    const dz = e.z - t.z;
+    if (!e.fly) return dx * dx + dz * dz;
+    return t.def.air ? dx * dx + dz * dz + AIR_DY * AIR_DY : Infinity;
+  }
+
+  /** Slow fields and shield pulses (plus the soak and healed timers). */
   private fields(bd: Board, dt: number) {
     const en = bd.en;
     for (let i = 0; i < en.length; i++) {
-      en[i].slow = 0;
-      if (en[i].zapT > 0) en[i].zapT -= dt;
+      const e = en[i];
+      e.slow = 0;
+      if (e.zapT > 0) e.zapT -= dt;
+      if (e.soakT > 0 && (e.soakT -= dt) <= 0) e.soak = e.soakT = 0;
+      if (e.healedT > 0) e.healedT -= dt;
     }
     const tw = bd.tw;
     for (let i = 0; i < tw.length; i++) {
@@ -895,7 +989,7 @@ export class GardenSim {
         // Skitters a colossus sheds during this pass join en but are not part of it.
         for (let j = 0, n = en.length; j < n; j++) {
           const e = en[j];
-          if (e.dead) continue;
+          if (e.dead || e.fly) continue;
           const dx = e.x - t.x;
           const dz = e.z - t.z;
           if (dx * dx + dz * dz > r2) continue;
@@ -909,10 +1003,7 @@ export class GardenSim {
         const dmg = t.lv.dmg * mul * ZAP_EVERY;
         for (let j = 0, n = en.length; j < n; j++) {
           const e = en[j];
-          if (e.dead) continue;
-          const dx = e.x - t.x;
-          const dz = e.z - t.z;
-          if (dx * dx + dz * dz > r2) continue;
+          if (e.dead || this.reach2(t, e) > r2) continue;
           hit = true;
           e.zapT = 0.35;
           this.hurt(e, dmg, t.def.pierce, t);
@@ -931,7 +1022,7 @@ export class GardenSim {
       const e = en[i];
       if (e.dead) continue;
       if (e.stun > 0) e.stun -= dt;
-      else e.d += e.speed * (1 - e.slow) * dt;
+      else e.d += e.speed * (1 - Math.max(e.slow, e.soakT > 0 ? e.soak : 0)) * dt;
       if (e.d >= e.len) {
         this.leak(bd, e);
         continue;
@@ -939,6 +1030,32 @@ export class GardenSim {
       routePos(bd.routes[e.r], e.d, e.o, this.pos);
       e.x = this.pos.x;
       e.z = this.pos.z;
+    }
+  }
+
+  /** Bloomkin pulses: every heal.every s, +pct of max health to every enemy within heal.range (2D, itself and flyers included). */
+  private heals(bd: Board, dt: number) {
+    const en = bd.en;
+    for (let i = 0, n = en.length; i < n; i++) {
+      const h = en[i];
+      const heal = h.def.heal;
+      if (!heal || h.dead) continue;
+      h.healT -= dt;
+      if (h.healT > 1e-6) continue; // (float drift: 60 x 0.05 s must make 3 s)
+      h.healT += heal.every;
+      const r2 = heal.range * heal.range;
+      let healed = 0;
+      for (let j = 0; j < en.length; j++) {
+        const e = en[j];
+        if (e.dead || e.hp >= e.maxHp) continue;
+        const dx = e.x - h.x;
+        const dz = e.z - h.z;
+        if (dx * dx + dz * dz > r2) continue;
+        e.hp = Math.min(e.maxHp, e.hp + e.maxHp * heal.pct);
+        e.healedT = HEALED_FLAG;
+        healed++;
+      }
+      if (healed > 0) this.events.push({ k: 'heal', en: h.id, n: healed, r: heal.range });
     }
   }
 
@@ -1002,9 +1119,7 @@ export class GardenSim {
     for (let i = 0; i < en.length; i++) {
       const e = en[i];
       if (e.dead || e.id === skipA || e.id === skipB) continue;
-      const dx = e.x - t.x;
-      const dz = e.z - t.z;
-      const d2 = dx * dx + dz * dz;
+      const d2 = this.reach2(t, e);
       if (d2 > r2) continue;
       const s = mode === 0 ? e.d - e.len : mode === 1 ? e.len - e.d : mode === 2 ? e.hp : -d2;
       if (s > bestS) {
@@ -1020,7 +1135,7 @@ export class GardenSim {
     for (let i = 0; i < tw.length; i++) {
       const t = tw[i];
       const k = t.info.k;
-      if (k !== 'laser' && k !== 'missile') continue;
+      if (k !== 'laser' && k !== 'missile' && k !== 'sprinkler') continue;
       if (t.disabled > 0) {
         t.tg = 0;
         t.ch.length = 0;
@@ -1036,17 +1151,17 @@ export class GardenSim {
         }
         t.tg = e.id;
         const dmg = t.lv.dmg * (1 + t.bDmg) * (1 + t.bRate) * dt;
-        const cx = e.x;
-        const cz = e.z;
+        let px = e.x;
+        let py = e.y;
+        let pz = e.z;
         this.hurt(e, dmg, t.def.pierce, t);
         const chains = t.lv.count ?? 0;
-        let px = cx;
-        let pz = cz;
         for (let c = 0; c < chains; c++) {
-          const n = this.nearest(bd, px, pz, CHAIN_HOP, e.id, t.ch);
+          const n = this.nearest(bd, px, py, pz, CHAIN_HOP, e.id, t.ch);
           if (!n) break;
           t.ch.push(n.id);
           px = n.x;
+          py = n.y;
           pz = n.z;
           this.hurt(n, dmg * CHAIN_SHARE, t.def.pierce, t);
         }
@@ -1067,17 +1182,33 @@ export class GardenSim {
           const target = m === 0 ? e : (this.pick(bd, t, range, a, b) ?? e);
           if (m === 0) a = target.id;
           else if (m === 1) b = target.id;
-          const dist = Math.hypot(target.x - t.x, target.z - t.z);
+          const dist = Math.sqrt(this.reach2(t, target));
           const ft = Math.max(0.25, dist / MISSILE_SPEED) + m * 0.08;
           const mid = this.nextMid++;
-          this.missiles.push({ mid, b: bd.b, tw: t.info.id, owner: t.info.own, en: target.id, x: target.x, z: target.z, t: ft, dmg, splash: t.lv.splash ?? 1.5 });
+          this.missiles.push({
+            mid,
+            b: bd.b,
+            tw: t.info.id,
+            owner: t.info.own,
+            en: target.id,
+            x: target.x,
+            y: target.y,
+            z: target.z,
+            t: ft,
+            dmg,
+            splash: t.lv.splash ?? 1.5,
+            pierce: t.def.pierce,
+            soak: t.lv.soak ?? 0,
+            soakTime: t.lv.soakTime ?? 0,
+          });
           this.events.push({ k: 'msl', tw: t.info.id, en: target.id, mid, ft: r2(ft) });
         }
       }
     }
   }
 
-  private nearest(bd: Board, x: number, z: number, maxD: number, skip: number, skipList: number[]): Enemy | null {
+  /** Nearest enemy within maxD (3D: flyers at FLY_HEIGHT) of a point, for laser chains (lasers reach flyers). */
+  private nearest(bd: Board, x: number, y: number, z: number, maxD: number, skip: number, skipList: number[]): Enemy | null {
     const en = bd.en;
     let best: Enemy | null = null;
     let bestD = maxD * maxD;
@@ -1085,8 +1216,9 @@ export class GardenSim {
       const e = en[i];
       if (e.dead || e.id === skip || skipList.includes(e.id)) continue;
       const dx = e.x - x;
+      const dy = e.y - y;
       const dz = e.z - z;
-      const d2 = dx * dx + dz * dz;
+      const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 <= bestD) {
         bestD = d2;
         best = e;
@@ -1102,6 +1234,7 @@ export class GardenSim {
       const e = this.enemies.get(m.en);
       if (e && !e.dead) {
         m.x = e.x;
+        m.y = e.y;
         m.z = e.z;
       }
       m.t -= dt;
@@ -1114,13 +1247,20 @@ export class GardenSim {
       const t = this.towers.get(m.tw) ?? null;
       const en = bd.en;
       // Skitters shed by this blast are not hit by it.
+      const bomb = m.soak > 0;
       for (let j = 0, n = en.length; j < n; j++) {
         const v = en[j];
-        if (v.dead) continue;
-        const dist = Math.hypot(v.x - m.x, v.z - m.z);
+        // Water bombs never touch flyers; missile blasts reach them in 3D (a blast aimed at a flyer bursts up there).
+        if (v.dead || (bomb && v.fly)) continue;
+        const dist = Math.hypot(v.x - m.x, v.y - m.y, v.z - m.z);
         if (dist > m.splash + v.def.radius) continue;
         const f = 1 - 0.5 * Math.min(1, dist / m.splash);
-        this.hurt(v, m.dmg * f, TOWERS.missile.pierce, t, m.owner);
+        if (bomb && m.soak >= v.soak) {
+          // Strongest soak applies; an equal or stronger one refreshes the timer, a weaker one leaves it alone.
+          v.soak = m.soak;
+          v.soakT = Math.max(v.soakT, m.soakTime);
+        }
+        this.hurt(v, m.dmg * f, m.pierce, t, m.owner);
       }
     }
   }
@@ -1263,14 +1403,19 @@ export class GardenSim {
     const bd = this.boards[p.board];
     const enemies: BotEnemyView[] = bd.en
       .filter((e) => !e.dead)
-      .map((e) => ({ id: e.id, kind: e.kind, b: e.b, route: e.r, d: e.d, hp: e.hp, maxHp: e.maxHp, x: e.x, z: e.z }));
+      .map((e) => {
+        const v: BotEnemyView = { id: e.id, kind: e.kind, b: e.b, route: e.r, d: e.d, hp: e.hp, maxHp: e.maxHp, x: e.x, z: e.z };
+        if (e.fly) v.fly = true;
+        return v;
+      });
     const def = this.def;
     const origin = bd.origin;
     return {
       mode: this.mode,
       def,
       board: bd.b,
-      routes: this.boards.map((b) => b.routes),
+      routes: this.boards.map((b) => b.routes.slice(0, b.ground)),
+      air: this.boards.map((b) => b.routes.slice(b.ground)),
       free: this.free(bd).map(([c, r]) => [c, r] as [number, number]),
       toWorld: (col, row) => cellToWorld(def, origin, col + 0.5, row + 0.5),
       wave: this.wave,
@@ -1285,6 +1430,7 @@ export class GardenSim {
         this.mode === 'vs' ? this.boards.filter((b) => !b.out && b.b !== bd.b).map((b) => ({ b: b.b, lives: b.lives, owner: b.owner ?? '' })) : [],
       players: this.defenders(),
       sendsLeft: this.mode === 'vs' ? Math.max(0, sendCap(this.sendWave()) - p.sends) : 0,
+      sun: p.sun,
     };
   }
 
@@ -1341,6 +1487,8 @@ export class GardenSim {
         if (e.dead) continue;
         let f = e.from ? EFlag.sent : 0;
         if (e.slow > 0) f |= EFlag.slowed;
+        if (e.soakT > 0) f |= EFlag.soaked;
+        if (e.healedT > 0) f |= EFlag.healed;
         if (e.zapT > 0) f |= EFlag.zapped;
         if (e.stun > 0) f |= EFlag.stunned;
         else if (e.def.disrupt && e.disT <= 0) f |= EFlag.charging;
@@ -1361,6 +1509,7 @@ export class GardenSim {
       inc: this.mode === 'vs' ? G.baseIncome + p.income : 0,
       rd: p.ready ? 1 : 0,
       b: p.board,
+      sun: p.sun,
     }));
     let pendingAll = 0;
     for (const b of this.boards) pendingAll += b.pending.length;

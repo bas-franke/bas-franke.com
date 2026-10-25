@@ -23,7 +23,8 @@ export interface TowerInfo {
   spent: number;
 }
 
-export const EFlag = { slowed: 1, zapped: 2, charging: 4, stunned: 8, sent: 16 } as const;
+/** soaked: hit by a sprinkler (slowed and dripping); healed: a Bloomkin healed it within the last second. */
+export const EFlag = { slowed: 1, zapped: 2, charging: 4, stunned: 8, sent: 16, soaked: 32, healed: 64 } as const;
 export const TFlag = { disabled: 1, shielded: 2, buffed: 4 } as const;
 
 export interface EnemySnap {
@@ -60,6 +61,8 @@ export interface PlayerSnap {
   rd: 0 | 1;
   /** Board this player builds on (co-op: 0; -1 = spectator, a versus mid-match joiner). */
   b: number;
+  /** Sunburst charges held (G.sun). */
+  sun?: number;
 }
 
 export interface BoardSnap {
@@ -124,7 +127,7 @@ export type GEvent =
   | { k: 'up'; id: number; lv: Level; by: string; spent: number }
   | { k: 'sell'; id: number; by: string; refund: number }
   | { k: 'tm'; id: number; tm: TargetMode }
-  /** A missile left tower `tw` for enemy `en`; it lands after `ft` seconds (a 'boom' follows). */
+  /** A missile (or a sprinkler's water bomb: tower kind 'sprinkler') left tower `tw` for enemy `en`; it lands after `ft` seconds (a 'boom' follows). */
   | { k: 'msl'; tw: number; en: number; mid: number; ft: number }
   /** Splash at a world point on board `b` (radius r). */
   | { k: 'boom'; b: number; x: number; z: number; r: number; mid: number }
@@ -157,7 +160,11 @@ export type GEvent =
   /** Versus: board eliminated, finishing in `place`. */
   | { k: 'out'; b: number; place: number }
   | { k: 'ping'; id: string; b: number; x: number; z: number }
-  | { k: 'deny'; id: string; why: string };
+  | { k: 'deny'; id: string; why: string }
+  /** A Sunburst landed: player `by` struck board `b` at world x/z, radius r. */
+  | { k: 'sun'; by: string; b: number; x: number; z: number; r: number }
+  /** A Bloomkin pulsed: healed `n` enemies around enemy `en` (radius r). */
+  | { k: 'heal'; en: number; n: number; r: number };
 
 export type GardenServerMsg =
   | {
@@ -195,4 +202,6 @@ export type GardenClientMsg =
   /** [added] The board the camera is on (versus), so its enemies come in every snapshot. */
   | { k: 'view'; b: number }
   /** Asks for a fresh 'init' (a client that mounts mid-match may have been handed an old one by the room page). */
-  | { k: 'sync' };
+  | { k: 'sync' }
+  /** Use a Sunburst charge at world x/z on your board (co-op: the shared board). */
+  | { k: 'sun'; x: number; z: number };

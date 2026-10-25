@@ -9,13 +9,17 @@
 //   &spectator=1                  versus spectator (no cards, sends, gold; "Spectating" tag)
 //   &incoming=1                   versus: sends queued at you and at other gardens (NEXT strip + gardens strip)
 //   &bossbanner=1                 the build phase before a boss wave turns into the wave after 0.6 s (boss banner)
-//   &coach=build|upgrade|early|send|leak|colossus|runner   force that coach tip (the rest marked seen)
+//   &coach=build|upgrade|early|send|leak|sun|sprinkler|colossus|runner|moth|bloomkin   force that coach tip
+//   &sun=0|1|2                    Sunburst charges (default 1); &aim=1 aiming a Sunburst (G toggles, like client.ts)
+//   &foes=new                     NEXT strip with the new enemies (Glow Moth flyers, Bloomkin healers) at wave 14
+//   &kind=sprinkler               the selected tower's kind (with &sel=1|2|3)
+//   &racercss=1                   also load the racer's global .hud stylesheet (regression check for the italic numbers)
 import { createRoot } from 'react-dom/client';
 import type { RoomView } from '@shared/protocol';
 import { G } from '@shared/garden/constants';
 import type { EnemyKind } from '@shared/garden/enemies';
 import type { GScore } from '@shared/garden/protocol';
-import { TOWERS, spentUpTo, type Level, type TowerKind } from '@shared/garden/towers';
+import { TOWER_KINDS, TOWERS, spentUpTo, type Level, type TowerKind } from '@shared/garden/towers';
 import { createStore, type ClientContext } from '../../types';
 import type { GardenActions, GHudState, HudBoard, HudIncoming, HudPlayer, Toast } from '../api';
 import { GardenHud } from '../Hud';
@@ -28,6 +32,8 @@ const phase = q.get('phase') === 'wave' ? 'wave' : 'build';
 const boss = q.has('boss') || q.has('bossbanner');
 const spectator = vs && q.has('spectator');
 const coach = q.get('coach');
+const newFoes = q.get('foes') === 'new';
+const rosterCoach = coach === 'colossus' || coach === 'runner' || coach === 'moth' || coach === 'bloomkin';
 
 const PEOPLE: [string, string, number, boolean][] = [
   ['me', 'Bas', 0x2eb3ff, false],
@@ -56,6 +62,7 @@ const INC: HudIncoming[][] = [
   [],
   [],
 ];
+if (newFoes) INC[0].push({ kind: 'moth', count: 2, from: 'p4', fromColor: 0x6baf4b });
 const boards: HudBoard[] = vs
   ? players.map((p, i) => ({
       b: i,
@@ -92,14 +99,14 @@ const toasts: Toast[] = [
 ];
 
 const endParam = q.get('end');
-const coachWave = coach === 'build' ? 0 : coach ? 2 : null;
+const coachWave = coach === 'build' ? 0 : coach === 'sprinkler' ? 4 : coach === 'moth' ? 7 : coach === 'bloomkin' ? 10 : coach ? 2 : null;
 const initial: GHudState = {
   ready: !q.has('loading'),
   mode: vs ? 'vs' : 'coop',
   mapName: 'Moonpetal Meadow',
-  wave: coachWave ?? (boss ? 9 : 11),
+  wave: coachWave ?? (boss ? 9 : newFoes ? 13 : 11),
   maxWave: vs ? 0 : G.coopWaves,
-  phase: endParam !== null ? 'over' : coach === 'colossus' || coach === 'runner' || q.has('bossbanner') ? 'build' : phase,
+  phase: endParam !== null ? 'over' : rosterCoach || q.has('bossbanner') ? 'build' : phase,
   left: phase === 'wave' ? 37 : 14,
   progress: 0.42,
   lives: vs ? boards[Number(q.get('view') ?? 0)].lives : 14,
@@ -129,6 +136,25 @@ const initial: GHudState = {
     : null,
   next: coach === 'runner'
     ? [{ kind: 'runner', count: 7 }]
+    : coach === 'moth' || coach === 'bloomkin'
+    ? [
+        { kind: 'runner', count: 14 },
+        { kind: coach, count: 2 },
+      ]
+    : coach === 'sprinkler'
+    ? [
+        { kind: 'runner', count: 12 },
+        { kind: 'skitter', count: 15 },
+      ]
+    : newFoes
+    ? [
+        { kind: 'runner', count: 22 },
+        { kind: 'skitter', count: 30 },
+        { kind: 'disruptor', count: 3 },
+        { kind: 'brute', count: 3 },
+        { kind: 'moth', count: 4 },
+        { kind: 'bloomkin', count: 1 },
+      ]
     : boss || coach === 'colossus'
     ? [
         { kind: 'runner', count: 18 },
@@ -150,6 +176,8 @@ const initial: GHudState = {
   end: endParam !== null ? { win: endParam === '1', winner: vs ? (endParam === '1' ? 'me' : 'p3') : null, wave: vs ? 23 : endParam === '1' ? 30 : 17 } : null,
   quality: 'high',
   paused: false,
+  sun: q.has('sun') ? Number(q.get('sun')) : 1,
+  aimingSun: q.has('aim'),
 };
 
 const store = createStore<GHudState>(initial);
@@ -180,16 +208,20 @@ const actions: GardenActions = {
     store.set((s) => ({ gold: s.gold - 50, income: s.income + 3 }));
     toast(`Sent ${kind} at ${to === undefined ? 'the next garden' : boards[to].name}`, 'info');
   },
+  sun: () =>
+    store.set((s) => (s.aimingSun ? { aimingSun: false } : (s.sun ?? 0) > 0 ? { aimingSun: true, placing: null, selected: null } : {})),
   viewBoard: (b) => store.set((s) => ({ viewBoard: b, lives: s.boards[b]?.lives ?? s.lives })),
   setScoresOpen: (open) => store.set({ scoresOpen: open }),
   setQuality: (quality) => store.set({ quality }),
   leave: () => alert('leave'),
 };
 
-// Selecting a tower in the lab: press 1-5 to place, click the backdrop to "build" (gold drops) and select it.
+// Selecting a tower in the lab: press 1-6 to place, click the backdrop to "build" (gold drops) and select it.
+// G aims a Sunburst; clicking the backdrop while aiming "strikes" (uses a charge).
 window.addEventListener('keydown', (e) => {
-  const k = ['laser', 'shield', 'slow', 'missile', 'beacon'][Number(e.key) - 1] as TowerKind | undefined;
+  const k = TOWER_KINDS[Number(e.key) - 1] as TowerKind | undefined;
   if (k) actions.place(store.get().placing === k ? null : k);
+  if (e.code === 'KeyG') actions.sun();
   if (e.code === 'KeyR') actions.ready();
   if (e.code === 'Tab') {
     e.preventDefault();
@@ -224,6 +256,10 @@ const ctx: ClientContext = {
 function Backdrop() {
   const onClick = () => {
     const s = store.get();
+    if (s.aimingSun) {
+      store.set({ aimingSun: false, sun: Math.max(0, (s.sun ?? 0) - 1) });
+      return toast('Sunburst!', 'good');
+    }
     if (s.placing) {
       const k = s.placing;
       const cost = TOWERS[k].levels[0].cost;
@@ -274,9 +310,9 @@ function Lab() {
 
 // Coach: seed localStorage so only the asked-for tip is due, then nudge the store so the coach sees transitions.
 if (coach) {
-  const all = ['build', 'upgrade', 'early', 'send', 'leak'];
-  const kinds = ['runner', 'skitter', 'disruptor', 'brute', 'colossus'];
-  const roster = coach === 'colossus' || coach === 'runner';
+  const all = ['build', 'upgrade', 'early', 'send', 'leak', 'sun', 'sprinkler'];
+  const kinds = ['runner', 'skitter', 'disruptor', 'brute', 'colossus', 'moth', 'bloomkin'];
+  const roster = rosterCoach;
   localStorage.setItem(
     'garden.coach.v1',
     JSON.stringify({ seen: roster ? all : all.filter((x) => x !== coach && !(coach === 'upgrade' && x === 'build')), kinds: roster ? kinds.filter((k) => k !== coach && !(coach === 'colossus' && k === 'runner')) : kinds, off: false }),
@@ -287,5 +323,6 @@ if (coach) {
 }
 if (q.has('bossbanner')) setTimeout(() => store.set((s) => ({ phase: 'wave', wave: s.wave + 1, left: 30, bossNext: false })), 600);
 
+if (q.has('racercss')) void import('../../../racer/ui/hud.css');
 createRoot(document.getElementById('root')!).render(<Lab />);
 if (q.has('menu')) setTimeout(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape' })), 300);

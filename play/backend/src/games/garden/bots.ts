@@ -9,11 +9,17 @@
 // Every possible purchase (a new tower of each kind on each free cell, or an upgrade of one of the bot's own towers)
 // gets a value in "damage per second x metres of path" and is ranked by value per gold. Normal and hard bots save up
 // for a clearly better purchase (a level 3 missile pod beats three lasers); easy bots pick loosely among the top few.
+//
+// Glow Moths fly straight from each portal to the greenhouse, so the bot also samples every route's air line (3D
+// distances from a tower's muzzle up to FLY_HEIGHT). Air samples weigh by the flyers' share of the coming wave and only
+// count for towers that can hit flyers (TowerDef.air), so lasers and missile pods drift onto the air lines once moths
+// are due. Sprinkler Cannons are splash attackers for the ground whose soak is valued like a slow field (worth more
+// against skitter packs and Bloomkin clusters). Sunburst charges go on dense clusters, bosses and near-leaks.
 
 import { rng } from '../../shared/math.js';
 import type { BotDifficulty } from '../../shared/protocol.js';
 import { G, coopHp } from '../../shared/garden/constants.js';
-import { ENEMIES, SENDS, waveHp, waveSpawns, type EnemyKind } from '../../shared/garden/enemies.js';
+import { ENEMIES, FLY_HEIGHT, SENDS, waveHp, waveSpawns, type EnemyKind } from '../../shared/garden/enemies.js';
 import type { RouteGeom } from '../../shared/garden/board.js';
 import type { TowerInfo } from '../../shared/garden/protocol.js';
 import { TOWERS, TOWER_KINDS, type Level, type TargetMode, type TowerKind } from '../../shared/garden/towers.js';
@@ -55,14 +61,22 @@ const PARAMS: Record<BotDifficulty, Params> = {
 
 /** Versus: how often each send is the goal the bank saves for, by difficulty (weights over the unlocked sends). */
 const SEND_MIX: Record<BotDifficulty, Partial<Record<EnemyKind, number>>> = {
-  easy: { runner: 5, skitter: 3, disruptor: 1, brute: 1 },
-  normal: { runner: 3, skitter: 2, disruptor: 2, brute: 3, colossus: 1 },
-  hard: { runner: 2, skitter: 1.5, disruptor: 2, brute: 4, colossus: 2 },
+  easy: { runner: 5, skitter: 3, disruptor: 1, brute: 1, moth: 2, bloomkin: 1 },
+  normal: { runner: 3, skitter: 2, disruptor: 2, brute: 3, moth: 2, bloomkin: 2, colossus: 1 },
+  hard: { runner: 2, skitter: 1.5, disruptor: 2, brute: 4, moth: 2, bloomkin: 2.5, colossus: 2 },
 };
 
-const ATTACKERS: ReadonlySet<TowerKind> = new Set(['laser', 'missile']);
+const ATTACKERS: ReadonlySet<TowerKind> = new Set(['laser', 'missile', 'sprinkler']);
 const STEP = 0.5;
 const MAX_RANGE = 12.5;
+/** Vertical gap from a tower's muzzle (~1.2 m, as the server) up to a flyer: air samples sit this far up. */
+const AIR_DY = FLY_HEIGHT - 1.2;
+/** Weight of air-line samples once moths are due, and how much more coverage an air line takes before it counts as
+ * covered (x the ground's D0, x sqrt(coopHp) again since a flyer has the full co-op health). */
+const AIR_K = 2.5;
+const AIR_SAT = 4;
+/** Share of the time a sprinkler's soak is expected to hold on what walks through its range. */
+const SOAK_UPTIME = 0.6;
 
 interface Sample {
   x: number;
@@ -71,6 +85,8 @@ interface Sample {
   w: number;
   /** 0 at the portal, 1 at the greenhouse. */
   prog: number;
+  /** On an air line (only towers with `air` reach it). */
+  air: boolean;
 }
 
 interface Geo {
@@ -82,6 +98,8 @@ interface Geo {
   /** World x/z of the board's north-west corner. */
   ox: number;
   oz: number;
+  /** 1 for air-line samples. */
+  air: Uint8Array;
 }
 
 interface Threat {
@@ -91,6 +109,9 @@ interface Threat {
   crowd: number;
   disruptors: number;
   heavy: boolean;
+  /** HP share of flyers in the wave. */
+  fly: number;
+  bloomkin: number;
 }
 
 interface Cand {
@@ -107,14 +128,14 @@ interface Cand {
 function rawDps(k: TowerKind, lv: Level): number {
   const L = TOWERS[k].levels[lv - 1];
   if (k === 'laser') return L.dmg * (1 + (L.count ?? 0) * 0.45);
-  if (k === 'missile') return (L.dmg * (L.count ?? 1)) / (L.interval ?? 1);
+  if (k === 'missile' || k === 'sprinkler') return (L.dmg * (L.count ?? 1)) / (L.interval ?? 1);
   return L.dmg;
 }
 
 function effDps(k: TowerKind, lv: Level, th: Threat): number {
   const L = TOWERS[k].levels[lv - 1];
   let d = rawDps(k, lv) * (1 - th.armor * (1 - TOWERS[k].pierce));
-  if (k === 'missile') d *= 1 + th.crowd * Math.min(1, (L.splash ?? 0) / 2);
+  if (k === 'missile' || k === 'sprinkler') d *= 1 + th.crowd * Math.min(1, (L.splash ?? 0) / 2);
   if (k === 'slow' || k === 'shield') d *= 1 + th.crowd;
   return d;
 }
@@ -129,6 +150,8 @@ function threatOf(wave: number, routes: number): Threat {
   let n = 0;
   let disruptors = 0;
   let heavy = false;
+  let fly = 0;
+  let bloomkin = 0;
   for (const s of g) {
     const e = ENEMIES[s.kind];
     const count = s.kind === 'skitter' ? s.count * 5 : s.count;
@@ -138,11 +161,15 @@ function threatOf(wave: number, routes: number): Threat {
     if (s.kind === 'skitter') sk += count;
     if (s.kind === 'disruptor') disruptors += count;
     if (s.kind === 'brute' || s.kind === 'colossus') heavy = true;
+    if (e.fly) fly += e.hp * count;
+    if (s.kind === 'bloomkin') bloomkin += count;
   }
-  return { armor: hp ? arm / hp : 0, crowd: 0.25 + (n ? (sk / n) * 1.2 : 0), disruptors, heavy };
+  // Bloomkin keep the pack around them alive and bunched: splash is worth more.
+  const crowd = 0.25 + (n ? (sk / n) * 1.2 : 0) + 0.1 * Math.min(3, bloomkin);
+  return { armor: hp ? arm / hp : 0, crowd, disruptors, heavy, fly: hp ? fly / hp : 0, bloomkin };
 }
 
-function buildGeo(view: BotView, routes: RouteGeom[]): Geo {
+function buildGeo(view: BotView, routes: RouteGeom[], air: RouteGeom[]): Geo {
   const def = view.def;
   const W = def.grid[0].length;
   let ox: number;
@@ -158,7 +185,8 @@ function buildGeo(view: BotView, routes: RouteGeom[]): Geo {
     oz = p.z - G.cell / 2;
   }
   const samples: Sample[] = [];
-  for (const g of routes) {
+  for (const g of [...routes, ...air]) {
+    const isAir = air.includes(g);
     for (let d = STEP / 2; d < g.length; d += STEP) {
       let i = 0;
       while (i < g.cum.length - 2 && g.cum[i + 1] < d) i++;
@@ -171,6 +199,7 @@ function buildGeo(view: BotView, routes: RouteGeom[]): Geo {
         // Enemies near the portal will still walk past later towers; the last stretch is the last chance.
         w: STEP * (0.8 + 0.5 * prog) * (d < 2 ? 0.5 : 1),
         prog,
+        air: isAir,
       });
     }
   }
@@ -182,14 +211,15 @@ function buildGeo(view: BotView, routes: RouteGeom[]): Geo {
       const cz = oz + (r + 0.5) * G.cell;
       const list: [number, number][] = [];
       samples.forEach((s, i) => {
-        const dd = Math.hypot(s.x - cx, s.z - cz);
+        // Flyers are up at FLY_HEIGHT: towers reach them over the 3D distance from the muzzle.
+        const dd = s.air ? Math.hypot(s.x - cx, s.z - cz, AIR_DY) : Math.hypot(s.x - cx, s.z - cz);
         if (dd <= MAX_RANGE) list.push([i, dd]);
       });
       list.sort((a, b) => a[1] - b[1]);
       near.set(r * W + c, { idx: Int32Array.from(list.map((l) => l[0])), dist: Float32Array.from(list.map((l) => l[1])) });
     }
   });
-  return { key: '', samples, near, W, ox, oz };
+  return { key: '', samples, near, W, ox, oz, air: Uint8Array.from(samples.map((x) => (x.air ? 1 : 0))) };
 }
 
 /** Sum of per-sample values within `r` of cell (col, row). */
@@ -214,6 +244,7 @@ class GardenBot implements GardenBotBrain {
   private lostLast = 0;
   private lostPrev = 0;
   private lastGold = -1;
+  private lastLives = 0;
   private bank = 0;
   /** Versus: the send the bank is saving for, the wave it was picked, and its target (-1 = server rotation). */
   private goal: EnemyKind | null = null;
@@ -221,6 +252,10 @@ class GardenBot implements GardenBotBrain {
   private target: number | null = null;
   private waitSince = -1;
   private jitter = new Map<number, number>();
+  /** Flyers on our board at the last look: id -> share of their air route flown. */
+  private flyers = new Map<number, number>();
+  /** Last wave a flyer reached the greenhouse (air lines weigh more for a few waves after). */
+  private airLeakWave = -99;
 
   constructor(private id: string, private difficulty: BotDifficulty, seed: number) {
     this.p = PARAMS[difficulty] ?? PARAMS.normal;
@@ -237,9 +272,10 @@ class GardenBot implements GardenBotBrain {
     this.timer = a + this.r() * (b - a);
 
     const routes = view.routes[view.board] ?? [];
-    const key = `${view.def.id}|${view.board}|${routes.map((g) => `${g.xs[0]},${g.zs[0]},${g.length}`).join(';')}`;
+    const air = view.air?.[view.board] ?? [];
+    const key = `${view.def.id}|${view.board}|${routes.map((g) => `${g.xs[0]},${g.zs[0]},${g.length}`).join(';')}|${air.length}`;
     if (!this.geo || this.geo.key !== key) {
-      this.geo = buildGeo(view, routes);
+      this.geo = buildGeo(view, routes, air);
       this.geo.key = key;
       this.jitter.clear();
     }
@@ -291,6 +327,10 @@ class GardenBot implements GardenBotBrain {
       if (s) out.push(s);
     }
 
+    // Sunburst is free: it never takes a purchase's place.
+    const sun = this.sunburst(view);
+    if (sun) out.push(sun);
+
     // Call the wave early once there is nothing worth buying (or we are saving up).
     // A bot saving up still readies after a few seconds, so it never holds humans back for long.
     if (!waiting) this.waitSince = -1;
@@ -304,6 +344,14 @@ class GardenBot implements GardenBotBrain {
 
   /** Lives and gold bookkeeping, every tick. */
   private track(view: BotView) {
+    // A flyer that vanished right at the door while lives dropped got through.
+    const now = new Map<number, number>();
+    const ground = view.routes[view.board]?.length ?? 0;
+    for (const e of view.enemies)
+      if (e.fly && e.b === view.board) now.set(e.id, e.d / (view.air?.[view.board]?.[e.route - ground]?.length || 1));
+    if (view.lives < this.lastLives) for (const [id, prog] of this.flyers) if (!now.has(id) && prog > 0.85) this.airLeakWave = view.wave;
+    this.flyers = now;
+    this.lastLives = view.lives;
     if (view.phase !== this.lastPhase) {
       if (view.phase === 'wave') this.livesAtWave = view.lives;
       else if (view.phase === 'build' && this.lastPhase === 'wave') {
@@ -355,9 +403,19 @@ class GardenBot implements GardenBotBrain {
     const disrupt = th.disruptors || seenDis ? Math.min(0.6, 0.15 + 0.08 * Math.max(th.disruptors, seenDis)) : 0;
     const emergency = this.leakingNow(view) || this.lostLast > 0;
 
+    // Air lines weigh in once moths are due (by the flyers' share of the wave, with a high floor: few towers can reach
+    // a flyer, so the ones that can are worth a lot), and three times as much for three waves after one got through.
+    // Versus: moth sends can come from wave 6 on.
+    const seenFly = view.enemies.some((e) => e.fly && e.b === view.board);
+    let airK = th.fly > 0 || seenFly ? Math.max(AIR_K, th.fly * 4) : 0;
+    if (wave >= 7 || (view.mode === 'vs' && wave >= 6)) airK = Math.max(airK, AIR_K * 0.6);
+    if (view.wave - this.airLeakWave <= 3) airK *= 3;
     // Sample weights, with the greenhouse end weighted up when things are leaking.
     const w = new Float64Array(S);
-    geo.samples.forEach((s, i) => (w[i] = s.w * (emergency ? 1 + s.prog : 1)));
+    geo.samples.forEach((s, i) => (w[i] = s.w * (emergency ? 1 + s.prog : 1) * (s.air ? airK : 1)));
+    const air = geo.air;
+    /** Whether tower kind k reaches sample j (only air towers reach the air lines). */
+    const hits = (k: TowerKind, j: number) => !air[j] || TOWERS[k].air;
 
     // How much damage already reaches each sample.
     const cov = new Float64Array(S);
@@ -370,19 +428,29 @@ class GardenBot implements GardenBotBrain {
       const R = range(t.k, t.lv);
       let v = 0;
       for (let i = 0; i < n.idx.length && n.dist[i] <= R; i++) {
-        cov[n.idx[i]] += e;
-        v += e * w[n.idx[i]];
+        const j = n.idx[i];
+        if (!hits(t.k, j)) continue;
+        cov[j] += e;
+        v += e * w[j];
       }
       tval.set(t.id, v);
     }
     // Coverage beyond this much damage per second counts for less (scaled with how tough the next wave is).
     const D0 = 22 * waveHp(wave) * Math.sqrt(view.mode === 'coop' ? coopHp(view.players) : 1);
+    // Air lines saturate later: a moth has the full co-op health, few towers can reach it, and the stretch by the
+    // greenhouse is often unbuildable, so the coverage that exists has to finish it.
+    const D0air = D0 * AIR_SAT * Math.sqrt(view.mode === 'coop' ? coopHp(view.players) : 1);
+    const d0 = (j: number) => (air[j] ? D0air : D0);
     const wNew = new Float64Array(S);
     const covCap = new Float64Array(S);
+    /** wNew without the air lines, for towers that cannot hit flyers. */
+    const wNewG = new Float64Array(S);
     for (let i = 0; i < S; i++) {
-      wNew[i] = w[i] / (1 + cov[i] / D0);
-      covCap[i] = w[i] * Math.min(cov[i], D0 * 2.5);
+      wNew[i] = w[i] / (1 + cov[i] / d0(i));
+      wNewG[i] = air[i] ? 0 : wNew[i];
+      covCap[i] = w[i] * Math.min(cov[i], d0(i) * 2.5);
     }
+    const vNew = (k: TowerKind) => (TOWERS[k].air ? wNew : wNewG);
     /** Strongest slow already on each sample (fields do not stack), optionally leaving one tower out. */
     const slowField = (except?: TowerInfo) => {
       const f = new Float64Array(S);
@@ -403,6 +471,9 @@ class GardenBot implements GardenBotBrain {
     if (nTowers >= 2 && wave >= 2 && towers.filter((t) => t.k === 'slow').length * 2 < nTowers) kinds.push('slow');
     if (disrupt && nTowers >= 4 && towers.filter((t) => t.k === 'shield').length * 4 < nTowers) kinds.push('shield');
     if (nTowers >= 3) kinds.push('beacon');
+    // Sprinklers: once a few attackers stand, about one in four (more welcome against packs and healers).
+    const sprinklers = towers.filter((t) => t.k === 'sprinkler').length;
+    if (nTowers >= 3 && wave >= 3 && sprinklers * (th.crowd > 0.6 || th.bloomkin ? 3 : 4) < nTowers) kinds.push('sprinkler');
 
     const attackers = towers.filter((t) => ATTACKERS.has(t.k));
     /** Distance in metres between two cells. */
@@ -426,26 +497,36 @@ class GardenBot implements GardenBotBrain {
     const covered = (k: TowerKind, t: TowerInfo, except?: TowerInfo) =>
       except || !coverCache.has(t) ? coveredExact(k, t, except) : coverCache.get(t)![k === 'shield' ? 0 : 1];
 
+    /** Slow-style value of a slow share s over radius R at (col, row): longer in range = more damage from every tower
+     * reaching the spot, 1/(1-s) instead of 1/(1-existing). Ground samples only. */
+    const slowGain = (col: number, row: number, R: number, s: number, have: Float64Array) => {
+      const n = geo.near.get(row * geo.W + col);
+      let gain = 0;
+      if (n)
+        for (let i = 0; i < n.idx.length && n.dist[i] <= R; i++) {
+          const j = n.idx[i];
+          if (!air[j] && have[j] < s) gain += covCap[j] * (1 / (1 - s) - 1 / (1 - have[j]));
+        }
+      return gain;
+    };
+    /** A sprinkler's soak value at level lv (only where no stronger slow field already holds). */
+    const soakValue = (lv: Level, col: number, row: number) =>
+      0.5 * SOAK_UPTIME * slowGain(col, row, range('sprinkler', lv), TOWERS.sprinkler.levels[lv - 1].soak ?? 0, slowNow);
+
     /** Value of a tower of kind k at level lv standing on (col, row), given the current field. */
     const valueAt = (k: TowerKind, lv: Level, col: number, row: number, self?: TowerInfo): number => {
       const R = range(k, lv);
       const L = TOWERS[k].levels[lv - 1];
-      if (k === 'laser' || k === 'missile') {
-        let v = effDps(k, lv, th) * sumIn(geo, col, row, R, wNew);
+      if (k === 'laser' || k === 'missile' || k === 'sprinkler') {
+        let v = effDps(k, lv, th) * sumIn(geo, col, row, R, vNew(k));
+        // Soak only adds where no stronger slow field already holds (strongest slow applies).
+        if (k === 'sprinkler') v += soakValue(lv, col, row);
         if (disrupt && !(self && covered('shield', self))) v *= 1 - disrupt * 0.5;
         return v;
       }
       if (k === 'slow') {
-        const s = L.slow ?? 0;
         const have = self ? slowField(self) : slowNow;
-        const n = geo.near.get(row * geo.W + col);
-        let gain = 0;
-        // Longer in range = more damage from every tower reaching the spot: 1/(1-s) instead of 1/(1-existing).
-        if (n) for (let i = 0; i < n.idx.length && n.dist[i] <= R; i++) {
-          const j = n.idx[i];
-          if (have[j] < s) gain += covCap[j] * (1 / (1 - s) - 1 / (1 - have[j]));
-        }
-        return 0.5 * gain + effDps(k, lv, th) * sumIn(geo, col, row, R, wNew);
+        return 0.5 * slowGain(col, row, R, L.slow ?? 0, have) + effDps(k, lv, th) * sumIn(geo, col, row, R, wNewG);
       }
       if (k === 'shield') {
         let prot = 0;
@@ -495,9 +576,14 @@ class GardenBot implements GardenBotBrain {
         gain = 0;
         for (let i = 0; i < n.idx.length && n.dist[i] <= R2; i++) {
           const s = n.idx[i];
+          if (!hits(t.k, s)) continue;
           const inOld = n.dist[i] <= R1;
-          const base = w[s] / (1 + Math.max(0, cov[s] - (inOld ? e : 0)) / D0);
+          const base = w[s] / (1 + Math.max(0, cov[s] - (inOld ? e : 0)) / d0(s));
           gain += (e2 - (inOld ? e : 0)) * base;
+        }
+        if (t.k === 'sprinkler') {
+          // The stronger, wider soak of the next level.
+          gain += soakValue(nl, t.x, t.y) - soakValue(t.lv, t.x, t.y);
         }
       } else {
         gain = valueAt(t.k, nl, t.x, t.y, t) - valueAt(t.k, t.lv, t.x, t.y, t);
@@ -516,6 +602,45 @@ class GardenBot implements GardenBotBrain {
     if (top.cost > gold && this.p.save > 0 && view.wave >= 3 && !emergency && affordable[0].ratio < top.ratio * this.p.save) return 'wait';
     const n = Math.min(this.p.topN, affordable.length);
     return affordable[Math.floor(this.r() * n)];
+  }
+
+  /**
+   * Sunburst: strike the spot (centred on one of our enemies) where the damage that would actually land is largest.
+   * Fire on a dense cluster (a lower bar when the charges are capped and the next one would be wasted), on a boss past
+   * the middle of its path, or on whatever is about to reach the greenhouse while lives are short or leaking.
+   */
+  private sunburst(view: BotView): BotAction | null {
+    if ((view.sun ?? 0) < 1 || view.phase === 'over') return null;
+    const mine = view.enemies.filter((e) => e.b === view.board);
+    if (!mine.length) return null;
+    const dmg = G.sun.base + G.sun.perWave * Math.max(1, view.wave);
+    const R = G.sun.radius;
+    const ground = view.routes[view.board] ?? [];
+    const air = view.air?.[view.board] ?? [];
+    const lenOf = (r: number) => (r < ground.length ? ground[r]?.length : air[r - ground.length]?.length) ?? 1;
+    let best = 0;
+    let bx = 0;
+    let bz = 0;
+    let urgent = false;
+    for (const c of mine) {
+      let v = 0;
+      for (const e of mine) if (Math.hypot(e.x - c.x, e.z - c.z) <= R) v += Math.min(e.hp, dmg);
+      const left = lenOf(c.route) - c.d;
+      const prog = c.d / lenOf(c.route);
+      const boss = c.kind === 'colossus' && prog > 0.5;
+      const leak = left < 8 && (view.lives <= 10 || this.leakingNow(view) || this.lostLast > 0);
+      const score = v * (boss || leak ? 2 : 1);
+      if (score > best) {
+        best = score;
+        bx = c.x;
+        bz = c.z;
+        urgent = boss || leak;
+      }
+    }
+    const capped = (view.sun ?? 0) >= G.sun.max;
+    const bar = dmg * (this.difficulty === 'easy' ? 4.5 : capped ? 2 : 3.2);
+    if (best < bar && !(urgent && best >= dmg * 0.8)) return null;
+    return { k: 'sun', x: Math.round(bx * 100) / 100, z: Math.round(bz * 100) / 100 };
   }
 
   /** Missiles on 'strong' when heavies are about (or by temperament), lasers on 'first'. */

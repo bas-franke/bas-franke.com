@@ -154,6 +154,21 @@ export function routePos(g: RouteGeom, d: number, lateral = 0, out: RoutePos = {
   return out;
 }
 
+/**
+ * Flying enemies (Glow Moths) do not follow the paths: each ground route r has an air route that flies straight from
+ * the route's portal mouth to its greenhouse door. Route indices on the wire: 0..routes-1 are the ground routes,
+ * routes..2*routes-1 the air routes (air route of ground route r = routes + r).
+ */
+export function airRoute(route: GRoute): GRoute {
+  return { entry: route.entry, pts: [route.pts[0], route.pts[route.pts.length - 1]], half: 0.6 };
+}
+
+/** Every route of a map in wire order: the ground routes, then their air routes. */
+export const allRoutes = (def: GMapDef): GRoute[] => [...def.routes, ...def.routes.map(airRoute)];
+
+/** Whether wire route index `r` is an air route on this map. */
+export const isAirRoute = (def: GMapDef, r: number) => r >= def.routes.length;
+
 /** Buildable mask for a map: true where a tower may stand (before towers are placed). */
 export function buildableMask(def: GMapDef): boolean[][] {
   return def.grid.map((row) => [...row].map((c) => c === '.'));

@@ -37,6 +37,12 @@ export const G = {
   clearBonusPerWave: 3,
   /** Versus: income paid to each player at the start of every wave (base; sends raise it). */
   baseIncome: 40,
+  /**
+   * Sunburst, every player's ability: an aimed strike from the sky on their own board (co-op: the shared board).
+   * Damage base + perWave x wave, ignores armour, hits flyers; `start` charges at the start, one more every `every`
+   * waves cleared, at most `max` held.
+   */
+  sun: { radius: 4.5, base: 250, perWave: 40, start: 1, every: 5, max: 2 },
   /** Share of the gold spent on a tower that selling returns. */
   sellRefund: 0.7,
   /** A board is eliminated (versus) or the match is lost (co-op) at 0 lives. */

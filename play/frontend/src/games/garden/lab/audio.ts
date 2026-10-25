@@ -7,7 +7,7 @@ import { ENEMY_KINDS, type EnemyKind } from '@shared/garden/enemies';
 import type { GAudio, GSound, P3 } from '../api';
 import { createGAudio, primeGAudio } from '../audio';
 
-const SOUNDS: GSound[] = ['laser', 'missile', 'boom', 'zap', 'disrupt', 'blocked', 'die', 'dieBig', 'leak', 'build', 'upgrade', 'sell', 'deny', 'click', 'hover', 'coin', 'waveStart', 'bossWave', 'waveClear', 'send', 'incoming', 'out', 'ping', 'victory', 'defeat'];
+const SOUNDS: GSound[] = ['laser', 'missile', 'boom', 'zap', 'disrupt', 'blocked', 'die', 'dieBig', 'leak', 'build', 'upgrade', 'sell', 'deny', 'click', 'hover', 'coin', 'waveStart', 'bossWave', 'waveClear', 'send', 'incoming', 'out', 'ping', 'victory', 'defeat', 'splash', 'heal', 'sun', 'moth'];
 const SR = 48000;
 
 const live = createGAudio();
@@ -31,6 +31,13 @@ const br = () => buttons.appendChild(document.createElement('br'));
 for (const s of SOUNDS) add(s, () => live.play(s, { amount: s === 'upgrade' ? 3 : s === 'sell' ? 120 : 0.7 }));
 br();
 for (const k of ENEMY_KINDS) add(`die ${k}`, () => live.play(k === 'brute' || k === 'colossus' ? 'dieBig' : 'die', { kind: k }));
+add('build sprinkler', () => live.play('build', { kind: 'sprinkler' }));
+add('splash x6 (rate limit)', () => {
+  for (let i = 0; i < 6; i++) setTimeout(() => live.play('splash', { at: { x: rnd(-6, 6), y: 0, z: rnd(-4, 4) } }), i * 40);
+});
+add('moth x4 (rate limit)', () => {
+  for (let i = 0; i < 4; i++) setTimeout(() => live.play('moth', { at: { x: rnd(-6, 6), y: 2.4, z: 0 } }), i * 150);
+});
 for (const a of [0.2, 0.6, 1.2]) add(`boom size ${a}`, () => live.play('boom', { amount: a }));
 br();
 add('laser far left', () => live.play('laser', { at: { x: -14, y: 1, z: 0 } }));
@@ -135,7 +142,7 @@ async function measure() {
   tbody.innerHTML = '';
   results.length = 0;
   for (const s of SOUNDS) {
-    const long = s === 'victory' || s === 'defeat' || s === 'bossWave';
+    const long = s === 'victory' || s === 'defeat' || s === 'bossWave' || s === 'sun';
     const buf = await render(long ? 4.5 : 2.5, (a) => a.play(s, { amount: s === 'upgrade' ? 3 : s === 'sell' ? 120 : 0.7 }));
     report(analyse(s, buf));
   }
@@ -146,6 +153,8 @@ async function measure() {
   for (const amt of [0.2, 1.5, 4]) report(analyse(`boom amount ${amt}`, await render(2.5, (a) => a.play('boom', { amount: amt }))));
   report(analyse('laser hum, 1 beam', await render(3, (a) => a.setBeams(1)), 1.5));
   report(analyse('laser hum, 30 beams', await render(3, (a) => a.setBeams(30)), 1.5));
+  report(analyse('build sprinkler', await render(2.5, (a) => a.play('build', { kind: 'sprinkler' }))));
+  report(analyse('sun at 60 m (other board)', await render(3, (a) => a.play('sun', { at: { x: 60, y: 0, z: 0 } }))));
   report(analyse('die at 60 m (other board)', await render(2.5, (a) => a.play('die', { at: { x: 60, y: 0, z: 0 } }))));
 
   // Stress: 100 deaths, 30 lasers and 10 booms scattered over a second, 30 beams humming, with music at intensity 1.

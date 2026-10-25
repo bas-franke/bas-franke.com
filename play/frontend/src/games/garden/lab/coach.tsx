@@ -1,6 +1,7 @@
 // Coach lab: /lab-garden-coach.html?step=n plays a short scripted sequence of fake HUD states that triggers tip n.
 //   1 build   2 upgrade   3 early call   4 runner   5 skitter   6 disruptor   7 brute   8 colossus   9 versus   10 leak
-//   ?sheet shows the five enemy portraits large.
+//   11 moth   12 bloomkin   13 sunburst   14 sprinkler (skitter packs again)
+//   ?sheet shows the enemy portraits large.
 // Each step pre-seeds localStorage (garden.coach.v1) so only that tip is due. A stand-in top bar and build bar show
 // where the real HUD sits.
 
@@ -40,8 +41,8 @@ const base: GHudState = {
   paused: false,
 };
 
-const ALL_TIPS = ['build', 'upgrade', 'early', 'send', 'leak'];
-const KINDS: EnemyKind[] = ['runner', 'skitter', 'disruptor', 'brute', 'colossus'];
+const ALL_TIPS = ['build', 'upgrade', 'early', 'send', 'leak', 'sun', 'sprinkler'];
+const KINDS: EnemyKind[] = ['runner', 'skitter', 'disruptor', 'brute', 'colossus', 'moth', 'bloomkin'];
 
 interface Step {
   name: string;
@@ -88,6 +89,15 @@ const STEPS: Step[] = [
       { wave: 2, phase: 'wave', left: 8, lives: 19 },
     ],
   },
+  roster(5, 8),
+  roster(6, 11),
+  { name: 'sunburst', seen: ['build', 'upgrade'], kinds: KINDS, frames: [{ wave: 1, sun: 1, gold: 60 }] },
+  {
+    name: 'sprinkler',
+    seen: ALL_TIPS.filter((t) => t !== 'sprinkler'),
+    kinds: KINDS,
+    frames: [{ wave: 4, phase: 'build', next: [{ kind: 'runner', count: 10 }, { kind: 'skitter', count: 15 }], left: 14 }],
+  },
 ];
 
 const noop = () => {};
@@ -99,6 +109,7 @@ const actions: GardenActions = {
   deselect: noop,
   ready: noop,
   send: noop,
+  sun: noop,
   viewBoard: noop,
   setScoresOpen: noop,
   setQuality: noop,
@@ -134,7 +145,7 @@ function Lab({ n }: { n: number }) {
         WAVE {state?.wave ?? 1} / 30
       </div>
       <div style={{ position: 'absolute', left: '50%', bottom: 14, transform: 'translateX(-50%)', width: 'min(620px, calc(100vw - 24px))', height: 120, borderRadius: 18, background: 'rgba(31,38,48,.75)', display: 'flex', gap: 8, padding: 10, boxSizing: 'border-box' }}>
-        {[1, 2, 3, 4, 5].map((k) => (
+        {[1, 2, 3, 4, 5, 6].map((k) => (
           <div key={k} style={{ flex: 1, borderRadius: 12, background: '#f5e7d6', opacity: 0.85, display: 'grid', placeItems: 'center', fontWeight: 800, color: '#334050' }}>
             {k}
           </div>

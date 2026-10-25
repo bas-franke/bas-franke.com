@@ -21,6 +21,27 @@
 //   not buff beacons; buffRange widens the buffed tower's range, not the aura. For continuous towers (laser, slow,
 //   shield) "fire rate" multiplies DPS too; missiles fire `interval / (1 + rate)`. Disabled shields and beacons
 //   project nothing.
+// - Sprinkler: fires like a missile pod (volley over distinct targets, flight = distance / 12 m/s, splash falling to
+//   50% at the edge; same 'msl' / 'boom' events, the client picks visuals by tower kind) with its own pierce; every
+//   walker its splash reaches is soaked: slowed by `soak` for `soakTime` s (EFlag.soaked). Strongest slow applies:
+//   max(slow field, soak), nothing stacks; an equal or stronger soak refreshes the timer, a weaker one is ignored.
+//   Soak is not EFlag.slowed (that stays the slow-field flag). Water bombs never touch flyers.
+// - Flyers (Glow Moth): spawn on the air route of their ground route (wire route = ground routes + r, round-robin as
+//   usual, sends too) and cross it in at least AIR_MIN_TIME (20) s (slower on short air lines). Slow fields, soak,
+//   the slow sting, sprinklers and beacons (n/a) ignore them; only TowerDef.air towers target or zap them, over the
+//   3D distance from a 1.2 m muzzle up to FLY_HEIGHT (ground enemies keep 2D ranges). Laser chains hop in 3D.
+//   Missile blasts burst at the target's height (FLY_HEIGHT when aimed at a flyer) and splash in 3D, so a ground
+//   blast only reaches a flyer above it with a big enough splash.
+// - Bloomkin: every heal.every s (first pulse heal.every s after it spawns) every living enemy within heal.range m
+//   (2D, itself and flyers included) below max health gets pct of its max health (capped at max) and EFlag.healed for
+//   1 s; one 'heal' event { en, n, r } per pulse that healed anyone. A heal never undoes colossus shedding.
+// - Sunburst ('sun' { x, z }, through the action token bucket): needs a charge, finite numbers and a point inside
+//   the player's own board (co-op: the shared board; spectators and eliminated boards cannot). Deals G.sun.base +
+//   perWave x max(1, wave) ignoring armour to every enemy whose body is within G.sun.radius (2D, flyers too) on that
+//   board, credited to the player (kills pay bounty as usual), 'sun' event first. Charges: G.sun.start each (new
+//   joiners too, a rejoin keeps its count); +1 (max G.sun.max) every G.sun.every-th wave cleared: co-op at the clear
+//   bonus for every defender, versus when the build phase after that wave starts for each living board's holder.
+//   PlayerSnap.sun carries the count. Any phase but 'over'.
 // - Targeting: first = least distance left to the greenhouse, last = most, strong = most health, close = nearest.
 // - Disruptor: once its timer runs out it charges 0.6 s (EFlag.charging) while a non-disabled tower is in range,
 //   then bolts the closest; stunned disruptors neither move nor fire.

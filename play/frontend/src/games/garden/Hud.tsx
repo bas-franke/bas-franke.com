@@ -2,8 +2,8 @@
 // toasts, scores, end screen and the escape menu. Reads GHudState from the client store and only talks back through
 // GardenActions (see api.ts). Styles in garden.css, every class prefixed `gs-`.
 //
-// Keys handled here: Esc (cancel placing, then deselect, then the menu). Everything else (1-5, R, U, X, Tab, camera)
-// belongs to client.ts; the HUD only shows the hints.
+// Keys handled here: Esc (cancel a Sunburst aim, then placing, then deselect, then the menu). Everything else (1-6, G,
+// R, U, X, Tab, camera) belongs to client.ts; the HUD only shows the hints.
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { colorHex } from '@shared/protocol';
@@ -16,7 +16,7 @@ import { VolumeControl } from '../../ui/VolumeControl';
 import { type ClientContext, type Store, useStore } from '../types';
 import type { GardenActions, GHudState, HudIncoming, HudSelected, Quality, Toast } from './api';
 import { GardenCoach, useCoarse } from './Coach';
-import { EnemyIcon, Heart, IncomeArrow, Leaf, Portrait, Skull, TowerIcon, Trophy } from './hudIcons';
+import { EnemyIcon, Heart, IncomeArrow, Leaf, Portrait, Skull, Sun, TowerIcon, Trophy, Wing } from './hudIcons';
 import './garden.css';
 
 /** Structural so the HUD does not depend on client.ts; GardenClient satisfies it. */
@@ -43,14 +43,24 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
   const [drawer, setDrawer] = useState<'none' | 'people' | 'send'>('none');
   const [sendTo, setSendTo] = useState<number | undefined>(undefined);
 
-  // Esc: cancel placing, then deselect, then toggle the menu. Read the store at key time so a stale render never
-  // decides it.
+  // Whether a Sunburst aim was on at the last render: if client.ts's own Esc handler cancelled it earlier in this same
+  // key event, the store already says "not aiming", and the Esc must still not open the menu.
+  const wasAiming = useRef(false);
+  wasAiming.current = !!s.aimingSun;
+
+  // Esc: cancel a Sunburst aim, then placing, then deselect, then toggle the menu. Read the store at key time so a
+  // stale render never decides it.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.code !== 'Escape') return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) t.blur();
       const st = client.store.get();
+      if (st.aimingSun) {
+        client.actions.sun();
+        return;
+      }
+      if (wasAiming.current) return;
       setMenu((m) => {
         if (m) return false;
         if (st.placing) {
@@ -107,7 +117,8 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
   const rootClass = [
     'hud gs',
     vs ? 'gs-vs' : 'gs-coop',
-    s.placing ? 'gs-is-placing' : '',
+    s.placing || s.aimingSun ? 'gs-is-placing' : '',
+    s.aimingSun ? 'gs-is-aiming' : '',
     s.selected ? 'gs-has-sheet' : '',
     drawer !== 'none' ? 'gs-has-drawer' : '',
     spectator ? 'gs-spectating' : '',
@@ -238,7 +249,26 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
       {/* ---- bottom: build cards ---- */}
       {!over && playing && (
         <div className="gs-bottom">
-          {s.placing && (
+          {s.aimingSun ? (
+            <div className="gs-placing-hint gs-aim-hint">
+              <span>
+                Aiming <b>Sunburst</b> ·{' '}
+                {touch ? (
+                  'tap to aim, tap again to strike'
+                ) : (
+                  <>
+                    click to strike · <kbd>Esc</kbd> to cancel
+                  </>
+                )}
+              </span>
+              <button type="button" className="gs-cancel" onClick={a.sun} aria-label="Cancel Sunburst">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M5 5 L15 15 M15 5 L5 15" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+                </svg>
+                Cancel
+              </button>
+            </div>
+          ) : s.placing && (
             <div className="gs-placing-hint">
               <span>
                 Placing <b>{TOWERS[s.placing].name}</b> ·{' '}
@@ -258,7 +288,10 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
               </button>
             </div>
           )}
-          <BuildCards s={s} onPlace={a.place} />
+          <div className="gs-bar">
+            <SunButton s={s} onSun={a.sun} touch={touch} />
+            <BuildCards s={s} onPlace={a.place} />
+          </div>
         </div>
       )}
       {imOut && !over && (
@@ -270,7 +303,7 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
       {playing && <GardenCoach state={menu && !s.paused ? { ...s, paused: true } : s} actions={a} />}
 
       <div className="gs-hint">
-        <kbd>1</kbd>–<kbd>5</kbd> build · <kbd>R</kbd> call wave · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>Tab</kbd> scores · <kbd>Esc</kbd> menu
+        <kbd>1</kbd>–<kbd>6</kbd> build · <kbd>G</kbd> Sunburst · <kbd>R</kbd> call wave · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>Tab</kbd> scores · <kbd>Esc</kbd> menu
       </div>
 
       {s.scoresOpen && !s.end && !menu && (
@@ -335,7 +368,8 @@ export function GardenHud({ client, ctx }: { client: GardenHudClient; ctx: Clien
 }
 
 const KEY_CONTROLS: [string[], string, string][] = [
-  [['1', '5'], '', 'pick a tower, click a tile to plant it'],
+  [['1', '6'], '', 'pick a tower, click a tile to plant it'],
+  [['G'], 'click', 'call down a Sunburst (charges: the sun button)'],
   [['R'], '', 'call the next wave early (bonus gold)'],
   [['U', 'X'], '', 'upgrade / sell the selected tower'],
   [['Tab'], '', 'scores'],
@@ -355,7 +389,7 @@ function KeyControls() {
           <span className="gs-keys">
             {keys[0] === '1' ? (
               <>
-                <kbd>1</kbd>–<kbd>5</kbd>
+                <kbd>1</kbd>–<kbd>6</kbd>
               </>
             ) : (
               keys.map((k) => <kbd key={k}>{k}</kbd>)
@@ -373,6 +407,7 @@ const TOUCH_CONTROLS: [string, string][] = [
   ['Tap a card', 'pick a tower (tap it again to put it back)'],
   ['Tap a tile', 'preview there; tap the same tile again to plant'],
   ['Tap a tower', 'upgrade, sell or change its target'],
+  ['Sun button', 'tap the map to aim a Sunburst, tap again to strike'],
   ['Drag', 'pan the camera'],
   ['Pinch', 'zoom in and out'],
   ['Call wave', 'start the next wave early for bonus gold'],
@@ -632,8 +667,9 @@ function NextWave({ s, incoming }: { s: GHudState; incoming?: HudIncoming[] }) {
     <div className={`gs-next ${s.bossNext ? 'boss' : ''}`}>
       <span className="gs-next-label">Next</span>
       {s.next.map((g) => (
-        <span key={g.kind} className={`gs-chip gs-chip-${g.kind}`} title={`${ENEMIES[g.kind].name}: ${ENEMIES[g.kind].blurb}`}>
+        <span key={g.kind} className={`gs-chip gs-chip-${g.kind}`} title={enemyTitle(g.kind)}>
           <EnemyIcon kind={g.kind} />
+          <FlyBadge kind={g.kind} />
           <b className="gs-num">×{g.count}</b>
         </span>
       ))}
@@ -650,6 +686,20 @@ function NextWave({ s, incoming }: { s: GHudState; incoming?: HudIncoming[] }) {
   );
 }
 
+/** Tooltip for an enemy chip; flyers say who can hit them. */
+const enemyTitle = (k: EnemyKind) =>
+  `${ENEMIES[k].name}: ${ENEMIES[k].blurb}${ENEMIES[k].fly ? ' Flying: only Lasers, Missile Pods and Bubble Shields can hit it.' : ''}`;
+
+/** A small wing on flying enemies' chips. */
+function FlyBadge({ kind }: { kind: EnemyKind }) {
+  if (!ENEMIES[kind].fly) return null;
+  return (
+    <span className="gs-fly" aria-label="flying">
+      <Wing />
+    </span>
+  );
+}
+
 /** A queued send: the enemy with a ring in the sender's colour. */
 function IncomingChip({ g, small }: { g: HudIncoming; small?: boolean }) {
   const ring = g.fromColor !== undefined ? hex(g.fromColor) : '#ff6f7d';
@@ -657,9 +707,10 @@ function IncomingChip({ g, small }: { g: HudIncoming; small?: boolean }) {
     <span
       className={`gs-chip gs-chip-inc ${small ? 'small' : ''}`}
       style={{ ['--gs-from' as string]: ring } as CSSProperties}
-      title={`${g.count} × ${ENEMIES[g.kind].name}${g.from ? ' (sent)' : ''} coming next wave`}
+      title={`${g.count} × ${ENEMIES[g.kind].name}${g.from ? ' (sent)' : ''} coming next wave${ENEMIES[g.kind].fly ? ' (flying)' : ''}`}
     >
       <EnemyIcon kind={g.kind} />
+      <FlyBadge kind={g.kind} />
       <b className="gs-num">×{g.count}</b>
     </span>
   );
@@ -742,7 +793,23 @@ function damageLabel(k: TowerKind, lv: Level): string {
       return `${l.dmg} × ${l.count ?? 1} splash`;
     case 'beacon':
       return `+${Math.round((l.buffDmg ?? 0) * 100)}% dmg`;
+    case 'sprinkler':
+      return `${l.dmg}${(l.count ?? 1) > 1 ? ` × ${l.count}` : ''} splash`;
   }
+}
+
+/** Whether the tower can hit Glow Moths (null: it does not attack at all, like the beacon). */
+const hitsFlyers = (k: TowerKind): boolean | null => (k === 'beacon' ? null : TOWERS[k].air);
+
+function AirTag({ k }: { k: TowerKind }) {
+  const air = hitsFlyers(k);
+  if (air === null) return null;
+  return (
+    <span className={`gs-air ${air ? 'yes' : 'no'}`}>
+      <Wing />
+      {air ? 'Hits flyers' : 'Can’t hit flyers'}
+    </span>
+  );
 }
 
 function BuildCards({ s, onPlace }: { s: GHudState; onPlace: (k: TowerKind | null) => void }) {
@@ -781,7 +848,13 @@ function BuildCards({ s, onPlace }: { s: GHudState; onPlace: (k: TowerKind | nul
                 <span>
                   {k === 'beacon' ? 'Buff' : k === 'slow' ? 'Field' : 'Damage'} <b className="gs-num">{damageLabel(k, 1)}</b>
                 </span>
+                {d.levels[0].soak ? (
+                  <span>
+                    Soak <b className="gs-num">{Math.round(d.levels[0].soak * 100)}% slow, {d.levels[0].soakTime} s</b>
+                  </span>
+                ) : null}
               </span>
+              <AirTag k={k} />
               <span className="gs-tip-note">{d.notes[0]}</span>
               {poor && <span className="gs-tip-poor">Need {cost - s.gold} more gold</span>}
             </span>
@@ -789,6 +862,58 @@ function BuildCards({ s, onPlace }: { s: GHudState; onPlace: (k: TowerKind | nul
         );
       })}
     </div>
+  );
+}
+
+/** Sunburst damage at wave n (G.sun: base + perWave x wave). */
+const sunDamage = (wave: number) => G.sun.base + G.sun.perWave * Math.max(1, wave);
+
+/** The Sunburst ability: a round golden button with charge pips, beside the build cards. */
+function SunButton({ s, onSun, touch }: { s: GHudState; onSun: () => void; touch: boolean }) {
+  const charges = Math.max(0, s.sun ?? 0);
+  const aiming = !!s.aimingSun;
+  const empty = charges <= 0 && !aiming;
+  const wave = Math.max(1, s.phase === 'build' ? s.wave + 1 : s.wave);
+  const cleared = Math.max(0, s.phase === 'build' ? s.wave : s.wave - 1);
+  const nextAt = (Math.floor(cleared / G.sun.every) + 1) * G.sun.every;
+  return (
+    <button
+      type="button"
+      className={`gs-sun ${aiming ? 'gs-sun-on' : ''} ${empty ? 'gs-sun-empty' : ''}`}
+      onClick={onSun}
+      disabled={empty}
+      aria-pressed={aiming}
+      aria-label={`Sunburst, ${charges} ${charges === 1 ? 'charge' : 'charges'}${touch ? '' : ', key G'}`}
+    >
+      <span className="gs-sun-disc">
+        <Sun />
+        {!touch && <kbd className="gs-key gs-sun-key">G</kbd>}
+      </span>
+      <span className="gs-sun-pips" aria-hidden="true">
+        {Array.from({ length: G.sun.max }, (_, i) => (
+          <i key={i} className={i < charges ? 'on' : ''} />
+        ))}
+      </span>
+      <span className="gs-tip gs-sun-tip" role="tooltip">
+        <b>Sunburst</b>
+        <span>{touch ? 'Tap the map to aim, tap again to strike.' : 'Press G or click, then click the board to strike. Esc cancels.'}</span>
+        <span className="gs-tip-stats">
+          <span>
+            Damage <b className="gs-num">{fmt(sunDamage(wave))}</b>
+          </span>
+          <span>
+            Radius <b className="gs-num">{G.sun.radius} m</b>
+          </span>
+        </span>
+        <span className="gs-tip-note">
+          {G.sun.base} + {G.sun.perWave} × wave. Ignores armour, hits flyers.
+        </span>
+        <span className="gs-tip-note">
+          {charges >= G.sun.max ? `Charges full (${G.sun.max}).` : `Next charge after wave ${nextAt}.`} One more every {G.sun.every} waves, max {G.sun.max}.
+        </span>
+        {empty && <span className="gs-tip-poor">No charges left</span>}
+      </span>
+    </button>
   );
 }
 
@@ -831,6 +956,17 @@ function statsOf(k: TowerKind, lv: Level): Stat[] {
         { label: 'Rate buff', v: (l.buffRate ?? 0) * 100, pct: true },
         { label: 'Range buff', v: (l.buffRange ?? 0) * 100, pct: true },
         { label: 'Aura', v: l.range, unit: ' m' },
+      );
+      break;
+    case 'sprinkler':
+      out.push(
+        { label: 'Damage', v: l.dmg },
+        { label: 'Bombs', v: l.count ?? 1 },
+        { label: 'Reload', v: l.interval ?? 0, unit: ' s', low: true },
+        { label: 'Splash', v: l.splash ?? 0, unit: ' m' },
+        { label: 'Soak', v: (l.soak ?? 0) * 100, unit: '%' },
+        { label: 'Soak time', v: l.soakTime ?? 0, unit: ' s' },
+        { label: 'Range', v: l.range, unit: ' m' },
       );
       break;
   }
@@ -900,6 +1036,7 @@ function TowerPanel({ s, sel, a, spectator }: { s: GHudState; sel: HudSelected; 
         })}
       </div>
       <p className="gs-note">{next ? `Next: ${d.notes[t.lv as 1 | 2]}` : d.notes[t.lv - 1]}</p>
+      <AirTag k={t.k} />
       {d.targets && (
         <div className="gs-target">
           <span>Target</span>
@@ -958,9 +1095,12 @@ function SendPanel({ s, a, to, setTo }: { s: GHudState; a: GardenActions; to: nu
               className={`gs-send-btn ${locked ? 'locked' : ''} ${poor ? 'poor' : ''}`}
               disabled={locked || poor || !foes.length}
               onClick={() => a.send(d.kind as EnemyKind, target)}
-              title={`${ENEMIES[d.kind].name}: ${ENEMIES[d.kind].blurb}`}
+              title={enemyTitle(d.kind)}
             >
-              <EnemyIcon kind={d.kind} />
+              <span className="gs-send-art">
+                <EnemyIcon kind={d.kind} />
+                <FlyBadge kind={d.kind} />
+              </span>
               <span className="gs-send-count gs-num">×{d.count}</span>
               {locked ? (
                 <span className="gs-send-lock">From wave {d.from}</span>

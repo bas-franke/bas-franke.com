@@ -10,11 +10,11 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { G, coopBountyShare, coopCount, coopEarly } from '../../backend/src/shared/garden/constants.js';
-import { ENEMIES, SENDS, SKITTER_PACK, sendCap, vsHpRamp, waveBounty, waveHp } from '../../backend/src/shared/garden/enemies.js';
+import { ENEMIES, FLY_HEIGHT, SENDS, SKITTER_PACK, sendCap, vsHpRamp, waveBounty, waveHp, waveSpawns } from '../../backend/src/shared/garden/enemies.js';
 import { GMAPS, type GMapDef, gmapById } from '../../backend/src/shared/garden/maps.js';
-import { boardOrigin, routeGeom, routePos } from '../../backend/src/shared/garden/board.js';
-import { TFlag } from '../../backend/src/shared/garden/protocol.js';
-import { TOWERS, type TowerKind } from '../../backend/src/shared/garden/towers.js';
+import { allRoutes, boardOrigin, cellToWorld, isAirRoute, routeGeom, routePos } from '../../backend/src/shared/garden/board.js';
+import { EFlag, TFlag } from '../../backend/src/shared/garden/protocol.js';
+import { TOWERS, TOWER_KINDS, type TowerKind } from '../../backend/src/shared/garden/towers.js';
 import { GardenSim, VS_RECLAIM, fallbackGardenBot } from '../../backend/src/games/garden/sim.js';
 import { createGardenBot } from '../../backend/src/games/garden/bots.js';
 import { createGardenGame } from '../../backend/src/games/garden/server.js';
@@ -499,7 +499,7 @@ describe('missile', () => {
     const at = [0, 0.8, 1.6, 1.6 + r - 0.01, 1.6 + r + 0.05];
     const want = [40, 30, 20, 20, 0];
     const es = at.map((dx) => enemy(sim, 'runner', FAR + dx, FAR + 50));
-    sim.missiles.push({ mid: 99, b: 0, tw: t.info.id, owner: 'p1', en: 0, x: FAR, z: FAR + 50, t: 0, dmg: 40, splash: 1.6 });
+    sim.missiles.push({ mid: 99, b: 0, tw: t.info.id, owner: 'p1', en: 0, x: FAR, z: FAR + 50, t: 0, dmg: 40, splash: 1.6, y: 0, pierce: 0, soak: 0, soakTime: 0 });
     sim.flyMissiles(DT);
     es.forEach((e: any, i: number) => near(e.maxHp - e.hp, want[i], 1e-9, `enemy at ${at[i]} m took ${e.maxHp - e.hp}, want ${want[i]}`));
   });
@@ -787,7 +787,7 @@ describe('colossus', () => {
       const c = enemy(sim, 'colossus', FAR, FAR);
       c.hp = c.maxHp * 0.76;
       if (how === 'missile') {
-        sim.missiles.push({ mid: 1, b: 0, tw: 0, owner: 'a', en: c.id, x: c.x, z: c.z, t: 0, dmg: c.maxHp * 0.05, splash: 2.6 });
+        sim.missiles.push({ mid: 1, b: 0, tw: 0, owner: 'a', en: c.id, x: c.x, z: c.z, t: 0, dmg: c.maxHp * 0.05, splash: 2.6, y: 0, pierce: 0, soak: 0, soakTime: 0 });
         sim.flyMissiles(0.05);
       } else {
         const t = tower(sim, 'a', how, FAR, FAR, 3);
@@ -977,7 +977,7 @@ describe('economy', () => {
       sim.startWave();
       const pend = sim.boards[0].pending;
       const runners = pend.filter((s: any) => s.kind === 'runner').length;
-      const base = Math.ceil((6 + Math.floor(10 * 1.2)) * 0.5);
+      const base = waveSpawns(10, COOP_MAP.routes.length).find((g) => g.kind === 'runner')!.count;
       assert.equal(runners, Math.max(1, Math.round(base * coopCount(n))), `${n} players`);
       assert.equal(pend.filter((s: any) => s.kind === 'colossus').length, 1);
     }
@@ -1450,6 +1450,481 @@ describe('rejoin and pacing', () => {
     assert.ok(total > 0);
     assert.ok((kinds.runner ?? 0) < total * 0.6, `send mix ${JSON.stringify(kinds)}`);
     assert.ok((kinds.brute ?? 0) + (kinds.disruptor ?? 0) > 0, `send mix ${JSON.stringify(kinds)}`);
+  });
+});
+
+// ---- expansion: sprinkler, flyers, bloomkin, sunburst -------------------------------------------------------------
+
+const AIR_DY = FLY_HEIGHT - 1.2;
+const r2t = (v: number) => Math.round(v * 100) / 100;
+/** Adds a Glow Moth on the air route of ground route `gr` (wire index ground + gr) at world (x, z). */
+function moth(sim: any, x = FAR, z = FAR, o: { b?: number; d?: number; gr?: number } = {}): any {
+  const bd = sim.boards[o.b ?? 0];
+  const e = sim.addEnemy(bd, 'moth', bd.ground + (o.gr ?? 0), o.d ?? 5, 0, 1, null);
+  e.x = x;
+  e.z = z;
+  return e;
+}
+/** Lands every missile / water bomb in flight now. */
+function land(sim: any) {
+  for (const m of sim.missiles) m.t = 0;
+  sim.flyMissiles(DT);
+}
+
+describe('sprinkler', () => {
+  it('lobs water bombs through the missile event path (msl then boom) with its own pierce', () => {
+    const sim = mkSim('coop');
+    const t = tower(sim, 'p1', 'sprinkler');
+    const e = enemy(sim, 'brute', FAR + 3, FAR);
+    sim.fire(sim.boards[0], DT);
+    const msl = sim.events.find((v: any) => v.k === 'msl');
+    assert.ok(msl && msl.tw === t.info.id && msl.en === e.id);
+    land(sim);
+    const boom = sim.events.find((v: any) => v.k === 'boom');
+    assert.ok(boom && boom.mid === msl.mid && boom.r === TOWERS.sprinkler.levels[0].splash);
+    const L = TOWERS.sprinkler.levels[0];
+    near(e.maxHp - e.hp, L.dmg * (1 - ENEMIES.brute.armor * (1 - TOWERS.sprinkler.pierce)), 1e-9);
+    assert.equal(TOWERS.sprinkler.air, false);
+  });
+  it('soaks what it splashes: slowed by soak for soakTime s, EFlag.soaked while soaked', () => {
+    const sim = mkSim('coop');
+    tower(sim, 'p1', 'sprinkler', FAR, FAR, 2);
+    const L = TOWERS.sprinkler.levels[1];
+    const e = enemy(sim, 'runner', FAR + 3, FAR, { d: 5, hpMul: 100 });
+    const side = enemy(sim, 'runner', FAR + 3 + L.splash! - 0.2, FAR, { d: 5, hpMul: 100 });
+    const out = enemy(sim, 'runner', FAR + 3 + L.splash! + 1, FAR, { d: 5, hpMul: 100 });
+    sim.fire(sim.boards[0], DT);
+    land(sim);
+    for (const v of [e, side]) {
+      assert.equal(v.soak, L.soak);
+      assert.equal(v.soakT, L.soakTime);
+    }
+    assert.equal(out.soakT, 0);
+    const f = sim.snapshot().en.find((v: any) => v.id === e.id).f;
+    assert.ok(f & EFlag.soaked, 'soaked flag');
+    assert.ok(!(f & EFlag.slowed), 'soak is not a slow field');
+    // Moves at speed * (1 - soak).
+    sim.fields(sim.boards[0], 0);
+    const d0 = e.d;
+    sim.move(sim.boards[0], 0.1);
+    near(e.d - d0, e.speed * (1 - L.soak!) * 0.1, 1e-9);
+    // Expires after soakTime.
+    for (let s = 0; s < L.soakTime! + 0.1; s += DT) sim.fields(sim.boards[0], DT);
+    assert.equal(e.soakT, 0);
+    assert.equal(e.soak, 0);
+    sim.tick++; // snapshots are cached per tick
+    assert.ok(!(sim.snapshot().en.find((v: any) => v.id === e.id).f & EFlag.soaked));
+  });
+  it('the strongest of slow field and soak applies; a weaker soak neither weakens nor extends a stronger one', () => {
+    const sim = mkSim('coop');
+    const sp = tower(sim, 'p1', 'sprinkler', FAR, FAR, 3);
+    const e = enemy(sim, 'runner', FAR + 3, FAR, { d: 5, hpMul: 100 });
+    sim.fire(sim.boards[0], DT);
+    land(sim);
+    const strong = TOWERS.sprinkler.levels[2];
+    assert.equal(e.soak, strong.soak);
+    // A level-1 slow field (0.3) under a 0.4 soak: 0.4 applies.
+    const sl = tower(sim, 'p1', 'slow', FAR, FAR + 2, 1);
+    // move() puts the enemy back on its route: keep it beside the towers for each check.
+    const here = () => {
+      e.x = FAR + 3;
+      e.z = FAR;
+    };
+    here();
+    sim.fields(sim.boards[0], 0);
+    let d0 = e.d;
+    sim.move(sim.boards[0], 0.1);
+    near(e.d - d0, e.speed * (1 - strong.soak!) * 0.1, 1e-9);
+    // A level-3 slow field (0.5) beats it.
+    sim.handle('p1', { k: 'up', id: sl.info.id });
+    sim.players.get('p1').gold = 1e6;
+    sim.handle('p1', { k: 'up', id: sl.info.id });
+    sim.handle('p1', { k: 'up', id: sl.info.id });
+    assert.equal(sl.info.lv, 3);
+    here();
+    sim.fields(sim.boards[0], 0);
+    d0 = e.d;
+    sim.move(sim.boards[0], 0.1);
+    near(e.d - d0, e.speed * 0.5 * 0.1, 1e-9);
+    // A weaker (level-1) bomb leaves the stronger soak and its timer alone.
+    e.soakT = 0.5;
+    here();
+    sp.lv = TOWERS.sprinkler.levels[0];
+    sp.cd = 0;
+    sim.fire(sim.boards[0], DT);
+    land(sim);
+    assert.equal(e.soak, strong.soak);
+    assert.equal(e.soakT, 0.5);
+  });
+});
+
+describe('flyers', () => {
+  it('moths fly their air route: straight from the portal mouth to the greenhouse, wire route = ground + r', () => {
+    const sim = mkSim('coop');
+    const bd = sim.boards[0];
+    const G0 = COOP_MAP.routes.length;
+    assert.equal(bd.routes.length, 2 * G0);
+    assert.equal(allRoutes(COOP_MAP).length, 2 * G0);
+    for (let r = 0; r < G0; r++) {
+      const e = sim.addEnemy(bd, 'moth', G0 + r, 0, 0, 1, null);
+      const rt = COOP_MAP.routes[r];
+      const a = cellToWorld(COOP_MAP, bd.origin, rt.pts[0][0], rt.pts[0][1]);
+      const b = cellToWorld(COOP_MAP, bd.origin, rt.pts.at(-1)![0], rt.pts.at(-1)![1]);
+      near(e.len, Math.hypot(b.x - a.x, b.z - a.z), 1e-6, 'air route length = straight line');
+      assert.equal(sim.events.at(-1).r, G0 + r, 'spawn event carries the air route index');
+      for (let i = 0; i < 40; i++) {
+        sim.move(bd, 0.5);
+        if (e.dead) break;
+        // On the segment a-b (cross product ~ 0, lateral 0).
+        const cross = (b.x - a.x) * (e.z - a.z) - (b.z - a.z) * (e.x - a.x);
+        assert.ok(Math.abs(cross) / e.len < 1e-6, 'off the air line');
+      }
+    }
+    assert.ok(isAirRoute(COOP_MAP, G0) && !isAirRoute(COOP_MAP, G0 - 1));
+  });
+  it('wave groups and sends put moths on the air routes, round-robin over the routes', () => {
+    const sim = mkSim('coop');
+    sim.wave = 7;
+    sim.startWave();
+    const bd = sim.boards[0];
+    const moths = bd.pending.filter((s: any) => s.kind === 'moth');
+    assert.ok(moths.length >= 2);
+    assert.ok(moths.every((s: any) => s.r >= bd.ground && s.r < 2 * bd.ground));
+    assert.ok(bd.pending.filter((s: any) => s.kind !== 'moth').every((s: any) => s.r < bd.ground));
+    if (bd.ground > 1) assert.ok(new Set(moths.map((s: any) => s.r)).size > 1, 'spread over routes');
+    const vs = mkSim('vs', ['a', 'b']);
+    vs.players.get('a').gold = 1e6;
+    vs.wave = 7;
+    assert.equal(vs.handle('a', { k: 'send', e: 'moth' }), true);
+    vs.startWave();
+    const sent = vs.boards[1].pending.filter((s: any) => s.from === 'a');
+    assert.equal(sent.length, SENDS.find((s) => s.kind === 'moth')!.count);
+    assert.ok(sent.every((s: any) => s.kind === 'moth' && s.r >= vs.boards[1].ground));
+  });
+  it('flyers ignore slow fields and sprinkler soak; slow, sprinkler and beacon cannot target them', () => {
+    const sim = mkSim('coop');
+    const bd = sim.boards[0];
+    tower(sim, 'p1', 'slow', FAR, FAR, 3);
+    const m = moth(sim, FAR + 1, FAR);
+    sim.fields(bd, 0);
+    assert.equal(m.slow, 0);
+    assert.equal(m.hp, m.maxHp, 'no sting either');
+    assert.ok(!(sim.snapshot().en[0].f & EFlag.slowed));
+    const sp = tower(sim, 'p1', 'sprinkler', FAR, FAR, 3);
+    assert.equal(sim.pick(bd, sp, 100), null, 'sprinkler never picks a flyer');
+    sim.fire(bd, DT);
+    assert.ok(!sim.events.some((v: any) => v.k === 'msl'));
+    // A bomb aimed at a walker right under the moth splashes the walker only.
+    const w = enemy(sim, 'runner', FAR + 1, FAR, { hpMul: 100 });
+    sp.cd = 0;
+    sim.fire(bd, DT);
+    land(sim);
+    assert.ok(w.hp < w.maxHp && w.soakT > 0);
+    assert.equal(m.hp, m.maxHp);
+    assert.equal(m.soakT, 0);
+    for (const k of TOWER_KINDS) assert.equal(typeof TOWERS[k].air, 'boolean');
+    assert.deepEqual(TOWER_KINDS.filter((k) => TOWERS[k].air).sort(), ['laser', 'missile', 'shield']);
+  });
+  it('air towers reach flyers over the 3D distance from a 1.2 m muzzle to FLY_HEIGHT', () => {
+    for (const k of ['laser', 'missile'] as const) {
+      const sim = mkSim('coop');
+      const bd = sim.boards[0];
+      const t = tower(sim, 'p1', k);
+      const R = t.lv.range;
+      const reach = Math.sqrt(R * R - AIR_DY * AIR_DY);
+      const m = moth(sim, FAR + reach + 0.02, FAR);
+      assert.equal(sim.pick(bd, t, R), null, `${k}: just out of 3D range`);
+      m.x = FAR + reach - 0.02;
+      assert.equal(sim.pick(bd, t, R)?.id, m.id, `${k}: just inside 3D range`);
+      // Walkers keep 2D ranges: one at R - 0.01 m is in range, and 'close' ranks the moth by its 3D distance.
+      const w = enemy(sim, 'runner', FAR, FAR + R - 0.01);
+      t.info.tm = 3;
+      assert.equal(sim.pick(bd, t, R)?.id, m.id, 'moth 3D distance just under R beats the walker at R - 0.01 only if nearer');
+      w.z = FAR + reach - 0.5;
+      assert.equal(sim.pick(bd, t, R)?.id, w.id);
+      w.z = FAR + R + 0.01;
+      m.x = FAR + R - 0.01;
+      assert.equal(sim.pick(bd, t, R), null, 'moth at R horizontally is out of 3D range');
+    }
+    // Shield pulses reach flyers in 3D too.
+    const sim = mkSim('coop');
+    const sh = tower(sim, 'p1', 'shield');
+    const R = sh.lv.range;
+    const inside = moth(sim, FAR + Math.sqrt(R * R - AIR_DY * AIR_DY) - 0.02, FAR);
+    const outside = moth(sim, FAR, FAR + Math.sqrt(R * R - AIR_DY * AIR_DY) + 0.02);
+    sh.zapT = 0;
+    sim.fields(sim.boards[0], DT);
+    assert.ok(inside.hp < inside.maxHp);
+    assert.equal(outside.hp, outside.maxHp);
+  });
+  it('lasers kill moths; a level-3 beam chains between walkers and flyers over 3D hops', () => {
+    const sim = mkSim('coop');
+    const bd = sim.boards[0];
+    const t = tower(sim, 'p1', 'laser', FAR, FAR, 3);
+    const w = enemy(sim, 'runner', FAR + 3, FAR, { hpMul: 100 });
+    const m = moth(sim, FAR + 3 + 1.5, FAR); // 3D hop sqrt(1.5^2 + 2.4^2) = 2.83 m < 3
+    const far = moth(sim, FAR + 3, FAR + 2.2); // 3D hop from w: sqrt(2.2^2 + 2.4^2) = 3.26 m > 3
+    m.hp = m.maxHp = 1e6;
+    far.hp = far.maxHp = 1e6;
+    t.info.tm = 3;
+    sim.fire(bd, DT);
+    assert.equal(t.tg, w.id);
+    assert.ok(t.ch.includes(m.id));
+    assert.ok(!t.ch.includes(far.id) || t.ch.indexOf(far.id) > t.ch.indexOf(m.id), 'far moth only via the near one');
+  });
+  it('missile splash reaches flyers in 3D: a blast aimed at a flyer bursts at FLY_HEIGHT', () => {
+    const sim = mkSim('coop');
+    const bd = sim.boards[0];
+    const t = tower(sim, 'p1', 'missile');
+    // 'strong' targeting: the walker has the most health, so the first volley is aimed at it.
+    const w = enemy(sim, 'runner', FAR + 4, FAR, { hpMul: 1e5 });
+    const above = moth(sim, FAR + 4, FAR);
+    above.hp = above.maxHp = 1e4;
+    t.info.tm = 2;
+    sim.fire(bd, DT);
+    assert.equal(sim.missiles[0].en, w.id);
+    assert.equal(sim.missiles[0].y, 0);
+    land(sim);
+    assert.ok(w.hp < w.maxHp);
+    assert.equal(above.hp, above.maxHp, 'a ground blast (splash 1.6) does not reach 2.4 m up');
+    // Aimed at the flyer: the walker below is spared, the flyer hit.
+    const w2 = enemy(sim, 'runner', FAR - 4, FAR, { hpMul: 100 });
+    const m2 = moth(sim, FAR - 4, FAR);
+    m2.hp = m2.maxHp = 1e9;
+    t.cd = 0;
+    sim.fire(bd, DT);
+    const mm = sim.missiles.find((x: any) => x.en === m2.id);
+    assert.ok(mm, 'missile at the flyer');
+    near(mm.y, FLY_HEIGHT);
+    sim.missiles.length = 0;
+    sim.missiles.push(mm);
+    land(sim);
+    assert.ok(m2.hp < m2.maxHp);
+    assert.equal(w2.hp, w2.maxHp);
+  });
+});
+
+describe('bloomkin', () => {
+  it('every `every` s heals enemies within range (itself and flyers included) by pct of max health, capped at max', () => {
+    const sim = mkSim('coop');
+    const bd = sim.boards[0];
+    const H = ENEMIES.bloomkin.heal!;
+    const bk = enemy(sim, 'bloomkin', FAR, FAR);
+    const a = enemy(sim, 'brute', FAR + H.range - 0.1, FAR);
+    const fl = moth(sim, FAR, FAR + 1);
+    const full = enemy(sim, 'runner', FAR + 1, FAR);
+    const nearlyFull = enemy(sim, 'runner', FAR - 1, FAR);
+    const out = enemy(sim, 'runner', FAR + H.range + 0.5, FAR);
+    for (const e of [bk, a, fl, out]) e.hp = e.maxHp * 0.5;
+    nearlyFull.hp = nearlyFull.maxHp * (1 - H.pct / 2);
+    sim.events = [];
+    const ticks = Math.round(H.every / DT);
+    for (let i = 1; i < ticks; i++) sim.heals(bd, DT);
+    assert.equal(a.hp, a.maxHp * 0.5, 'no pulse before `every` s');
+    sim.heals(bd, DT);
+    for (const e of [bk, a, fl]) near(e.hp, e.maxHp * (0.5 + H.pct), 1e-6);
+    assert.equal(nearlyFull.hp, nearlyFull.maxHp, 'capped at max');
+    assert.equal(full.hp, full.maxHp);
+    assert.equal(out.hp, out.maxHp * 0.5, 'out of range');
+    const ev = sim.events.filter((v: any) => v.k === 'heal');
+    assert.deepEqual(ev, [{ k: 'heal', en: bk.id, n: 4, r: H.range }]);
+    // EFlag.healed for 1 s on the healed ones.
+    const f = (e: any) => sim.snapshot().en.find((v: any) => v.id === e.id).f;
+    sim.tick++;
+    assert.ok(f(a) & EFlag.healed && !(f(out) & EFlag.healed) && !(f(full) & EFlag.healed));
+    for (let s = 0; s < 1.05; s += DT) sim.fields(bd, DT);
+    sim.tick++;
+    assert.ok(!(f(a) & EFlag.healed));
+  });
+  it('no event when nobody needed healing', () => {
+    const sim = mkSim('coop');
+    enemy(sim, 'bloomkin', FAR, FAR);
+    enemy(sim, 'runner', FAR + 1, FAR);
+    sim.events = [];
+    for (let s = 0; s < ENEMIES.bloomkin.heal!.every * 2 + 0.1; s += DT) sim.heals(sim.boards[0], DT);
+    assert.equal(sim.events.filter((v: any) => v.k === 'heal').length, 0);
+  });
+});
+
+describe('waves and sends (expansion)', () => {
+  it('moths from wave 8, bloomkin from wave 11; their sends unlock on their `from` wave', () => {
+    const kinds = (n: number) => waveSpawns(n, 2).map((g) => g.kind);
+    assert.ok(!kinds(7).includes('moth') && kinds(8).includes('moth'));
+    assert.ok(!kinds(10).includes('bloomkin') && kinds(11).includes('bloomkin'));
+    assert.ok(ENEMIES.moth.fly && !ENEMIES.bloomkin.fly && ENEMIES.bloomkin.heal);
+    for (const k of ['moth', 'bloomkin'] as const) {
+      const sd = SENDS.find((s) => s.kind === k)!;
+      const sim = mkSim('vs', ['a', 'b']);
+      sim.players.get('a').gold = 1e6;
+      sim.wave = sd.from - 2;
+      assert.equal(sim.handle('a', { k: 'send', e: k }), false);
+      sim.wave = sd.from - 1;
+      assert.equal(sim.handle('a', { k: 'send', e: k }), true);
+      assert.equal(sim.boards[1].queued.length, sd.count);
+    }
+  });
+});
+
+describe('sunburst', () => {
+  function setup(mode: 'coop' | 'vs' = 'coop') {
+    const sim = mkSim(mode, mode === 'coop' ? ['p1', 'p2'] : ['a', 'b']);
+    return { sim, id: mode === 'coop' ? 'p1' : 'a' };
+  }
+  it('every player starts with G.sun.start charges (PlayerSnap.sun)', () => {
+    const { sim } = setup();
+    for (const p of sim.players.values()) assert.equal(p.sun, G.sun.start);
+    assert.ok(sim.snapshot().pl.every((p: any) => p.sun === G.sun.start));
+    const late = sim.addPlayer({ id: 'late', name: 'late', bot: false });
+    assert.equal(late.sun, G.sun.start);
+  });
+  it('deals base + perWave x wave within radius (2D, flyers too), ignoring armour; event; charge consumed', () => {
+    const { sim } = setup();
+    sim.wave = 6;
+    const o = sim.boards[0].origin;
+    const R = G.sun.radius;
+    const dmg = G.sun.base + G.sun.perWave * 6;
+    const br = enemy(sim, 'brute', o.x + 1, o.z, { hpMul: 100 });
+    const fl = moth(sim, o.x, o.z + R - 0.1);
+    fl.hp = fl.maxHp = 1e6;
+    const edge = enemy(sim, 'runner', o.x + R + ENEMIES.runner.radius - 0.05, o.z, { hpMul: 100 });
+    const out = enemy(sim, 'runner', o.x + R + ENEMIES.runner.radius + 0.1, o.z, { hpMul: 100 });
+    sim.events = [];
+    assert.equal(sim.handle('p1', { k: 'sun', x: o.x, z: o.z }), true);
+    near(br.maxHp - br.hp, dmg, 1e-6, 'armour ignored');
+    near(fl.maxHp - fl.hp, dmg, 1e-6, 'flyers hit');
+    near(edge.maxHp - edge.hp, dmg, 1e-6, 'body at the edge');
+    assert.equal(out.hp, out.maxHp);
+    assert.deepEqual(sim.events.find((v: any) => v.k === 'sun'), { k: 'sun', by: 'p1', b: 0, x: r2t(o.x), z: r2t(o.z), r: R });
+    assert.equal(sim.players.get('p1').sun, G.sun.start - 1);
+    assert.ok(sim.players.get('p1').score.dmg >= dmg * 3);
+    // Kills credit the player and pay bounty as usual.
+    const weak = enemy(sim, 'runner', o.x, o.z);
+    sim.players.get('p1').sun = 1;
+    const k0 = sim.players.get('p1').score.kills;
+    sim.handle('p1', { k: 'sun', x: o.x, z: o.z });
+    assert.ok(weak.dead);
+    assert.equal(sim.players.get('p1').score.kills, k0 + 1);
+  });
+  it('validation: charges, finite numbers, own board bounds, no spectators', () => {
+    const { sim } = setup();
+    const o = sim.boards[0].origin;
+    const hw = (sim.W * G.cell) / 2;
+    const hh = (sim.H * G.cell) / 2;
+    for (const bad of [{}, { x: NaN, z: 0 }, { x: 0, z: Infinity }, { x: '1', z: 0 }, { x: null, z: 0 }]) assert.equal(sim.handle('p1', { k: 'sun', ...bad }), false);
+    assert.equal(sim.handle('p1', { k: 'sun', x: o.x + hw + 0.1, z: o.z }), false);
+    assert.equal(sim.denies.at(-1).why, 'Aim at your own garden');
+    assert.equal(sim.handle('p1', { k: 'sun', x: o.x, z: o.z - hh - 0.1 }), false);
+    assert.equal(sim.players.get('p1').sun, G.sun.start, 'nothing spent on a refused strike');
+    sim.players.get('p1').sun = 0;
+    assert.equal(sim.handle('p1', { k: 'sun', x: o.x, z: o.z }), false);
+    assert.equal(sim.denies.at(-1).why, 'No Sunburst charges');
+    // Co-op: the board is shared, every defender aims at it.
+    assert.equal(sim.handle('p2', { k: 'sun', x: o.x + hw - 0.1, z: o.z + hh - 0.1 }), true);
+    // Versus: own board only, spectators and eliminated boards cannot.
+    const vs = mkSim('vs', ['a', 'b']);
+    const ob = vs.boards[1].origin;
+    assert.equal(vs.handle('a', { k: 'sun', x: ob.x, z: ob.z }), false, "not at an opponent's garden");
+    assert.equal(vs.handle('b', { k: 'sun', x: ob.x, z: ob.z }), true);
+    const spec = vs.addPlayer({ id: 'spec', name: 'spec', bot: false });
+    assert.equal(spec.board, -1);
+    assert.equal(vs.handle('spec', { k: 'sun', x: ob.x, z: ob.z }), false);
+    vs.boards[0].out = true;
+    assert.equal(vs.handle('a', { k: 'sun', x: vs.boards[0].origin.x, z: vs.boards[0].origin.z }), false);
+  });
+  it('co-op: +1 charge for every defender each G.sun.every waves cleared, capped at G.sun.max', () => {
+    const { sim } = setup();
+    sim.wave = G.sun.every - 1;
+    sim.payClear();
+    assert.equal(sim.players.get('p1').sun, G.sun.start);
+    sim.wave = G.sun.every;
+    sim.payClear();
+    assert.equal(sim.players.get('p1').sun, Math.min(G.sun.max, G.sun.start + 1));
+    assert.equal(sim.players.get('p2').sun, Math.min(G.sun.max, G.sun.start + 1));
+    for (let i = 2; i < 6; i++) {
+      sim.wave = G.sun.every * i;
+      sim.payClear();
+    }
+    assert.equal(sim.players.get('p1').sun, G.sun.max);
+  });
+  it('versus: +1 charge for each living board owner when the build phase after every G.sun.every-th wave starts', () => {
+    const sim = mkSim('vs', ['a', 'b', 'c']);
+    sim.boards[2].out = true;
+    sim.phase = 'wave';
+    sim.wave = G.sun.every;
+    sim.vsClears();
+    assert.equal(sim.phase, 'build');
+    assert.equal(sim.players.get('a').sun, Math.min(G.sun.max, G.sun.start + 1));
+    assert.equal(sim.players.get('b').sun, Math.min(G.sun.max, G.sun.start + 1));
+    assert.equal(sim.players.get('c').sun, G.sun.start, 'eliminated owner gets none');
+    sim.phase = 'wave';
+    sim.wave = G.sun.every + 1;
+    sim.vsClears();
+    assert.equal(sim.players.get('a').sun, Math.min(G.sun.max, G.sun.start + 1));
+  });
+  it("server: 'sun' goes through the action token bucket to the sim", () => {
+    const { host } = fakeHost('coop', ['a', 'b'], 'greenhouse-commons');
+    const game: any = createGardenGame(host as any);
+    game.start();
+    game.stop();
+    const o = game.sim.boards[0].origin;
+    game.onMessage('a', { k: 'sun', x: o.x, z: o.z });
+    assert.equal(game.sim.players.get('a').sun, G.sun.start - 1);
+    game.flush();
+    assert.ok(host.bcast.some((m: any) => m.k === 'ev' && m.e.some((v: any) => v.k === 'sun' && v.by === 'a')));
+    game.buckets.set('b', { tokens: 0, at: game.now() });
+    game.onMessage('b', { k: 'sun', x: o.x, z: o.z });
+    assert.equal(game.sim.players.get('b').sun, G.sun.start, 'an empty bucket drops it');
+  });
+});
+
+describe('bots (expansion)', () => {
+  it('co-op bots build sprinklers, cover every air line with air towers once moths come, kill moths and use Sunburst', () => {
+    const sim = mkSim('coop', ['bot1', 'bot2', 'bot3'], { bots: true, seed: 5 });
+    const kinds = new Map<number, string>();
+    let mothSpawn = 0;
+    let mothKill = 0;
+    let suns = 0;
+    while (!sim.end && sim.wave < 16) {
+      sim.step(DT);
+      for (const e of sim.events) {
+        if (e.k === 'spawn') {
+          kinds.set(e.en, e.kind);
+          if (e.kind === 'moth') mothSpawn++;
+        } else if (e.k === 'die' && e.kind === 'moth') mothKill++;
+        else if (e.k === 'sun') suns++;
+      }
+      sim.events = [];
+      sim.denies = [];
+    }
+    assert.ok(!sim.end, `lost on wave ${sim.wave}`);
+    const tw = [...sim.towers.values()];
+    assert.ok(tw.some((t: any) => t.info.k === 'sprinkler'), 'no sprinkler built');
+    // Every air line's last 40% is within 3D reach of at least one laser or missile pod.
+    const bd = sim.boards[0];
+    for (let r = bd.ground; r < bd.routes.length; r++) {
+      const g = bd.routes[r];
+      let covered = false;
+      for (let d = g.length * 0.6; d < g.length && !covered; d += 0.5) {
+        const p = routePos(g, d);
+        covered = tw.some((t: any) => TOWERS[t.info.k as TowerKind].air && t.info.k !== 'shield' && Math.hypot(p.x - t.x, p.z - t.z, AIR_DY) <= t.lv.range);
+      }
+      assert.ok(covered, `air line ${r} uncovered`);
+    }
+    assert.ok(mothSpawn > 0 && mothKill >= mothSpawn * 0.8, `moths killed ${mothKill}/${mothSpawn}`);
+    assert.ok(suns > 0, 'bots never used Sunburst');
+  });
+  it('versus bots send moths and bloomkin too', () => {
+    const kinds: Record<string, number> = {};
+    for (const seed of [1, 2, 3]) {
+      const sim = mkSim('vs', ['bot1', 'bot2', 'bot3', 'bot4'], { bots: true, seed });
+      while (!sim.end && sim.time < 2400) {
+        sim.step(DT);
+        for (const e of sim.events) if (e.k === 'send') kinds[e.kind] = (kinds[e.kind] ?? 0) + 1;
+        sim.events = [];
+        sim.denies = [];
+      }
+    }
+    assert.ok((kinds.moth ?? 0) > 0 && (kinds.bloomkin ?? 0) > 0, `send mix ${JSON.stringify(kinds)}`);
   });
 });
 

@@ -166,7 +166,37 @@ function Beacon() {
   );
 }
 
-const TOWER_ART: Record<TowerKind, () => JSX.Element> = { laser: Laser, shield: Shield, slow: Flower, missile: Missile, beacon: Beacon };
+function Sprinkler() {
+  return (
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <Ground />
+      {/* water arc + droplets */}
+      <path d="M46 20 C52 12 58 14 60 24" stroke={BLUE} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeDasharray="3 3" opacity="0.85" />
+      <path d="M59 28 q1.6 2.6 0 3.8 q-1.6 -1.2 0 -3.8 z M54 33 q1.3 2.2 0 3.2 q-1.3 -1 0 -3.2 z" fill={BLUE} />
+      <circle cx="61" cy="23" r="3.6" fill="#bfe9ff" />
+      <circle cx="60" cy="22" r="1.2" fill="#fff" />
+      {/* base */}
+      <path d="M18 54 L21 45 H43 L46 54 Z" fill={CREAM} stroke={CREAM_D} strokeWidth="1.2" strokeLinejoin="round" />
+      <rect x="20" y="48.5" width="24" height="2.8" rx="1.4" fill="var(--gs-team, #2EB3FF)" />
+      {/* tank */}
+      <rect x="19" y="21" width="22" height="25" rx="9" fill={BLUE} stroke="#1c86c4" strokeWidth="1.2" />
+      <rect x="22" y="24" width="5" height="16" rx="2.5" fill="#bfe9ff" opacity="0.85" />
+      <path d="M20 35 H40" stroke="#1c86c4" strokeWidth="1.2" />
+      <rect x="27" y="17" width="6" height="5" rx="1.5" fill={SLATE} />
+      {/* gauge */}
+      <circle cx="34" cy="29" r="3.4" fill={CREAM} stroke={SLATE} strokeWidth="1" />
+      <path d="M34 29 L35.8 27.2" stroke="#ff6b5a" strokeWidth="1.1" strokeLinecap="round" />
+      {/* nozzle */}
+      <g transform="rotate(-32 38 26)">
+        <rect x="37" y="23" width="14" height="6" rx="3" fill={SLATE_L} />
+        <rect x="48" y="22" width="5" height="8" rx="2" fill={SLATE} />
+        <circle cx="52.5" cy="26" r="1.6" fill={BLUE} />
+      </g>
+    </svg>
+  );
+}
+
+const TOWER_ART: Record<TowerKind, () => JSX.Element> = { laser: Laser, shield: Shield, slow: Flower, missile: Missile, beacon: Beacon, sprinkler: Sprinkler };
 
 export function TowerIcon({ kind, team }: { kind: TowerKind; team?: string }) {
   const Art = TOWER_ART[kind];
@@ -272,7 +302,59 @@ function Colossus() {
   );
 }
 
-const ENEMY_ART: Record<EnemyKind, () => JSX.Element> = { runner: Runner, skitter: Skitter, disruptor: Disruptor, brute: Brute, colossus: Colossus };
+function Moth() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      {/* glow */}
+      <circle cx="16" cy="16" r="14" fill={AMBER} opacity="0.16" />
+      {/* wings: amber uppers, mint lowers */}
+      <path d="M15 14 C10 4 3 4 2.5 9 C2 14 8 16 15 16 Z" fill={AMBER} />
+      <path d="M17 14 C22 4 29 4 29.5 9 C30 14 24 16 17 16 Z" fill={AMBER} />
+      <path d="M15 16 C9 16 4.5 19 6 23.5 C7.5 27 12 24 15 18 Z" fill={MINT} />
+      <path d="M17 16 C23 16 27.5 19 26 23.5 C24.5 27 20 24 17 18 Z" fill={MINT} />
+      <circle cx="7.5" cy="9.5" r="2" fill="#fff2d6" />
+      <circle cx="24.5" cy="9.5" r="2" fill="#fff2d6" />
+      <circle cx="9" cy="21.5" r="1.3" fill="#d6fffb" />
+      <circle cx="23" cy="21.5" r="1.3" fill="#d6fffb" />
+      {/* body */}
+      <ellipse cx="16" cy="17" rx="2.6" ry="7" fill="#6a4a8c" />
+      <circle cx="16" cy="10.5" r="3.2" fill="#7d5aa3" />
+      <circle cx="14.8" cy="10.3" r="0.9" fill="#fff" />
+      <circle cx="17.2" cy="10.3" r="0.9" fill="#fff" />
+      <path d="M14.6 8 C13.5 5 12 4 10.5 3.8 M17.4 8 C18.5 5 20 4 21.5 3.8" stroke="#6a4a8c" strokeWidth="1" fill="none" strokeLinecap="round" />
+      <circle cx="10.5" cy="3.8" r="1.1" fill={AMBER} />
+      <circle cx="21.5" cy="3.8" r="1.1" fill={AMBER} />
+    </svg>
+  );
+}
+
+function Bloomkin() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      {/* leaves */}
+      <path d="M8 18 C2 17 1 11 3 8 C7 9 9 13 8 18 Z" fill={GREEN} />
+      <path d="M24 18 C30 17 31 11 29 8 C25 9 23 13 24 18 Z" fill={GREEN} />
+      <path d="M8 17.5 C5.5 14 4.5 11.5 3.5 9 M24 17.5 C26.5 14 27.5 11.5 28.5 9" stroke={GREEN_D} strokeWidth="0.9" fill="none" />
+      {/* glowing bud */}
+      <circle cx="16" cy="6.5" r="5.5" fill="#ffe36b" opacity="0.3" />
+      <path d="M16 11 V8" stroke={GREEN_D} strokeWidth="1.4" />
+      <path d="M16 2.5 C19 3.5 19.5 7 16 8.5 C12.5 7 13 3.5 16 2.5 Z" fill="#ff9fd0" />
+      <circle cx="16" cy="5.8" r="1.6" fill="#fff6b0" />
+      {/* leafy body */}
+      <path d="M6 21 C6 14 10 10.5 16 10.5 C22 10.5 26 14 26 21 C26 26 21.5 29 16 29 C10.5 29 6 26 6 21 Z" fill="#5fbf4a" />
+      <path d="M9 17 C10 13.5 12.5 12 15 12" stroke="#a6e98c" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <path d="M10 22 C12 26 14 27.5 16 27.5 C18 27.5 20 26 22 22 C20 23 18 23.4 16 23.4 C14 23.4 12 23 10 22 Z" fill="#e9ffd9" />
+      <circle cx="12.5" cy="19" r="1.9" fill={INK} />
+      <circle cx="19.5" cy="19" r="1.9" fill={INK} />
+      <circle cx="12" cy="18.4" r="0.7" fill="#fff" />
+      <circle cx="19" cy="18.4" r="0.7" fill="#fff" />
+      <path d="M14.5 23.5 Q16 24.8 17.5 23.5" stroke={INK} strokeWidth="1" fill="none" strokeLinecap="round" />
+      <path d="M26.5 12 v3 M25 13.5 h3" stroke="#fff6b0" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const ENEMY_ART: Record<EnemyKind, () => JSX.Element> = { runner: Runner, skitter: Skitter, disruptor: Disruptor, brute: Brute, colossus: Colossus, moth: Moth, bloomkin: Bloomkin };
 
 export function EnemyIcon({ kind }: { kind: EnemyKind }) {
   const Art = ENEMY_ART[kind];
@@ -325,6 +407,30 @@ export function IncomeArrow() {
     <svg className="gs-glyph" viewBox="0 0 20 20" aria-hidden="true">
       <circle cx="10" cy="10" r="9.5" fill={AMBER} />
       <path d="M10 15 V5.5 M6 9.2 L10 5.2 L14 9.2" stroke="#fff" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Sunburst: a golden sun with rays. */
+export function Sun() {
+  const rays = Array.from({ length: 8 }, (_, i) => i * 45);
+  return (
+    <svg className="gs-glyph gs-sun-glyph" viewBox="0 0 32 32" aria-hidden="true">
+      {rays.map((a) => (
+        <path key={a} d="M16 1.5 L18.4 7 H13.6 Z" fill="#ffd34d" transform={`rotate(${a} 16 16)`} />
+      ))}
+      <circle cx="16" cy="16" r="8.6" fill="#ffb21f" />
+      <circle cx="16" cy="16" r="6.8" fill="#ffd34d" />
+      <path d="M11.5 13.5 A5.5 5.5 0 0 1 15 10.6" stroke="#fff6cf" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Little wing: marks flying enemies (only towers that hit flyers can reach them). */
+export function Wing() {
+  return (
+    <svg className="gs-glyph" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M2 14 C3 7 9 3 18 3 C16 6 15 8 12 9.5 C14 10 15 11 15.5 12 C12 12.5 9 12 7 11.5 C5.5 13 4 14 2 14 Z" fill="currentColor" />
     </svg>
   );
 }

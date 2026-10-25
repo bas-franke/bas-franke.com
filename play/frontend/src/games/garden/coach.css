@@ -103,7 +103,9 @@
   color: #c97a12;
 }
 
-.gsc-kbd {
+/* Doubled up inside the HUD so .gs kbd and the racer's global .hud kbd (see garden.css) never restyle it. */
+.gsc-kbd,
+.gs .gsc-card kbd.gsc-kbd {
   display: inline-block;
   min-width: 1.4em;
   padding: 0 5px;
@@ -149,6 +151,14 @@
   cursor: pointer;
   box-shadow: 0 3px 0 #d9862a;
   transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+/* Inside the HUD, `.gs button { font: inherit }` outranks the two rules above. */
+.gs .gsc-card .gsc-mute {
+  font-size: 12px;
+}
+.gs .gsc-card .gsc-ok {
+  font-weight: 800;
+  font-size: 13px;
 }
 .gsc-ok:hover {
   transform: translateY(-1px);
@@ -217,6 +227,8 @@
 .gsc-tag-swarm { background: #22b5a8; }
 .gsc-tag-support { background: #a869ff; }
 .gsc-tag-armored { background: #2e8fc9; }
+.gsc-tag-flying { background: #e08a00; }
+.gsc-tag-healer { background: #4d9a36; }
 .gsc-tag-boss { background: linear-gradient(90deg, #a869ff, #2eb3ff, #4ee6d9, #ffa940); }
 
 @keyframes gsc-pop {
@@ -313,7 +325,8 @@
 }
 
 /* Touch: key badges mean nothing. */
-.gsc-touch .gsc-kbd {
+.gsc-touch .gsc-kbd,
+.gs .gsc-touch kbd.gsc-kbd {
   display: none;
 }
 

@@ -21,14 +21,18 @@ export interface BotEnemyView {
   maxHp: number;
   x: number;
   z: number;
+  /** Glow Moth: flies along its air route (route = ground routes + index), only `air` towers reach it. */
+  fly?: boolean;
 }
 
 export interface BotView {
   mode: GMode;
   def: GMapDef;
-  /** The board this bot builds on, and every board's routes (world space). */
+  /** The board this bot builds on, and every board's ground routes (world space). */
   board: number;
   routes: RouteGeom[][];
+  /** Every board's air routes (board.ts airRoute: portal mouth straight to the greenhouse), same order as `routes`. */
+  air?: RouteGeom[][];
   /** Cells free to build on for the bot's board right now (no tower, buildable): [col, row]. */
   free: [number, number][];
   /** cellToWorld for this bot's board. */
@@ -48,6 +52,8 @@ export interface BotView {
   players: number;
   /** Versus: sends still allowed this wave (sendCap minus sends made); 0 in co-op. */
   sendsLeft?: number;
+  /** Sunburst charges this bot holds (G.sun). */
+  sun?: number;
 }
 
 export type BotAction =
@@ -56,7 +62,9 @@ export type BotAction =
   | { k: 'sell'; id: number }
   | { k: 'tm'; id: number; tm: TargetMode }
   | { k: 'ready' }
-  | { k: 'send'; e: EnemyKind; to?: number };
+  | { k: 'send'; e: EnemyKind; to?: number }
+  /** Sunburst at world x/z on the bot's own board. */
+  | { k: 'sun'; x: number; z: number };
 
 export interface GardenBotBrain {
   think(view: BotView, dt: number): BotAction[];

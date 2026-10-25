@@ -1,15 +1,16 @@
 // Garden client lab: the real GardenClient + HUD fed by a scripted fake server running in the page, so the whole
 // client pipeline (snapshots, interpolation, events, camera, placement) can be tested without the backend.
 //   /lab-garden-client.html?map=<id>&mode=<coop|vs>&boards=<n>&wave=<n>&gold=<n>&q=<low|medium|high>&fast=1
-// `fast=1` shortens build phases (fake server). `sim=real` runs the real backend game server (games/garden/server.ts)
+// `fast=1` shortens build phases (fake server). `sun=<n>` Sunburst charges to start with; `spawn=moth,bloomkin` spawns
+// those kinds right away (also `__gardenLab.spawn('moth', 4)` from the console). `sim=real` runs the real backend game server (games/garden/server.ts)
 // in the page instead (needs server.fs.allow to include backend/src/games). `window.__gardenLab` exposes both.
 
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { GameServerMsg, PlayerInfo, RoomView } from '@shared/protocol';
 import { G, type GMode, coopBountyShare } from '@shared/garden/constants';
-import { type RouteGeom, boardOrigin, cellAt, routeGeom, routePos } from '@shared/garden/board';
-import { ENEMIES, type EnemyKind, SENDS, SKITTER_PACK, waveHp, waveSpawns } from '@shared/garden/enemies';
+import { type RouteGeom, allRoutes, boardOrigin, cellAt, routeGeom, routePos } from '@shared/garden/board';
+import { ENEMIES, type EnemyKind, FLY_HEIGHT, ENEMY_KINDS, SENDS, SKITTER_PACK, waveHp, waveSpawns } from '@shared/garden/enemies';
 import { GMAPS, type GMapDef, type GRoute, gmapById, isBuildableChar } from '@shared/garden/maps';
 import type { BoardInfo, EnemySnap, GEvent, GScore, GSnapshot, GardenClientMsg, GardenServerMsg, Phase, TowerInfo } from '@shared/garden/protocol';
 import { EFlag, TFlag } from '@shared/garden/protocol';
@@ -122,6 +123,12 @@ interface SEnemy {
   disT: number;
   sent: boolean;
   shedAt: number;
+  /** Sprinkler soak: seconds left and slow share. */
+  soakT: number;
+  soak: number;
+  /** Bloomkin: seconds to the next pulse; healed flag time left. */
+  healCd: number;
+  healedT: number;
 }
 interface SPlayer {
   id: string;
@@ -133,6 +140,7 @@ interface SPlayer {
   dmg: number;
   built: number;
   sent: number;
+  sun: number;
 }
 interface SMissile {
   mid: number;
@@ -144,7 +152,12 @@ interface SMissile {
   b: number;
   x: number;
   z: number;
+  soak: number;
+  soakTime: number;
 }
+
+/** Wire route of a spawn: flyers take their ground route's air route (index routes + r). */
+const wireRoute = (k: EnemyKind, r: number) => (ENEMIES[k].fly ? (r % def.routes.length) + def.routes.length : r % def.routes.length);
 
 class FakeServer {
   tick = 0;
@@ -169,13 +182,14 @@ class FakeServer {
 
   constructor(private readonly deliver: (m: GameServerMsg) => void) {
     const gold = Number(params.get('gold') ?? G.startGold[mode]);
-    this.pl = players.map((p, i) => ({ id: p.id, gold, inc: G.baseIncome, rd: 0, b: mode === 'vs' ? i : 0, kills: 0, dmg: 0, built: 0, sent: 0 }));
+    const sun = Number(params.get('sun') ?? G.sun.start);
+    this.pl = players.map((p, i) => ({ id: p.id, gold, inc: G.baseIncome, rd: 0, b: mode === 'vs' ? i : 0, kills: 0, dmg: 0, built: 0, sent: 0, sun }));
     this.boards = Array.from({ length: nBoards }, (_, i) => ({ b: i, own: mode === 'vs' ? players[i].id : null }));
-    this.geoms = this.boards.map((_, i) => def.routes.map((r) => routeGeom(def, boardOrigin(def, i, nBoards), r)));
+    this.geoms = this.boards.map((_, i) => allRoutes(def).map((r) => routeGeom(def, boardOrigin(def, i, nBoards), r)));
     // A starting defence on every board so there is something to look at.
     for (let b = 0; b < nBoards; b++) {
       const own = mode === 'vs' ? players[b].id : players[b % players.length].id;
-      const kinds: TowerKind[] = ['laser', 'missile', 'slow', 'shield', 'beacon', 'laser'];
+      const kinds: TowerKind[] = ['laser', 'missile', 'sprinkler', 'slow', 'shield', 'beacon', 'laser', 'sprinkler'];
       let placed = 0;
       for (const [cx, cy] of this.nearPath(b)) {
         if (placed >= kinds.length) break;
@@ -232,6 +246,12 @@ class FakeServer {
     return routePos(this.geoms[e.b][e.r], e.d, e.o);
   }
 
+  /** Distance from a tower position to an enemy (3D: flyers cruise at FLY_HEIGHT). */
+  dist(p: { x: number; z: number }, e: SEnemy) {
+    const q = this.epos(e);
+    return Math.hypot(q.x - p.x, q.z - p.z, ENEMIES[e.k].fly ? FLY_HEIGHT : 0);
+  }
+
   handle(id: string, m: GardenClientMsg) {
     const p = this.pl.find((q) => q.id === id)!;
     const deny = (why: string) => this.ev.push({ k: 'deny', id, why });
@@ -286,13 +306,26 @@ class FakeServer {
         p.inc += s.income;
         p.sent += s.cost;
         const n = s.kind === 'skitter' ? s.count * SKITTER_PACK : s.count;
-        for (let i = 0; i < n; i++) this.queue.push({ at: this.waveT + 0.5 + i * 0.4, k: s.kind, b: to, r: i % def.routes.length, o: (i % 3) - 1, sent: true });
+        for (let i = 0; i < n; i++) this.queue.push({ at: this.waveT + 0.5 + i * 0.4, k: s.kind, b: to, r: wireRoute(s.kind, i), o: (i % 3) - 1, sent: true });
         this.ev.push({ k: 'send', from: id, to, kind: s.kind, n });
         return;
       }
       case 'ping':
         this.ev.push({ k: 'ping', id, b: p.b, x: m.x, z: m.z });
         return;
+      case 'sun': {
+        if (p.sun <= 0) return deny('No Sunburst charge');
+        p.sun--;
+        const r = G.sun.radius;
+        const dmg = G.sun.base + G.sun.perWave * Math.max(1, this.wave);
+        this.ev.push({ k: 'sun', by: id, b: p.b, x: m.x, z: m.z, r });
+        for (const e of this.enemies) {
+          if (e.b !== p.b || e.hp <= 0) continue;
+          const q = this.epos(e);
+          if (Math.hypot(q.x - m.x, q.z - m.z) <= r) this.damage(e, dmg, { own: id, id: 0 }, 1);
+        }
+        return;
+      }
     }
   }
 
@@ -310,7 +343,7 @@ class FakeServer {
         for (let i = 0; i < g.count; i++) {
           const pack = g.kind === 'skitter' ? SKITTER_PACK : 1;
           for (let j = 0; j < pack; j++) {
-            const r = g.route >= 0 ? g.route : i % def.routes.length;
+            const r = wireRoute(g.kind, g.route >= 0 ? g.route : i);
             this.queue.push({ at: g.at + i * g.gap + j * 0.05, k: g.kind, b, r, o: pack > 1 ? (j - 2) / 2 : Math.sin(i * 2.3) * 0.6, sent: false });
           }
         }
@@ -320,7 +353,7 @@ class FakeServer {
 
   spawn(q: { k: EnemyKind; b: number; r: number; o: number; sent: boolean }, d = 0) {
     const max = ENEMIES[q.k].hp * waveHp(Math.max(1, this.wave));
-    this.enemies.push({ id: this.nextId++, k: q.k, b: q.b, r: q.r, d, o: q.o, hp: max, max, slow: 1, stun: 0, disT: 2, sent: q.sent, shedAt: 0.75 });
+    this.enemies.push({ id: this.nextId++, k: q.k, b: q.b, r: q.r, d, o: q.o, hp: max, max, slow: 1, stun: 0, disT: 2, sent: q.sent, shedAt: 0.75, soakT: 0, soak: 0, healCd: 1.5, healedT: 0 });
   }
 
   damage(e: SEnemy, amount: number, tw: { own: string; id: number } | null, pierce: number) {
@@ -334,7 +367,7 @@ class FakeServer {
     if (def0.shed && e.hp > 0 && e.hp / e.max < e.shedAt) {
       e.shedAt -= 0.25;
       this.ev.push({ k: 'shed', en: e.id, n: def0.shed });
-      for (let i = 0; i < def0.shed; i++) this.spawn({ k: 'skitter', b: e.b, r: e.r, o: (i % 5 - 2) / 2, sent: false }, Math.max(0, e.d - 0.3 * i));
+      for (let i = 0; i < def0.shed; i++) this.spawn({ k: 'skitter', b: e.b, r: e.r % def.routes.length, o: (i % 5 - 2) / 2, sent: false }, Math.max(0, e.d - 0.3 * i));
     }
     if (e.hp <= 0) {
       const bounty = def0.bounty;
@@ -368,8 +401,10 @@ class FakeServer {
 
     // Field effects.
     for (const e of this.enemies) {
-      e.slow = 1;
       e.stun = Math.max(0, e.stun - dt);
+      e.soakT = Math.max(0, e.soakT - dt);
+      e.healedT = Math.max(0, e.healedT - dt);
+      e.slow = e.soakT > 0 ? 1 - e.soak : 1;
     }
     const buffs = new Map<number, number>();
     for (const t of this.towers) {
@@ -383,10 +418,8 @@ class FakeServer {
       const L = TOWERS[t.k].levels[t.lv - 1];
       const p = this.pos(t);
       const buff = 1 + (buffs.get(t.id) ?? 0);
-      const inRange = this.enemies.filter((e) => e.b === t.b && e.hp > 0 && (() => {
-        const q = this.epos(e);
-        return Math.hypot(q.x - p.x, q.z - p.z) <= L.range;
-      })());
+      const air = TOWERS[t.k].air;
+      const inRange = this.enemies.filter((e) => e.b === t.b && e.hp > 0 && (air || !ENEMIES[e.k].fly) && this.dist(p, e) <= L.range);
       t.tg = 0;
       t.ch = [];
       if (t.dis > 0) continue;
@@ -407,10 +440,8 @@ class FakeServer {
         switch (t.tm) {
           case 1: return a.d - b.d;
           case 2: return b.hp - a.hp;
-          case 3: {
-            const qa = this.epos(a), qb = this.epos(b);
-            return Math.hypot(qa.x - p.x, qa.z - p.z) - Math.hypot(qb.x - p.x, qb.z - p.z);
-          }
+          case 3:
+            return this.dist(p, a) - this.dist(p, b);
           default: return b.d - a.d;
         }
       });
@@ -425,7 +456,7 @@ class FakeServer {
             if (e) this.damage(e, L.dmg * 0.5 * dt * buff, t, TOWERS.laser.pierce);
           }
         }
-      } else if (t.k === 'missile') {
+      } else if (t.k === 'missile' || t.k === 'sprinkler') {
         t.cd -= dt;
         if (t.cd <= 0) {
           t.cd = L.interval ?? 1.5;
@@ -434,7 +465,7 @@ class FakeServer {
             const q = this.epos(e);
             const ft = 0.5 + Math.hypot(q.x - p.x, q.z - p.z) / 14;
             const mid = this.nextMid++;
-            this.missiles.push({ mid, tw: t.id, en: e.id, t: ft, dmg: L.dmg * buff, splash: L.splash ?? 1.5, b: t.b, x: q.x, z: q.z });
+            this.missiles.push({ mid, tw: t.id, en: e.id, t: ft, dmg: L.dmg * buff, splash: L.splash ?? 1.5, b: t.b, x: q.x, z: q.z, soak: L.soak ?? 0, soakTime: L.soakTime ?? 0 });
             this.ev.push({ k: 'msl', tw: t.id, en: e.id, mid, ft });
           }
         }
@@ -454,8 +485,16 @@ class FakeServer {
         const tw = this.towers.find((t) => t.id === m.tw) ?? null;
         for (const e2 of this.enemies) {
           if (e2.b !== m.b || e2.hp <= 0) continue;
+          // Water bombs splash the ground: flyers stay dry.
+          if (m.soak && ENEMIES[e2.k].fly) continue;
           const q = this.epos(e2);
-          if (Math.hypot(q.x - m.x, q.z - m.z) <= m.splash) this.damage(e2, m.dmg, tw, 1);
+          if (Math.hypot(q.x - m.x, q.z - m.z) <= m.splash) {
+            this.damage(e2, m.dmg, tw, m.soak ? TOWERS.sprinkler.pierce : 1);
+            if (m.soak) {
+              e2.soakT = Math.max(e2.soakT, m.soakTime);
+              e2.soak = Math.max(e2.soakT > 0 ? e2.soak : 0, m.soak);
+            }
+          }
         }
       }
     }
@@ -478,7 +517,24 @@ class FakeServer {
           }
         }
       }
-      if (e.stun <= 0) e.d += E.speed * e.slow * dt;
+      if (E.heal) {
+        e.healCd -= dt;
+        if (e.healCd <= 0) {
+          e.healCd = E.heal.every;
+          const q = this.epos(e);
+          let n = 0;
+          for (const o of this.enemies) {
+            if (o.b !== e.b || o.hp <= 0) continue;
+            const qo = this.epos(o);
+            if (Math.hypot(qo.x - q.x, qo.z - q.z) > E.heal.range) continue;
+            o.hp = Math.min(o.max, o.hp + o.max * E.heal.pct);
+            o.healedT = 1;
+            n++;
+          }
+          this.ev.push({ k: 'heal', en: e.id, n, r: E.heal.range });
+        }
+      }
+      if (e.stun <= 0) e.d += E.speed * (E.fly ? 1 : e.slow) * dt;
       const g = this.geoms[e.b][e.r];
       if (e.d >= g.length) {
         e.hp = 0;
@@ -496,7 +552,10 @@ class FakeServer {
     this.enemies = this.enemies.filter((e) => e.hp > 0 && !this.out[e.b]);
     if (this.ph === 'wave' && !this.queue.length && !this.enemies.length) {
       const bonus = G.clearBonus + G.clearBonusPerWave * this.wave;
-      for (const p of this.pl) p.gold += bonus;
+      for (const p of this.pl) {
+        p.gold += bonus;
+        if (this.wave % G.sun.every === 0) p.sun = Math.min(G.sun.max, p.sun + 1);
+      }
       this.ev.push({ k: 'clear', n: this.wave, bonus });
       this.ph = 'build';
       this.left = fast ? 4 : G.betweenWaves;
@@ -534,11 +593,16 @@ class FakeServer {
           d: Math.round(e.d * 100) / 100,
           o: e.o,
           hp: Math.max(0, Math.round((e.hp / e.max) * 100) / 100),
-          f: (e.slow < 1 ? EFlag.slowed : 0) | (e.stun > 0 ? EFlag.stunned : 0) | (e.sent ? EFlag.sent : 0),
+          f:
+            (e.slow < 1 && !ENEMIES[e.k].fly ? EFlag.slowed : 0) |
+            (e.soakT > 0 ? EFlag.soaked : 0) |
+            (e.healedT > 0 ? EFlag.healed : 0) |
+            (e.stun > 0 ? EFlag.stunned : 0) |
+            (e.sent ? EFlag.sent : 0),
         }),
       ),
       tw: this.towers.map((t) => ({ id: t.id, tg: t.tg, ...(t.ch.length ? { ch: t.ch } : {}), f: t.dis > 0 ? TFlag.disabled : 0 })),
-      pl: this.pl.map((p) => ({ id: p.id, gold: Math.floor(p.gold), inc: p.inc, rd: p.rd, b: p.b })),
+      pl: this.pl.map((p) => ({ id: p.id, gold: Math.floor(p.gold), inc: p.inc, rd: p.rd, b: p.b, sun: p.sun })),
     };
   }
 
@@ -622,4 +686,10 @@ const hudRoot = document.createElement('div');
 stage.appendChild(hudRoot);
 createRoot(hudRoot).render(createElement(GardenHud, { client, ctx }));
 server?.start();
-(window as unknown as { __gardenLab: unknown }).__gardenLab = { server, client, ctx };
+/** Spawns `n` enemies of a kind on board 0 (or `b`) right away, spread over the routes (fake server only). */
+const spawnKind = (k: EnemyKind, n = 1, b = 0) => {
+  if (!server) return;
+  for (let i = 0; i < n; i++) server.spawn({ k, b, r: wireRoute(k, i), o: (i % 3) - 1, sent: false }, 2 + i * 1.5);
+};
+for (const k of (params.get('spawn') ?? '').split(',')) if ((ENEMY_KINDS as string[]).includes(k)) spawnKind(k as EnemyKind, 3);
+(window as unknown as { __gardenLab: unknown }).__gardenLab = { server, client, ctx, spawn: spawnKind };

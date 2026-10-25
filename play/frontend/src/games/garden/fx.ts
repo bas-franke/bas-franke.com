@@ -1,5 +1,6 @@
 // Garden Sentinels attack and ability effects: laser beams, missiles, explosions, slow / shield / beacon fields, zaps,
-// disrupt bolts, crystal-shard deaths, "+gold" popups, leak / build / upgrade / sell / spawn / ping.
+// disrupt bolts, crystal-shard deaths, "+gold" popups, leak / build / upgrade / sell / spawn / ping, sprinkler water bombs
+// and splashes, Bloomkin heal pulses, the Sunburst strike and its aiming reticle.
 //
 // Everything is batched so dozens of beams and thousands of particles cost a handful of draw calls:
 //   Particles   GPU-analytic billboards in a ring buffer (one additive, one alpha-blended, one for popup glyphs). The
@@ -13,7 +14,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { EnemyKind } from '@shared/garden/enemies';
+import { FLY_HEIGHT, type EnemyKind } from '@shared/garden/enemies';
 import type { Level } from '@shared/garden/towers';
 import type { CreateFx, Fx, P3, Quality } from './api';
 
@@ -60,6 +61,20 @@ const DUST = lin(0xf0e2c8);
 const SPAWN_V = lin(0xa869ff, 1.6);
 const SPAWN_M = lin(0x4ee6d9, 1.6);
 const COLOSSUS_FLASH = lin(0xd6b8ff, 1.6);
+const WATER = lin(0x2eb3ff);
+const WATER_HDR = lin(0x2eb3ff, 1.9);
+const WATER_PALE = lin(0xbfeaff, 1.3);
+const WET = lin(0x1f4a5c, 0.55);
+const HEAL_GREEN = lin(0x9be05a, 1.5);
+const HEAL_GOLD = lin(0xffd36a, 1.5);
+const HEAL_MOTES = [lin(0x9be05a, 1.3), lin(0xc7f07a, 1.3), lin(0xffd36a, 1.2), lin(0xffb3c8, 1.2)];
+const SUN_GOLD = lin(0xffb43a, 2.3);
+const SUN_RING = lin(0xffc048, 2.6);
+const SUN_CORE: RGB = [1, 0.9, 0.66];
+const SUN_SCORCH = lin(0x7a5418, 0.75);
+const SUN_PETALS = [lin(0xffd36a, 1.2), lin(0xffb84a, 1.2), CREAM, lin(0xffe39a, 1.2)];
+const AIM_COL = lin(0xffc65a, 1.5);
+const MOTH_WINGS = [lin(0xffa940, 1.2), lin(0x4ee6d9, 1.2), lin(0xffd27a, 1.2)];
 
 const BEAM_COL: Record<Level, RGB> = { 1: lin(0xff8a24, 2.1), 2: lin(0xffa040, 2.6), 3: lin(0xffc048, 3.0) };
 const BEAM_W: Record<Level, number> = { 1: 0.19, 2: 0.23, 3: 0.27 };
@@ -71,10 +86,12 @@ const KIND_COLS: Record<EnemyKind, RGB[]> = {
   disruptor: [lin(0xa869ff), lin(0xd3a8ff), lin(0x7a3dff)],
   brute: [lin(0x3fd8e8), lin(0x2eb3ff), lin(0x8af4ff)],
   colossus: [],
+  moth: [lin(0xffa940), lin(0x4ee6d9), lin(0xffd27a)],
+  bloomkin: [lin(0x6bba4b), lin(0x9be05a), lin(0xff8fb1)],
 };
-const KIND_SHARDS: Record<EnemyKind, number> = { runner: 11, skitter: 7, disruptor: 12, brute: 24, colossus: 46 };
+const KIND_SHARDS: Record<EnemyKind, number> = { runner: 11, skitter: 7, disruptor: 12, brute: 24, colossus: 46, moth: 6, bloomkin: 14 };
 /** Half the body height (m): where the burst centres relative to the feet. */
-const KIND_HALF: Record<EnemyKind, number> = { runner: 0.4, skitter: 0.25, disruptor: 0.45, brute: 0.9, colossus: 1.5 };
+const KIND_HALF: Record<EnemyKind, number> = { runner: 0.4, skitter: 0.25, disruptor: 0.45, brute: 0.9, colossus: 1.5, moth: 0.35, bloomkin: 0.5 };
 
 const QUALITY_MULT: Record<Quality, number> = { low: 0.35, medium: 0.7, high: 1 };
 
@@ -420,13 +437,15 @@ const PARTICLE_VS = /* glsl */ `
     size *= clamp(-mv.z / 18.0, 1.0, 3.5);
     #endif
     vec2 c = position.xy;
-    vec2 off;
+    vec2 off = vec2(0.0);
     if (iM.z > 0.0) {
-      vec3 vv = (viewMatrix * vec4(vel, 0.0)).xyz;
-      float sp = length(vv.xy);
-      vec2 d = sp > 1e-4 ? vv.xy / sp : vec2(0.0, 1.0);
-      vec2 n = vec2(-d.y, d.x);
-      off = n * c.x * size + d * c.y * size * (1.0 + iM.z * min(sp, 12.0));
+      // Stretched along the screen-space velocity (sparks, droplets). The side axis is (dir.y, -dir.x) so the basis
+      // is a rotation (det +1): the mirrored one flipped the quad's winding and back-face culling hid every spark.
+      vec2 sv = (mat3(viewMatrix) * vel).xy;
+      float sp = length(sv);
+      vec2 dir = sp > 1e-4 ? sv / sp : vec2(0.0, 1.0);
+      float stretch = 1.0 + iM.z * min(sp, 12.0);
+      off = (vec2(dir.y, -dir.x) * c.x + dir * (c.y * stretch)) * size;
     } else {
       float r = iF.w + iM.y * age;
       float cs = cos(r), sn = sin(r);
@@ -518,12 +537,18 @@ const RING_FS = /* glsl */ `
     } else if (vX.x < 1.5) {
       a = 1.0 - smoothstep(r * 0.25, r, d);
       a *= a;
-    } else {
+    } else if (vX.x < 2.5) {
       float ang = atan(vL.y, vL.x);
       float arms = 0.5 + 0.5 * sin(ang * 3.0 + d * 5.0 / max(r, 0.1) * 3.0 - (uTime * vX.z));
       float band = exp(-pow((d - r * 0.62) / (r * 0.32), 2.0));
       float rim = exp(-pow((d - r) / th, 2.0));
       a = band * arms * 0.9 + rim * 0.7;
+    } else {
+      // Blotch: a soft patch with a wobbly edge (wet ground, scorch); vX.z is a per-patch seed.
+      float ang = atan(vL.y, vL.x);
+      float wob = 1.0 + 0.12 * sin(ang * 5.0 + vX.z) + 0.07 * sin(ang * 11.0 + vX.z * 2.3);
+      float rr = r * wob;
+      a = (1.0 - smoothstep(rr * 0.5, rr, d)) * (0.8 + 0.2 * sin(d * 9.0 / max(r, 0.1) + vX.z));
     }
     a *= vCol.a * smoothstep(0.0, max(vX.y, 1e-4), u) * (1.0 - smoothstep(0.35, 1.0, u));
     if (a < 0.003) discard;
@@ -792,6 +817,65 @@ const DOME_FS = /* glsl */ `
   }
 `;
 
+// Sprinkler water bomb: translucent blue with a pale fresnel rim and a white highlight (instanced spheres).
+const BOMB_VS = /* glsl */ `
+  varying vec3 vN;
+  varying vec3 vW;
+  void main() {
+    mat4 m = modelMatrix * instanceMatrix;
+    vec4 w = m * vec4(position, 1.0);
+    vN = normalize(mat3(m) * normal);
+    vW = w.xyz;
+    gl_Position = projectionMatrix * viewMatrix * w;
+  }
+`;
+const BOMB_FS = /* glsl */ `
+  uniform vec3 uCol;
+  varying vec3 vN;
+  varying vec3 vW;
+  void main() {
+    vec3 n = normalize(vN);
+    vec3 v = normalize(cameraPosition - vW);
+    vec3 l = normalize(vec3(0.4, 0.9, 0.3));
+    float ndv = abs(dot(n, v));
+    float fres = pow(1.0 - ndv, 2.2);
+    float diff = max(dot(n, l), 0.0);
+    float spec = pow(max(dot(reflect(-l, n), v), 0.0), 40.0);
+    vec3 c = uCol * (0.55 + 0.45 * diff) + vec3(0.75, 0.93, 1.0) * fres * 0.9 + vec3(spec) * 2.2;
+    gl_FragColor = vec4(c, min(1.0, 0.62 + 0.33 * fres + spec));
+    ${GLSL_TAIL}
+  }
+`;
+
+// Sunburst aiming reticle: a warm dashed rim turning slowly, inner ring, four ticks and a soft fill, pulsing.
+const AIM_FS = /* glsl */ `
+  uniform float uTime;
+  uniform float uAlpha;
+  uniform float uR;
+  uniform vec3 uCol;
+  varying vec2 vP;
+  float line(float d, float at, float w) { float q = (d - at) / w; return exp(-q * q); }
+  void main() {
+    float d = length(vP);
+    if (d > 1.0) discard;
+    float ang = atan(vP.y, vP.x);
+    float px = 1.0 / max(uR, 0.5);
+    float pulse = 0.82 + 0.18 * sin(uTime * 4.2);
+    float dash = step(0.42, fract(ang / 6.28318 * 28.0 + uTime * 0.35));
+    float rim = line(d, 0.96, 0.012 + 0.02 * px) * dash + line(d, 0.985, 0.006 + 0.01 * px) * 0.35;
+    float inner = line(d, 0.62 + 0.03 * sin(uTime * 4.2), 0.008 + 0.012 * px) * 0.45;
+    float cr = abs(cos(ang * 2.0));
+    float ticks = smoothstep(0.996, 0.999, cr) * step(0.74, d) * step(d, 0.88);
+    float dot0 = 1.0 - smoothstep(0.015, 0.025 + 0.03 * px, d);
+    float fill = (1.0 - smoothstep(0.3, 1.0, d)) * 0.12 + (1.0 - smoothstep(0.85, 0.97, d)) * 0.05;
+    float a = (rim * 0.85 + inner + ticks * 0.7 + dot0 * 0.6) * pulse + fill;
+    a *= uAlpha;
+    if (a < 0.003) discard;
+    gl_FragColor = vec4(uCol, min(a, 1.0));
+    ${GLSL_TAIL}
+  }
+`;
+
 // ---- pools ----------------------------------------------------------------------------------------------------------
 
 interface BeamState {
@@ -835,6 +919,36 @@ interface Missile {
   side: number;
   lift: number;
   trail: number;
+}
+
+interface Bomb {
+  active: boolean;
+  mid: number;
+  fx: number;
+  fy: number;
+  fz: number;
+  tx: number;
+  ty: number;
+  tz: number;
+  px: number;
+  py: number;
+  pz: number;
+  target: () => P3 | null;
+  ft: number;
+  age: number;
+  apex: number;
+  trail: number;
+  phase: number;
+}
+
+interface Sunburst {
+  active: boolean;
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+  t0: number;
+  acc: number;
 }
 
 interface Arc {
@@ -1239,6 +1353,27 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
   const mscale = new THREE.Vector3(1, 1, 1);
   const FWD = new THREE.Vector3(0, 0, 1);
 
+  // Sprinkler water bombs: one instanced mesh of wobbling translucent spheres.
+  const BOMBS = 192;
+  const bombGeo = new THREE.SphereGeometry(0.2, 18, 12);
+  const bombMat = new THREE.ShaderMaterial({ uniforms: { uCol: { value: new THREE.Vector3(WATER[0], WATER[1], WATER[2]) } }, vertexShader: BOMB_VS, fragmentShader: BOMB_FS });
+  bombMat.transparent = true;
+  bombMat.depthWrite = false;
+  const bombMesh = new THREE.InstancedMesh(bombGeo, bombMat, BOMBS);
+  bombMesh.frustumCulled = false;
+  bombMesh.count = 0;
+  bombMesh.renderOrder = 4;
+  group.add(bombMesh);
+  const bombs: Bomb[] = [];
+  for (let i = 0; i < BOMBS; i++) bombs.push({ active: false, mid: 0, fx: 0, fy: 0, fz: 0, tx: 0, ty: 0, tz: 0, px: 0, py: 0, pz: 0, target: noTarget, ft: 1, age: 0, apex: 3, trail: 0, phase: 0 });
+  const bombById = new Map<number, Bomb>();
+  const UP = new THREE.Vector3(0, 1, 0);
+
+  // Sunbursts in flight (the beam lasts ~0.45 s; everything else is spawn-once).
+  const suns: Sunburst[] = [];
+  for (let i = 0; i < 6; i++) suns.push({ active: false, x: 0, y: 0, z: 0, r: 4, t0: 0, acc: 0 });
+  let sunHead = 0;
+
   // Beams.
   const beamPool: BeamState[] = [];
   const beamsById = new Map<number, BeamState>();
@@ -1351,6 +1486,21 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
   };
 
   const disabledMap = new Map<number, Disabled>();
+
+  // Sunburst aiming reticle (one disc, hidden until sunAim gets a point).
+  const aimMat = new THREE.ShaderMaterial({
+    uniforms: { uTime, uAlpha: { value: 0 }, uR: { value: 4 }, uCol: { value: new THREE.Vector3(AIM_COL[0], AIM_COL[1], AIM_COL[2]) } },
+    vertexShader: DISC_VS,
+    fragmentShader: AIM_FS,
+  });
+  transparent(aimMat, false);
+  aimMat.polygonOffset = true;
+  aimMat.polygonOffsetFactor = -3;
+  aimMat.polygonOffsetUnits = -6;
+  const aim = addMesh(discGeo, aimMat, 3);
+  aim.visible = false;
+  let aimOn = false;
+  let aimAlpha = 0;
 
   // ---- effect recipes -------------------------------------------------------------------------------------------
 
@@ -1507,6 +1657,203 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
     confetti(x, y + 0.2, z, n(5), S_LEAF, BOOM_LEAVES, 3.5, 1.4, 0.16, gy + 0.02);
   };
 
+  /** Water droplets: small stretched blue dots thrown out and falling to `floor`. */
+  const droplets = (x: number, y: number, z: number, count: number, speed: number, up: number, size: number, floor: number, spread: number) => {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * 6.283;
+      const rr = Math.random() * spread;
+      reset(x + Math.cos(a) * rr, y, z + Math.sin(a) * rr, S_DOT, rnd(0.45, 0.8));
+      const sp = speed * rnd(0.5, 1);
+      P.vx = Math.cos(a) * sp;
+      P.vy = up * rnd(0.6, 1.15);
+      P.vz = Math.sin(a) * sp;
+      P.drag = 1.2;
+      P.grav = 11;
+      P.s0 = size * rnd(0.7, 1.2);
+      P.s1 = P.s0 * 0.6;
+      P.stretch = 0.05;
+      P.floor = floor;
+      P.a = 0.85;
+      P.fadeIn = 0.02;
+      P.fadeOut = 0.7;
+      col(Math.random() < 0.3 ? WATER_PALE : WATER, rnd(1, 1.25));
+      emit(soft);
+    }
+  };
+
+  const splashAt = (x: number, y: number, z: number, radius: number) => {
+    const s = Math.max(0.8, radius);
+    const gy = Math.max(0, y - 0.5);
+    // Crown: a tight ring of droplets shooting up and out, then a wider, lower spray.
+    droplets(x, gy + 0.1, z, n(16 + s * 5), 2.2 * s, 5.5, 0.3, gy + 0.02, 0.25 * s);
+    droplets(x, gy + 0.15, z, n(10 + s * 3), 4 * s, 2.5, 0.22, gy + 0.02, 0.3);
+    // A splash column of pale glints.
+    for (let i = 0; i < n(8); i++) {
+      reset(x + rnd(-0.2, 0.2), gy + 0.2, z + rnd(-0.2, 0.2), S_SPARK, rnd(0.25, 0.4));
+      P.vx = rnd(-0.6, 0.6);
+      P.vy = rnd(3, 5.5);
+      P.vz = rnd(-0.6, 0.6);
+      P.drag = 2;
+      P.grav = 10;
+      P.s0 = 0.12;
+      P.s1 = 0.04;
+      P.stretch = 0.1;
+      col(WATER_PALE, 1.4);
+      emit(add);
+    }
+    flash(x, gy + 0.4, z, s * 1.3, WATER, 1.1, 0.14);
+    ring(x, gy, z, s * 0.2, s * 1.05, 0.4, 0.055 * s, WATER_HDR, 0.6, 0);
+    ring(x, gy, z, s * 0.1, s * 0.75, 0.55, 0.05 * s, WATER_PALE, 0.5, 0, 0.08);
+    // Wet patch: darker ground that dries over ~2 s.
+    ring(x, gy - 0.01, z, s * 0.45, s * 0.85, 2.2, 0.1, WET, 0.5, 3, 0, Math.random() * 6.28);
+    // Blue sparkles left hanging.
+    for (let i = 0; i < n(6); i++) {
+      const a = Math.random() * 6.283;
+      const d = s * Math.sqrt(Math.random()) * 0.8;
+      reset(x + Math.cos(a) * d, gy + rnd(0.1, 0.5), z + Math.sin(a) * d, S_STAR, rnd(0.5, 0.9));
+      P.delay = rnd(0.05, 0.2);
+      P.vy = rnd(0.2, 0.5);
+      P.drag = 1;
+      P.s0 = rnd(0.18, 0.28);
+      P.s1 = 0.03;
+      P.spin = rnd(-3, 3);
+      col(WATER_HDR, rnd(0.9, 1.2));
+      emit(add);
+    }
+  };
+
+  const healAt = (x: number, y: number, z: number, radius: number) => {
+    const r = Math.max(0.8, radius);
+    const gy = Math.max(0, y - 0.5);
+    ring(x, gy, z, 0.3, r, 0.95, 0.14 + 0.02 * r, HEAL_GREEN, 0.75, 0);
+    ring(x, gy, z, 0.2, r * 0.8, 1.1, 0.08 + 0.015 * r, HEAL_GOLD, 0.45, 0, 0.12);
+    ring(x, gy, z, 0, r * 0.9, 0.8, 0.3, HEAL_GREEN, 0.12, 1);
+    flash(x, gy + 0.7, z, 1.6, HEAL_GOLD, 0.7, 0.3);
+    // Petals and leaves drifting up out of the ring.
+    for (let i = 0; i < n(12); i++) {
+      const a = Math.random() * 6.283;
+      const d = r * rnd(0.2, 0.9);
+      reset(x + Math.cos(a) * d, gy + rnd(0.1, 0.4), z + Math.sin(a) * d, Math.random() < 0.5 ? S_PETAL : S_LEAF, rnd(1.1, 1.7));
+      P.delay = (d / r) * 0.4;
+      P.vx = Math.cos(a) * 0.3;
+      P.vy = rnd(0.9, 1.6);
+      P.vz = Math.sin(a) * 0.3;
+      P.drag = 1.4;
+      P.grav = -0.2;
+      P.s0 = rnd(0.13, 0.2);
+      P.s1 = P.s0 * 0.7;
+      P.spin = rnd(-3, 3);
+      P.rot = Math.random() * 6.28;
+      P.a = 0.9;
+      P.fadeIn = 0.15;
+      P.fadeOut = 0.55;
+      col(pick(HEAL_MOTES), rnd(0.95, 1.1));
+      emit(soft);
+    }
+    // Soft glowing motes.
+    for (let i = 0; i < n(16); i++) {
+      const a = Math.random() * 6.283;
+      const d = r * Math.sqrt(Math.random()) * 0.95;
+      reset(x + Math.cos(a) * d, gy + rnd(0.1, 0.6), z + Math.sin(a) * d, i % 3 === 0 ? S_STAR : S_GLOW, rnd(0.9, 1.5));
+      P.delay = (d / r) * 0.45;
+      P.vy = rnd(0.6, 1.3);
+      P.drag = 0.8;
+      P.s0 = rnd(0.12, 0.22);
+      P.s1 = 0.04;
+      P.spin = rnd(-2, 2);
+      P.fadeIn = 0.2;
+      P.fadeOut = 0.5;
+      col(i % 2 ? HEAL_GREEN : HEAL_GOLD, rnd(0.9, 1.3));
+      emit(add);
+    }
+  };
+
+  const sunburstAt = (x: number, y: number, z: number, radius: number) => {
+    const r = Math.max(1, radius);
+    const gy = Math.max(0, y);
+    const s = suns[sunHead];
+    sunHead = (sunHead + 1) % suns.length;
+    s.active = true;
+    s.x = x;
+    s.y = gy;
+    s.z = z;
+    s.r = r;
+    s.t0 = time;
+    s.acc = 0;
+    // Impact lands ~0.1 s after the beam starts.
+    const hit = 0.1;
+    reset(x, gy + r * 0.45, z, S_GLOW, 0.4);
+    P.delay = hit;
+    P.s0 = r * 0.7;
+    P.s1 = r * 1.3;
+    P.fadeIn = 0.02;
+    P.fadeOut = 0.12;
+    col(SUN_CORE, 1.6);
+    emit(add);
+    ring(x, gy, z, 0, r * 1.05, 0.55, 0.3, SUN_GOLD, 0.55, 1, hit);
+    ring(x, gy, z, r * 0.15, r * 1.12, 0.7, 0.1 * r, SUN_RING, 0.95, 0, hit);
+    ring(x, gy, z, r * 0.1, r * 0.7, 0.85, 0.05 * r, SUN_CORE, 0.6, 0, hit + 0.1);
+    // Scorched-golden ground: a warm burnt patch and a glow over it, both fading over ~2.5 s.
+    ring(x, gy - 0.01, z, r * 0.55, r * 0.85, 2.6, 0.1, SUN_SCORCH, 0.38, 3, hit, Math.random() * 6.28);
+    ring(x, gy, z, r * 0.3, r * 0.75, 1.8, 0.3, SUN_GOLD, 0.16, 1, hit + 0.05);
+    // Embers shooting up, petals tossed out.
+    for (let i = 0; i < n(36); i++) {
+      const a = Math.random() * 6.283;
+      const d = r * Math.sqrt(Math.random()) * 0.7;
+      reset(x + Math.cos(a) * d, gy + 0.2, z + Math.sin(a) * d, S_SPARK, rnd(0.7, 1.4));
+      P.delay = hit + rnd(0, 0.12);
+      const sp = rnd(2, 6);
+      P.vx = Math.cos(a) * sp * 0.6;
+      P.vy = rnd(3, 8);
+      P.vz = Math.sin(a) * sp * 0.6;
+      P.drag = 2.2;
+      P.grav = 2.5;
+      P.s0 = rnd(0.12, 0.2);
+      P.s1 = 0.03;
+      P.stretch = 0.1;
+      P.fadeOut = 0.5;
+      col(i % 3 ? SUN_GOLD : SUN_CORE, rnd(1, 1.5));
+      emit(add);
+    }
+    for (let i = 0; i < n(24); i++) {
+      randDir(true);
+      reset(x + D.x * r * 0.3, gy + 0.4, z + D.z * r * 0.3, i % 3 ? S_PETAL : S_LEAF, rnd(1.4, 2.2));
+      P.delay = hit;
+      const sp = rnd(3, 7);
+      P.vx = D.x * sp;
+      P.vy = rnd(2.5, 5);
+      P.vz = D.z * sp;
+      P.drag = 1.6;
+      P.grav = 3;
+      P.s0 = P.s1 = rnd(0.16, 0.26);
+      P.spin = rnd(-7, 7);
+      P.rot = Math.random() * 6.28;
+      P.floor = gy + 0.03;
+      P.fadeOut = 0.75;
+      col(pick(SUN_PETALS), rnd(0.95, 1.1));
+      emit(soft);
+    }
+    // Warm dust rolling out low along the ground.
+    const dusts = n(12);
+    for (let i = 0; i < dusts; i++) {
+      const a = (i / dusts) * 6.283 + rnd(-0.2, 0.2);
+      reset(x + Math.cos(a) * r * 0.3, gy + 0.25, z + Math.sin(a) * r * 0.3, S_SMOKE, rnd(0.9, 1.4));
+      P.delay = hit;
+      P.vx = Math.cos(a) * r * 1.6;
+      P.vy = rnd(0.2, 0.6);
+      P.vz = Math.sin(a) * r * 1.6;
+      P.drag = 3;
+      P.s0 = 0.5;
+      P.s1 = rnd(1.1, 1.6);
+      P.spin = rnd(-1, 1);
+      P.rot = Math.random() * 6.28;
+      P.a = 0.4;
+      P.fadeOut = 0.35;
+      col(DUST, rnd(1, 1.1));
+      emit(soft);
+    }
+  };
+
   // ---- update helpers -------------------------------------------------------------------------------------------
 
   const updateMissiles = (dt: number) => {
@@ -1598,6 +1945,110 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
     }
     missileMesh.count = count;
     if (count) missileMesh.instanceMatrix.needsUpdate = true;
+  };
+
+  const updateBombs = (dt: number) => {
+    let count = 0;
+    for (const b of bombs) {
+      if (!b.active) continue;
+      b.age += dt;
+      const t = b.target();
+      if (t) {
+        b.tx = t.x;
+        b.ty = t.y;
+        b.tz = t.z;
+      }
+      if (b.age > b.ft + 0.6) {
+        // Never told to splash: a small drip where it came down.
+        b.active = false;
+        bombById.delete(b.mid);
+        droplets(b.px, b.py, b.pz, n(6), 1.5, 2, 0.2, Math.max(0, b.py - 0.6), 0.1);
+        continue;
+      }
+      const s = Math.min(1, b.age / b.ft);
+      if (s >= 1) continue;
+      // High lob: linear across the ground, a parabola over it that lands exactly on the target at s = 1.
+      const nx = b.fx + (b.tx - b.fx) * s;
+      const nz = b.fz + (b.tz - b.fz) * s;
+      const ny = b.fy + (b.ty - b.fy) * s + 4 * b.apex * s * (1 - s);
+      const step = Math.hypot(nx - b.px, ny - b.py, nz - b.pz);
+      // A thin trail of droplets every ~18 cm.
+      b.trail += step;
+      const gap = 0.18 / Math.max(0.4, q);
+      while (b.trail > gap) {
+        b.trail -= gap;
+        reset(nx + rnd(-0.06, 0.06), ny + rnd(-0.06, 0.06), nz + rnd(-0.06, 0.06), S_DOT, rnd(0.3, 0.5));
+        P.vx = rnd(-0.3, 0.3);
+        P.vy = rnd(-0.2, 0.3);
+        P.vz = rnd(-0.3, 0.3);
+        P.grav = 7;
+        P.s0 = rnd(0.13, 0.2);
+        P.s1 = 0.05;
+        P.a = 0.75;
+        P.fadeOut = 0.4;
+        col(Math.random() < 0.35 ? WATER_PALE : WATER, 1.1);
+        emit(soft);
+      }
+      b.px = nx;
+      b.py = ny;
+      b.pz = nz;
+      // Wobble: squash and stretch around a slowly turning axis.
+      const w = 0.16 * Math.sin(b.age * 19 + b.phase);
+      const w2 = 0.1 * Math.sin(b.age * 13 + b.phase * 1.7);
+      mpos.set(nx, ny, nz);
+      mq.setFromAxisAngle(UP, b.age * 2.5 + b.phase);
+      mscale.set(1 + w, 1 - w + w2, 1 + w2);
+      mtx.compose(mpos, mq, mscale);
+      bombMesh.setMatrixAt(count++, mtx);
+      sprite(nx, ny, nz, 0.75, WATER, 0.55, 0.8);
+      sprite(nx - 0.06, ny + 0.08, nz + 0.04, 0.13, HOT_WHITE, 1.4, 0.9);
+    }
+    mscale.set(1, 1, 1);
+    bombMesh.count = count;
+    if (count) bombMesh.instanceMatrix.needsUpdate = true;
+  };
+
+  const updateSuns = (dt: number) => {
+    for (const s of suns) {
+      if (!s.active) continue;
+      const u = time - s.t0;
+      if (u > 0.5) {
+        s.active = false;
+        continue;
+      }
+      // Beam: snaps down in 0.08 s, holds, thins out by 0.5 s.
+      const env = u < 0.08 ? u / 0.08 : 1 - Math.min(1, Math.max(0, (u - 0.14) / 0.36)) ** 1.5;
+      const top = s.y + 34;
+      const hw = s.r * (0.22 + 0.12 * env) * (0.6 + 0.4 * env);
+      const bot = s.y + 0.15;
+      const reach = u < 0.08 ? top - (top - bot) * (u / 0.08) : bot;
+      seg(s.x, top, s.z, s.x, reach, s.z, hw, SUN_GOLD, 0.55 * env, 0.2, -14, 0.4, 7);
+      seg(s.x, top, s.z, s.x, reach, s.z, hw * 0.36, SUN_CORE, 0.7 * env, 0.5, -20, 0.3, 3);
+      sprite(s.x, reach + s.r * 0.3, s.z, s.r * 0.85 * env, SUN_GOLD, 0.6, env);
+      // Light motes drifting down the column.
+      s.acc += dt * 90 * q * env;
+      while (s.acc >= 1) {
+        s.acc -= 1;
+        const a = Math.random() * 6.283;
+        const d = hw * Math.sqrt(Math.random()) * 0.8;
+        reset(s.x + Math.cos(a) * d, s.y + rnd(1, 9), s.z + Math.sin(a) * d, Math.random() < 0.3 ? S_STAR : S_SPARK, rnd(0.3, 0.5));
+        P.vy = -rnd(4, 9);
+        P.drag = 0.5;
+        P.s0 = rnd(0.1, 0.18);
+        P.s1 = 0.03;
+        P.stretch = 0.06;
+        P.spin = 3;
+        col(Math.random() < 0.5 ? SUN_CORE : SUN_GOLD, 1.2);
+        emit(add);
+      }
+    }
+  };
+
+  const updateAim = (dt: number) => {
+    aimAlpha += ((aimOn ? 1 : 0) - aimAlpha) * (1 - Math.exp(-dt * 14));
+    if (!aimOn && aimAlpha < 0.01) aimAlpha = 0;
+    aim.visible = aimAlpha > 0;
+    aimMat.uniforms.uAlpha.value = aimAlpha;
   };
 
   const updateBeams = (dt: number) => {
@@ -2035,7 +2486,8 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
     death(at, kind, gold) {
       const half = KIND_HALF[kind];
       const big = kind === 'brute' || kind === 'colossus';
-      const floor = Math.max(0, at.y - half) + 0.03;
+      // Glow Moths die in the air: their pieces fall all the way to the ground.
+      const floor = Math.max(0, at.y - half - (kind === 'moth' ? FLY_HEIGHT : 0)) + 0.03;
       const cy = Math.max(at.y, floor + half * 0.8);
       const cols = KIND_COLS[kind];
       const count = n(KIND_SHARDS[kind]);
@@ -2067,7 +2519,102 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
       flash(at.x, cy, at.z, half * 3.2, fc, 2, 0.2);
       puff(at.x, cy - half * 0.3, at.z, n(big ? 8 : 4), CREAM, 0.9, half * 1.1, 1.6 * half + 0.5, 0.9, 0.35, 0.4);
       ring(at.x, floor - 0.03, at.z, half * 0.4, half * (big ? 2.6 : 3), big ? 0.6 : 0.4, (big ? 0.2 : 0.3) * half, fc, big ? 0.9 : 0.6, 0);
+      if (kind === 'moth') {
+        // Wing shards fluttering down: amber and mint flakes spinning as they fall.
+        for (let i = 0; i < n(14); i++) {
+          randDir(true);
+          reset(at.x + D.x * 0.3, cy + D.y * 0.2, at.z + D.z * 0.3, i % 4 === 0 ? S_SHARD : S_PETAL, rnd(1.6, 2.4));
+          P.vx = D.x * rnd(1, 2.5);
+          P.vy = rnd(0.5, 2);
+          P.vz = D.z * rnd(1, 2.5);
+          P.drag = 2.6;
+          P.grav = 1.4;
+          P.s0 = P.s1 = rnd(0.14, 0.22);
+          P.spin = rnd(5, 10) * (Math.random() < 0.5 ? -1 : 1);
+          P.rot = Math.random() * 6.28;
+          P.floor = floor;
+          P.fadeOut = 0.8;
+          col(pick(MOTH_WINGS), rnd(0.95, 1.15));
+          emit(soft);
+        }
+        // Its glow dust drifting off.
+        for (let i = 0; i < n(10); i++) {
+          randDir();
+          reset(at.x, cy, at.z, S_GLOW, rnd(0.6, 1));
+          P.vx = D.x * 1.2;
+          P.vy = D.y * 1.2 - 0.3;
+          P.vz = D.z * 1.2;
+          P.drag = 2;
+          P.s0 = rnd(0.1, 0.18);
+          P.s1 = 0.03;
+          P.fadeOut = 0.5;
+          col(i % 2 ? AMBER : MINT, 1.6);
+          emit(add);
+        }
+      } else if (kind === 'bloomkin') {
+        confetti(at.x, cy, at.z, n(18), S_PETAL, PETALS, 4, 1.8, 0.24, floor);
+        confetti(at.x, cy, at.z, n(8), S_LEAF, LEAVES, 3.5, 1.6, 0.22, floor);
+        ring(at.x, floor - 0.03, at.z, 0.2, 2.2, 0.7, 0.1, HEAL_GREEN, 0.5, 0, 0.05);
+      }
       if (gold > 0) goldText(at.x, cy + half + 0.35, at.z, gold);
+    },
+
+    water(mid, from, target, ft) {
+      let b: Bomb | undefined;
+      for (const c of bombs)
+        if (!c.active) {
+          b = c;
+          break;
+        }
+      if (!b) return;
+      const t = target();
+      b.active = true;
+      b.mid = mid;
+      b.fx = b.px = from.x;
+      b.fy = b.py = from.y;
+      b.fz = b.pz = from.z;
+      b.tx = t ? t.x : from.x;
+      b.ty = t ? t.y : from.y;
+      b.tz = t ? t.z : from.z;
+      b.target = target;
+      b.ft = Math.max(0.05, ft);
+      b.age = 0;
+      b.apex = 1.6 + Math.hypot(b.tx - b.fx, b.tz - b.fz) * 0.32;
+      b.trail = 0;
+      b.phase = Math.random() * 6.28;
+      bombById.set(mid, b);
+      // A wet "pop" out of the nozzle.
+      flash(from.x, from.y, from.z, 0.7, WATER, 0.9, 0.12);
+      droplets(from.x, from.y, from.z, n(6), 1.2, 2.5, 0.18, Math.max(0, from.y - 1.5), 0.08);
+    },
+
+    splash(mid, at, radius) {
+      const b = bombById.get(mid);
+      if (b) {
+        b.active = false;
+        bombById.delete(mid);
+      }
+      splashAt(at.x, at.y, at.z, radius);
+    },
+
+    heal(at, radius) {
+      healAt(at.x, at.y, at.z, radius);
+    },
+
+    sunburst(at, radius) {
+      sunburstAt(at.x, at.y, at.z, radius);
+    },
+
+    sunAim(at, radius) {
+      if (!at) {
+        aimOn = false;
+        return;
+      }
+      aimOn = true;
+      aim.position.set(at.x, at.y + 0.05, at.z);
+      const r = Math.max(0.5, radius);
+      aim.scale.set(r, 1, r);
+      aimMat.uniforms.uR.value = r;
     },
 
     leak(at) {
@@ -2235,6 +2782,9 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
       time += step;
       uTime.value = time;
       updateMissiles(step);
+      updateBombs(step);
+      updateSuns(step);
+      updateAim(step);
       updateFields(step, _camera);
       updateDisabled(step);
       updateBeams(step);
@@ -2259,9 +2809,10 @@ export const createFx: CreateFx = (scene: THREE.Scene, quality: Quality) => {
       fields.clear();
       dyingFields.length = 0;
       scene.remove(group);
-      for (const g of [add.geo, soft.geo, text.geo, ringsN.geo, ringsA.geo, shardGeo, segGeo, spriteGeo, missileGeo, discGeo, domeGeo]) g.dispose();
-      for (const m of [add.mat, soft.mat, text.mat, ringsN.mat, ringsA.mat, shardMat, segMat, spriteMat, missileMat]) m.dispose();
+      for (const g of [add.geo, soft.geo, text.geo, ringsN.geo, ringsA.geo, shardGeo, segGeo, spriteGeo, missileGeo, bombGeo, discGeo, domeGeo]) g.dispose();
+      for (const m of [add.mat, soft.mat, text.mat, ringsN.mat, ringsA.mat, shardMat, segMat, spriteMat, missileMat, bombMat, aimMat]) m.dispose();
       missileMesh.dispose();
+      bombMesh.dispose();
       atlas.dispose();
     },
   };

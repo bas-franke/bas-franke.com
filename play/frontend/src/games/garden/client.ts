@@ -4,9 +4,9 @@
 
 import * as THREE from 'three';
 import type { GameServerMsg, PlayerInfo, RoomView } from '@shared/protocol';
-import { type BoardOrigin, type RouteGeom, boardOrigin, cellAt, cellToWorld, routeGeom, routePos, worldToCell } from '@shared/garden/board';
+import { type BoardOrigin, type RouteGeom, allRoutes, boardOrigin, cellAt, cellToWorld, routeGeom, routePos, worldToCell } from '@shared/garden/board';
 import { G, type GMode, coopCount } from '@shared/garden/constants';
-import { ENEMIES, type EnemyKind, SKITTER_PACK, waveSpawns } from '@shared/garden/enemies';
+import { ENEMIES, type EnemyKind, FLY_HEIGHT, SKITTER_PACK, waveSpawns } from '@shared/garden/enemies';
 import { type GMapDef, gmapById, isBuildableChar } from '@shared/garden/maps';
 import {
   type BoardInfo,
@@ -134,7 +134,11 @@ const OVERDUE = 1;
 /** Versus auto-follow: seconds of no camera input before it takes over again, and between board switches. */
 const FOLLOW_IDLE = 25;
 const FOLLOW_SWITCH = 12;
-const COSMETIC = new Set<GEvent['k']>(['msl', 'boom', 'zap', 'ping', 'dis', 'shed']);
+const COSMETIC = new Set<GEvent['k']>(['msl', 'boom', 'zap', 'ping', 'dis', 'shed', 'heal', 'sun']);
+/** Touch Sunburst: a second tap this close (m) to the aimed point fires it. */
+const SUN_TAP_REACH = 2.2;
+/** Seconds between Glow Moth flutter sounds. */
+const MOTH_SOUND_EVERY = 2.6;
 /** Touch: pixels per cell to aim for at the home zoom. */
 const TOUCH_CELL_PX = 26;
 /** Portrait phones: CSS px the HUD covers at the top (status rows) and bottom (build cards). */
@@ -183,6 +187,8 @@ const emptyHud = (quality: Quality, you: string): GHudState => ({
   end: null,
   quality,
   paused: false,
+  sun: 0,
+  aimingSun: false,
 });
 
 const isTyping = (e: Event) => {
@@ -293,6 +299,17 @@ export class GardenClient implements GameClient {
   private pointer = { x: 0, y: 0, inside: false, mouse: false, moved: false };
   /** Touch placement: the cell the ghost sits on (a second tap there builds). */
   private touchGhost: { col: number; row: number } | null = null;
+  /** Touch Sunburst: the aimed point (a second tap near it strikes). */
+  private touchSun: { x: number; z: number } | null = null;
+  private sunAimShown = false;
+  /** Missile ids that are sprinkler water bombs drawn with fx.water (their 'boom' becomes a splash). */
+  private readonly waterMids = new Set<number>();
+  /** Camera shake (m of jitter, decays) and this frame's offset. */
+  private shake = 0;
+  private readonly shakeOff = { x: 0, y: 0, z: 0 };
+  private mothSoundAt = 0;
+  /** A snapshot has reported your Sunburst charges (later increases are toasted). */
+  private sunSeen = false;
   private selectedId: number | null = null;
 
   constructor(private readonly ctx: ClientContext) {
@@ -315,6 +332,7 @@ export class GardenClient implements GameClient {
         this.send({ k: 'send', e: kind, to });
         this.audio?.play('click');
       },
+      sun: () => this.setAimingSun(!this.store.get().aimingSun),
       viewBoard: (b) => {
         this.markManual();
         this.viewBoard(b);
@@ -441,6 +459,7 @@ export class GardenClient implements GameClient {
       case 'end': {
         this.store.set({ end: { win: m.win, winner: m.winner, wave: m.wave }, scores: m.scores, phase: 'over', placing: null });
         this.units?.ghost(null);
+        this.setAimingSun(false);
         const won = this.mode === 'coop' ? m.win : m.winner === this.ctx.you;
         this.audio?.play(won ? 'victory' : 'defeat');
         return;
@@ -468,7 +487,8 @@ export class GardenClient implements GameClient {
     this.mode = m.mode;
     this.boards = m.boards;
     this.origins = m.boards.map((_, i) => boardOrigin(def, i, m.boards.length));
-    this.geoms = this.origins.map((o) => def.routes.map((r) => routeGeom(def, o, r)));
+    // Ground routes, then their air routes (wire route index >= def.routes.length: flying Glow Moths).
+    this.geoms = this.origins.map((o) => allRoutes(def).map((r) => routeGeom(def, o, r)));
     this.initBoard = m.myBoard;
     this.towers.clear();
     this.towerLive.clear();
@@ -490,7 +510,10 @@ export class GardenClient implements GameClient {
     }
     this.selectedId = null;
     this.lastWave = -1;
+    this.waterMids.clear();
+    this.touchSun = null;
     this.store.set({
+      aimingSun: false,
       mode: m.mode,
       mapName: m.map.name,
       wave: m.wave,
@@ -613,6 +636,18 @@ export class GardenClient implements GameClient {
       gold: me?.gold ?? 0,
       income: me?.inc ?? 0,
     };
+    const sun = me?.sun ?? 0;
+    if (sun !== (hud.sun ?? 0)) {
+      patch.sun = sun;
+      // A new charge (not the first snapshot after joining): say so once.
+      if (sun > (hud.sun ?? 0) && this.sunSeen) {
+        this.toast('Sunburst ready! Press G (or the sun button) and click the garden', 'good');
+        this.audio?.play('coin', { amount: 0.5 });
+      }
+    }
+    this.sunSeen = true;
+    // Out of charges (or a spectator now): stop aiming.
+    if (hud.aimingSun && (sun <= 0 || this.isSpectator())) patch.aimingSun = false;
     const mb = this.myBoard();
     if (mb !== hud.myBoard) patch.myBoard = mb;
     const spectator = this.isSpectator();
@@ -696,7 +731,7 @@ export class GardenClient implements GameClient {
       const b = s[n - 1];
       if (b.t - a.t > 0 && b.t - a.t < 1.5) return Math.max(0, (b.d - a.d) / (b.t - a.t));
     }
-    return ENEMIES[tr.k].speed * (tr.f & EFlag.slowed ? 0.6 : 1);
+    return ENEMIES[tr.k].speed * (tr.f & (EFlag.slowed | EFlag.soaked) ? 0.6 : 1);
   }
 
   private intensity(s: GSnapshot) {
@@ -795,24 +830,55 @@ export class GardenClient implements GameClient {
         this.muzzleTurn.set(e.tw, turn + 1);
         const from = units?.muzzle(e.tw, turn) ?? { ...this.towerPos(t), y: 1.4 };
         let last: P3 | null = units?.enemyPos(e.en) ?? null;
-        fx?.missile(
-          e.mid,
-          from,
-          () => {
-            const p = this.units?.enemyPos(e.en);
-            if (p) last = { x: p.x, y: p.y, z: p.z };
-            return last;
-          },
-          e.ft,
-        );
-        audio?.play('missile', { at: from });
+        const target = () => {
+          const p = this.units?.enemyPos(e.en);
+          if (p) last = { x: p.x, y: p.y, z: p.z };
+          return last;
+        };
+        if (t.k === 'sprinkler' && fx?.water && fx.splash) {
+          // Sprinkler water bomb: its landing ('boom' with this mid) becomes a splash.
+          fx.water(e.mid, from, target, e.ft);
+          this.waterMids.add(e.mid);
+          if (this.waterMids.size > 256) this.waterMids.delete(this.waterMids.values().next().value as number);
+          audio?.play('missile', { at: from, amount: 0.45 });
+        } else {
+          fx?.missile(e.mid, from, target, e.ft);
+          audio?.play('missile', { at: from, amount: t.k === 'sprinkler' ? 0.45 : undefined });
+          if (t.k === 'sprinkler') this.waterMids.add(-e.mid);
+        }
         return;
       }
       case 'boom': {
         const at = v3(e.x, 0.3, e.z);
-        fx?.boom(e.mid, at, e.r);
-        this.ambience?.scare(e.x, e.z, e.r * 2.5);
-        audio?.play('boom', { at, amount: Math.min(1, e.r / 2.6) });
+        const water = this.waterMids.delete(e.mid);
+        const wet = water || this.waterMids.delete(-e.mid);
+        if (water && this.fx?.splash) fx?.splash?.(e.mid, at, e.r);
+        else fx?.boom(e.mid, at, e.r);
+        this.ambience?.scare(e.x, e.z, e.r * (wet ? 1.5 : 2.5));
+        audio?.play(wet ? 'splash' : 'boom', { at, amount: Math.min(1, e.r / 2.6) });
+        return;
+      }
+      case 'heal': {
+        const p = units?.enemyPos(e.en);
+        units?.cast(e.en);
+        if (p) {
+          const at = v3(p.x, 0.1, p.z);
+          fx?.heal?.(at, e.r);
+          audio?.play('heal', { at, amount: Math.min(1, 0.4 + e.n * 0.1) });
+        }
+        return;
+      }
+      case 'sun': {
+        const at = v3(e.x, 0, e.z);
+        fx?.sunburst?.(at, e.r);
+        audio?.play('sun', { at });
+        if (!quiet) {
+          this.ambience?.scare(e.x, e.z, e.r * 3);
+          // A small kick when it lands in view (your own strike, or the board you watch).
+          const near = Math.hypot(e.x - this.cam.x, e.z - this.cam.z) < this.cam.dist;
+          if (near) this.shake = Math.max(this.shake, e.by === you ? 0.35 : 0.22);
+        }
+        if (e.by !== you && this.mode === 'coop') this.toast(`${this.playerName(e.by)} called down a Sunburst`, 'info');
         return;
       }
       case 'zap':
@@ -1094,6 +1160,7 @@ export class GardenClient implements GameClient {
     list.length = 0;
     const pos = this.routeTmp;
     const k = Math.exp(-6 * dt);
+    let moth: EnemyFrame | null = null;
     for (const tr of this.tracks.values()) {
       if (T >= tr.removeAt) {
         this.tracks.delete(tr.id);
@@ -1126,7 +1193,7 @@ export class GardenClient implements GameClient {
       const speed = Math.max(0, Math.min(2, this.trackSpeed(tr) / ENEMIES[tr.k].speed));
       let fr = pool[list.length];
       if (!fr) {
-        fr = { id: 0, kind: tr.k, b: 0, x: 0, z: 0, yaw: 0, hp: 1, f: 0, speed: 1 };
+        fr = { id: 0, kind: tr.k, b: 0, x: 0, z: 0, yaw: 0, hp: 1, f: 0, speed: 1, y: 0 };
         pool.push(fr);
       }
       fr.id = tr.id;
@@ -1138,9 +1205,19 @@ export class GardenClient implements GameClient {
       fr.hp = tr.hp;
       fr.f = tr.f;
       fr.speed = speed;
+      fr.y = ENEMIES[tr.k].fly ? FLY_HEIGHT : 0;
+      if (fr.y && (!moth || Math.random() < 0.3)) moth = fr;
       list.push(fr);
     }
     this.units!.syncEnemies(list);
+    // A soft flutter now and then while Glow Moths are about (near the camera).
+    if (moth) {
+      const now = performance.now() / 1000;
+      if (now - this.mothSoundAt > MOTH_SOUND_EVERY && Math.hypot(moth.x - this.cam.x, moth.z - this.cam.z) < this.cam.dist * 0.8) {
+        this.mothSoundAt = now;
+        this.audio?.play('moth', { at: v3(moth.x, FLY_HEIGHT, moth.z), amount: 0.35 });
+      }
+    }
     if (this.memo.size > list.length + 200) {
       const keep = this.keepIds;
       keep.clear();
@@ -1171,7 +1248,7 @@ export class GardenClient implements GameClient {
       let on = false;
       for (let i = 0; i < list.length && !on; i++) {
         const e = list[i];
-        if (e.b !== t.b) continue;
+        if (e.b !== t.b || e.y) continue; // flyers pass over the flower fields
         const dx = e.x - p.x;
         const dz = e.z - p.z;
         on = dx * dx + dz * dz <= r2;
@@ -1601,6 +1678,18 @@ export class GardenClient implements GameClient {
     c.z = damp(c.z, this.goal.z, 10, dt);
     c.dist = damp(c.dist, this.goal.dist, 9, dt);
     c.yaw = lerpAngle(c.yaw, this.goal.yaw, 1 - Math.exp(-8 * dt));
+    // Shake (Sunburst): jitter scaled with the zoom, decaying fast.
+    const so = this.shakeOff;
+    if (this.shake > 0.001) {
+      const a = this.shake * this.shake * c.dist * 0.02;
+      so.x = (Math.random() * 2 - 1) * a;
+      so.y = (Math.random() * 2 - 1) * a * 0.6;
+      so.z = (Math.random() * 2 - 1) * a;
+      this.shake *= Math.exp(-5 * dt);
+    } else {
+      this.shake = 0;
+      so.x = so.y = so.z = 0;
+    }
     this.applyCamera();
     // Versus: the board the camera is over is the one the HUD shows.
     if (this.mode === 'vs' && this.origins.length > 1) {
@@ -1634,8 +1723,9 @@ export class GardenClient implements GameClient {
     if (!cam) return;
     const c = this.cam;
     const horiz = Math.cos(PITCH) * c.dist;
-    cam.position.set(c.x + Math.sin(c.yaw) * horiz, Math.sin(PITCH) * c.dist, c.z + Math.cos(c.yaw) * horiz);
-    cam.lookAt(c.x, 0, c.z);
+    const so = this.shakeOff;
+    cam.position.set(c.x + Math.sin(c.yaw) * horiz + so.x, Math.sin(PITCH) * c.dist + so.y, c.z + Math.cos(c.yaw) * horiz + so.z);
+    cam.lookAt(c.x + so.x, so.y, c.z + so.z);
     cam.updateMatrixWorld();
   }
 
@@ -1740,7 +1830,7 @@ export class GardenClient implements GameClient {
       return;
     }
     // Drag pans: left (when not placing), right, middle, one finger. The grabbed ground point stays under the pointer.
-    const placingMouseLeft = p.type === 'mouse' && p.button === 0 && this.store.get().placing !== null;
+    const placingMouseLeft = p.type === 'mouse' && p.button === 0 && (this.store.get().placing !== null || !!this.store.get().aimingSun);
     if (p.moved && !placingMouseLeft) this.dragTo(p.grab, x, y);
   };
 
@@ -1778,7 +1868,8 @@ export class GardenClient implements GameClient {
       return;
     }
     if (p.button === 2) {
-      if (this.store.get().placing) this.setPlacing(null);
+      if (this.store.get().aimingSun) this.setAimingSun(false);
+      else if (this.store.get().placing) this.setPlacing(null);
       else this.select(null);
       return;
     }
@@ -1821,6 +1912,21 @@ export class GardenClient implements GameClient {
   }
 
   private click(x: number, y: number, keep: boolean, touch: boolean) {
+    if (this.store.get().aimingSun) {
+      const hit = this.sunPointAt(x, y);
+      if (!hit) return;
+      const t = this.touchSun;
+      if (touch && (!t || Math.hypot(t.x - hit.x, t.z - hit.z) > SUN_TAP_REACH)) {
+        // First tap aims, a second tap near the ring strikes.
+        this.touchSun = hit;
+        this.audio?.play('hover');
+        return;
+      }
+      const at = touch && t ? t : hit;
+      this.send({ k: 'sun', x: Math.round(at.x * 100) / 100, z: Math.round(at.z * 100) / 100 });
+      this.setAimingSun(false);
+      return;
+    }
     const placing = this.store.get().placing;
     if (placing) {
       const cell = touch ? this.touchCellAt(x, y) : this.cellAtScreen(x, y);
@@ -1931,7 +2037,59 @@ export class GardenClient implements GameClient {
     return null;
   }
 
+  /** Sunburst aim point under screen x/y, clamped to the board you defend (null off the ground / no board). */
+  private sunPointAt(x: number, y: number): { x: number; z: number } | null {
+    const hit = this.groundAt(x, y, this.tmpV);
+    const b = this.buildBoard();
+    const o = this.origins[b];
+    if (!hit || !o) return null;
+    const { w, h } = this.boardSize();
+    return { x: Math.max(o.x - w / 2, Math.min(o.x + w / 2, hit.x)), z: Math.max(o.z - h / 2, Math.min(o.z + h / 2, hit.z)) };
+  }
+
+  /** The Sunburst ring under the pointer (or the touch-aimed point) while aiming. */
+  private updateSunAim() {
+    const fx = this.fx;
+    if (!fx?.sunAim) return;
+    let at: { x: number; z: number } | null = null;
+    if (this.store.get().aimingSun) {
+      if (this.touchSun) at = this.touchSun;
+      else if (this.pointer.inside && this.pointer.mouse) at = this.sunPointAt(this.pointer.x, this.pointer.y);
+    }
+    if (at) {
+      fx.sunAim(v3(at.x, 0.05, at.z), G.sun.radius);
+      this.sunAimShown = true;
+    } else if (this.sunAimShown) {
+      fx.sunAim(null, G.sun.radius);
+      this.sunAimShown = false;
+    }
+  }
+
+  /** Start / stop aiming a Sunburst (exclusive with placing a tower). */
+  private setAimingSun(on: boolean) {
+    const hud = this.store.get();
+    if (on) {
+      if (hud.phase === 'over' || this.buildBoard() < 0) on = false;
+      else if ((hud.sun ?? 0) <= 0) {
+        this.toast(`No Sunburst charge yet (one every ${G.sun.every} waves)`, 'bad');
+        this.audio?.play('deny');
+        on = false;
+      }
+    }
+    this.touchSun = null;
+    if (on) {
+      if (hud.placing) this.setPlacing(null);
+      this.select(null);
+    }
+    if (on !== !!hud.aimingSun) {
+      this.audio?.play('click', { amount: 0.5 });
+      this.store.set({ aimingSun: on });
+    }
+    if (!on) this.updateSunAim();
+  }
+
   private updatePlacement() {
+    this.updateSunAim();
     const placing = this.store.get().placing;
     const units = this.units!;
     if (!placing || !this.def) {
@@ -1959,7 +2117,7 @@ export class GardenClient implements GameClient {
     this.cursorAt = now;
     let c = 'default';
     if (this.presses.size && [...this.presses.values()].some((p) => p.moved)) c = 'grabbing';
-    else if (this.store.get().placing) c = 'crosshair';
+    else if (this.store.get().placing || this.store.get().aimingSun) c = 'crosshair';
     else if (this.pointer.inside && this.pointer.mouse && this.units?.pickTower(this.rayAt(this.pointer.x, this.pointer.y)) != null) c = 'pointer';
     if (c !== this.cursor) {
       this.cursor = c;
@@ -1971,6 +2129,7 @@ export class GardenClient implements GameClient {
     if (kind && (this.store.get().phase === 'over' || this.buildBoard() < 0)) kind = null;
     this.touchGhost = null;
     if (kind) this.select(null);
+    if (kind && this.store.get().aimingSun) this.setAimingSun(false);
     if (kind !== this.store.get().placing) this.audio?.play('click', { amount: 0.5 });
     this.store.set({ placing: kind });
     if (!kind) this.units?.ghost(null);
@@ -2059,8 +2218,9 @@ export class GardenClient implements GameClient {
     if (isTyping(e)) return;
     if (e.code === 'Escape') {
       // Cancel placement / deselect before the room's escape menu sees the key.
-      if (!this.paused && (this.store.get().placing || this.selectedId !== null)) {
-        if (this.store.get().placing) this.setPlacing(null);
+      if (!this.paused && (this.store.get().aimingSun || this.store.get().placing || this.selectedId !== null)) {
+        if (this.store.get().aimingSun) this.setAimingSun(false);
+        else if (this.store.get().placing) this.setPlacing(null);
         else this.select(null);
         e.stopImmediatePropagation();
         e.preventDefault();
@@ -2107,6 +2267,9 @@ export class GardenClient implements GameClient {
         return;
       case 'KeyR':
         this.actions.ready();
+        return;
+      case 'KeyG':
+        this.actions.sun();
         return;
       case 'Tab':
         this.store.set({ scoresOpen: true });

@@ -22,7 +22,8 @@
 // play() options:
 //   amount   boom: size 0..1 (values above 1.5 are read as a blast radius in metres); upgrade: the new level (1..3);
 //            coin / sell: how much (more coins for bigger amounts)
-//   kind     die / dieBig: enemy kind (shard pitch and colour); build / upgrade: tower kind (a little timbre)
+//   kind     die / dieBig: enemy kind (shard pitch and colour; moth flutters, bloomkin sighs); build / upgrade: tower kind
+//            (a little timbre; the sprinkler gurgles)
 //
 // Music: generative, D major pentatonic at 96 BPM, an 8-bar AABA' tune on kalimba over pads, regenerated every 16
 // bars. setIntensity(0) is sparse and calm, 1 adds marimba arpeggios, bass and soft percussion, 2 is the boss
@@ -72,6 +73,10 @@ const RATE: Record<GSound, [number, number]> = {
   ping: [0.2, 2],
   victory: [3, 1],
   defeat: [3, 1],
+  splash: [0.12, 3],
+  heal: [0.4, 2],
+  sun: [0.5, 2],
+  moth: [0.7, 1],
 };
 
 /** Combat sounds hold a voice for this long (others always play). */
@@ -84,6 +89,7 @@ const COMBAT: Partial<Record<GSound, number>> = {
   blocked: 0.7,
   die: 0.4,
   dieBig: 1.2,
+  splash: 0.35,
 };
 
 /** Reverb send per sound. */
@@ -103,10 +109,13 @@ const VERB: Partial<Record<GSound, number>> = {
   coin: 0.15,
   sell: 0.15,
   disrupt: 0.2,
+  splash: 0.12,
+  heal: 0.4,
+  sun: 0.35,
 };
 
 /** Positional sounds that never fade below this (you must hear a leak on your board). */
-const FLOOR: Partial<Record<GSound, number>> = { leak: 0.45, ping: 0.4, incoming: 1, send: 0.5 };
+const FLOOR: Partial<Record<GSound, number>> = { leak: 0.45, ping: 0.4, incoming: 1, send: 0.5, sun: 0.5 };
 
 /** Level trims per sound, set from the lab's offline readings (lab-garden-audio.html?measure=1). */
 const TRIM: Partial<Record<GSound, number>> = {
@@ -122,10 +131,14 @@ const TRIM: Partial<Record<GSound, number>> = {
   ping: 1.6,
   bossWave: 0.85,
   victory: 0.85,
+  splash: 1.5,
+  heal: 0.7,
+  sun: 1.12,
+  moth: 2.5,
 };
 
-const DIE_PITCH: Record<EnemyKind, number> = { runner: 2300, skitter: 3100, disruptor: 1900, brute: 1500, colossus: 1100 };
-const TOWER_PITCH: Record<TowerKind, number> = { laser: 1.08, shield: 0.92, slow: 1, missile: 0.84, beacon: 1.18 };
+const DIE_PITCH: Record<EnemyKind, number> = { runner: 2300, skitter: 3100, disruptor: 1900, brute: 1500, colossus: 1100, moth: 2700, bloomkin: 1700 };
+const TOWER_PITCH: Record<TowerKind, number> = { laser: 1.08, shield: 0.92, slow: 1, missile: 0.84, beacon: 1.18, sprinkler: 0.96 };
 
 const mf = (m: number) => 440 * 2 ** ((m - 69) / 12);
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -812,6 +825,19 @@ class Graph implements GAudio {
     lfo.stop(t + dur + 0.03);
   }
 
+  /** A water droplet: a short sine blip sliding up. */
+  private drop(out: AudioNode, t: number, f: number, gain: number) {
+    this.tone(out, t, f, rnd(0.03, 0.06), 'sine', gain, rnd(1.6, 2.4), 0.002);
+  }
+
+  /** Wingbeats: `beats` quick band-passed noise puffs about 45 ms apart, swelling then fading. */
+  private flutter(out: AudioNode, t: number, beats: number, gain: number, f: number) {
+    for (let i = 0; i < beats; i++) {
+      const env = Math.sin(((i + 0.5) / beats) * Math.PI);
+      this.noise(out, t + i * rnd(0.04, 0.05), 0.035, gain * (0.4 + 0.6 * env), 'bandpass', f * rnd(0.9, 1.1), f * 0.7, 1.4, this.pink, 0.008);
+    }
+  }
+
   private emit(ctx: BaseAudioContext, name: GSound, out: AudioNode, t: number, a: number, opts: Opts) {
     const r = rnd(0.94, 1.06);
     const amount = opts.amount ?? 0.5;
@@ -875,6 +901,12 @@ class Graph implements GAudio {
         this.noise(out, t, big ? 0.14 : 0.06, (big ? 0.18 : 0.12) * a, 'highpass', 4200, 4200, 0.7, this.white, 0.001);
         this.tone(out, t, (big ? 300 : 620) * r, big ? 0.12 : 0.06, 'sine', 0.16 * a, 0.5, 0.002);
         if (kind === 'disruptor') this.warble(out, t, 880 * r, 0.25, 0.06 * a, 0.7, 14, 50);
+        if (kind === 'moth') this.flutter(out, t + 0.02, 5, 0.05 * a, 900 * r);
+        if (kind === 'bloomkin') {
+          // A wilting two-note kalimba sigh.
+          this.kalimba(out, t + 0.03, mf(81) * r, 0.5, 0.07 * a);
+          this.kalimba(out, t + 0.13, mf(76) * r, 0.6, 0.06 * a);
+        }
         if (big) {
           const deep = kind === 'colossus' ? 0.75 : 1;
           this.tone(out, t, 140 * r * deep, 0.45, 'sine', 0.55 * a, 0.36, 0.005);
@@ -897,8 +929,54 @@ class Graph implements GAudio {
         this.tone(out, t + 0.01, 2300 * r * k, 0.05, 'sine', 0.08 * a, 1, 0.001);
         this.tone(out, t + 0.01, 3450 * r * k, 0.035, 'sine', 0.04 * a, 1, 0.001);
         for (let i = 0; i < 5; i++) this.noise(out, t + 0.06 + i * rnd(0.03, 0.06), rnd(0.04, 0.08), rnd(0.05, 0.09) * a, 'bandpass', rnd(4500, 7000), rnd(3500, 5000), 0.9, this.white, 0.008);
+        // The sprinkler gurgles as it fills.
+        if (opts.kind === 'sprinkler') for (let i = 0; i < 3; i++) this.drop(out, t + 0.08 + i * 0.07, rnd(700, 1300), 0.035 * a);
         break;
       }
+      case 'splash': {
+        // Watery plop: a rising bubble "bloop", a wash of noise, then droplets pattering down.
+        const p = r * rnd(0.88, 1.12);
+        this.tone(out, t, 260 * p, 0.09, 'sine', 0.42 * a, 2.8, 0.003);
+        this.tone(out, t + 0.01, 520 * p, 0.06, 'sine', 0.1 * a, 2.2, 0.002);
+        this.noise(out, t, 0.22, 0.26 * a, 'lowpass', 2600 * p, 500, 0.8, this.pink, 0.004);
+        this.noise(out, t + 0.01, 0.12, 0.08 * a, 'bandpass', 5200, 3000, 1.2, this.white, 0.004);
+        const drops = 4 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < drops; i++) this.drop(out, t + 0.06 + Math.random() * 0.28, rnd(900, 2600) * p, rnd(0.04, 0.08) * a);
+        break;
+      }
+      case 'heal': {
+        // A soft rising chime arpeggio with a breath of air.
+        const notes = pick([
+          [74, 78, 81, 86],
+          [76, 81, 83, 88],
+          [74, 79, 83, 86],
+        ]);
+        notes.forEach((m, i) => this.bell(out, t + i * 0.075, mf(m) * r, 0.9, (i === 3 ? 0.07 : 0.085) * a));
+        this.tone(out, t, mf(62) * r, 0.7, 'sine', 0.06 * a, 1, 0.05);
+        this.noise(out, t, 0.5, 0.025 * a, 'highpass', 6000, 8000, 0.7, this.white, 0.15);
+        break;
+      }
+      case 'sun': {
+        // Sunburst: a warm swelling "whoom" down from the sky, a low thump on impact, a golden shimmer after.
+        this.duck(6, 1.4);
+        this.noise(out, t, 0.32, 0.3 * a, 'bandpass', 180, 1400, 0.9, this.pink, 0.22);
+        this.noise(out, t + 0.02, 0.3, 0.08 * a, 'highpass', 3000, 7000, 0.7, this.white, 0.25);
+        this.warble(out, t, 220, 0.38, 0.12 * a, 2, 6, 6, 'triangle', 0.25);
+        const hit = t + 0.1;
+        this.tone(out, hit, 95, 0.75, 'sine', 0.85 * a, 0.42, 0.006);
+        this.tone(out, hit, 190, 0.25, 'sine', 0.25 * a, 0.5, 0.004);
+        this.noise(out, hit, 0.9, 0.42 * a, 'lowpass', 1400, 90, 0.7, this.pink, 0.006);
+        this.noise(out, hit, 0.35, 0.12 * a, 'highpass', 2600, 2600, 0.7, this.crackle, 0.01);
+        // Warm chord swell and a sparkle of bells on top (D major).
+        for (const m of [50, 57, 62, 66]) this.horn(out, hit + 0.04, mf(m), 0.55, 0.045 * a);
+        [86, 90, 93, 98, 93].forEach((m, i) => this.bell(out, hit + 0.08 + i * 0.06, mf(m), 1.1, 0.05 * a));
+        this.noise(out, hit + 0.05, 1.2, 0.03 * a, 'highpass', 8000, 10000, 0.7, this.white, 0.2);
+        break;
+      }
+      case 'moth':
+        // A soft wingbeat flutter.
+        this.flutter(out, t, 6 + Math.floor(Math.random() * 3), 0.06 * a, rnd(600, 900) * r);
+        break;
       case 'upgrade': {
         // Rising sparkle arpeggio; level 3 climbs higher.
         const lv = clamp(Math.round(opts.amount ?? 2), 1, 3);

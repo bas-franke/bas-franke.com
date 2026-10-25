@@ -157,6 +157,8 @@ export interface EnemyFrame {
   f: number;
   /** Speed multiplier this frame (slowed enemies animate slower). */
   speed: number;
+  /** Height above the ground (flying Glow Moths cruise at FLY_HEIGHT; 0 or missing for walkers). */
+  y?: number;
 }
 
 export interface Units {
@@ -219,6 +221,16 @@ export interface Fx {
   /** Build dust + leaves / upgrade sparkle / sell poof. */
   build(at: P3, lv: Level): void;
   sell(at: P3): void;
+  /** Sprinkler water bomb arcing from `from` to an enemy (looked up each frame), landing after `ft` s; then splash(mid). */
+  water?(mid: number, from: P3, target: () => P3 | null, ft: number): void;
+  /** Water bomb landing: splash ring, droplets, a wet patch that fades (removes the bomb if still flying). */
+  splash?(mid: number, at: P3, radius: number): void;
+  /** Bloomkin heal pulse: a soft green-gold ring and rising petals. */
+  heal?(at: P3, radius: number): void;
+  /** Sunburst: a warm beam from the sky, a ground flash and a shock ring (radius m). */
+  sunburst?(at: P3, radius: number): void;
+  /** Sunburst aiming ring under the pointer (null hides). */
+  sunAim?(at: P3 | null, radius: number): void;
   /** Spawn swirl at a portal. */
   spawn(at: P3): void;
   /** Map ping in a player's colour. */
@@ -257,7 +269,11 @@ export type GSound =
   | 'out'
   | 'ping'
   | 'victory'
-  | 'defeat';
+  | 'defeat'
+  | 'splash' // sprinkler water bomb landing
+  | 'heal' // Bloomkin pulse
+  | 'sun' // Sunburst strike
+  | 'moth'; // a Glow Moth flutters past (soft, rate-limited)
 
 export interface GAudio {
   unlock(): void;
@@ -373,6 +389,9 @@ export interface GHudState {
   end: { win: boolean; winner: string | null; wave: number } | null;
   quality: Quality;
   paused: boolean;
+  /** Sunburst charges you hold, and whether you are aiming one (click the board to strike, Esc / right-click cancels). */
+  sun?: number;
+  aimingSun?: boolean;
 }
 
 export interface GardenActions {
@@ -385,6 +404,8 @@ export interface GardenActions {
   deselect(): void;
   ready(): void;
   send(kind: EnemyKind, to?: number): void;
+  /** Start / cancel aiming a Sunburst (the HUD button and its hotkey call this; client.ts sends the strike on click). */
+  sun(): void;
   /** Move the camera to a board (versus). */
   viewBoard(b: number): void;
   setScoresOpen(open: boolean): void;

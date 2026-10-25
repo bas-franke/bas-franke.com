@@ -6,6 +6,8 @@
 //   ?t=<s>           fast-forward the loop before the first frame (for screenshots)
 //   ?focus=x,z,dist  camera target and distance; ?yaw=<rad> ?pitch=<deg>
 //   ?post=basic      plain UnrealBloomPass instead of post.ts
+//   ?solo=<effect>   one effect on repeat at the origin (?period=<s>, ?dist=<m>): boom death leak build upgrade sell
+//                    spawn ping disabled disrupt block missile beam chain water splash heal sun aim
 // Drag = pan, right-drag = orbit, wheel = zoom. window.__lab exposes fx and the boards.
 
 import * as THREE from 'three';
@@ -15,7 +17,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Engine } from '../../../engine/engine';
 import type { EnemyKind } from '@shared/garden/enemies';
-import { ENEMIES } from '@shared/garden/enemies';
+import { ENEMIES, FLY_HEIGHT } from '@shared/garden/enemies';
+import { G } from '@shared/garden/constants';
 import type { Level, TowerKind } from '@shared/garden/towers';
 import { TOWERS } from '@shared/garden/towers';
 import type { P3, Quality } from '../api';
@@ -89,7 +92,7 @@ scene.add(ground);
 
 const stoneMat = new THREE.MeshStandardMaterial({ color: 0xd9cbb4, roughness: 0.85 });
 const pathMat = new THREE.MeshStandardMaterial({ color: 0xcfb48a, roughness: 1 });
-const KIND_TOP: Record<TowerKind, number> = { laser: 0xe9dcc6, shield: 0xffb24a, slow: 0x7ff0e4, missile: 0xc9a47a, beacon: 0x3fd8b8 };
+const KIND_TOP: Record<TowerKind, number> = { laser: 0xe9dcc6, shield: 0xffb24a, slow: 0x7ff0e4, missile: 0xc9a47a, beacon: 0x3fd8b8, sprinkler: 0x2eb3ff };
 function towerMesh(kind: TowerKind) {
   const g = new THREE.Group();
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.5, 16), stoneMat);
@@ -106,8 +109,8 @@ function towerMesh(kind: TowerKind) {
   g.add(top);
   return g;
 }
-const ENEMY_COL: Record<EnemyKind, number> = { runner: 0xff9a3a, skitter: 0x4ee6d9, disruptor: 0xa869ff, brute: 0x3fc8d8, colossus: 0xf0e0ff };
-const HALF: Record<EnemyKind, number> = { runner: 0.4, skitter: 0.25, disruptor: 0.45, brute: 0.9, colossus: 1.5 };
+const ENEMY_COL: Record<EnemyKind, number> = { runner: 0xff9a3a, skitter: 0x4ee6d9, disruptor: 0xa869ff, brute: 0x3fc8d8, colossus: 0xf0e0ff, moth: 0xffb860, bloomkin: 0x7cc85a };
+const HALF: Record<EnemyKind, number> = { runner: 0.4, skitter: 0.25, disruptor: 0.45, brute: 0.9, colossus: 1.5, moth: 0.35, bloomkin: 0.5 };
 function enemyMesh(kind: EnemyKind) {
   const h = HALF[kind];
   const geo =
@@ -390,9 +393,16 @@ const solo = params.get('solo');
 if (solo) {
   // One effect on repeat at the origin: boom, death, leak, build, upgrade, sell, spawn, ping, disrupt, block, beam, chain.
   dist = Number(params.get('dist') ?? 12);
-  const tw = towerMesh(solo === 'beam' || solo === 'chain' ? 'laser' : solo === 'block' ? 'laser' : 'missile');
+  if (solo === 'sun' || solo === 'water') dist = Number(params.get('dist') ?? (solo === 'sun' ? 20 : 17));
+  const tw = towerMesh(solo === 'beam' || solo === 'chain' ? 'laser' : solo === 'block' ? 'laser' : solo === 'water' ? 'sprinkler' : 'missile');
   tw.position.set(-3, 0, 0);
+  tw.visible = !['heal', 'sun', 'aim', 'splash'].includes(solo);
   scene.add(tw);
+  if (solo === 'heal') {
+    const bk = enemyMesh('bloomkin');
+    bk.position.set(0, HALF.bloomkin, 0);
+    scene.add(bk);
+  }
   const dummies = (['runner', 'skitter', 'disruptor', 'brute', 'colossus'] as EnemyKind[]).map((k, i) => {
     const m = enemyMesh(k);
     m.position.set(2, HALF[k], i === 0 ? -3.2 : i === 1 ? -1.6 : i === 2 ? 1.6 : 40);
@@ -403,15 +413,24 @@ if (solo) {
   let lvSolo = 0;
   let kindSolo = 0;
   let next = 0.2;
-  const period = Number(params.get('period') ?? 1.6);
+  const period = Number(params.get('period') ?? (solo === 'sun' ? 2.6 : solo === 'heal' ? 2 : 1.6));
   const fire = () => {
     const o = { x: 0, y: 0, z: 0 };
-    const kinds: EnemyKind[] = ['runner', 'skitter', 'disruptor', 'brute', 'colossus'];
+    const kinds: EnemyKind[] = ['runner', 'skitter', 'disruptor', 'brute', 'colossus', 'moth', 'bloomkin'];
     if (solo === 'boom') fx.boom(0, { x: 0, y: 0.4, z: 0 }, 2);
     else if (solo === 'death') {
-      const k = kinds[kindSolo++ % 5];
-      fx.death({ x: 0, y: HALF[k], z: 0 }, k, ENEMIES[k].bounty);
-    } else if (solo === 'leak') fx.leak(o);
+      const k = kinds[kindSolo++ % kinds.length];
+      fx.death({ x: 0, y: HALF[k] + (k === 'moth' ? FLY_HEIGHT : 0), z: 0 }, k, ENEMIES[k].bounty);
+    } else if (solo === 'water') {
+      const mid = nextMissile++;
+      const ft = 1.1;
+      const z = ((lvSolo++ % 3) - 1) * 1.5;
+      fx.water?.(mid, { x: -3, y: 1.5, z: 0 }, () => ({ x: 3, y: 0.4, z }), ft);
+      later(ft, () => fx.splash?.(mid, { x: 3, y: 0.4, z }, TOWERS.sprinkler.levels[1].splash!));
+    } else if (solo === 'splash') fx.splash?.(0, { x: 0, y: 0.4, z: 0 }, TOWERS.sprinkler.levels[1].splash!);
+    else if (solo === 'heal') fx.heal?.({ x: 0, y: 0.5, z: 0 }, ENEMIES.bloomkin.heal!.range);
+    else if (solo === 'sun') fx.sunburst?.(o, G.sun.radius);
+    else if (solo === 'leak') fx.leak(o);
     else if (solo === 'build') fx.build(o, 1);
     else if (solo === 'upgrade') fx.build(o, ((lvSolo++ % 2) + 2) as Level);
     else if (solo === 'sell') fx.sell(o);
@@ -431,6 +450,10 @@ if (solo) {
   boards.push({
     update(dt: number) {
       for (const m of dummies) m.visible = solo === 'beam' || solo === 'chain';
+      if (solo === 'aim') {
+        fx.sunAim?.({ x: Math.sin(clock * 0.8) * 2, y: 0, z: Math.cos(clock * 0.5) }, G.sun.radius);
+        return;
+      }
       if (solo === 'beam' || solo === 'chain') {
         const lv = (solo === 'chain' ? 3 : 1 + (Math.floor(clock / 2) % 2)) as Level;
         const chain = solo === 'chain' ? [{ x: 2, y: 0.25, z: -1.6 }, { x: 2, y: 0.45, z: 1.6 }] : [];
