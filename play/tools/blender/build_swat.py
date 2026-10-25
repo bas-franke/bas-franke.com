@@ -16,9 +16,14 @@ boot details). Modelling, in order:
      protection, chin strap), goggles, balaclava head, plate carrier with laser-cut MOLLE, rifle mag pouches with
      bungee tops, admin panel, radio with antenna and PTT cable, cummerbund, battle belt, drop-leg holster with a
      pistol, hard knee pads, gloves with five fingers and knuckle armour, boots with soles, laces and toe caps.
-  4. Everything is weighted to the shared skeleton, then one 2048 atlas is baked in Cycles: albedo (material colour,
-     edge wear from pointiness, ambient occlusion multiplied in), tangent normals (weave, webbing, stitching, knit,
-     leather grain) and roughness.
+  4. Low poly, high detail (prepare_lows / bake): every assembled mesh keeps a full-detail copy as its bake source,
+     MOLLE / velcro detail meshes are merged into the panels under them, and the exported meshes are reduced to
+     BUDGET triangles (planar dissolve on hard gear, quadric collapse, more for head gear and gloves). One 4096 atlas
+     is projected from the sources in Cycles (selected-to-active, cage from the measured deviation): albedo (material
+     colour, weave / ripstop, cavities, edge wear, grime, AO multiplied in) and tangent normals (the source geometry
+     plus weave, ripstop, webbing, knit and grain bump), roughness / metalness flat. Exported as per-map JPEGs
+     (TEX_OUT); all baked materials collapse into one `Survivor` material, `Team` and the lenses stay separate, and
+     the weighted pieces are joined into one skinned mesh.
 The skeleton, bone names, clips (idle, walk, run, downed, reload), hold poses and GRIP come from build_zombies.py, so
 the game's grip point (models.ts) and animations keep working. The player colour material `Team` is only a small
 armband and the helmet patches.
@@ -28,25 +33,36 @@ import importlib.util
 import math
 import random
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("bz", HERE / "build_zombies.py")
 bz = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bz)
 
+try:
+    sys.stdout.reconfigure(line_buffering=True)  # progress lines reach a redirected log while the bake runs
+except AttributeError:
+    pass
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = Path(ARGS[0]) if ARGS else Path("models/zombies")
 PREVIEW = Path(ARGS[1]) if len(ARGS) > 1 and ARGS[1] != "standin" else None
 bz.OUT = OUT
 
 S = 1.02
-ATLAS = 2048
+ATLAS = 4096  # bake resolution; the exported maps are TEX_OUT
+# Exported maps: (size, JPEG quality). The albedo keeps the full bake, the normal map is box-filtered down (that also
+# anti-aliases the procedural weave), roughness / metalness is low frequency.
+TEX_OUT = {"albedo": (4096, 88), "normal": (2048, 92), "orm": (1024, 85)}
+TEXDIR = (PREVIEW / "maps") if PREVIEW else Path(tempfile.mkdtemp(prefix="swat_maps_"))
 material, prim, box, cyl, join, apply_all, activate, smooth, link, tris = (
     bz.material, bz.prim, bz.box, bz.cyl, bz.join, bz.apply_all, bz.activate, bz.smooth, bz.link, bz.tris)
 
@@ -111,12 +127,14 @@ def category(name):
     return n.split("_")[0].title() if "_" in n else name
 
 
-# Base colours per category (linear). Navy ripstop uniform (#1f2433), black nylon and polymer, white patches.
+# Base colours per category (linear albedo, as a PBR renderer expects: real black nylon is ~0.03-0.05, not 0.004, or
+# the operators read as silhouettes under the game's lights). Navy ripstop uniform, black nylon / polymer / leather,
+# white patches.
 LIB_COLOR = {
-    "Uniform": (0.0137, 0.0176, 0.0319), "Gear": (0.0037, 0.004, 0.0044), "Strap": (0.0045, 0.0047, 0.005),
-    "Polymer": (0.008, 0.008, 0.009), "Helmet": (0.007, 0.007, 0.008), "Rubber": (0.006, 0.006, 0.0065),
-    "Leather": (0.007, 0.0068, 0.0066), "Glove": (0.007, 0.007, 0.0075), "Balaclava": (0.006, 0.006, 0.0065),
-    "GearMetal": (0.1, 0.1, 0.105), "Buckle": (0.03, 0.03, 0.032), "Patch": (0.72, 0.72, 0.72), "Team": (0.8, 0.8, 0.8),
+    "Uniform": (0.035, 0.045, 0.08), "Gear": (0.038, 0.038, 0.041), "Strap": (0.032, 0.032, 0.035),
+    "Polymer": (0.036, 0.036, 0.039), "Helmet": (0.033, 0.033, 0.036), "Rubber": (0.026, 0.026, 0.027),
+    "Leather": (0.032, 0.031, 0.03), "Glove": (0.032, 0.032, 0.034), "Balaclava": (0.028, 0.028, 0.03),
+    "GearMetal": (0.16, 0.16, 0.165), "Buckle": (0.045, 0.045, 0.048), "Patch": (0.72, 0.72, 0.72), "Team": (0.8, 0.8, 0.8),
     "Skin": (0.42, 0.28, 0.22),
 }
 METAL = {"GearMetal": 0.85}
@@ -125,16 +143,18 @@ METAL = {"GearMetal": 0.85}
 DETAIL = {
     "Patch": (0.15, 0.001, [("noise", 400, 3, 0.6)]),
     "Skin": (0.12, 0.0015, [("noise", 300, 6, 0.6), ("noise", 40, 3, 0.3)]),
-    "Team": (0.35, 0.003, [("wave", 300, 0, 0.15), ("waveb", 300, 0, 0.15), ("noise", 8, 2, 0.5)]),
-    "Uniform": (0.32, 0.0015, [("grid", 200, 0, 0.35), ("wave", 2600, 0, 0.12), ("waveb", 2600, 0, 0.12), ("noise", 6, 2, 0.5)]),
-    "Gear": (0.28, 0.0015, [("wave", 1800, 0, 0.25), ("waveb", 1800, 0, 0.25), ("noise", 10, 2, 0.4)]),
-    "Strap": (0.15, 0.0015, [("wave", 2600, 0, 0.6), ("noise", 20, 2, 0.3)]),
-    "Polymer": (0.3, 0.002, [("noise", 140, 4, 0.6), ("noise", 15, 2, 0.3)]),
-    "Helmet": (0.12, 0.0015, [("noise", 300, 5, 0.7), ("noise", 10, 2, 0.3)]),
+    # "weave": in-surface sine stripes on every axis (period 0.314 / scale m: 210 = 1.5 mm twill, 170 = 1.8 mm
+    # Cordura, 260 = 1.2 mm webbing ribs, 125 = 2.5 mm knit); "lines": ripstop threads (57 = 5.5 mm grid).
+    "Team": (0.3, 0.002, [("weave", 210, 0, 0.3), ("noise", 8, 2, 0.4)]),
+    "Uniform": (0.4, 0.0012, [("lines", 57, 0, 0.45), ("weave", 210, 0, 0.3), ("noise", 6, 2, 0.25)]),
+    "Gear": (0.4, 0.0012, [("weave", 170, 0, 0.5), ("noise", 420, 2, 0.15), ("noise", 10, 2, 0.25)]),
+    "Strap": (0.35, 0.0012, [("weave", 260, 0, 0.6), ("noise", 20, 2, 0.2)]),
+    "Polymer": (0.3, 0.0015, [("noise", 520, 3, 0.5), ("noise", 15, 2, 0.3)]),
+    "Helmet": (0.2, 0.0015, [("noise", 380, 4, 0.7), ("noise", 10, 2, 0.3)]),
     "Rubber": (0.6, 0.003, [("noise", 60, 6, 0.7), ("voronoi", 18, 0, 0.4)]),
-    "Leather": (0.5, 0.002, [("voronoi", 160, 0, 0.6), ("noise", 70, 6, 0.4), ("noise", 9, 2, 0.4)]),
-    "Glove": (0.55, 0.002, [("voronoi", 120, 0, 0.5), ("wave", 300, 0, 0.2), ("noise", 50, 4, 0.4)]),
-    "Balaclava": (0.12, 0.0015, [("wave", 2600, 0, 0.4), ("noise", 45, 3, 0.4)]),
+    "Leather": (0.5, 0.0015, [("voronoi", 380, 0, 0.6), ("noise", 70, 6, 0.4), ("noise", 9, 2, 0.4)]),
+    "Glove": (0.45, 0.0015, [("voronoi", 420, 0, 0.4), ("weave", 300, 0, 0.3), ("noise", 50, 4, 0.3)]),
+    "Balaclava": (0.3, 0.0015, [("weave", 125, 0, 0.6), ("noise", 45, 3, 0.3)]),
     "Lens": (0.02, 0.001, [("noise", 4, 1, 1.0)]),
     "GearMetal": (0.2, 0.001, [("noise", 140, 4, 1.0)]),
     "Buckle": (0.2, 0.001, [("noise", 140, 4, 1.0)]),
@@ -149,7 +169,9 @@ ROUGH = {
     "Buckle": (0.3, 0.5, 30), "SurvivorEyes": (0.05, 0.1, 6), "Patch": (0.6, 0.8, 20), "Skin": (0.4, 0.6, 30),
 }
 # Edge wear brightens convex edges of hard materials a little (scuffed nylon, chipped polymer, worn leather).
-WEAR = {"Gear": 0.22, "Polymer": 0.5, "Helmet": 0.18, "Leather": 0.45, "Glove": 0.25, "Strap": 0.15, "Rubber": 0.15, "GearMetal": 0.8, "Buckle": 0.6}
+WEAR = {"Gear": 0.16, "Polymer": 0.22, "Helmet": 0.1, "Leather": 0.4, "Glove": 0.2, "Strap": 0.12, "Rubber": 0.2, "GearMetal": 0.8, "Buckle": 0.6}
+# Dust / grime strength per category (the reference's gear is scuffed and dusty, not showroom clean).
+GRIME = {"Gear": 0.16, "Strap": 0.12, "Polymer": 0.07, "Helmet": 0.05, "Glove": 0.12, "Leather": 0.25, "Rubber": 0.3, "Uniform": 0.1}
 
 
 # ---- helpers ----------------------------------------------------------------------------------------------------------
@@ -834,24 +856,341 @@ def use_gpu():
     bpy.context.scene.cycles.device = "CPU"
 
 
+BUDGET = 15500  # triangles for the whole exported operator
+# Low meshes the part files designed for their own `_high` bake source (strap, pouch and plate cages, gloves, boots):
+# collapse would shred their thin straps, so they are exported as modelled; the budget is paid by the rest.
+DESIGNED_KEEP = ("torso_", "limbs_glove", "limbs_knee", "head_helmetgear")
+KEEP_THIN = ("strap", "rail", "buckle")  # thin bands (headset band, goggle and chin straps) shred when collapsed
+# Share of the budget per mesh relative to its modelled density (first match by name).
+DENSITY = [("eye", 0.5), ("face", 0.6), ("foam", 0.5), ("cushion", 0.5), ("buckle", 0.6), ("lens", 0.6),
+           ("helmet", 1.6), ("mask", 1.15), ("goggle", 1.0), ("headset", 0.9), ("head_", 0.9),
+           ("glove", 0.85), ("boot", 0.75), ("knee", 0.7), ("shirt", 1.6), ("trouser", 1.6), ("pant", 1.6),
+           ("patch", 1.0), ("pouch", 0.75), ("holster", 0.9), ("radio", 0.9), ("torso_", 0.8)]
+# Organic / cloth meshes: no planar dissolve, smooth shading up to 75 degrees (hard gear splits at 48).
+CLOTH = ("shirt", "trouser", "pant", "mask", "face", "eye", "glove", "skin", "body", "balaclava", "armband")
+# Pure detail meshes baked into the panel under them instead of being exported (MOLLE rows, velcro fields).
+MERGE_INTO = {
+    "Torso_Molle": ("Torso_FrontPlate", "Torso_BackPlate"),
+    "Torso_CummerbundMolle": ("Torso_Cummerbund",),
+    "Torso_Velcro": ("Torso_FrontPlate", "Torso_BackPlate"),
+}
+# UV texel density multipliers (first match by name): patches stay legible, head gear and gloves are seen close.
+TEXEL = [("patch", 1.6), ("eye", 0.4), ("face", 0.5), ("foam", 0.6), ("head_", 1.3), ("glove", 1.25), ("boot", 1.1), ("knee", 1.1)]
+TILES = {}  # low mesh name -> its atlas tile (x, y, cell size, UV square size) in pixels
+SOURCES = {}  # low mesh name -> its bake sources (own full-detail copy, merged detail meshes)
+
+
+def axis_pattern(nt, nodes, tc, scale, lines=False, distortion=0.0):
+    """Stripes along every axis that lies in the surface (each axis weighted by 1 - |normal component|), so a weave
+    or a ripstop grid shows on any orientation without UVs. Wave period is 0.314 / scale metres. lines=True turns the
+    sine into thin raised threads (ripstop grid)."""
+    def nn(kind, **props):
+        n = nt.nodes.new(kind)
+        for k, val in props.items():
+            setattr(n, k, val)
+        nodes.append(n)
+        return n
+
+    geo = nn("ShaderNodeNewGeometry")
+    sep = nn("ShaderNodeSeparateXYZ")
+    nt.links.new(geo.outputs["Normal"], sep.inputs["Vector"])
+    total = None
+    for ax in "XYZ":
+        w = nn("ShaderNodeTexWave", wave_type="BANDS", bands_direction=ax)
+        w.inputs["Scale"].default_value = scale
+        w.inputs["Distortion"].default_value = distortion
+        w.inputs["Detail"].default_value = 1.0
+        nt.links.new(tc.outputs["Object"], w.inputs["Vector"])
+        val = w.outputs["Fac"]
+        if lines:
+            mr = nn("ShaderNodeMapRange")
+            mr.inputs["From Min"].default_value = 0.86
+            mr.inputs["From Max"].default_value = 1.0
+            nt.links.new(val, mr.inputs["Value"])
+            val = mr.outputs["Result"]
+        ab = nn("ShaderNodeMath", operation="ABSOLUTE")
+        nt.links.new(sep.outputs[ax], ab.inputs[0])
+        inv = nn("ShaderNodeMath", operation="SUBTRACT", use_clamp=True)
+        inv.inputs[0].default_value = 1.0
+        nt.links.new(ab.outputs[0], inv.inputs[1])
+        mul = nn("ShaderNodeMath", operation="MULTIPLY")
+        nt.links.new(val, mul.inputs[0])
+        nt.links.new(inv.outputs[0], mul.inputs[1])
+        if total is None:
+            total = mul.outputs[0]
+        else:
+            ad = nn("ShaderNodeMath", operation="ADD")
+            nt.links.new(total, ad.inputs[0])
+            nt.links.new(mul.outputs[0], ad.inputs[1])
+            total = ad.outputs[0]
+    return total
+
+
+def name_weight(name, table, default=1.0):
+    n = name.lower()
+    for k, w in table:
+        if k in n:
+            return w
+    return default
+
+
+def is_cloth(name):
+    return any(k in name.lower() for k in CLOTH)
+
+
+def prepare_lows(meshes, budget=BUDGET):
+    """The low-poly pass. Every mesh first leaves a full-detail copy behind as its bake source (bevels, MOLLE, folds,
+    stitching and laces end up in the normal map, cavities and worn edges in the albedo); pure detail meshes (MOLLE
+    rows, velcro fields) are merged into the panel under them. Then hard gear loses its coplanar faces (planar
+    dissolve, material borders kept) and every mesh is collapsed (quadric, X-symmetric where the mesh is) to its share
+    of the budget: head gear and gloves keep more, hidden bits under the mask and goggles very little."""
+    SOURCES.clear()
+    names = {m.name for m in meshes}
+    keep = []
+    for m in meshes:
+        c = m.copy()
+        c.data = m.data.copy()
+        c.name = m.name + "__src"
+        bpy.context.collection.objects.link(c)
+        for mod in list(c.modifiers):
+            c.modifiers.remove(mod)
+        c.vertex_groups.clear()
+        targets = [t for t in MERGE_INTO.get(m.name, ()) if t in names]
+        if targets:
+            for t in targets:
+                SOURCES.setdefault(t, []).append(c)
+            print("MERGED", m.name, "->", targets)
+            bpy.data.objects.remove(m, do_unlink=True)
+            continue
+        SOURCES.setdefault(m.name, []).insert(0, c)
+        keep.append(m)
+    designed = set(high_sources(keep))
+    fixed = {m.name for m in keep if (m.name in designed and m.name.lower().startswith(DESIGNED_KEEP)) or any(k in m.name.lower() for k in KEEP_THIN)}
+    for m in keep:
+        activate(m)
+        if m.data.has_custom_normals:
+            bpy.ops.mesh.customdata_custom_splitnormals_clear()
+        if not is_cloth(m.name) and m.name not in fixed:
+            d = m.modifiers.new("Planar", "DECIMATE")
+            d.decimate_type = "DISSOLVE"
+            d.angle_limit = math.radians(1.0)
+            d.delimit = {"MATERIAL"}
+            bpy.ops.object.modifier_apply(modifier=d.name)
+    pre = {m.name: tris(m) for m in keep}
+    wts = {m.name: name_weight(m.name, DENSITY) for m in keep}
+
+    def share(r):
+        return {n: t if n in fixed else min(t, max(min(t, 40), int(wts[n] * r * t))) for n, t in pre.items()}
+
+    lo, hi = 0.0, 4.0
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if sum(share(mid).values()) > budget:
+            hi = mid
+        else:
+            lo = mid
+    target = share(lo)
+    for m in keep:
+        bb = [m.matrix_world @ Vector(c) for c in m.bound_box]
+        cx = (min(v.x for v in bb) + max(v.x for v in bb)) / 2
+        sym = abs(cx) < 0.004 and max(v.x for v in bb) - min(v.x for v in bb) > 0.05
+        for _ in range(3):
+            cur = tris(m)
+            if cur <= target[m.name] * 1.04:
+                break
+            d = m.modifiers.new("Dec", "DECIMATE")
+            d.decimate_type = "COLLAPSE"
+            d.ratio = target[m.name] / cur
+            d.use_symmetry = sym
+            d.symmetry_axis = "X"
+            activate(m)
+            bpy.ops.object.modifier_apply(modifier=d.name)
+        activate(m)
+        bpy.ops.object.shade_smooth_by_angle(angle=math.radians(75 if is_cloth(m.name) else 48))
+    print("LOWPOLY", sum(pre.values()), "->", sum(tris(m) for m in keep), [(m.name, pre[m.name], tris(m)) for m in keep])
+    return keep
+
+
+def high_sources(meshes):
+    """The part files' sculpted / high-detail sources (Head_MaskHigh, Limbs_Glove.R_high, ...) per low mesh."""
+    names = {m.name for m in meshes}
+    out = {}
+    for h in HIGHS:
+        targets = HIGH_TARGETS.get(h.name)
+        if targets is None and h.get("high_of"):
+            targets = [str(h["high_of"])]
+        if targets is None:
+            base = h.name[:-5] if h.name.lower().endswith("_high") else h.name[:-4] if h.name.endswith("High") else None
+            targets = [base] if base else []
+        for t in targets:
+            if t in names:
+                out.setdefault(t, []).append(h)
+    return out
+
+
+def covers(highs, low):
+    """True when the high sources carry every material category of the low (then their albedo can be projected too:
+    a single-material glove or boot sculpt would paint the low's armour, soles or laces in its one colour)."""
+    cats = lambda o: {category(m.name) for m in o.data.materials if m}  # noqa: E731
+    have = set().union(*(cats(h) for h in highs)) if highs else set()
+    return cats(low) <= have
+
+
+def dilate(a, mask, iters):
+    """Grows baked islands into the empty atlas around them (4-neighbour average), so mip maps and the downsampled
+    export never bleed black into the seams."""
+    m = mask.copy()
+    s0, s1 = a.shape[:2]
+    shifts = [((slice(1, None), slice(None)), (slice(None, -1), slice(None))), ((slice(None, -1), slice(None)), (slice(1, None), slice(None))),
+              ((slice(None), slice(1, None)), (slice(None), slice(None, -1))), ((slice(None), slice(None, -1)), (slice(None), slice(1, None)))]
+    for _ in range(iters):
+        if m.all():
+            break
+        acc = np.zeros((s0, s1, 3), np.float32)
+        cnt = np.zeros((s0, s1), np.float32)
+        mf = m.astype(np.float32)
+        for dst, src in shifts:
+            acc[dst] += a[src][..., :3] * mf[src][..., None]
+            cnt[dst] += mf[src]
+        new = (~m) & (cnt > 0)
+        a[new, :3] = acc[new] / cnt[new][:, None]
+        m |= new
+    return a
+
+
+def img_array(img):
+    w, h = img.size
+    a = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(a)
+    return a.reshape(h, w, 4)
+
+
+def write_texture(a, name, out_size, quality, data, normal=False):
+    """Box-downsamples a baked map to `out_size`, writes it as a JPEG of the given quality and loads it back as a
+    packed file image: the glTF exporter embeds those bytes unchanged (no second lossy pass, per-map quality)."""
+    while a.shape[0] > out_size:
+        n = a.shape[0] // 2
+        a = a.reshape(n, 2, n, 2, 4).mean(axis=(1, 3))
+        if normal:
+            v = a[..., :3] * 2 - 1
+            v /= np.maximum(np.linalg.norm(v, axis=2, keepdims=True), 1e-6)
+            a[..., :3] = v * 0.5 + 0.5
+    a = np.ascontiguousarray(a, dtype=np.float32)
+    a[..., 3] = 1.0
+    size = a.shape[0]
+    tmp = bpy.data.images.new(name + "_tmp", size, size, alpha=False, is_data=data)
+    tmp.pixels.foreach_set(a.ravel())
+    TEXDIR.mkdir(parents=True, exist_ok=True)
+    path = TEXDIR / f"{name}.jpg"
+    tmp.filepath_raw = str(path)
+    tmp.file_format = "JPEG"
+    tmp.save(quality=quality)
+    bpy.data.images.remove(tmp)
+    if name in bpy.data.images:
+        bpy.data.images[name].name = name + "_baked"
+    img = bpy.data.images.load(str(path))
+    img.name = name
+    if data:
+        img.colorspace_settings.name = "Non-Color"
+    img.pack()
+    print("TEXTURE", name, size, "q", quality, path.stat().st_size, "bytes")
+    return img
+
+
 def bake(meshes, size=ATLAS):
-    """UV atlas for every part; bakes AO, albedo (with edge wear), normals and roughness; rewires the materials so
-    the glTF exporter writes baseColor, normal and metallicRoughness textures."""
+    """One UV atlas for every low mesh; albedo (material colour, weave, cavity, edge wear, grime) and tangent normals
+    (geometry of the full-detail sources + procedural weave / ripstop / grain bump) are projected per mesh from its
+    bake sources (selected-to-active, cage from the measured low-to-high deviation), AO is baked on the lows together
+    (contact shadows between parts) and multiplied in, roughness / metalness are baked flat. All baked materials then
+    share these maps; they are written as per-map JPEGs (see TEX_OUT)."""
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     use_gpu()
+    baked = [m for m in meshes if any(mat and category(mat.name) != "Lens" for mat in m.data.materials)]
+    stage1 = high_sources(meshes)
+    sources = {m.name: SOURCES.get(m.name, []) for m in baked}
+    all_src = {s for ss in SOURCES.values() for s in ss} | set(HIGHS)
+    for s in all_src:
+        s.hide_set(False)
+    # UVs: islands from one smart projection of the lows; each mesh packs its own islands into a square tile, and the
+    # tiles are shelf-packed into the atlas at a texel density weighted per piece (TEXEL: head gear, gloves, patches
+    # more, hidden bits less). Per-mesh tiles also keep the projections cheap: each bakes into an image the size of
+    # its tile instead of the whole atlas.
+    for m in meshes:
+        while m.data.uv_layers:
+            m.data.uv_layers.remove(m.data.uv_layers[0])
+        m.data.uv_layers.new(name="UVMap")
     bpy.ops.object.select_all(action="DESELECT")
     for m in meshes:
         m.select_set(True)
-        if not m.data.uv_layers:
-            m.data.uv_layers.new(name="UVMap")
     bpy.context.view_layer.objects.active = meshes[0]
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.001, area_weight=0.7, scale_to_bounds=False)
-    bpy.ops.uv.pack_islands(margin=0.0015, rotate=True)
+    tp = time.time()
+    bpy.ops.uv.smart_project(angle_limit=math.radians(52), island_margin=0.003, area_weight=0.7, scale_to_bounds=False)
+    print("UV smart project", round(time.time() - tp, 1), "s")
     bpy.ops.object.mode_set(mode="OBJECT")
-    used = {mat for m in meshes for mat in m.data.materials if mat and category(mat.name) != "Lens"}
+    W, PAD = size, 4
+    area3d = {m.name: max(1e-6, sum(p.area for p in m.data.polygons) * abs(m.matrix_world.determinant()) ** (2 / 3)) for m in meshes}
+    wt = {m.name: name_weight(m.name, TEXEL) for m in meshes}
+    d_est = 0.8 * W / math.sqrt(sum(area3d[n] * wt[n] ** 2 for n in area3d) / 0.7)
+    local, uarea = {}, {}
+    scene.tool_settings.use_uv_select_sync = True  # every UV of the selected faces takes part in the pack
+    for m in meshes:
+        activate(m)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        est = max(16.0, d_est * wt[m.name] * math.sqrt(area3d[m.name] / 0.7))
+        tp = time.time()
+        bpy.ops.uv.pack_islands(rotate=True, shape_method="AABB", margin_method="FRACTION", margin=min(0.06, 3.0 / est))  # concave packing costs ~15 s per mesh
+        bpy.ops.object.mode_set(mode="OBJECT")
+        print("UV pack", m.name, round(time.time() - tp, 1), "s")
+        uvd = m.data.uv_layers.active.data
+        arr = np.empty(len(uvd) * 2, dtype=np.float32)
+        uvd.foreach_get("uv", arr)
+        arr = arr.reshape(-1, 2)
+        arr -= arr.min(axis=0)
+        ext = max(1e-6, float(arr.max()))
+        arr /= ext
+        local[m.name] = arr
+        ua = 0.0
+        for p in m.data.polygons:
+            q = arr[list(p.loop_indices)]
+            ua += abs(float(np.dot(q[:, 0], np.roll(q[:, 1], -1)) - np.dot(q[:, 1], np.roll(q[:, 0], -1)))) / 2
+        uarea[m.name] = max(0.05, ua)
+    scene.tool_settings.use_uv_select_sync = False
+
+    def shelf(d):
+        sides = {n: max(8, int(d * wt[n] * math.sqrt(area3d[n] / uarea[n]))) for n in local}
+        x = y = row = 0
+        pos = {}
+        for n in sorted(sides, key=lambda k: -sides[k]):
+            c = sides[n] + 2 * PAD
+            if x + c > W:
+                y += row
+                x = row = 0
+            pos[n] = (x, y, c, sides[n])
+            x += c
+            row = max(row, c)
+        return pos, y + row
+
+    lo_d, hi_d = 1.0, 4.0 * W
+    for _ in range(40):
+        mid = (lo_d + hi_d) / 2
+        if shelf(mid)[1] <= W:
+            lo_d = mid
+        else:
+            hi_d = mid
+    tiles = shelf(lo_d)[0]
+    TILES.clear()
+    TILES.update(tiles)
+    for m in meshes:
+        x, y, c, side = tiles[m.name]
+        uvd = m.data.uv_layers.active.data
+        uvd.foreach_set("uv", ((local[m.name] * side + np.array([x + PAD, y + PAD])) / W).astype(np.float32).ravel())
+    print("UV tiles", len(tiles), "texels per metre (weight 1)", round(lo_d), "atlas use",
+          round(sum(uarea[n] * tiles[n][3] ** 2 for n in tiles) / W ** 2, 3))
+    used = {mat for m in list(baked) + list(all_src) for mat in m.data.materials if mat and category(mat.name) != "Lens"}
     for mat in used:
         bsdf = mat.node_tree.nodes.get("Principled BSDF")
         cat = category(mat.name)
@@ -885,45 +1224,117 @@ def bake(meshes, size=ATLAS):
             img.colorspace_settings.name = "Non-Color"
         return img
 
-    def run(kind, img, setup, samples=2, **kw):
+    everything = [o for o in scene.objects if o.type == "MESH"]
+
+    def show(objs, active):
+        keep = set(objs)
+        for o in everything:
+            o.hide_render = o not in keep
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in keep:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = active
+
+    cages = {}
+    dg = bpy.context.evaluated_depsgraph_get()
+
+    def cage(low, srcs):
+        """Cage extrusion from how far the sources stand off the low (97th percentile of the nearby source vertices)."""
+        key = (low.name, tuple(s.name for s in srcs))
+        if key in cages:
+            return cages[key]
+        mw = low.matrix_world
+        tree = BVHTree.FromPolygons([mw @ v.co for v in low.data.vertices], [tuple(p.vertices) for p in low.data.polygons])
+        ds = []
+        for s in srcs:
+            sw = s.matrix_world
+            vs = s.data.vertices
+            step = max(1, len(vs) // 15000)
+            for i in range(0, len(vs), step):
+                hit = tree.find_nearest(sw @ vs[i].co, 0.035)
+                if hit[0] is not None:
+                    ds.append(hit[3])
+        d = sorted(ds)[int(len(ds) * 0.97)] if ds else 0.008
+        e = min(0.022, max(0.003, d * 1.3 + 0.0015))
+        cages[key] = (e, e * 2.2 + 0.002)
+        return cages[key]
+
+    def run(kind, img, setup, jobs=None, samples=2, arr=None, data=False, **kw):
+        """jobs None: one bake into `img` on all lows together. Else [(low, sources)] projected one low at a time into
+        its tile of the atlas array `arr` (a tile-sized image, the low's UVs moved into it for the bake)."""
         temp = {}
+        nodes_img = []
         for mat in used:
             nt = mat.node_tree
             nodes = setup(mat, nt) or []
             t = nt.nodes.new("ShaderNodeTexImage")
             t.image = img
             nt.nodes.active = t
+            nodes_img.append(t)
             temp[mat] = nodes + [t]
         scene.cycles.samples = samples
-        bpy.ops.object.select_all(action="DESELECT")
-        for m in meshes:
-            m.select_set(True)
-        bpy.context.view_layer.objects.active = meshes[0]
-        bpy.ops.object.bake(type=kind, margin=8, use_clear=True, **kw)
+        if jobs is None:
+            show(baked, baked[0])
+            bpy.ops.object.bake(type=kind, margin=0, use_clear=False, use_selected_to_active=False, **kw)
+        else:
+            for low, srcs in jobs:
+                if not srcs:
+                    continue
+                e, dist = cage(low, srcs)
+                x, y, c, _side = TILES[low.name]
+                tile = bpy.data.images.new("SurvivorTile", c, c, alpha=False, is_data=data)
+                if data:
+                    tile.colorspace_settings.name = "Non-Color"
+                tile.pixels.foreach_set(np.ascontiguousarray(arr[y:y + c, x:x + c]).ravel())
+                for t in nodes_img:
+                    t.image = tile
+                uvd = low.data.uv_layers.active.data
+                keep_uv = np.empty(len(uvd) * 2, dtype=np.float32)
+                uvd.foreach_get("uv", keep_uv)
+                uvd.foreach_set("uv", ((keep_uv.reshape(-1, 2) * W - np.array([x, y])) / c).astype(np.float32).ravel())
+                show([low] + srcs, low)
+                try:
+                    bpy.ops.object.bake(type=kind, margin=0, use_clear=False, use_selected_to_active=True, cage_extrusion=e, max_ray_distance=dist, **kw)
+                    arr[y:y + c, x:x + c] = img_array(tile)
+                except RuntimeError as exc:
+                    print("BAKE FAILED", kind, low.name, exc)
+                uvd.foreach_set("uv", keep_uv)
+                bpy.data.images.remove(tile)
         for mat, nodes in temp.items():
             for n in nodes:
                 mat.node_tree.nodes.remove(n)
 
     def emit(mat, nt, sock):
-        out = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL")
+        out = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL" and n.is_active_output) if any(n.type == "OUTPUT_MATERIAL" and n.is_active_output for n in nt.nodes) else next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL")
         old = out.inputs["Surface"].links[0].from_socket if out.inputs["Surface"].links else None
         em = nt.nodes.new("ShaderNodeEmission")
         nt.links.new(sock, em.inputs["Color"])
         nt.links.new(em.outputs["Emission"], out.inputs["Surface"])
-        mat["_old"] = 1
         restore.append((nt, out, old))
         return em
 
-    # AO.
+    def unemit():
+        for nt, out, old in restore:
+            if old:
+                nt.links.new(old, out.inputs["Surface"])
+        restore.clear()
+
+    restore = []
+    t0 = time.time()
+    # Coverage mask (which atlas texels belong to a face), for the margin dilation.
+    mask_img = new_img("SurvivorMask", size, True, (0, 0, 0, 1))
+    run("EMIT", mask_img, lambda mat, nt: _mask_setup(mat, nt, emit), samples=1)
+    unemit()
+    mask = img_array(mask_img)[..., 0] > 0.5
+    small = mask.reshape(size // 2, 2, size // 2, 2).any(axis=(1, 3))
+    print("BAKE mask", round(float(mask.mean()), 3), "of the atlas covered", round(time.time() - t0, 1), "s")
+    # AO on the lows together (contact shadows between pouches, plates, straps), sources hidden.
     ao = new_img("SurvivorAO", size // 2, True, (1, 1, 1, 1))
     if scene.world is None:
         scene.world = bpy.data.worlds.new("bake")
     scene.world.light_settings.distance = 0.12  # crease-scale occlusion, not room-scale
-    scene.render.bake.use_selected_to_active = False
     run("AO", ao, lambda mat, nt: [], samples=48)
-    # Albedo: material colour x subtle large-scale variation, brightened on worn convex edges (pointiness).
-    alb = new_img("SurvivorAlbedo", size, False, (0, 0, 0, 1))
-    restore = []
+    print("BAKE ao", round(time.time() - t0, 1), "s")
 
     def albedo_setup(mat, nt):
         bsdf = nt.nodes.get("Principled BSDF")
@@ -938,17 +1349,26 @@ def bake(meshes, size=ATLAS):
             nodes.append(n)
             return n
 
+        def mrange(sock, a, b, c, d):
+            r = nn("ShaderNodeMapRange")
+            r.inputs["From Min"].default_value = a
+            r.inputs["From Max"].default_value = b
+            r.inputs["To Min"].default_value = c
+            r.inputs["To Max"].default_value = d
+            nt.links.new(sock, r.inputs["Value"])
+            return r.outputs["Result"]
+
+        def scale_col(sock, fac):
+            sc = nn("ShaderNodeVectorMath", operation="SCALE")
+            nt.links.new(sock, sc.inputs[0])
+            nt.links.new(fac, sc.inputs["Scale"])
+            return sc.outputs[0]
+
         tc = nn("ShaderNodeTexCoord")
         nz = nn("ShaderNodeTexNoise")
         nz.inputs["Scale"].default_value = 4.0
         nz.inputs["Detail"].default_value = 3.0
         nt.links.new(tc.outputs["Object"], nz.inputs["Vector"])
-        mr = nn("ShaderNodeMapRange")
-        mr.inputs["From Min"].default_value = 0.3
-        mr.inputs["From Max"].default_value = 0.7
-        mr.inputs["To Min"].default_value = 0.82
-        mr.inputs["To Max"].default_value = 1.12
-        nt.links.new(nz.outputs["Fac"], mr.inputs["Value"])
         col = nn("ShaderNodeVectorMath", operation="SCALE")
         alpha_src = None
         if linked is not None and bsdf.inputs["Alpha"].links:
@@ -960,82 +1380,84 @@ def bake(meshes, size=ATLAS):
             # patch backing, since the exported material is opaque.
             mixa = nn("ShaderNodeMix", data_type="RGBA", blend_type="MIX")
             nt.links.new(alpha_src, mixa.inputs["Factor"])
-            mixa.inputs[6].default_value = (0.012, 0.012, 0.013, 1.0)
+            mixa.inputs[6].default_value = (0.035, 0.035, 0.038, 1.0)
             nt.links.new(linked, mixa.inputs[7])
             nt.links.new(mixa.outputs[2], col.inputs[0])
         elif linked is not None:
             nt.links.new(linked, col.inputs[0])
         else:
             col.inputs[0].default_value = base
-        nt.links.new(mr.outputs["Result"], col.inputs["Scale"])
+        nt.links.new(mrange(nz.outputs["Fac"], 0.3, 0.7, 0.84, 1.1), col.inputs["Scale"])
         out_sock = col.outputs[0]
-        if category(mat.name) in ("Uniform", "Gear", "Strap", "Balaclava"):
-            # Cloth: darker in concave folds (pointiness), and a faint weave in the colour so the fabric reads at
-            # full-body distance.
-            geo_c = nn("ShaderNodeNewGeometry")
-            cav = nn("ShaderNodeMapRange")
-            cav.inputs["From Min"].default_value = 0.44
-            cav.inputs["From Max"].default_value = 0.5
-            cav.inputs["To Min"].default_value = 0.45
-            cav.inputs["To Max"].default_value = 1.0
-            nt.links.new(geo_c.outputs["Pointiness"], cav.inputs["Value"])
-            br = nn("ShaderNodeTexBrick")
-            br.inputs["Scale"].default_value = 200.0
-            br.inputs["Mortar Size"].default_value = 0.05
-            nt.links.new(tc.outputs["Object"], br.inputs["Vector"])
-            wv = nn("ShaderNodeMapRange")
-            wv.inputs["From Min"].default_value = 0.0
-            wv.inputs["From Max"].default_value = 1.0
-            wv.inputs["To Min"].default_value = 0.86
-            wv.inputs["To Max"].default_value = 1.04
-            nt.links.new(br.outputs["Fac"], wv.inputs["Value"])
-            k = nn("ShaderNodeMath", operation="MULTIPLY")
-            nt.links.new(cav.outputs["Result"], k.inputs[0])
-            nt.links.new(wv.outputs["Result"], k.inputs[1])
-            sc2 = nn("ShaderNodeVectorMath", operation="SCALE")
-            nt.links.new(out_sock, sc2.inputs[0])
-            nt.links.new(k.outputs[0], sc2.inputs["Scale"])
-            out_sock = sc2.outputs[0]
-        wear = WEAR.get(category(mat.name), 0.0)
+        cat_g = category(mat.name)
+        geo_c = nn("ShaderNodeNewGeometry")
+        if cat_g in ("Uniform", "Gear", "Strap", "Balaclava", "Team", "Glove"):
+            # Fabric: the weave (and the ripstop grid on the uniform) in the colour, so the cloth reads as cloth.
+            weave = axis_pattern(nt, nodes, tc, {"Uniform": 210, "Gear": 170, "Strap": 260, "Balaclava": 125, "Team": 210, "Glove": 300}[cat_g], distortion=0.6)
+            out_sock = scale_col(out_sock, mrange(weave, 0.0, 2.0, 0.9, 1.06))
+            if cat_g == "Uniform":
+                grid = axis_pattern(nt, nodes, tc, 57, lines=True)
+                out_sock = scale_col(out_sock, mrange(grid, 0.0, 1.0, 1.0, 1.16))
+        # Cavities (concave creases between pouches, folds, MOLLE rows) darker, from the full-detail source.
+        cav_strength = 0.4 if cat_g in ("Uniform", "Gear", "Strap", "Balaclava") else 0.35
+        out_sock = scale_col(out_sock, mrange(geo_c.outputs["Pointiness"], 0.44, 0.5, 1.0 - cav_strength, 1.0))
+        if cat_g in GRIME:
+            # Dust and grime: soft noise patches of dusty grey, heavier low on the boots (kicked-up dust).
+            amount = GRIME[cat_g]
+            dn = nn("ShaderNodeTexNoise")
+            dn.inputs["Scale"].default_value = 3.5
+            dn.inputs["Detail"].default_value = 8.0
+            dn.inputs["Roughness"].default_value = 0.65
+            nt.links.new(tc.outputs["Object"], dn.inputs["Vector"])
+            mask_s = mrange(dn.outputs["Fac"], 0.55, 0.8, 0.0, amount)
+            if cat_g in ("Leather", "Rubber"):
+                sz = nn("ShaderNodeSeparateXYZ")
+                nt.links.new(geo_c.outputs["Position"], sz.inputs["Vector"])
+                addm = nn("ShaderNodeMath", operation="ADD", use_clamp=True)
+                nt.links.new(mask_s, addm.inputs[0])
+                nt.links.new(mrange(sz.outputs["Z"], 0.0, 0.2, 0.45, 0.0), addm.inputs[1])
+                mask_s = addm.outputs[0]
+            # Grime collects in the creases.
+            cv = nn("ShaderNodeMath", operation="ADD", use_clamp=True)
+            nt.links.new(mask_s, cv.inputs[0])
+            nt.links.new(mrange(geo_c.outputs["Pointiness"], 0.4, 0.48, amount * 0.6, 0.0), cv.inputs[1])
+            dmix = nn("ShaderNodeMix", data_type="RGBA", blend_type="MIX")
+            nt.links.new(cv.outputs[0], dmix.inputs["Factor"])
+            nt.links.new(out_sock, dmix.inputs[6])
+            dmix.inputs[7].default_value = (0.1, 0.094, 0.082, 1.0)
+            out_sock = dmix.outputs[2]
+        wear = WEAR.get(cat_g, 0.0)
         if wear:
-            geo = nn("ShaderNodeNewGeometry")
-            wr = nn("ShaderNodeMapRange")
-            wr.inputs["From Min"].default_value = 0.52
-            wr.inputs["From Max"].default_value = 0.6
-            wr.inputs["To Min"].default_value = 0.0
-            wr.inputs["To Max"].default_value = wear
-            nt.links.new(geo.outputs["Pointiness"], wr.inputs["Value"])
+            # Worn convex edges: scuffed lighter where the full-detail bevels are, broken up by grit.
             grit = nn("ShaderNodeTexNoise")
-            grit.inputs["Scale"].default_value = 60.0
+            grit.inputs["Scale"].default_value = 90.0
+            grit.inputs["Detail"].default_value = 6.0
             nt.links.new(tc.outputs["Object"], grit.inputs["Vector"])
             gm = nn("ShaderNodeMath", operation="MULTIPLY")
-            nt.links.new(wr.outputs["Result"], gm.inputs[0])
-            nt.links.new(grit.outputs["Fac"], gm.inputs[1])
-            mix = nn("ShaderNodeMix", data_type="RGBA", blend_type="MIX")
+            nt.links.new(mrange(geo_c.outputs["Pointiness"], 0.52, 0.6, 0.0, wear), gm.inputs[0])
+            nt.links.new(mrange(grit.outputs["Fac"], 0.35, 0.65, 0.2, 1.6), gm.inputs[1])
+            mix = nn("ShaderNodeMix", data_type="RGBA", blend_type="MIX", clamp_factor=True)
             nt.links.new(gm.outputs[0], mix.inputs["Factor"])
             nt.links.new(out_sock, mix.inputs[6])
-            mix.inputs[7].default_value = (0.13, 0.13, 0.135, 1.0)
+            mix.inputs[7].default_value = (0.17, 0.17, 0.175, 1.0)
             out_sock = mix.outputs[2]
         nodes.append(emit(mat, nt, out_sock))
         return nodes
 
-    run("EMIT", alb, albedo_setup, samples=4)
-    for nt, out, old in restore:
-        if old:
-            nt.links.new(old, out.inputs["Surface"])
-    # AO into the albedo (numpy), at the albedo's resolution.
-    ao.scale(size, size)
-    a = np.empty(size * size * 4, dtype=np.float32)
-    o = np.empty(size * size * 4, dtype=np.float32)
-    alb.pixels.foreach_get(a)
-    ao.pixels.foreach_get(o)
-    a = a.reshape(-1, 4)
-    o = o.reshape(-1, 4)
-    a[:, :3] *= (0.18 + 0.82 * o[:, :1])
-    alb.pixels.foreach_set(a.ravel())
-    alb.pack()
-    # Normals.
-    nrm = new_img("SurvivorNormal", size, True, (0.5, 0.5, 1.0, 1.0))
+    # Albedo: a flat bake on the lows first (anything a projection misses), then projected from the sources.
+    alb = new_img("SurvivorAlbedo", size, False, (0, 0, 0, 1))
+    run("EMIT", alb, albedo_setup, samples=2)
+    unemit()
+    a_alb = img_array(alb)
+    run("EMIT", None, albedo_setup, jobs=[(m, sources[m.name]) for m in baked], samples=2, arr=a_alb)
+    unemit()
+    # ... and from the part files' high sources where they carry all of the low's materials (cavities and worn edges
+    # of the MOLLE rows, bindings and stitch beads).
+    alb_high = [(m, stage1[m.name]) for m in baked if m.name in stage1 and covers(stage1[m.name], m)]
+    print("ALBEDO from high sources:", [m.name for m, _ in alb_high])
+    run("EMIT", None, albedo_setup, jobs=alb_high, samples=2, arr=a_alb)
+    unemit()
+    print("BAKE albedo", round(time.time() - t0, 1), "s")
 
     def normal_setup(mat, nt):
         bsdf = nt.nodes.get("Principled BSDF")
@@ -1049,30 +1471,23 @@ def bake(meshes, size=ATLAS):
                 t = nt.nodes.new("ShaderNodeTexNoise")
                 t.inputs["Scale"].default_value = scale
                 t.inputs["Detail"].default_value = extra
+                nt.links.new(tc.outputs["Object"], t.inputs["Vector"])
                 out = t.outputs["Fac"]
+                nodes.append(t)
             elif kind == "voronoi":
                 t = nt.nodes.new("ShaderNodeTexVoronoi")
                 t.feature = "DISTANCE_TO_EDGE"
                 t.inputs["Scale"].default_value = scale
+                nt.links.new(tc.outputs["Object"], t.inputs["Vector"])
                 out = t.outputs["Distance"]
-            elif kind == "grid":
-                t = nt.nodes.new("ShaderNodeTexBrick")
-                t.inputs["Scale"].default_value = scale
-                t.inputs["Mortar Size"].default_value = 0.04
-                out = t.outputs["Fac"]
-            else:
-                t = nt.nodes.new("ShaderNodeTexWave")
-                t.wave_type = "BANDS"
-                t.bands_direction = "X" if kind == "wave" else "Z"
-                t.inputs["Scale"].default_value = scale
-                t.inputs["Distortion"].default_value = 2.0
-                out = t.outputs["Fac"]
-            nt.links.new(tc.outputs["Object"], t.inputs["Vector"])
+                nodes.append(t)
+            else:  # "weave" (in-surface sine stripes) or "lines" (ripstop threads)
+                out = axis_pattern(nt, nodes, tc, scale, lines=kind == "lines", distortion=0.0 if kind == "lines" else 0.6)
             mul = nt.nodes.new("ShaderNodeMath")
             mul.operation = "MULTIPLY"
             mul.inputs[1].default_value = weight
             nt.links.new(out, mul.inputs[0])
-            nodes += [t, mul]
+            nodes.append(mul)
             if total is None:
                 total = mul.outputs[0]
             else:
@@ -1090,12 +1505,17 @@ def bake(meshes, size=ATLAS):
         nodes.append(bmp)
         return nodes
 
-    run("NORMAL", nrm, normal_setup, samples=2, normal_space="TANGENT")
-    bake_high(meshes, nrm)
-    nrm.pack()
-    # Roughness (G) and metalness (B), baked as emission.
+    # Normals: projected from each low's own full-detail copy (and merged detail meshes), then from the part files'
+    # sculpted sources where they exist; texels a projection misses keep the previous pass (flat to start with).
+    a_nrm = np.empty((size, size, 4), dtype=np.float32)
+    a_nrm[:] = (0.5, 0.5, 1.0, 1.0)
+    run("NORMAL", None, normal_setup, jobs=[(m, sources[m.name]) for m in baked], samples=1, arr=a_nrm, data=True, normal_space="TANGENT")
+    run("NORMAL", None, normal_setup, jobs=[(m, stage1[m.name]) for m in baked if m.name in stage1], samples=1, arr=a_nrm, data=True, normal_space="TANGENT")
+    for low_name, hs in stage1.items():
+        print("BAKED HIGH", low_name, "<-", [h.name for h in hs])
+    print("BAKE normal", round(time.time() - t0, 1), "s")
+    # Roughness (G) and metalness (B), baked flat on the lows.
     orm = new_img("SurvivorORM", size // 2, True, (1, 0.7, 0, 1))
-    restore = []
 
     def rough_setup(mat, nt):
         bsdf = nt.nodes.get("Principled BSDF")
@@ -1119,82 +1539,72 @@ def bake(meshes, size=ATLAS):
         em = emit(mat, nt, cmb.outputs["Color"])
         return [tc, nz, mr, cmb, em]
 
-    run("EMIT", orm, rough_setup, samples=2)
-    for nt, out, old in restore:
-        if old:
-            nt.links.new(old, out.inputs["Surface"])
-    orm.pack()
-    for mat in used:
-        nt = mat.node_tree
-        bsdf = nt.nodes.get("Principled BSDF")
-        ta = nt.nodes.new("ShaderNodeTexImage")
-        ta.image = alb
-        nt.links.new(ta.outputs["Color"], bsdf.inputs["Base Color"])
-        tn = nt.nodes.new("ShaderNodeTexImage")
-        tn.image = nrm
-        nm = nt.nodes.new("ShaderNodeNormalMap")
-        nm.space = "TANGENT"
-        nt.links.new(tn.outputs["Color"], nm.inputs["Color"])
-        nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
-        tr = nt.nodes.new("ShaderNodeTexImage")
-        tr.image = orm
-        sep = nt.nodes.new("ShaderNodeSeparateColor")
-        nt.links.new(tr.outputs["Color"], sep.inputs["Color"])
-        nt.links.new(sep.outputs["Green"], bsdf.inputs["Roughness"])
-        nt.links.new(sep.outputs["Blue"], bsdf.inputs["Metallic"])
-        for l in list(bsdf.inputs["Alpha"].links):
-            nt.links.remove(l)
-        bsdf.inputs["Alpha"].default_value = 1.0
+    run("EMIT", orm, rough_setup, samples=1)
+    unemit()
+    print("BAKE orm", round(time.time() - t0, 1), "s")
+    # Margins, AO into the albedo, then the export maps.
+    a_alb = dilate(a_alb, mask, 24)
+    a_ao = dilate(img_array(ao), small, 12)
+    a_ao = np.repeat(np.repeat(a_ao, 2, axis=0), 2, axis=1)
+    a_alb[..., :3] *= (0.2 + 0.8 * a_ao[..., :1])
+    a_nrm = dilate(a_nrm, mask, 24)
+    a_orm = dilate(img_array(orm), small, 12)
+    tex = {
+        "alb": write_texture(a_alb, "SurvivorAlbedo", *TEX_OUT["albedo"], data=False),
+        "nrm": write_texture(a_nrm, "SurvivorNormal", *TEX_OUT["normal"], data=True, normal=True),
+        "orm": write_texture(a_orm, "SurvivorORM", *TEX_OUT["orm"], data=True),
+    }
     if PREVIEW:
         PREVIEW.mkdir(parents=True, exist_ok=True)
-        for img in (alb, nrm, orm, ao):
-            img.save(filepath=str(PREVIEW / f"{img.name}.png"))
-    print("BAKED survivor maps")
-
-
-def bake_high(meshes, nrm):
-    """Projects the parts' high-detail sources (MOLLE rows, sculpted mask/head/helmet, gloves, boots) onto their low
-    meshes' islands of the shared normal atlas (selected-to-active, short rays), then deletes the sources."""
-    if not HIGHS:
-        return
-    by_name = {m.name: m for m in meshes}
-    pairs = {}
-    for h in HIGHS:
-        targets = HIGH_TARGETS.get(h.name)
-        if targets is None:
-            base = h.name[:-5] if h.name.lower().endswith("_high") else h.name[:-4] if h.name.endswith("High") else None
-            targets = [base] if base else []
-        for t in targets:
-            if t in by_name:
-                pairs.setdefault(t, []).append(h)
-    scene = bpy.context.scene
-    scene.cycles.samples = 2
-    for low_name, highs in pairs.items():
-        low = by_name[low_name]
-        temp = []
-        for mat in low.data.materials:
-            if not mat or category(mat.name) == "Lens":
-                continue
-            t = mat.node_tree.nodes.new("ShaderNodeTexImage")
-            t.image = nrm
-            mat.node_tree.nodes.active = t
-            temp.append((mat, t))
-        bpy.ops.object.select_all(action="DESELECT")
-        for h in highs:
-            h.hide_set(False)
-            h.select_set(True)
-        low.select_set(True)
-        bpy.context.view_layer.objects.active = low
-        try:
-            bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT", use_selected_to_active=True, cage_extrusion=0.012, max_ray_distance=0.03, margin=4, use_clear=False)
-            print("BAKED HIGH", low_name, "<-", [h.name for h in highs])
-        except RuntimeError as exc:
-            print("HIGH BAKE FAILED", low_name, exc)
-        for mat, t in temp:
-            mat.node_tree.nodes.remove(t)
-    for h in HIGHS:
-        bpy.data.objects.remove(h, do_unlink=True)
+        ao.save(filepath=str(PREVIEW / "SurvivorAO.png"))
+    for img in (alb, orm, ao, mask_img):
+        bpy.data.images.remove(img)
+    for s in all_src:
+        bpy.data.objects.remove(s, do_unlink=True)
     HIGHS.clear()
+    SOURCES.clear()
+    for o in meshes:
+        o.hide_render = False
+    # One shared material for everything baked (one draw call per skinned mesh); `Team` (recoloured per player) and
+    # the clear lenses stay separate.
+    shared = bpy.data.materials.new("Survivor")
+    shared.use_nodes = True
+    for mat in [shared] + [m for m in used if m.name == "Team"]:
+        wire_maps(mat, tex)
+    for m in meshes:
+        for i, mat in enumerate(m.data.materials):
+            if mat in used and mat.name != "Team":
+                m.data.materials[i] = shared
+    print("BAKED survivor maps", round(time.time() - t0, 1), "s")
+
+
+def _mask_setup(mat, nt, emit):
+    rgb = nt.nodes.new("ShaderNodeRGB")
+    rgb.outputs[0].default_value = (1, 1, 1, 1)
+    return [rgb, emit(mat, nt, rgb.outputs[0])]
+
+
+def wire_maps(mat, tex):
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    for l in list(bsdf.inputs["Base Color"].links) + list(bsdf.inputs["Normal"].links) + list(bsdf.inputs["Roughness"].links) + list(bsdf.inputs["Metallic"].links) + list(bsdf.inputs["Alpha"].links):
+        nt.links.remove(l)
+    ta = nt.nodes.new("ShaderNodeTexImage")
+    ta.image = tex["alb"]
+    nt.links.new(ta.outputs["Color"], bsdf.inputs["Base Color"])
+    tn = nt.nodes.new("ShaderNodeTexImage")
+    tn.image = tex["nrm"]
+    nm = nt.nodes.new("ShaderNodeNormalMap")
+    nm.space = "TANGENT"
+    nt.links.new(tn.outputs["Color"], nm.inputs["Color"])
+    nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
+    tr = nt.nodes.new("ShaderNodeTexImage")
+    tr.image = tex["orm"]
+    sep = nt.nodes.new("ShaderNodeSeparateColor")
+    nt.links.new(tr.outputs["Color"], sep.inputs["Color"])
+    nt.links.new(sep.outputs["Green"], bsdf.inputs["Roughness"])
+    nt.links.new(sep.outputs["Blue"], bsdf.inputs["Metallic"])
+    bsdf.inputs["Alpha"].default_value = 1.0
 
 
 # ---- build ------------------------------------------------------------------------------------------------------------
@@ -1210,7 +1620,6 @@ HIGH_TARGETS = {
 }
 PART_FILES = {"body": "swat_body.blend", "head": "swat_head.blend", "torso": "swat_torso.blend", "limbs": "swat_limbs.blend"}
 BONE_NAMES = [b[0] for b in bz.BONES]
-BUDGET = 30000
 
 
 def load_part(path):
@@ -1276,13 +1685,15 @@ def transfer_weights(obj, src):
     bpy.ops.object.modifier_apply(modifier=dt.name)
     n = obj.name.lower()
     no_arms = (n.startswith("torso_") and "patch" not in n) or any(k in n for k in ("knee", "boot", "belt", "holster"))
-    region_cleanup(obj, ARM_REF[0], no_arms)
+    # Carrier, belt and pouches ride the torso only: thigh weights tear them apart when the legs spread.
+    torso_only = n.startswith("torso_") and not any(k in n for k in ("holster", "thigh", "sleeve"))
+    region_cleanup(obj, ARM_REF[0], no_arms, torso_only)
 
 
 ARM_REF = [None]
 
 
-def region_cleanup(obj, arm, no_arms=False):
+def region_cleanup(obj, arm, no_arms=False, torso_only=False):
     """After a weight transfer, drops weights from bones outside each vertex's own body region (a hip pouch next to
     the A-posed hand must not follow the hand) and renormalises."""
     if arm is None:
@@ -1290,6 +1701,8 @@ def region_cleanup(obj, arm, no_arms=False):
     segs = {b.name: (arm.matrix_world @ b.head_local, arm.matrix_world @ b.tail_local) for b in arm.data.bones if b.name in REGION_OF}
     if no_arms:
         segs = {k: v for k, v in segs.items() if not REGION_OF[k].startswith("arm")}
+    if torso_only:
+        segs = {k: v for k, v in segs.items() if REGION_OF[k] == "torso"}
     idx = {g.index: g.name for g in obj.vertex_groups}
     for v in obj.data.vertices:
         p = obj.matrix_world @ v.co
@@ -1317,6 +1730,8 @@ def bind(obj, arm, src):
     n = obj.name.lower()
     if "glove" in n and ARM_REF[0] is not None and src is not None:
         return glove_weights(obj, arm)
+    if "boot" in n and ARM_REF[0] is not None and src is not None:
+        return boot_weights(obj, arm)
     rigid = obj.get("bone") if obj.get("bone") in BONE_NAMES else next((b for k, b in RIGID.items() if k in n), None)
     if obj.get("bone") in BONE_NAMES:
         for g in list(obj.vertex_groups):
@@ -1339,9 +1754,6 @@ def bind(obj, arm, src):
         m = obj.modifiers.new("Armature", "ARMATURE")
         m.object = arm
     return obj
-
-
-FIRST_TO_GO = ("beltpouch", "sidepouch", "medic")
 
 
 def glove_weights(obj, arm):
@@ -1367,22 +1779,42 @@ def glove_weights(obj, arm):
     return obj
 
 
-def fit_budget(meshes, budget=BUDGET):
-    """Decimates the densest meshes until the whole operator fits the triangle budget (belt pouches first)."""
-    total = sum(tris(m) for m in meshes)
-    if total > budget:
-        meshes = [bz.decimate(m, 0.5) if any(k in m.name.lower() for k in FIRST_TO_GO) and tris(m) > 300 else m for m in meshes]
-        total = sum(tris(m) for m in meshes)
-    if total <= budget:
-        return meshes
-    out = []
-    keep = 1500  # small pieces are left alone
-    big = sum(tris(m) for m in meshes if tris(m) > keep)
-    small = total - big
-    ratio = max(0.2, (budget - small) / max(1, big))
+def boot_weights(obj, arm):
+    """Boots: the shaft follows the shin, the foot box the foot, blended over 8 cm around the ankle (a transferred
+    blend tore the boot apart in the wide ready stance)."""
+    side = "L" if obj.name.endswith("L") or ".l" in obj.name.lower() else "R"
+    ankle = (arm.matrix_world @ arm.data.bones[f"foot.{side}"].head_local).z
+    for g in list(obj.vertex_groups):
+        obj.vertex_groups.remove(g)
+    gs = obj.vertex_groups.new(name=f"shin.{side}")
+    gf = obj.vertex_groups.new(name=f"foot.{side}")
+    for v in obj.data.vertices:
+        z = (obj.matrix_world @ v.co).z
+        w = max(0.0, min(1.0, (z - (ankle - 0.05)) / 0.14))  # 1 = shin; a soft ankle
+        if w > 0:
+            gs.add([v.index], w, "REPLACE")
+        if w < 1:
+            gf.add([v.index], 1.0 - w, "REPLACE")
+    obj.parent = arm
+    if not any(m.type == "ARMATURE" for m in obj.modifiers):
+        m = obj.modifiers.new("Armature", "ARMATURE")
+        m.object = arm
+    return obj
+
+
+def join_skinned(meshes):
+    """One skinned mesh for the whole operator once every piece is weighted: three primitives (the shared baked
+    material, Team, the clear lenses) instead of a draw call per piece and material."""
+    bpy.ops.object.select_all(action="DESELECT")
     for m in meshes:
-        out.append(bz.decimate(m, ratio) if tris(m) > keep else m)
-    return out
+        m.select_set(True)
+    body = next((m for m in meshes if "shirt" in m.name.lower()), meshes[0])
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.join()
+    body.name = "Survivor_Mesh"
+    body.data.name = "Survivor_Mesh"
+    print("JOINED", tris(body), "tris,", len(body.data.vertices), "verts, materials", [m.name for m in body.data.materials])
+    return [body]
 
 
 def standin_parts(p, need):
@@ -1456,15 +1888,46 @@ def build():
         sleeve = next((m for m in meshes if "shirt" in m.name.lower()), None)
         meshes.append(fitted_armband(p, arm, sleeve) if sleeve else armband(p, -1))
     print("PRE-BUDGET tris", sum(tris(m) for m in meshes))
-    meshes = fit_budget(meshes)
+    meshes = prepare_lows(meshes)
     print("SURVIVOR tris", sum(tris(m) for m in meshes), [(m.name, tris(m)) for m in meshes])
     bake(meshes)
     for m in meshes:
         bind(m, arm, src)
     if src is not None and src.name not in [m.name for m in meshes]:
         bpy.data.objects.remove(src, do_unlink=True)
-    bz.survivor_anims(arm)
+    meshes = join_skinned(meshes)
+    build_anims(arm)
     return arm, meshes
+
+
+ANIM_MODULE = HERE / "swat" / "swat_anim.py"
+PREVIEW_GRIP = [None]  # where the idle holds the rifle grip (Blender space), for the preview
+PREVIEW_GUN = "mp7"  # the MP5SD in weapons.glb, the gun the idle stance holds
+
+
+def build_anims(arm):
+    """The SWAT clips: from the ANIM worker's swat/swat_anim.py (build_clips(arm, bz): shouldered-MP5 ready idle,
+    tactical walk, run, downed, reload, plus idle/walk/run/reload_pistol) when it exists, else the clips ported from
+    build_zombies.py. The new idle holds the grip at swat_anim.models_ts_grip(), which models.ts must use for `grip`."""
+    if ANIM_MODULE.exists():
+        try:
+            spec = importlib.util.spec_from_file_location("swat_anim", ANIM_MODULE)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.build_clips(arm, bz)
+            if hasattr(mod, "models_ts_grip"):
+                gx, gy, gz = mod.models_ts_grip()
+                PREVIEW_GRIP[0] = Vector((gx, -gz, gy))  # glTF y-up back to Blender z-up
+                print("ANIM grip (models.ts GRIP):", (round(gx, 4), round(gy, 4), round(gz, 4)))
+            print("ANIM clips from swat_anim.py:", sorted(a.name for a in bpy.data.actions))
+            return
+        except Exception as exc:  # noqa: BLE001
+            print("ANIM swat_anim.py failed, falling back to the ported clips:", exc)
+            for act in list(bpy.data.actions):
+                bpy.data.actions.remove(act)
+            if arm.animation_data:
+                arm.animation_data_clear()
+    bz.survivor_anims(arm)
 
 
 # ---- preview sheet ----------------------------------------------------------------------------------------------------
@@ -1499,7 +1962,7 @@ def preview_sheet(arm):
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=str(wpath))
         new = [o for o in bpy.data.objects if o not in before]
-        root = next((o for o in new if o.name == "m4a1"), None)
+        root = next((o for o in new if o.name == PREVIEW_GUN), None)
         for o in new:
             if root is None or (o is not root and root not in o.parents_recursive if hasattr(o, "parents_recursive") else False):
                 pass
@@ -1509,7 +1972,7 @@ def preview_sheet(arm):
                 bpy.data.objects.remove(o, do_unlink=True)
         if root:
             root.parent = None
-            root.location = bz.GRIP
+            root.location = PREVIEW_GRIP[0] or bz.GRIP
             root.rotation_euler = (0, 0, 0)
             root.rotation_mode = "XYZ"
             gun = [root] + list(root.children_recursive)
@@ -1561,6 +2024,29 @@ def preview_sheet(arm):
     out.filepath_raw = str(PREVIEW / "op_sheet.png")
     out.file_format = "PNG"
     out.save()
+    # The idle (shouldered MP5 ready stance) in the stance reference's three views: front 3/4, side, rear 3/4, all from
+    # the character's left so the gun points screen-right like the reference.
+    scene.render.resolution_x = 700
+    scene.render.resolution_y = 900
+    pfiles = []
+    for name, ang in (("f34", 40), ("side", 90), ("r34", 140)):
+        a_ = math.radians(ang)
+        cam.location = (math.sin(a_) * 5.0, math.cos(a_) * 5.0, 1.15)
+        cam.rotation_euler = (Vector((0, 0, 1.0)) - cam.location).to_track_quat("-Z", "Y").to_euler()
+        path = str(PREVIEW / f"op_p_{name}.png")
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        pfiles.append(path)
+    pimgs = [bpy.data.images.load(f) for f in pfiles]
+    pw, ph = pimgs[0].size
+    psheet = np.zeros((ph, pw * 3, 4), dtype=np.float32)
+    for i, im in enumerate(pimgs):
+        psheet[:, i * pw:(i + 1) * pw] = np.array(im.pixels[:], dtype=np.float32).reshape(ph, pw, 4)
+    pout = bpy.data.images.new("sheet_pose", pw * 3, ph, alpha=False)
+    pout.pixels.foreach_set(psheet.ravel())
+    pout.filepath_raw = str(PREVIEW / "op_sheet_pose.png")
+    pout.file_format = "PNG"
+    pout.save()
     # The same four views in the rest (A-like) pose without the rifle, like the reference sheet, so plates, patches
     # and pouches are not hidden behind the arms.
     arm.animation_data.action = None
@@ -1589,6 +2075,31 @@ def preview_sheet(arm):
     out.filepath_raw = str(PREVIEW / "op_sheet_a.png")
     out.file_format = "PNG"
     out.save()
+    # Close-ups in the rest pose (texture / normal-map detail): chest rig, helmet, boots, glove and knee.
+    scene.render.resolution_x = 640
+    scene.render.resolution_y = 640
+    cam_d.lens = 85
+    cfiles = []
+    for name, eye, look in (("chest", (0.75, 1.9, 1.35), (0, 0.15, 1.22)), ("helmet", (0.55, 0.8, 1.8), (0, 0.02, 1.7)),
+                            ("boots", (0.55, 1.25, 0.3), (0, 0.04, 0.14)), ("glove", (-1.05, 0.9, 1.05), (-0.42, 0.02, 0.88)),
+                            ("knee", (0.6, 1.3, 0.62), (0.05, 0.05, 0.5)), ("back", (-0.5, -1.7, 1.3), (0, -0.12, 1.15))):
+        cam.location = eye
+        cam.rotation_euler = (Vector(look) - Vector(eye)).to_track_quat("-Z", "Y").to_euler()
+        path = str(PREVIEW / f"op_c_{name}.png")
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        cfiles.append(path)
+    cimgs = [bpy.data.images.load(f) for f in cfiles]
+    cw, ch = cimgs[0].size
+    csheet = np.zeros((ch * 2, cw * 3, 4), dtype=np.float32)
+    for i, im in enumerate(cimgs):
+        r, c = 1 - i // 3, i % 3  # first row on top (image rows run bottom-up)
+        csheet[r * ch:(r + 1) * ch, c * cw:(c + 1) * cw] = np.array(im.pixels[:], dtype=np.float32).reshape(ch, cw, 4)
+    cout = bpy.data.images.new("sheet_close", cw * 3, ch * 2, alpha=False)
+    cout.pixels.foreach_set(csheet.ravel())
+    cout.filepath_raw = str(PREVIEW / "op_sheet_close.png")
+    cout.file_format = "PNG"
+    cout.save()
     for o in [floor, cam] + lights + gun:
         bpy.data.objects.remove(o, do_unlink=True)
 
@@ -1608,11 +2119,32 @@ def report_bounds(meshes):
         ev.to_mesh_clear()
 
 
+def export_glb(arm):
+    """bz.export with the settings the baked maps need: the JPEG maps are embedded as written (per-map quality, see
+    write_texture), tangents go along so the normal map matches Blender's MikkTSpace bake on the low-poly mesh."""
+    bpy.ops.object.select_all(action="DESELECT")
+    arm.select_set(True)
+    for c in arm.children_recursive:
+        c.select_set(True)
+    bpy.context.view_layer.objects.active = arm
+    OUT.mkdir(parents=True, exist_ok=True)
+    path = str(OUT / "survivor.glb")
+    bpy.ops.export_scene.gltf(
+        filepath=path, export_format="GLB", use_selection=True, export_apply=True, export_yup=True,
+        export_materials="EXPORT", export_image_format="JPEG", export_image_quality=90, export_normals=True,
+        export_tangents=True, export_texcoords=True, export_vertex_color="NONE", export_animations=True,
+        export_animation_mode="ACTIONS", export_skins=True, export_def_bones=False, export_morph=False,
+        export_lights=False, export_cameras=False, export_extras=False, export_anim_slide_to_zero=True,
+        export_force_sampling=True, export_frame_step=1,
+    )
+    print("EXPORTED", path, Path(path).stat().st_size, "bytes")
+
+
 def main():
     arm, meshes = build()
     bpy.context.scene.frame_set(1)
     report_bounds(meshes)
-    bz.export("survivor", [arm], animations=True, skins=True, textures=True)
+    export_glb(arm)
     preview_sheet(arm)
 
 
