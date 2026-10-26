@@ -328,7 +328,10 @@ export class ZombiesClient implements GameClient {
   private recoilVel = 0;
   private recoilYaw = 0;
   private trauma = 0;
+  /** Footstep clock: +1 per step (stride metres walked), so the bob rises and falls once per footstep. */
   private bobT = 0;
+  /** How much the head bobs (0..1), eased in and out so starting and stopping don't snap. */
+  private bobK = 0;
   private stepDist = 0;
   private hurtK = 0;
   private hitK = 0;
@@ -1083,7 +1086,7 @@ export class ZombiesClient implements GameClient {
         this.audio?.play('step', { amount: inp.sprint ? 0.8 : 0.45 });
       }
       if (!wasGround && me.body.onGround && fall > 2) this.audio?.play('step', { amount: Math.min(1, 0.5 + fall / 10) });
-      this.bobT += moved * (inp.sprint ? 1.6 : 2.1);
+      this.bobT += moved / stride;
     }
     me.pending.push(inp);
     if (me.pending.length > 240) me.pending.splice(0, me.pending.length - 240);
@@ -1621,9 +1624,12 @@ export class ZombiesClient implements GameClient {
     const sy = (Math.sin(now * 41.3) + Math.sin(now * 19.9)) * 0.5 * shake * 0.03;
     const eye = eyeHeight(me.life === 1);
     const speed = Math.hypot(me.body.vel.x, me.body.vel.z);
-    const bob = me.body.onGround ? Math.min(1, speed / ZB.walkSpeed) * (1 - this.adsK * 0.8) : 0;
-    const bobY = Math.abs(Math.sin(this.bobT * Math.PI)) * 0.035 * bob;
-    const bobX = Math.sin(this.bobT * Math.PI) * 0.02 * bob;
+    // Head bob: a few millimetres, one smooth rise and fall per footstep (cosine, no kink at the bottom) and a slower
+    // side sway over each left-right pair, eased in and out with the walking speed.
+    this.bobK = damp(this.bobK, me.body.onGround ? Math.min(1, speed / ZB.walkSpeed) : 0, 6, dt);
+    const bob = this.bobK * (1 - this.adsK * 0.85);
+    const bobY = (0.5 - 0.5 * Math.cos(this.bobT * Math.PI * 2)) * 0.009 * bob;
+    const bobX = Math.sin(this.bobT * Math.PI) * 0.006 * bob;
     const r = yawRight(me.yaw);
     cam.position.set(
       me.body.pos.x + this.correction.x + r.x * bobX,
@@ -1636,7 +1642,7 @@ export class ZombiesClient implements GameClient {
     cam.rotation.set(
       me.pitch + this.recoilPitch + sy + this.landDip * 0.05,
       me.yaw + this.recoilYaw + sx,
-      (me.life === 1 ? 0.25 : Math.sin(this.bobT * Math.PI) * 0.004 * bob) + hurtRoll,
+      (me.life === 1 ? 0.25 : Math.sin(this.bobT * Math.PI) * 0.0015 * bob) + hurtRoll,
     );
     // FOV: aim zoom, a touch wider when sprinting.
     const id = this.slots[this.cur] ?? START_WEAPON;
@@ -1661,7 +1667,7 @@ export class ZombiesClient implements GameClient {
       dt,
       ads: this.adsK,
       sprint,
-      move: Math.min(1, speed / ZB.walkSpeed),
+      move: this.bobK,
       bob: this.bobT,
       onGround: this.me.body.onGround,
       lookX: this.lookX,

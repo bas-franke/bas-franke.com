@@ -407,9 +407,10 @@ export class Viewmodel {
     // Bob (much less when aimed) and idle breathing.
     const bobAmt = f.onGround ? f.move * (1 - a * 0.85) : 0;
     const ph = f.bob * Math.PI;
-    pos.x += Math.sin(ph) * 0.011 * bobAmt;
-    pos.y += -Math.abs(Math.cos(ph)) * 0.012 * bobAmt + Math.sin(performance.now() / 900) * 0.0018 * (1 - a);
-    rot.z += Math.sin(ph) * 0.02 * bobAmt;
+    // One smooth dip per footstep (cosine, no kink) and a side sway over each left-right pair, both small.
+    pos.x += Math.sin(ph) * 0.006 * bobAmt;
+    pos.y += -(0.5 + 0.5 * Math.cos(ph * 2)) * 0.007 * bobAmt + Math.sin(performance.now() / 900) * 0.0018 * (1 - a);
+    rot.z += Math.sin(ph) * 0.01 * bobAmt;
 
     // Sway.
     pos.x += this.swayX.x * 0.02;

@@ -49,8 +49,14 @@ const GRIP = new THREE.Vector3(0.0679, 1.4853, -0.382);
 
 const loader = new GLTFLoader();
 
+/** Content hashes of public/models/**.glb, baked in by vite.config.ts (absent in other build setups). */
+declare const __MODEL_VERSIONS__: Record<string, string> | undefined;
+
 function load(name: string, quiet = false): Promise<GLTF | null> {
-  return loader.loadAsync(`${BASE}${name}.glb`).catch((err) => {
+  // The server caches /models for a day: the content hash in the URL makes a rebuilt model load at once.
+  const url = `${BASE}${name}.glb`;
+  const v = typeof __MODEL_VERSIONS__ !== 'undefined' ? __MODEL_VERSIONS__[url] : undefined;
+  return loader.loadAsync(v ? `${url}?v=${v}` : url).catch((err) => {
     if (!quiet) console.warn(`Last Light: ${name}.glb failed to load; using primitives`, err);
     return null;
   });
