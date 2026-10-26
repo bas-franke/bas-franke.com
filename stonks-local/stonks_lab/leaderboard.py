@@ -18,7 +18,10 @@ from typing import Any
 from . import registry as reg
 
 PLACEBO_FAMILY = "placebo_timing"      # random in/out timing: the luck benchmark (findings #475/#476/#482)
-EXCLUDED_FAMILIES = {"buy_hold", "buy_and_hold", "hold", "benchmark", PLACEBO_FAMILY}
+# Diagnostic reruns of other families at other close hours: picking the best hour is luck (finding #673).
+DIAGNOSTIC_FAMILIES = {"phase_shift", "hourcheck_a19", "hour_bag_a13", "hour_check_a21", "hourshift_a14", "weekend_hour_a21",
+                       "wick_hours_a22"}
+EXCLUDED_FAMILIES = {"buy_hold", "buy_and_hold", "hold", "benchmark", PLACEBO_FAMILY, *DIAGNOSTIC_FAMILIES}
 LUCK_EXPOSURE_BAND = 15.0              # placebo runs within this many exposure points count as "similar exposure"
 MARKET_NAMES = {"BTC-EUR": "BTC", "ETH-EUR": "ETH"}
 
@@ -49,12 +52,44 @@ def test_trades(e: dict) -> int | None:
     return int(v) if isinstance(v, (int, float)) else None
 
 
+def _family_flag(family: str, attr: str) -> bool:
+    """A family module may set BENCHMARK = True (placebo/null) or DIAGNOSTIC = True (reruns of other families):
+    such families are never ranked."""
+    try:
+        from .families import FAMILIES  # type: ignore
+        fam = FAMILIES.get(family)
+        return bool(getattr(getattr(fam, "module", None), attr, False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def superseded_reason(e: dict) -> str | None:
+    """Rows of a family version older than the family's ``INVALID_BELOW_VERSION`` (a confirmed bug such as
+    look-ahead was fixed in a later version) are never ranked; ``lab.py rescore --family X --rerun-superseded``
+    re-runs them at the current version."""
+    try:
+        from .families import FAMILIES  # type: ignore
+        fam = FAMILIES.get(e["family"])
+    except Exception:  # noqa: BLE001
+        return None
+    below = int(getattr(fam, "invalid_below", 1) or 1) if fam is not None else 1
+    v = e.get("family_version") or (e.get("spec") or {}).get("familyVersion") or 1
+    if int(v) < below:
+        return f"superseded: {e['family']} v{v} had a bug fixed in v{below}"
+    return None
+
+
 def ineligible_reason(e: dict, min_test_trades: int = 5) -> str | None:
     """Why an experiment may not be ranked (None = it may). Sitting in cash is not a strategy: evaluate marks a
     spec ineligible when its median fold exposure is under 10 %; fewer than ``min_test_trades`` fills in the test
     folds is the same thing in disguise. Buy and hold is the benchmark, never a candidate."""
     if e["family"] in EXCLUDED_FAMILIES:
-        return "benchmark family"
+        return "benchmark family" if e["family"] not in DIAGNOSTIC_FAMILIES else "diagnostic family (hour rerun)"
+    if _family_flag(e["family"], "BENCHMARK") or _family_flag(e["family"], "DIAGNOSTIC"):
+        return "benchmark/diagnostic family"
+    sup = superseded_reason(e)
+    if sup:
+        return sup
     if e.get("score") is None or not math.isfinite(e["score"]):
         return "no score"
     parts = (e.get("metrics") or {}).get("scoreParts") or {}

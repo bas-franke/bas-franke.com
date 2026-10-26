@@ -1,4 +1,5 @@
 import random
+import time
 import types
 
 import numpy as np
@@ -184,3 +185,214 @@ def test_rotation_missing_bars_use_own_series():
     v = FAMILIES["rotation_momentum"].targets({"AAA-EUR": a, "BBB-EUR": b}, spec).to_numpy()
     # bar 2: BBB's previous own candle is bar 0 -> ret 0.3 beats AAA's 0.0909
     np.testing.assert_allclose(v[1:], [[1, 0], [0, 1], [1, 0]])
+
+
+# --------------------------------------------------------------------------------------------- every family
+# The generic contract and no-look-ahead checks run on EVERY discovered family (finding #445), on real cached daily
+# candles (signal markets and point-in-time universes need real coins), with the default params and one sampled
+# param set, on the first market set the family accepts: the point-in-time pool (spec universe top10_pit), today's
+# top 10, BTC+ETH, or BTC alone; on daily candles, or the last ~11 months of hourly ones for intraday families that
+# never decide on daily candles. Skipped when no real candles are cached.
+
+from stonks_lab import data as _data  # noqa: E402
+from stonks_lab.families import discover  # noqa: E402
+
+discover()
+ALL_FAMILIES = sorted(n for n in FAMILIES if not n.startswith("test_"))
+CUTS_FROM_END = (200, 30)          # truncate / perturb everything after bar n - 1 - k
+REAL_INTERVALS = ("1d", "1h")
+REAL_TAIL = {"1h": 8000}           # bars of real history used per interval (all daily candles)
+SLOW_PROBE_S = 1.0                 # slower than this on ~3 years of bars (e.g. model refits): keep to those
+# Contract problems found by this test in other agents' families, reported to the fleet; xfail until fixed.
+KNOWN_CONTRACT_ISSUES = {
+    "time_window": "its default params are rejected by its own valid_params (buy and hold)",
+}
+_REAL: dict = {}
+
+
+def real(market, interval="1d"):
+    if (market, interval) not in _REAL:
+        try:
+            df = _data.load_candles(market, interval)
+            _REAL[(market, interval)] = df.iloc[-REAL_TAIL[interval]:] if interval in REAL_TAIL else df
+        except FileNotFoundError:
+            _REAL[(market, interval)] = None
+    return _REAL[(market, interval)]
+
+
+def real_candles(fam, spec):
+    cd = {m: real(m, spec["interval"]) for m in fam.markets_needed(spec)}
+    return {m: d for m, d in cd.items() if d is not None and len(d)}
+
+
+def market_sets(fam):
+    if not fam.multi_market:
+        return [(["BTC-EUR"], None)]
+    from stonks_lab.universe import PIT_NAME, pit_pool, top10
+    return [(pit_pool(), PIT_NAME), (top10(), None), (["BTC-EUR", "ETH-EUR"], None)]
+
+
+def real_spec(name, params=None):
+    """(spec, candles, targets, slow) on the first interval and market set the family accepts and decides on (else the
+    first accepted one); None when no real data is cached."""
+    if real("BTC-EUR", "1d") is None:
+        return None
+    fam = FAMILIES[name]
+    fallback = None
+    for interval in REAL_INTERVALS:
+        for ms, uni in market_sets(fam):
+            raw = {"family": name, "markets": ms, "interval": interval, "params": dict(params or {})}
+            if uni:
+                raw["universe"] = uni
+            spec = normalize_spec(raw, fam)
+            cd = real_candles(fam, spec)
+            if not all(m in cd for m in spec["markets"]):
+                continue
+            try:
+                keep = max(int(fam.warmup(spec["params"]) or 0) + 300, 1100)
+                short = {m: d.iloc[-keep:] for m, d in cd.items()}
+                t0 = time.perf_counter()
+                t = fam.targets(short, spec)
+                slow = time.perf_counter() - t0 >= SLOW_PROBE_S
+                if slow:
+                    cd = short
+                else:
+                    t = fam.targets(cd, spec)
+            except ValueError:          # this family does not take this market set
+                continue
+            if np.isfinite(t.to_numpy(np.float64)).any():
+                return spec, cd, t, slow
+            fallback = fallback or (spec, cd, t, slow)
+            break
+    return fallback
+
+
+def _same(a, b):
+    return a.shape == b.shape and np.array_equal(np.nan_to_num(a, nan=-7.0), np.nan_to_num(b, nan=-7.0))
+
+
+def lookahead_problems(fam, candles, spec, cuts=CUTS_FROM_END, seed=5, full_df=None):
+    """Decisions up to bar t must not change when everything after t is dropped or scrambled (prices and volume
+    x 0.3..3). Returns a list of problems (empty = no look-ahead found)."""
+    full_df = fam.targets(candles, spec) if full_df is None else full_df
+    full = full_df.to_numpy()
+    idx = np.asarray(full_df.index, dtype=np.int64)
+    rng = np.random.default_rng(seed)
+    out = []
+    for back in cuts:
+        k = len(idx) - 1 - back
+        if k < 10:
+            continue
+        ts = idx[k]
+        trunc = {m: d[np.asarray(d.index, dtype=np.int64) <= ts] for m, d in candles.items()}
+        t = fam.targets(trunc, spec).to_numpy()[: k + 1]
+        if not _same(t, full[: k + 1]):
+            out.append(f"truncating after bar {k} changes earlier decisions")
+        pert = {}
+        for m, d in candles.items():
+            d = d.copy()
+            after = np.asarray(d.index, dtype=np.int64) > ts
+            f = rng.uniform(0.3, 3.0, int(after.sum()))
+            for col in ("open", "high", "low", "close", "volume"):
+                if col in d:
+                    x = d[col].to_numpy(np.float64).copy()
+                    x[after] *= f
+                    d[col] = x
+            pert[m] = d
+        p = fam.targets(pert, spec).to_numpy()[: k + 1]
+        if not _same(p, full[: k + 1]):
+            out.append(f"changing the bars after bar {k} changes earlier decisions")
+    return out
+
+
+def contract_problems(t, spec):
+    """Columns = spec markets, increasing int64 index, every weight within [0, maxWeight] and every row's sum too.
+    Rows before the first decision are all NaN (warm-up); a NaN row after it means 'no decision' (allowed, e.g.
+    phase_shift decides once a day on hourly bars) and a NaN cell in a decided row counts as 0."""
+    mw = float(spec["risk"]["maxWeight"])
+    out = []
+    if list(t.columns) != spec["markets"]:
+        out.append(f"columns {list(t.columns)[:3]}... are not the spec markets")
+    if t.index.dtype != np.int64:
+        out.append(f"index dtype {t.index.dtype}, expected int64")
+    if len(t) > 1 and not np.all(np.diff(t.index.to_numpy()) > 0):
+        out.append("index not strictly increasing")
+    v = t.to_numpy(np.float64)
+    if np.isinf(v).any():
+        out.append("infinite weight")
+    if not np.isfinite(v).any():
+        return out + ["never decides"]
+    with np.errstate(invalid="ignore"):
+        if (v < 0).any() or (v > mw + 1e-9).any():
+            out.append(f"weight outside [0, {mw}]: min {np.nanmin(v)}, max {np.nanmax(v)}")
+    tot = np.nansum(v, axis=1)
+    if (tot > mw + 1e-9).any():
+        out.append(f"row weights sum to {tot.max()} > maxWeight {mw}")
+    return out
+
+
+def _param_sets(fam):
+    return [("default", fam.default_params()), ("sampled", fam.sample(random.Random(7)))]
+
+
+@pytest.mark.parametrize("name", ALL_FAMILIES)
+def test_every_family_contract(name):
+    if name in KNOWN_CONTRACT_ISSUES:
+        pytest.xfail(KNOWN_CONTRACT_ISSUES[name])
+    fam = FAMILIES[name]
+    assert fam.validate({"params": fam.default_params()}) is None
+    rng = random.Random(1)
+    for _ in range(10):
+        p = fam.sample(rng)
+        assert fam.validate({"params": p}) is None, p
+    for label, params in _param_sets(fam):
+        got = real_spec(name, params)
+        if got is None:
+            pytest.skip("no real candles cached")
+        spec, cd, t1, _ = got
+        ex = fam.explain(spec)
+        assert ex["summary"] and len(ex["howItWorks"]) >= 2 and ex["whenItWins"] and ex["whenItLoses"]
+        for mw in (1.0, 0.6):
+            s = dict(spec, risk={**spec["risk"], "maxWeight": mw})
+            probs = contract_problems(t1 if mw == 1.0 else fam.targets(cd, s), s)
+            assert not probs, f"{label} params {params}, maxWeight {mw}: {probs}"
+
+
+@pytest.mark.parametrize("name", ALL_FAMILIES)
+def test_every_family_no_lookahead(name):
+    fam = FAMILIES[name]
+    for label, params in _param_sets(fam):
+        got = real_spec(name, params)
+        if got is None:
+            pytest.skip("no real candles cached")
+        spec, cd, full, slow = got
+        probs = lookahead_problems(fam, cd, spec, cuts=CUTS_FROM_END[-1:] if slow else CUTS_FROM_END, full_df=full)
+        assert not probs, f"{label} params {params} on {len(spec['markets'])} markets: {probs}"
+
+
+def _leaky_module(kind):
+    def targets(candles, spec, start_time=None):
+        df = candles[spec["markets"][0]]
+        c = df["close"].to_numpy(np.float64)
+        if kind == "shift":
+            sig = pd.Series(c).shift(-1).to_numpy() > c                       # tomorrow's close
+        elif kind == "median":
+            sig = c > np.median(c)                                            # median of the whole history
+        else:
+            sig = pd.Series(c).rolling(5, center=True).mean().to_numpy() < c  # centered window
+        w = sig.astype(np.float64)
+        w[:5] = np.nan
+        return pd.DataFrame({spec["markets"][0]: w}, index=pd.Index(np.asarray(df.index, dtype=np.int64), name="ts"))
+    return types.SimpleNamespace(NAME=f"test_leaky_{kind}", default_params=lambda: {}, param_space=lambda: {},
+                                 explain=lambda s: {"summary": "x"}, targets=targets)
+
+
+@pytest.mark.parametrize("kind", ["shift", "median", "centered"])
+def test_lookahead_checker_catches_leaks(kind):
+    fam = register_family(_leaky_module(kind))
+    try:
+        cd = {"BTC-EUR": synth(600, 4)}
+        spec = normalize_spec({"family": fam.name, "markets": ["BTC-EUR"], "interval": "4h", "params": {}}, fam)
+        assert lookahead_problems(fam, cd, spec)
+    finally:
+        del FAMILIES[fam.name]

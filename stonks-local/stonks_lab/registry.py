@@ -359,18 +359,34 @@ class Registry:
                 _bump_round(c, r, a, "experiments")
         return h
 
-    def stale_versions(self, limit: int | None = None, version: int = EVAL_VERSION) -> list[dict]:
+    def stale_versions(self, limit: int | None = None, version: int = EVAL_VERSION,
+                       family: str | None = None) -> list[dict]:
         """Done experiments evaluated with an older method (eval_version NULL or < ``version``), cheapest
-        intervals first: [{spec_hash, spec, interval, eval_version}]."""
+        intervals first, optionally of one family: [{spec_hash, spec, interval, eval_version}]."""
         q = ("SELECT spec_hash, spec, interval, eval_version FROM experiments WHERE status='done' "
-             "AND (eval_version IS NULL OR eval_version < ?) ORDER BY id")
+             "AND (eval_version IS NULL OR eval_version < ?)")
+        args: list = [version]
+        if family:
+            q += " AND family=?"
+            args.append(family)
         with self._conn() as c:
-            rows = [dict(r) for r in c.execute(q, (version,)).fetchall()]
+            rows = [dict(r) for r in c.execute(q + " ORDER BY id", args).fetchall()]
         order = {iv: i for i, iv in enumerate(reversed(INTERVALS))}
         rows.sort(key=lambda r: order.get(r["interval"], 99))
         for r in rows:
             r["spec"] = _lj(r["spec"])
         return rows[:limit] if limit else rows
+
+    def older_family_versions(self, family: str, below: int) -> list[dict]:
+        """Done experiments of ``family`` with family_version < ``below`` (NULL = 1), best score first:
+        [{spec_hash, spec, interval, family_version, score}]."""
+        q = ("SELECT spec_hash, spec, interval, family_version, score FROM experiments WHERE status='done' "
+             "AND family=? AND COALESCE(family_version, 1) < ? ORDER BY score IS NULL, score DESC")
+        with self._conn() as c:
+            rows = [dict(r) for r in c.execute(q, (family, below)).fetchall()]
+        for r in rows:
+            r["spec"] = _lj(r["spec"])
+        return rows
 
     def backfill_eval_version(self) -> int:
         """Rows whose stored result says which eval version made it but whose column is NULL (written by a process

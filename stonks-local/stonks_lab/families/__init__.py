@@ -17,6 +17,7 @@ Adding a family (research agents): create ``stonks_lab/families/<name>.py`` defi
     def targets(candles, spec, start_time=None) -> DataFrame   # index ts (int64 ms), one column per spec market,
                                   # weight 0..maxWeight decided at that bar's close, NaN = no decision yet
     def explain(spec) -> dict     # summary, howItWorks[], whenItWins, whenItLoses
+    INVALID_BELOW_VERSION = 2     # optional: older versions had a confirmed bug (look-ahead); their rows are ignored
 
 It is picked up automatically (BOT_READY defaults to False: the dashboard shows it as "not yet runnable" until it is
 ported to stonks/backend/src/strategies/ with a parity fixture). ``register_family(module_or_family)`` registers one
@@ -64,6 +65,7 @@ def register_family(obj: Any, *, bot_ready: bool | None = None, replace: bool = 
             bot_ready=bool(getattr(m, "BOT_READY", False)),
             multi_market=bool(getattr(m, "MULTI_MARKET", False)),
             anchored=bool(getattr(m, "ANCHORED", False)),
+            invalid_below=int(getattr(m, "INVALID_BELOW_VERSION", 1)),
             module=m,
         )
     else:

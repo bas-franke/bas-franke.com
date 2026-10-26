@@ -198,6 +198,26 @@ def test_placebo_is_a_luck_line_not_a_candidate(r):
     assert leaderboard.validate_payload(p) == []
 
 
+def test_diagnostic_and_superseded_rows_are_not_ranked(r):
+    from stonks_lab.families import FAMILIES
+    _fill(r)
+    s = spec("phase_shift", preset="sma130", hour=7)
+    r.claim(s)
+    r.record(s, result(50.0))
+    assert "phase_shift" not in [e["family"] for e in leaderboard.rank(r, n=5)]      # hour rerun (#673)
+    fam = FAMILIES["ema_cross"]
+    old = fam.invalid_below
+    fam.invalid_below = 2                                    # ema_cross v1 rows had a (pretend) look-ahead bug
+    try:
+        assert "ema_cross" not in [e["family"] for e in leaderboard.rank(r, n=5)]
+    finally:
+        fam.invalid_below = old
+    assert "ema_cross" in [e["family"] for e in leaderboard.rank(r, n=5)]
+    v1 = spec(fast=12, slow=48)
+    assert [x["spec_hash"] for x in r.older_family_versions("ema_cross", 2)][:1] == [reg.spec_hash(v1)]
+    assert r.stale_versions(family="rsi_dip") == []
+
+
 def test_vs_buy_hold_sentence_honest():
     m = {"returnPct": -5.0, "maxDrawdownPct": 10.0, "testPeriod": ["2024-01-01", "2025-01-01"]}
     s = leaderboard.vs_buy_hold_sentence(m, 40.0, 50.0, ["BTC-EUR"])

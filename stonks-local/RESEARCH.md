@@ -140,7 +140,21 @@ ranked or published. Buy and hold is the benchmark of every fold, never a candid
 compare results of the current version; `lab.py rescore` re-evaluates older rows in place (the old score stays in
 `metrics.history`). Version 1 started each spec's folds after its own warm-up and used the median of x_f
 (findings #21/#22); version 3 dated the point-in-time eligibility (findings #258-#260; other results carried
-forward unchanged). `lab.py show <hash>` has `scoreParts`, every fold and the holdout.
+forward unchanged). `lab.py show <hash>` has `scoreParts`, every fold and the holdout. `lab.py rescore --family X`
+limits a rescore to one family.
+
+**Family versions**: a family's `VERSION` is part of every spec's identity (and of the near-duplicate check, so a
+bumped family can be re-run). When an older version had a confirmed bug such as look-ahead, the fix bumps
+`VERSION` and sets `INVALID_BELOW_VERSION = <new version>` in the module: the leaderboard then ignores the older
+rows (they stay in the registry), and `lab.py rescore --family X --rerun-superseded [--invalid-only]` re-runs their
+specs as new rows at the current version.
+
+**Luck line and diagnostics**: `placebo_timing` (random in/out timing) is the luck benchmark, never a candidate:
+the payload notes and every top-5 entry's explanation give the best-of-N placebo score on the same market and
+interval at a similar exposure ("Luck check: ..."). Close-hour reruns of other families (`phase_shift`,
+`hourcheck_a19`, `hour_bag_a13`, `hour_check_a21`, `hourshift_a14`, `weekend_hour_a21`, `wick_hours_a22`) are
+diagnostics: picking the best hour is luck (#673), so they are never ranked. A new benchmark or diagnostic family
+sets `BENCHMARK = True` or `DIAGNOSTIC = True` in its module to stay off the leaderboard.
 
 ## Adding a family
 
@@ -168,8 +182,10 @@ def explain(spec) -> dict:     # {"summary", "howItWorks": [...], "whenItWins", 
 ```
 
 It is discovered automatically. Add `tests/test_family_<name>.py` (small synthetic candles: it buys when it should,
-sells when it should); the generic no-look-ahead test in `tests/test_families.py` runs on every family. Run
-`$PY -m pytest tests -q`, then sweep it. The helpers in `stonks_lab/families/_base.py` and
+sells when it should); the generic contract and no-look-ahead tests in `tests/test_families.py` run on every
+discovered family, on real cached daily candles (hourly for intraday families), with the default params and one
+sampled param set: truncating or scrambling the bars after t must not change any decision up to t, and every
+weight must stay within [0, maxWeight]. Run `$PY -m pytest tests -q -k <name>`, then sweep it. The helpers in `stonks_lab/families/_base.py` and
 `stonks_lab/indicators.py` (EMA/RSI/Bollinger/MACD per SPEC) save time; import them, don't copy them.
 
 ## How results reach the dashboard

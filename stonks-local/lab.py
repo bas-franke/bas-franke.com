@@ -20,7 +20,7 @@ import sys
 import threading
 import time
 import traceback
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from pathlib import Path
 
 LAB_DIR = Path(__file__).resolve().parent
@@ -641,16 +641,18 @@ def cmd_rescore(a, r):
     """Re-evaluate done experiments of older evaluation versions in place (old score kept in metrics.history).
     Resumable (it only picks rows still below the current version), idempotent, low priority."""
     _low_priority()
+    if a.rerun_superseded:
+        return rerun_superseded(a, r)
     fixed = r.backfill_eval_version()
     if fixed:
         print(f"backfilled eval_version on {fixed} rows that already had a current result", flush=True)
     carried = r.carry_forward()
     if carried:
         print(f"carried {carried} rows forward to eval version {reg.EVAL_VERSION} (their result is unchanged)", flush=True)
-    todo = r.stale_versions(limit=a.limit)
+    todo = r.stale_versions(limit=a.limit, family=a.family)
     workers = max(1, min(a.workers, 6))
-    print(f"rescore: {len(todo)} done experiments below eval version {reg.EVAL_VERSION}, {workers} workers "
-          f"(low priority)", flush=True)
+    print(f"rescore: {len(todo)} done {a.family + ' ' if a.family else ''}experiments below eval version "
+          f"{reg.EVAL_VERSION}, {workers} workers (low priority)", flush=True)
     db = str(r.path)
     n_ok = n_fail = n_same = 0
     t_start = time.time()
@@ -684,6 +686,53 @@ def cmd_rescore(a, r):
     print(f"rescore finished: {n_ok} re-evaluated ({n_same} were already current), {n_fail} failed and left at "
           f"their old version{', STOP file present' if STOP_FILE.exists() else ''}; "
           f"{r.stats()['staleEval']} still below version {reg.EVAL_VERSION}", flush=True)
+
+
+def rerun_superseded(a, r):
+    """Re-run the specs of ``--family`` rows whose family version is older than the current one (all of them, or
+    only those below the family's INVALID_BELOW_VERSION with --invalid-only) as NEW experiments at the current
+    version. The old rows stay as they are (history); the leaderboard ignores versions below INVALID_BELOW_VERSION."""
+    if not a.family:
+        sys.exit("--rerun-superseded needs --family")
+    fam = families().get(a.family)
+    if fam is None:
+        sys.exit(f"unknown family {a.family}")
+    cur = int(fam_attr(fam, "version") or 1)
+    below = int(fam_attr(fam, "invalid_below") or 1) if a.invalid_only else cur
+    rows = r.older_family_versions(a.family, below)
+    todo, seen = [], set()
+    for row in rows:
+        spec = {k: v for k, v in (row["spec"] or {}).items() if k not in ("id", "name")}
+        spec["familyVersion"] = cur
+        spec = complete_spec(spec)
+        h = reg.spec_hash(spec)
+        if h in seen or r.seen(spec, include_failed=False):
+            continue
+        seen.add(h)
+        todo.append((spec, row["spec_hash"]))
+    if a.limit:
+        todo = todo[: a.limit]
+    workers = max(1, min(a.workers, 6))
+    print(f"rerun: {len(todo)} {a.family} specs of versions < {below} to run at v{cur} ({len(rows)} old rows), "
+          f"{workers} workers (low priority)", flush=True)
+    db = str(r.path)
+    n_ok = n_fail = 0
+    with ProcessPoolExecutor(max_workers=workers, initializer=_low_priority) as pool:
+        futs = {}
+        for spec, parent in todo:
+            if STOP_FILE.exists():
+                break
+            if not r.claim(spec, agent=a.agent, round=a.round, parent=parent, hypothesis=a.hypothesis,
+                           retry_failed=True):
+                continue
+            futs[pool.submit(evaluate_and_record, spec, db, a.agent, a.round, a.hypothesis, parent)] = spec
+        for fut in as_completed(futs):
+            res = fut.result()
+            n_ok += res["ok"]
+            n_fail += not res["ok"]
+            if not res["ok"]:
+                print(f"FAILED {res['hash'][:10]}: {res['error']}", flush=True)
+    print(f"rerun finished: {n_ok} done, {n_fail} failed", flush=True)
 
 
 def cmd_pit_twins(a, r):
@@ -900,6 +949,14 @@ def main(argv=None):
     sp.add_argument("--workers", type=int, default=3, help="parallel low-priority processes (max 6)")
     sp.add_argument("--limit", type=int, help="at most this many experiments")
     sp.add_argument("--quiet", action="store_true")
+    sp.add_argument("--family", help="only this family")
+    sp.add_argument("--rerun-superseded", action="store_true",
+                    help="with --family: re-run specs of older family versions as new rows at the current version")
+    sp.add_argument("--invalid-only", action="store_true",
+                    help="with --rerun-superseded: only versions below the family's INVALID_BELOW_VERSION")
+    sp.add_argument("--agent", default="maintainer")
+    sp.add_argument("--round", type=int, default=0)
+    sp.add_argument("--hypothesis", default="re-run at the current family version (older version superseded)")
 
     a = p.parse_args(argv)
     r = reg.Registry(a.db) if a.db else reg.Registry()

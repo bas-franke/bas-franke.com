@@ -150,6 +150,9 @@ class Family:
     bot_ready: bool = False
     multi_market: bool = False
     anchored: bool = False  # targets depend on where trading starts (start_time); evaluate recomputes per window
+    # Rows of an older family version below this one have a confirmed bug (e.g. look-ahead): the leaderboard ignores
+    # them and `lab.py rescore --family <name> --rerun-superseded` re-runs their specs at the current version.
+    invalid_below: int = 1
     module: Any = field(default=None, repr=False)
 
     def validate(self, spec: dict) -> str | None:
