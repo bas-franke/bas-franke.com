@@ -1,5 +1,6 @@
 // Everything that makes up the world around a race, in build order. Each module is owned separately; see types.ts.
 
+import { buildDustHaze } from './dustHaze';
 import { buildLandmarks } from './landmarks';
 import { buildSky } from './sky';
 import { buildSkyCity } from './skyCity';
@@ -15,6 +16,7 @@ export const WORLD_BUILDERS: Record<string, WorldBuilder> = {
   landmarks: buildLandmarks,
   track: buildTrackSurface,
   stands: buildStands,
+  dustHaze: buildDustHaze,
   water: buildWater,
   skyCity: buildSkyCity,
 };
