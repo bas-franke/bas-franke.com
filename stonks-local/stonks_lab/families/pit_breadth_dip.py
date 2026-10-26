@@ -9,13 +9,15 @@ every bar only the ``universe`` coins with the largest trailing EUR turnover cou
   ``volLook`` bars of its own history. The ``universe`` largest are the members at t (ties by name).
 - A capitulation bar: at least 3 members have an RSI(rsiPeriod), and at least ``breadthMin`` of those have an RSI
   under ``rsiBelow``.
+- pool="pit14" is the same over the 14 pool coins that have intraday candles (BTC ETH XRP BNB SOL DOGE ADA TRX LINK
+  AVAX BCH LTC XLM DOT; missing LUNA UNI MIOTA XTZ SHIB POL SUI HBAR), so the family also runs on 6h/12h.
 - pool="top10" uses breadth_dip's fixed today's-top-10 list instead (all with RSI count, no turnover filter), so the
   two can be compared 1:1 inside this family; it reproduces breadth_dip.
 - Trading rules are breadth_dip's: on a capitulation bar each traded market not yet in a dip trade buys; the dip trade
   ends when the market's own RSI rises over sellAbove or after maxHold candles; optional core: also hold while the
   close is above SMA(coreSma). Each market gets maxWeight/len(markets) while held.
 
-The pool coins only have 1d and 1W candles, so the family runs on 1d / 1W. Everything at bar t uses candles up to and
+pool "pit" needs every pool coin's candles, which exist for 1d and 1W only; use "pit14" on 6h/12h. Everything at bar t uses candles up to and
 including t (turnover: before t).
 """
 from __future__ import annotations
@@ -33,6 +35,9 @@ TITLE = "Market-wide dip buying (point-in-time breadth)"
 BOT_READY = False
 MULTI_MARKET = True
 POOL = sorted(f"{b}-EUR" for b in PIT_POOL)
+# the PIT pool coins that also have 6h/12h candles (the others only have 1d/1W): pool "pit14" for intraday bars
+POOL14 = ["ADA-EUR", "AVAX-EUR", "BCH-EUR", "BNB-EUR", "BTC-EUR", "DOGE-EUR", "DOT-EUR", "ETH-EUR", "LINK-EUR",
+          "LTC-EUR", "SOL-EUR", "TRX-EUR", "XLM-EUR", "XRP-EUR"]
 TODAY_TOP10 = ["BTC-EUR", "ETH-EUR", "XRP-EUR", "BNB-EUR", "SOL-EUR", "DOGE-EUR", "ADA-EUR", "TRX-EUR",
                "LINK-EUR", "AVAX-EUR"]
 MIN_BREADTH_COINS = 3
@@ -56,8 +61,9 @@ def param_space() -> dict:
                     "description": "end the dip trade after this many candles at the latest (0 = no limit)"},
         "coreSma": {"type": "int", "min": 10, "max": 1000, "zero": True, "log": True,
                     "description": "also hold while the coin is above this SMA, dips or not (0 = dips only)"},
-        "pool": {"type": "choice", "values": ["pit", "top10"],
-                 "description": "breadth list: point-in-time top coins by turnover (pit) or today's top 10 (top10)"},
+        "pool": {"type": "choice", "values": ["pit", "pit14", "top10"],
+                 "description": "breadth list: point-in-time top coins by turnover from the 22-coin pool (pit, 1d/1W "
+                                "only) or from its 14 coins with intraday candles (pit14), or today's top 10 (top10)"},
         "universe": {"type": "int", "min": 3, "max": 22,
                      "description": "pit: how many of the largest-turnover pool coins count for the breadth"},
         "volLook": {"type": "int", "min": 5, "max": 400, "log": True,
@@ -75,7 +81,7 @@ def warmup(p: dict) -> int:
 
 
 def _breadth_markets(p: dict) -> list[str]:
-    return list(TODAY_TOP10) if p.get("pool", "pit") == "top10" else list(POOL)
+    return {"top10": TODAY_TOP10, "pit14": POOL14}.get(p.get("pool", "pit"), POOL)[:]
 
 
 def required_markets(spec: dict) -> list[str]:
@@ -122,7 +128,7 @@ def _capitulation(candles, p, idx) -> np.ndarray:
     ms = [m for m in _breadth_markets(p) if m in candles and len(candles[m])]
     if not ms:
         return np.full(n, np.nan)
-    if p.get("pool", "pit") == "pit":
+    if p.get("pool", "pit") != "top10":
         member = _members(candles, ms, idx, p)
     else:
         member = np.ones((n, len(ms)), dtype=bool)
@@ -136,7 +142,7 @@ def _capitulation(candles, p, idx) -> np.ndarray:
         defined += use
     frac = np.divide(low, defined, out=np.zeros(n), where=defined > 0)
     cap = (frac >= float(p["breadthMin"]) - 1e-12).astype(float)
-    if p.get("pool", "pit") == "pit":
+    if p.get("pool", "pit") != "top10":
         # the turnover ranking needs volLook bars; before that the list is undecided, not "no capitulation"
         warm = np.zeros(n, dtype=bool)
         warm[min(int(p["volLook"]), n):] = True
@@ -191,7 +197,7 @@ def explain(spec) -> dict:
     p, iv = {**default_params(), **spec["params"]}, spec.get("interval")
     mk = market_names(spec)
     k = len(spec.get("markets") or [])
-    if p.get("pool", "pit") == "pit":
+    if p.get("pool", "pit") != "top10":
         who = (f"the {int(p['universe'])} coins with the most euro trading volume over the previous "
                f"{bars_text(p['volLook'], iv)} (picked from the coins that were among the biggest at the time, "
                "so no hindsight about which coins later survived)")

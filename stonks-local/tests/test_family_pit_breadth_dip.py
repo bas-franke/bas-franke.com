@@ -71,3 +71,12 @@ def test_top10_pool_reproduces_breadth_dip():
         {"family": "breadth_dip", "markets": ["BTC-EUR", "ETH-EUR"], "interval": "1d", "params": p},
         FAMILIES["breadth_dip"]))
     np.testing.assert_allclose(mine.to_numpy(), ref.to_numpy())
+
+
+def test_pit14_pool_for_intraday_bars():
+    need = FAM.markets_needed(spec(pool="pit14"))
+    assert "BCH-EUR" in need and "LTC-EUR" in need and "LUNA-EUR" not in need and "UNI-EUR" not in need
+    cd = {"BTC-EUR": closes(DIP, 100), "ETH-EUR": closes(DIP, 1), "LTC-EUR": closes(DIP, 1),
+          "XRP-EUR": closes([10.0] * len(DIP), 100), "BCH-EUR": closes([10.0] * len(DIP), 100)}
+    assert np.nansum(FAM.targets(cd, spec(pool="pit14"))["BTC-EUR"].to_numpy()) == 0
+    assert np.nansum(FAM.targets(cd, spec(pool="pit14", universe=5))["BTC-EUR"].to_numpy()) > 0
