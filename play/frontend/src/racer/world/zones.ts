@@ -31,6 +31,10 @@ export interface Zones {
   city: { pos: THREE.Vector3; radius: number; height: number } | null;
   /** Open vista stretches per side (no wall, long view across the desert). */
   vistas: (Span & { side: -1 | 1 })[];
+  /** How open the canyon is at s: 0 deep (walls 45-125 m), 1 open (low ledges, the spire forest shows above them). */
+  openness(s: number): number;
+  /** Slot canyons: both walls right behind the boulders and `height` metres tall (fading in over ~90 m each end). */
+  slots: (Span & { height: number })[];
 }
 
 const cache = new WeakMap<Track, Zones>();
@@ -72,6 +76,13 @@ function build(track: Track): Zones {
   const nr = wave([4, 9, 17]);
   const hl = wave([2, 5, 11]);
   const hr = wave([3, 6, 10]);
+  // Open canyon vs deep canyon, alternating every kilometre or two: in the open stretches the walls drop to low
+  // stepped ledges a little further out, so the spire forest behind them (landmarks.ts) towers over the course.
+  // (Own random stream, so adding it moved nothing else.)
+  const ro = rng(track.def.seed * 7 + 5);
+  const oph = [ro() * Math.PI * 2, ro() * Math.PI * 2];
+  const ow = (s: number) => (Math.sin((s / L) * Math.PI * 2 * 5 * B + oph[0]) + Math.sin((s / L) * Math.PI * 2 * 8 * B + oph[1])) / 2;
+  const openAt = (s: number) => THREE.MathUtils.smoothstep(ow(s), -0.15, 0.35);
 
   // Stands on both sides of the grid and the start line, and along the finish straight.
   const { startS, finishS } = track;
@@ -112,11 +123,41 @@ function build(track: Track): Zones {
     vistas.push({ s0: vAt, s1: vAt + (L * 0.12) / B, side: r() < 0.5 ? -1 : 1 });
   }
 
+  // Slot canyons: around each slot-rock formation (the walls close in on the massif the slots are cut through), plus
+  // one more per block on a gentle stretch. Never in or near a cave, a stand, a gorge, a shortcut lane or the grid.
+  const slots: Zones['slots'] = [];
+  const clearFor = (s0: number, s1: number) =>
+    s0 > startS + 250 &&
+    s1 < finishS - 250 &&
+    !track.caves.some((c) => s1 > c.s0 - 160 && s0 < c.s1 + 160) &&
+    !stands.some((st) => s1 > st.s0 - 120 && s0 < st.s1 + 120) &&
+    !gorges.some((g) => s1 > g.s0 - 200 && s0 < g.s1 + 200) &&
+    !track.shortcuts.some((c) => s1 > c.s0 - 60 && s0 < c.s1 + 60) &&
+    !slots.some((o) => s1 > o.s0 - 400 && s0 < o.s1 + 400);
+  for (const w of track.slotWalls) {
+    const s0 = w.s - 170;
+    const s1 = w.s + w.len + 170;
+    if (clearFor(s0, s1)) slots.push({ s0, s1, height: 170 + r() * 80 });
+  }
+  for (let k = 0; k < B; k++) {
+    for (let tries = 0; tries < 40; tries++) {
+      const len = 380 + r() * 220;
+      const s0 = (L * (k + 0.1 + r() * 0.8)) / B;
+      if (!clearFor(s0, s0 + len) || track.maxCurvature(s0, len) > 0.006) continue;
+      slots.push({ s0, s1: s0 + len, height: 150 + r() * 100 });
+      break;
+    }
+  }
+  slots.sort((a, b) => a.s0 - b.s0);
+  // No open vista through a slot canyon.
+  for (let i = vistas.length - 1; i >= 0; i--) if (slots.some((o) => vistas[i].s1 > o.s0 - 150 && vistas[i].s0 < o.s1 + 150)) vistas.splice(i, 1);
+
   let arch: Zones['arch'] = null;
   if (theme.arches) {
     let s = L * (0.35 + r() * 0.12);
     // Not in or right next to a cave: move it on past the cave.
     for (const c of track.caves) if (s > c.s0 - 250 && s < c.s1 + 250) s = c.s1 + 300;
+    for (const o of slots) if (s > o.s0 - 300 && s < o.s1 + 300) s = o.s1 + 350;
     arch = { s, span: track.frameAt(s).width + 50, height: 55 + r() * 20 };
   }
 
@@ -150,10 +191,12 @@ function build(track: Track): Zones {
     const f = track.frameAt(s);
     const n = side < 0 ? nl(s) : nr(s);
     // Just behind the boulders that line the corridor; around a cave, out past the rock it is cut through.
-    let off = f.width / 2 + 8 + (n + 1) * 10;
+    let off = f.width / 2 + 8 + (n + 1) * 10 + openAt(s) * 8;
     for (const c of track.caves) off = Math.max(off, f.width / 2 + 30 * spanWeight(s, c, 60));
     // Stands sit on a terrace: push the wall back a little there.
     for (const st of stands) if (st.side === side) off += spanWeight(s, st, 40) * 10;
+    // Slot canyons: the walls close in right behind the boulders.
+    for (const o of slots) off = THREE.MathUtils.lerp(off, f.width / 2 + 8 + (n + 1) * 1.5, spanWeight(s, o, 90));
     return off;
   };
   const wallHeight = (s: number, side: -1 | 1) => {
@@ -162,10 +205,20 @@ function build(track: Track): Zones {
     for (const g of gorges) fade = Math.min(fade, 1 - spanWeight(s, g, 80) * 0.6);
     for (const v of vistas) if (v.side === side) fade = Math.min(fade, 1 - spanWeight(s, v, 60));
     const n = side < 0 ? hl(s) : hr(s);
-    let h = (45 + (n + 1) * 40) * fade;
+    let h = THREE.MathUtils.lerp(45 + (n + 1) * 40, 16 + (n + 1) * 12, openAt(s)) * fade;
     for (const c of track.caves) h = Math.max(h, 50 * spanWeight(s, c, 80));
+    for (const o of slots) {
+      const w = spanWeight(s, o, 90);
+      if (w > 0) h = THREE.MathUtils.lerp(h, o.height * (0.85 + 0.15 * n), w * w * (3 - 2 * w));
+    }
     return h;
   };
 
-  return { wallOffset, wallHeight, gorges, stands, waterfalls, arch, city, vistas };
+  const openness = (s: number) => {
+    let o = openAt(s);
+    for (const sl of slots) o *= 1 - spanWeight(s, sl, 90);
+    return o;
+  };
+
+  return { wallOffset, wallHeight, gorges, stands, waterfalls, arch, city, vistas, slots, openness };
 }

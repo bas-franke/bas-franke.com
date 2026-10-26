@@ -1,12 +1,14 @@
-// The skyline: distant mesas, buttes and needle spires ringing the circuit in depth layers from ~300 m to ~3 km out,
-// one or two arches on the horizon, and the great natural arch the racers fly under (zones.arch). Placement keeps
+// The skyline: clusters of slender, blocky sandstone spires right behind the canyon walls all along the course (the
+// "spire forest" of the concept art), distant mesas, buttes and spire clusters ringing the circuit in depth layers from
+// ~300 m to ~3 km out, a huge blocky arch between two massive buttresses in the mid distance ahead of a straight once
+// per block, arches on the horizon, and the great natural arch the racers fly under (zones.arch). Placement keeps
 // clear of the canyon walls, the mesa city, the waterfalls and the river below the gorge bridge (see zones.ts).
-// Everything distant is merged into one faceted mesh (one draw call, no shadows); the track arch is its own mesh so
-// it can cast its shadow across the road.
+// The near spires are merged per ~1.5 km of course (frustum culled); everything distant is one faceted mesh (one draw
+// call, no shadows); the track arch is its own mesh so it can cast its shadow across the road.
 
 import * as THREE from 'three';
 import { rng, type Track } from '../core/track';
-import { addArch, addMesa, addSpire, RockBuilder } from './landmarkGeometry';
+import { addArch, addBlockSpire, addMesa, addSpire, RockBuilder } from './landmarkGeometry';
 import { createRockMaterial } from './landmarkMaterial';
 import type { WorldBuilder } from './types';
 import { zonesFor, type Zones } from './zones';
@@ -23,11 +25,14 @@ interface Layer {
 }
 
 const LAYERS: Layer[] = [
-  { near: 300, far: 650, spires: 6, buttes: 6, mesas: 2, scale: 1 },
-  { near: 650, far: 1300, spires: 6, buttes: 7, mesas: 7, scale: 1.35 },
-  { near: 1300, far: 2200, spires: 4, buttes: 4, mesas: 11, scale: 1.8 },
-  { near: 2200, far: 3200, spires: 0, buttes: 2, mesas: 13, scale: 2.4 },
+  { near: 300, far: 650, spires: 14, buttes: 6, mesas: 3, scale: 1 },
+  { near: 650, far: 1300, spires: 14, buttes: 7, mesas: 7, scale: 1.35 },
+  { near: 1300, far: 2200, spires: 10, buttes: 4, mesas: 11, scale: 1.8 },
+  { near: 2200, far: 3200, spires: 6, buttes: 2, mesas: 13, scale: 2.4 },
 ];
+
+/** Length of course whose near spires share one mesh. */
+const NEAR_CHUNK = 1500;
 
 export const buildLandmarks: WorldBuilder = (ctx) => {
   const { track, theme, quality } = ctx;
@@ -98,21 +103,44 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
     skyline.tint = [c.r, c.g, c.b];
   };
 
-  const spireCluster = (x: number, z: number, sc: number, tall: number, seg: number) => {
-    const n = 1 + Math.floor(r() * 3.2);
+  /** A spire cluster as in the concept art: a massive fractured rock base (a stubby blocky butte) out of which a crowd
+   * of slender blocky pinnacles rises, one main needle tallest, now and then a capped hoodoo beside it. `cols` scales
+   * the pinnacle count (far layers get fewer, cheaper ones). */
+  const spireCluster = (into: RockBuilder, x: number, z: number, sc: number, tall: number, seg: number, cols = 1, base = ground) => {
+    const n = Math.max(1, Math.round((4 + r() * 5) * cols));
+    const main = (210 + r() * 150) * sc * tall;
+    const prev = skyline.tint;
+    const paint = () => {
+      tint();
+      into.tint = skyline.tint;
+    };
+    // The base mass: wide, a third to half the height of the main needle.
+    const Rb = (30 + r() * 22) * sc * Math.sqrt(tall);
+    const hb = main * (0.3 + r() * 0.3);
+    paint();
+    addBlockSpire(into, r, { x, z, ground: base, height: hb, radius: Rb, seg: Math.max(5, Math.round(seg * 0.75)), talus: 1, taper: 0.3 });
     for (let k = 0; k < n; k++) {
       const a = r() * Math.PI * 2;
-      const off = k === 0 ? 0 : (20 + r() * 35) * sc;
-      tint();
-      addSpire(skyline, r, {
-        x: x + Math.cos(a) * off,
-        z: z + Math.sin(a) * off,
-        ground,
-        height: (k === 0 ? 200 + r() * 160 : 100 + r() * 130) * sc * tall,
-        radius: (k === 0 ? 13 + r() * 8 : 8 + r() * 7) * sc * Math.sqrt(tall),
-        seg,
-      });
+      const off = k === 0 ? r() * Rb * 0.3 : Rb * (0.3 + r() * 0.65);
+      paint();
+      const h = k === 0 ? main : main * (0.5 + r() * 0.42);
+      const px = x + Math.cos(a) * off;
+      const pz = z + Math.sin(a) * off;
+      if (k > 0 && r() < 0.12) {
+        addSpire(into, r, { x: px, z: pz, ground: base, height: h * 0.7, radius: (7 + r() * 5) * sc, seg: Math.max(6, seg) });
+      } else {
+        addBlockSpire(into, r, {
+          x: px,
+          z: pz,
+          ground: base,
+          height: h,
+          radius: (k === 0 ? 16 + r() * 8 : 9 + r() * 9) * sc * Math.sqrt(tall),
+          seg: Math.max(4, Math.round(seg * (0.5 + r() * 0.3))),
+          talus: 0,
+        });
+      }
     }
+    skyline.tint = prev;
   };
 
   // Hero needles first: where the road bends, the view straight ahead leaves the canyon and lands on open desert a
@@ -133,9 +161,125 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
       if (d < heroLayer.near || d > heroLayer.far || blocked(x, z, 50)) continue;
       if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.rad + 120)) continue;
       placed.push({ x, z, rad: 70 });
-      spireCluster(x, z, 1, 1.6, Math.round(10 * segScale));
+      spireCluster(skyline, x, z, 1, 1.5, Math.round(10 * segScale), 1.3);
       made++;
       break;
+    }
+  }
+
+  // The great arch of the concept art, once per block: a thick, blocky span right across the canyon, its feet on the
+  // rims behind the walls and two massive stepped buttresses beyond them rising over the crown, at the end of a long
+  // straight so it shows framed between the walls from far off and the racers fly under it. Spire clusters crowd it.
+  const bigArches = low ? Math.ceil(B / 2) : B;
+  const bigArch = new RockBuilder();
+  /** Course positions of the big arches (debug: group.userData.bigArches), and their feet, kept clear of spires. */
+  const bigArchAt: number[] = [];
+  const archFeet: { x: number; z: number }[] = [];
+  const busy = (s: number, m: number) =>
+    track.caves.some((c) => c.s1 > s - m && c.s0 < s + m) ||
+    zones.slots.some((o) => o.s1 > s - m && o.s0 < s + m) ||
+    zones.stands.some((st) => st.s1 > s - m && st.s0 < s + m) ||
+    zones.gorges.some((g) => g.s1 > s - m && g.s0 < s + m) ||
+    (zones.arch !== null && Math.abs(zones.arch.s - s) < m + 400) ||
+    track.shortcuts.some((c) => c.s1 > s - m && c.s0 < s + m);
+  for (let k = 0, made = 0; k < 80 * B && made < bigArches; k++) {
+    const s = track.raceS((made + 0.12 + r() * 0.76) / B);
+    // A straight run-up (the arch in view for a few seconds), the walls on both sides closed.
+    if (track.maxCurvature(s - 300, 320) > 0.003 || busy(s - 200, 240) || bigArchAt.some((o) => Math.abs(o - s) < 2000)) continue;
+    const Wl = zones.wallOffset(s, -1);
+    const Wr = zones.wallOffset(s, 1);
+    if (!Number.isFinite(Wl) || !Number.isFinite(Wr)) continue;
+    const f = track.frameAt(s);
+    const dir = f.tangent.clone().setY(0).normalize();
+    const across = new THREE.Vector3(-dir.z, 0, dir.x);
+    // `across` is the flat right of travel (as in terrainField): centre the span between the two wall feet.
+    const legThick = 60 + r() * 16;
+    const span = Wl + Wr + legThick + 40;
+    const c = new THREE.Vector3(f.pos.x, Math.min(ground, f.pos.y - 8), f.pos.z).addScaledVector(across, (Wr - Wl) / 2);
+    // The feet stand back from every part of the course (bends bring other stretches close).
+    let ok = true;
+    for (const side of [-1, 1]) {
+      const fx = c.x + across.x * side * span * 0.5;
+      const fz = c.z + across.z * side * span * 0.5;
+      if (nearestTrack(fx, fz) < Math.min(Wl, Wr) + 10) ok = false;
+    }
+    if (!ok) continue;
+    const wallTop = Math.max(zones.wallHeight(s, -1), zones.wallHeight(s, 1));
+    const clear = Math.max(120 + r() * 40, wallTop + 60) + (f.pos.y - c.y);
+    made++;
+    bigArchAt.push(s);
+    tint();
+    bigArch.tint = skyline.tint;
+    addArch(bigArch, r, {
+      centre: c,
+      across,
+      through: dir,
+      span,
+      clear,
+      legThick,
+      crownThick: 40 + r() * 14,
+      legDepth: 64,
+      crownDepth: 50,
+      steps: low ? 20 : 34,
+      around: 8,
+      blocky: true,
+    });
+    for (const side of [-1, 1]) {
+      const bx = c.x + across.x * side * (span / 2 + 45);
+      const bz = c.z + across.z * side * (span / 2 + 45);
+      archFeet.push({ x: bx, z: bz }, { x: c.x + across.x * side * span * 0.5, z: c.z + across.z * side * span * 0.5 });
+      tint();
+      bigArch.tint = skyline.tint;
+      addMesa(bigArch, r, {
+        x: bx,
+        z: bz,
+        ground: c.y,
+        height: clear + 50 + r() * 110,
+        radius: 46 + r() * 16,
+        elong: 1.5 + r() * 0.4,
+        rot: Math.atan2(dir.z, dir.x) + (r() - 0.5) * 0.4,
+        seg: Math.round(12 * segScale),
+        kind: 'butte',
+      });
+      const sx = bx + across.x * side * 90 + dir.x * (r() - 0.5) * 120;
+      const sz = bz + across.z * side * 90 + dir.z * (r() - 0.5) * 120;
+      archFeet.push({ x: sx, z: sz });
+      spireCluster(bigArch, sx, sz, 1, 1.15, Math.round(9 * segScale));
+    }
+  }
+
+  // The spire forest: clusters of slender columns just behind the canyon walls on both sides, all along the course,
+  // rising high above the rim. Not in the slot canyons (their walls hide everything) and not where the side is open.
+  const near = new Map<number, RockBuilder>();
+  const nearAt = (s: number) => {
+    const k = Math.floor(s / NEAR_CHUNK);
+    let nb = near.get(k);
+    if (!nb) near.set(k, (nb = new RockBuilder()));
+    return nb;
+  };
+  const nearPlaced: { x: number; z: number }[] = [];
+  const nearStep = low ? 220 : quality === 'medium' ? 160 : 120;
+  for (let s = 60; s < track.length - 60; s += nearStep * (0.7 + r() * 0.6)) {
+    if (zones.slots.some((o) => s > o.s0 - 40 && s < o.s1 + 40)) continue;
+    const f = track.frameAt(s);
+    const flatRight = f.right.clone().setY(0).normalize();
+    // Mostly where the canyon opens up (deep walls hide what is behind them).
+    const open = zones.openness(s);
+    for (const side of [-1, 1] as const) {
+      if (r() > 0.3 + 0.65 * open) continue;
+      const W = zones.wallOffset(s, side);
+      if (!Number.isFinite(W)) continue;
+      const dist = W + 40 + r() * r() * 380;
+      const x = f.pos.x + flatRight.x * side * dist + f.tangent.x * (r() - 0.5) * 80;
+      const z = f.pos.z + flatRight.z * side * dist + f.tangent.z * (r() - 0.5) * 80;
+      // Clear of the whole corridor (bends bring other parts of the course close) and of each other.
+      if (nearestTrack(x, z) < Math.max(W + 40, dist * 0.8)) continue;
+      if (blocked(x, z, 40) || nearPlaced.some((p) => Math.hypot(p.x - x, p.z - z) < 85)) continue;
+      if (archFeet.some((p) => Math.hypot(p.x - x, p.z - z) < 120)) continue;
+      nearPlaced.push({ x, z });
+      const h = zones.wallHeight(s, side);
+      const sc = 0.7 + r() * 0.35;
+      spireCluster(nearAt(s), x, z, sc, Math.max(1, (h + 120) / (285 * sc)), Math.round(9 * segScale), 0.9, Math.min(ground, f.pos.y - 8));
     }
   }
 
@@ -147,7 +291,7 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
       const spot = findSpot(layer, 60 * sc, 1.1);
       if (!spot) continue;
       placed.push({ x: spot.x, z: spot.z, rad: 60 * sc });
-      spireCluster(spot.x, spot.z, sc, 1, seg(9));
+      spireCluster(skyline, spot.x, spot.z, sc, 1, seg(9), layer.near > 1200 ? 0.6 : 1);
     }
     for (let i = 0; i < Math.round(layer.buttes * density); i++) {
       const rad = (35 + r() * 35) * sc;
@@ -242,6 +386,7 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
 
   const group = new THREE.Group();
   group.name = 'landmarks';
+  group.userData.bigArches = bigArchAt;
   const geos: THREE.BufferGeometry[] = [];
   const mats: THREE.Material[] = [];
 
@@ -252,6 +397,26 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
   geos.push(skyGeo);
   mats.push(skyMat);
   group.add(skyMesh);
+
+  if (bigArch.pos.length) {
+    const g = bigArch.geometry();
+    const m = new THREE.Mesh(g, skyMat);
+    m.name = 'landmarks-big-arches';
+    m.castShadow = true;
+    geos.push(g);
+    group.add(m);
+  }
+
+  const nearMat = createRockMaterial(theme);
+  mats.push(nearMat);
+  for (const [k, nb] of near) {
+    if (!nb.pos.length) continue;
+    const g = nb.geometry();
+    const m = new THREE.Mesh(g, nearMat);
+    m.name = `landmarks-spires-${k}`;
+    geos.push(g);
+    group.add(m);
+  }
 
   if (zones.arch) {
     const ab = new RockBuilder();
@@ -282,7 +447,7 @@ function buildTrackArch(b: RockBuilder, r: () => number, track: Track, arch: Non
   const through = f.tangent.clone().setY(0).normalize();
   const across = new THREE.Vector3(-through.z, 0, through.x);
   const half = f.width / 2;
-  const legThick = 28;
+  const legThick = 34;
   // Foot centres sit so the inner face of each leg is well clear of the road edge (+4 m and more).
   const span = Math.max(arch.span, f.width + 2 * (4 + legThick * 0.6) + 8);
   // The road may be banked or climbing: use the lower edge as ground so neither foot floats.

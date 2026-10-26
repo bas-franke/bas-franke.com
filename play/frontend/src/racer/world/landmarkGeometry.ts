@@ -290,6 +290,8 @@ export interface ArchOpts {
   /** Number of rings along the arch and around its cross-section. */
   steps: number;
   around: number;
+  /** Blocky: a boxier cross-section with crisp edges and a flatter, slab-like crown on steep shoulders. */
+  blocky?: boolean;
 }
 
 /**
@@ -314,16 +316,17 @@ export function addArch(b: RockBuilder, r: Rand, o: ArchOpts) {
     // A slightly squared-off ellipse: flatter crown, steeper shoulders.
     const ca = Math.cos(a);
     const sa = Math.sin(a);
-    const u = half * Math.sign(ca) * Math.pow(Math.abs(ca), 0.85);
-    const v = spring + (top - spring) * Math.pow(sa, 0.7);
+    const u = half * Math.sign(ca) * Math.pow(Math.abs(ca), o.blocky ? 0.7 : 0.85);
+    const v = spring + (top - spring) * Math.pow(sa, o.blocky ? 0.4 : 0.7);
     path.push([u, v, sa]);
   }
   for (let i = 1; i <= legN; i++) {
     const t = i / legN;
     path.push([half * (1 + 0.06 * t), spring + (-60 - spring) * t, 0]);
   }
-  const lump = Array.from({ length: path.length }, () => 1 + (r() - 0.5) * 0.18);
+  const lump = Array.from({ length: path.length }, () => 1 + (r() - 0.5) * (o.blocky ? 0.1 : 0.18));
   const sect = Array.from({ length: o.around }, () => 1 + (r() - 0.5) * 0.16);
+  const ex = o.blocky ? 0.25 : 0.55;
   const rings: THREE.Vector3[][] = [];
   const T = new THREE.Vector3();
   const N = new THREE.Vector3();
@@ -349,11 +352,92 @@ export function addArch(b: RockBuilder, r: Rand, o: ArchOpts) {
       const ca = Math.cos(a);
       const sa = Math.sin(a);
       // Superellipse: a rounded box, so the arch has flat faces and blocky edges.
-      const cx = Math.sign(ca) * Math.pow(Math.abs(ca), 0.55) * sect[k];
-      const cz = Math.sign(sa) * Math.pow(Math.abs(sa), 0.55) * sect[(k + i) % o.around];
+      const cx = Math.sign(ca) * Math.pow(Math.abs(ca), ex) * sect[k];
+      const cz = Math.sign(sa) * Math.pow(Math.abs(sa), ex) * sect[(k + i) % o.around];
       ring.push(C.clone().addScaledVector(N, (cx * thick) / 2).addScaledVector(o.through, (cz * depth) / 2));
     }
     rings.push(ring);
   }
-  b.rings(rings, false, 0.8);
+  b.rings(rings, false, o.blocky ? 0.25 : 0.8);
+}
+
+export interface BlockSpireOpts {
+  x: number;
+  z: number;
+  ground: number;
+  height: number;
+  /** Half-width of the column near its base. */
+  radius: number;
+  /** Corners of the cross-section (4-7): few corners give flat, chiselled faces. */
+  seg: number;
+  /** Talus mound at the foot (scale of its radius; 0 = the column stands straight out of the ground). */
+  talus?: number;
+  /** How much the column narrows from foot to top (default 0.5). */
+  taper?: number;
+}
+
+/**
+ * Blocky sandstone column, the slender spires of the concept art: an irregular polygon (flat fracture faces, crisp
+ * edges) stacked in drums of uneven height. Each drum keeps vertical faces; at every joint the next drum steps in,
+ * shifts sideways a little and turns, so the column reads as fractured blocks stacked on each other, narrowing up to
+ * a flat or caprocked top.
+ */
+export function addBlockSpire(b: RockBuilder, r: Rand, o: BlockSpireOpts) {
+  const seg = Math.max(4, o.seg);
+  const H = o.height;
+  const R = o.radius;
+  // Corner angles (jittered) and radii: an irregular, elongated polygon.
+  const ang: number[] = [];
+  for (let j = 0; j < seg; j++) ang.push(((j + (r() - 0.5) * 0.5) / seg) * Math.PI * 2);
+  const elong = 1 + r() * 0.6;
+  const rot = r() * Math.PI;
+  const rings: THREE.Vector3[][] = [];
+  let cx = o.x;
+  let cz = o.z;
+  const ring = (h: number, rad: number, mult: number[], turn: number) => {
+    const out: THREE.Vector3[] = [];
+    const c = Math.cos(rot + turn);
+    const s = Math.sin(rot + turn);
+    for (let j = 0; j < seg; j++) {
+      const lx = Math.cos(ang[j]) * rad * mult[j] * elong;
+      const lz = Math.sin(ang[j]) * rad * mult[j];
+      out.push(new THREE.Vector3(cx + lx * c - lz * s, o.ground + h, cz + lx * s + lz * c));
+    }
+    rings.push(out);
+  };
+  const flat = new Array(seg).fill(1);
+  const talus = o.talus ?? 1;
+  if (talus > 0) {
+    ring(-60, R * (1.6 + 1.4 * talus), flat, 0);
+    ring(0, R * (1.3 + 0.9 * talus), flat, 0);
+    ring(H * 0.04 * talus, R * (1.12 + 0.3 * talus), flat, 0);
+  } else {
+    ring(-60, R * 1.2, flat, 0);
+  }
+  const n = 4 + Math.floor(r() * 4);
+  // Uneven drum heights: a few tall blocks and some short ones.
+  const hs = Array.from({ length: n }, () => 0.4 + r());
+  const sum = hs.reduce((a, v) => a + v, 0);
+  const cap = r() < 0.35;
+  let y = H * 0.05 * talus;
+  let turn = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / n;
+    let rad = R * (1 - (o.taper ?? 0.5) * t) * (0.92 + r() * 0.16);
+    if (cap && i === n - 1) rad = R * (0.75 + r() * 0.2);
+    const mult = Array.from({ length: seg }, () => 0.8 + r() * 0.35);
+    const top = y + ((H * 0.95 - H * 0.05 * talus) * hs[i]) / sum;
+    // Joint: a narrow ledge, the drum above stepping in and turning a little.
+    if (i > 0) ring(y, rad * 1.1, mult, turn);
+    ring(y + 0.3, rad, mult, turn);
+    ring(top, rad * (0.94 + r() * 0.05), mult, turn);
+    y = top;
+    turn += (r() - 0.5) * 0.35;
+    cx += (r() - 0.5) * rad * 0.25;
+    cz += (r() - 0.5) * rad * 0.25;
+  }
+  // A small broken crown on top.
+  const crown = Array.from({ length: seg }, () => 0.6 + r() * 0.5);
+  ring(y + H * 0.02, R * 0.32, crown, turn);
+  b.rings(rings, true, 0);
 }
