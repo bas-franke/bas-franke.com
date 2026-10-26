@@ -117,3 +117,25 @@ def test_hold_blocks_and_absmom():
     w2 = FAM.targets(falling, spec(markets=["BTC-EUR", "ETH-EUR"], lookback=5, hold=1, count=1, universe=2,
                                    volLook=5, regimeSma=0, absMom=False))
     assert (w2["BTC-EUR"].iloc[6:] == 1.0).all()
+
+
+def test_v2_picks_only_pit_members(monkeypatch):
+    # top10_pit spec: a coin that is not a point-in-time member is never a candidate, the next best member is held
+    from stonks_lab import universe as u
+    n = 200
+    up = 100 * 1.01 ** np.arange(n)
+    cd = {"BTC-EUR": frame_of(up), "ETH-EUR": frame_of(100 * 1.005 ** np.arange(n)),
+          "SOL-EUR": frame_of(100 * 1.02 ** np.arange(n))}
+    s = spec(lookback=5, hold=1, count=1, universe=3, volLook=10, regimeSma=0, absMom=True)
+    s["universe"] = u.PIT_NAME
+
+    def fake_members(index, markets, daily=None, n=10, lookback=90):
+        m = np.ones((len(index), len(markets)), dtype=bool)
+        m[:, markets.index("SOL-EUR")] = False
+        return m
+    monkeypatch.setattr(u, "pit_members", fake_members)
+    t = FAM.targets(cd, s)
+    last = t.iloc[-1]
+    assert last["SOL-EUR"] == 0 and last["BTC-EUR"] == 1.0
+    s.pop("universe")
+    assert FAM.targets(cd, s).iloc[-1]["SOL-EUR"] == 1.0

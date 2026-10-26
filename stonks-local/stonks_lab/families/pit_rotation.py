@@ -1,4 +1,4 @@
-"""pit_rotation v1 (agent-17): momentum rotation over a point-in-time universe (no hindsight in the coin list).
+"""pit_rotation v2 (agent-17): momentum rotation over a point-in-time universe (no hindsight in the coin list).
 
 `top10` is today's top 10, so every rotation run on it knows in advance which coins would survive and grow (SOL,
 AVAX, DOGE, BNB). This family takes a wider pool of markets (e.g. today's top 10 plus the 2019/2020 leaders that
@@ -15,6 +15,10 @@ trailing EUR turnover on the exchange, a point-in-time stand-in for "the top-N c
   (= rotation_momentum on the point-in-time universe).
 - ``regimeSma`` > 0: everything is cash while BTC-EUR closes at or below its SMA(regimeSma) (checked every bar).
 
+- v2: with ``"universe": "top10_pit"`` on the spec, only coins that are point-in-time members at bar t
+  (universe.pit_members: dated CoinMarketCap eligibility + trailing Bitvavo volume) are candidates, so a pick is
+  never a coin the evaluator would zero to cash afterwards (v1 picked over the whole pool and lost those slots).
+
 Everything at bar t uses candles up to and including t (no look-ahead).
 """
 from __future__ import annotations
@@ -23,10 +27,11 @@ import numpy as np
 import pandas as pd
 
 from .. import indicators as ind
+from .. import universe as uni_mod
 from ._base import aligned_close, bars_text, frame, market_names, max_weight, risk_steps, union_index
 
 NAME = "pit_rotation"
-VERSION = 1
+VERSION = 2
 TITLE = "Point-in-time momentum rotation"
 BOT_READY = False
 MULTI_MARKET = True
@@ -100,6 +105,10 @@ def targets(candles, spec, start_time=None):
     for j, m in enumerate(markets):
         # rolling mean that is NaN until the market has volLook listed bars
         TV[j] = pd.Series(_aligned_turnover(candles, m, idx)).rolling(vlook, min_periods=vlook).mean().to_numpy()
+    member = None
+    if spec.get("universe") == uni_mod.PIT_NAME:
+        daily = {m: candles[m] for m in markets} if spec.get("interval") == "1d" else None
+        member = uni_mod.pit_members(idx, markets, daily)
     warm = np.isfinite(ret).any(axis=0) & np.isfinite(TV).any(axis=0)
     gate = np.ones(n, dtype=bool)
     if reg_n > 0:
@@ -124,7 +133,8 @@ def targets(candles, spec, start_time=None):
             continue
         if t == first or block[t] != block[t - 1] or not gate[t - 1] or hold == 1:
             tv = TV[:, t]
-            live = [j for j in range(M) if np.isfinite(tv[j]) and np.isfinite(ret[j, t])]
+            live = [j for j in range(M) if np.isfinite(tv[j]) and np.isfinite(ret[j, t])
+                    and (member is None or member[t, j])]
             live.sort(key=lambda j: (-tv[j], name_rank[j]))
             cand = [j for j in live[:uni] if not absmom or ret[j, t] > 0]
             cand.sort(key=lambda j: (-ret[j, t], name_rank[j]))
