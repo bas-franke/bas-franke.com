@@ -122,8 +122,22 @@ jobs:
           for name in STONKS_ADMIN_PASSWORD BITVAVO_API_KEY BITVAVO_API_SECRET; do
             value=${!name}
             [ -n "$value" ] || continue
-            printf '%s\n' "$value" | ssh server "umask 077 && read -r v && f=/srv/apps/$PROJECT/.env && touch \$f \
-              && { grep -v '^$name=' \$f || true; printf '%s=%s\n' '$name' \"\$v\"; } > \$f.new && mv \$f.new \$f"
+            # Quote for Node's --env-file parser: unquoted, a '#' starts a comment and would silently cut the
+            # password short, and surrounding spaces are trimmed. Single quotes and backticks keep the value
+            # literally; double quotes are the last resort (no backslash then: Node expands \n inside them).
+            if [[ $value == *$'\n'* || $value == *$'\r'* ]]; then
+              echo "::error::$name contains a line break; .env values must be one line."
+              exit 1
+            elif [[ $value != *"'"* ]]; then q="'"
+            elif [[ $value != *'`'* ]]; then q='`'
+            elif [[ $value != *'"'* && $value != *'\'* ]]; then q='"'
+            else
+              echo "::error::$name contains a single quote, a backtick and a double quote or backslash; .env cannot quote it."
+              exit 1
+            fi
+            printf '%s=%s%s%s\n' "$name" "$q" "$value" "$q" | ssh server "umask 077 && IFS= read -r line \
+              && f=/srv/apps/$PROJECT/.env && touch \$f \
+              && { grep -v '^$name=' \$f || true; printf '%s\n' \"\$line\"; } > \$f.new && mv \$f.new \$f"
           done
 
       - name: Install and restart backend
