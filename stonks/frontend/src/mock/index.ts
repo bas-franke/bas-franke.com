@@ -1,0 +1,147 @@
+// Dev-only fake backend: patches window.fetch for /api/*. Loaded from main.tsx only when VITE_MOCK=1 in dev,
+// so production builds never contain it.
+//   ?mock=empty      research endpoint returns { empty: true }
+//   ?mock=off        bot starts switched off
+//   ?mock=login      start logged out
+// Any non-empty password logs in, except "wrong".
+import type { BotSettings } from '../types';
+import { equityPoints, families, fills, initialBot, logs, makeLog, markets, orders, research, rng } from './data';
+
+const flags = new URLSearchParams(location.search).get('mock') ?? '';
+const KEY = 'stonks-mock-session';
+let loggedIn = !flags.includes('login') && sessionStorage.getItem(KEY) !== '0';
+let bot: BotSettings = initialBot();
+if (flags.includes('off')) bot.enabled = false;
+const liveRng = rng(1234);
+
+const json = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+
+const delay = () => new Promise((r) => setTimeout(r, 120 + Math.random() * 260));
+
+function page<T extends { id: number | string; mode: string; market: string }>(rows: T[], q: URLSearchParams) {
+  const mode = q.get('mode');
+  const market = q.get('market');
+  const before = q.get('before');
+  const limit = Number(q.get('limit') ?? 50);
+  return rows
+    .filter((r) => (!mode || r.mode === mode) && (!market || r.market === market) && (!before || Number(r.id) < Number(before)))
+    .slice(0, limit);
+}
+
+function validate(patch: Partial<BotSettings> & { confirmLive?: boolean }) {
+  const errors: Record<string, string> = {};
+  if (patch.mode === 'live' && bot.mode !== 'live' && !patch.confirmLive) errors.mode = 'Switching to live needs confirmLive: true.';
+  if (patch.dailyLossLimitEur !== undefined && !(patch.dailyLossLimitEur > 0)) errors.dailyLossLimitEur = 'Must be more than €0.';
+  if (patch.maxExposureEur !== undefined && patch.maxExposureEur !== null && !(patch.maxExposureEur >= 5))
+    errors.maxExposureEur = 'Must be at least €5, or empty for the whole portfolio.';
+  if (patch.paperStartEur !== undefined && !(patch.paperStartEur >= 10)) errors.paperStartEur = 'Must be at least €10.';
+  const s = patch.strategy;
+  if (s) {
+    if (s.family === 'ema_cross' && Number(s.params.fast) >= Number(s.params.slow)) errors['strategy.params.fast'] = 'Fast must be shorter than slow.';
+    if (!s.markets?.length) errors['strategy.markets'] = 'Pick a market.';
+    if (s.execution.limitOffsetBps < 0 || s.execution.limitOffsetBps > 500) errors['strategy.execution.limitOffsetBps'] = 'Between 0 and 500 bps.';
+    for (const k of ['stopLossPct', 'takeProfitPct', 'trailingStopPct'] as const) {
+      const v = s.risk[k];
+      if (v !== null && !(v > 0 && v < 1)) errors[`strategy.risk.${k}`] = 'Between 0 and 1 (e.g. 0.08 = 8%).';
+    }
+  }
+  return errors;
+}
+
+async function handle(method: string, url: URL, body: unknown): Promise<Response> {
+  const p = url.pathname.replace(/^\/api/, '');
+  const q = url.searchParams;
+  if (p === '/health') return json({ status: 'ok', database: true, bitvavo: true, bot: { enabled: bot.enabled, mode: bot.mode } });
+  if (p === '/auth/login' && method === 'POST') {
+    const pw = (body as { password?: string })?.password ?? '';
+    if (!pw || pw === 'wrong') return json({ error: 'Wrong password' }, 401);
+    loggedIn = true;
+    sessionStorage.setItem(KEY, '1');
+    return json({ ok: true });
+  }
+  if (!loggedIn) return json({ error: 'Not logged in' }, 401);
+  if (p === '/auth/me') return json({ loggedIn: true });
+  if (p === '/auth/logout') {
+    loggedIn = false;
+    sessionStorage.setItem(KEY, '0');
+    return json({ ok: true });
+  }
+  if (p === '/overview') {
+    const equity = 1184.32;
+    return json({
+      bot,
+      running: bot.enabled,
+      lastTickAt: bot.enabled ? new Date(Date.now() - 42_000).toISOString() : null,
+      bitvavo: { connected: true },
+      balances: [
+        { symbol: 'EUR', available: '12.10', inOrder: '0', eurValue: 12.1 },
+        { symbol: 'BTC', available: '0.01191000', inOrder: '0', eurValue: 1172.22 },
+        { symbol: 'ETH', available: '0.00000000', inOrder: '0', eurValue: 0 },
+      ],
+      equityEur: equity,
+      todayPnlEur: -38.4,
+      dailyLossLimitEur: bot.dailyLossLimitEur,
+      openOrders: orders.filter((o) => o.status === 'new' && o.mode === bot.mode).length,
+      strategyExplanation:
+        bot.strategy.family === 'ema_cross'
+          ? `Every ${bot.strategy.interval} the bot compares two moving averages of the ${bot.strategy.markets[0]} price: a fast one over the last ${bot.strategy.params.fast} candles and a slow one over the last ${bot.strategy.params.slow}. While the fast average is above the slow one, the market is trending up and it holds the coin; when it dips below, it sells and waits in euros.`
+          : `The bot runs “${bot.strategy.name}” on ${bot.strategy.markets.join(', ')} every ${bot.strategy.interval}.`,
+    });
+  }
+  if (p === '/bot' && method === 'PUT') {
+    const patch = body as Partial<BotSettings> & { confirmLive?: boolean };
+    const errors = validate(patch);
+    if (Object.keys(errors).length) return json({ error: 'Invalid settings', errors }, 400);
+    const { confirmLive: _c, ...rest } = patch;
+    bot = { ...bot, ...rest };
+    return json(bot);
+  }
+  if (p === '/bot/start' && method === 'POST') {
+    bot = { ...bot, enabled: true };
+    return json(bot);
+  }
+  if (p === '/bot/stop' && method === 'POST') {
+    bot = { ...bot, enabled: false };
+    return json(bot);
+  }
+  if (p === '/orders') return json({ orders: page(orders, q) });
+  if (p === '/fills') return json({ fills: page(fills, q) });
+  if (p === '/equity') {
+    const points = equityPoints(Number(q.get('days') ?? 30));
+    // Not in SPEC yet: what the same start value would be worth holding the strategy's market.
+    const r2 = rng(5);
+    let v = points[0]?.totalEur ?? 1000;
+    const buyHold = points.map((pt, i) => {
+      if (i) v *= Math.exp(0.00002 + 0.0024 * (r2() - 0.5) * 2.2);
+      return { ts: pt.ts, totalEur: Math.round(v * 100) / 100 };
+    });
+    return json({ points, buyHold });
+  }
+  if (p === '/logs') {
+    if (bot.enabled && liveRng() < 0.6) logs.push(makeLog(Date.now(), liveRng));
+    const after = Number(q.get('after') ?? 0);
+    const level = q.get('level');
+    const limit = Number(q.get('limit') ?? 200);
+    const order = ['debug', 'info', 'warn', 'error'];
+    let rows = logs.filter((l) => l.id > after && (!level || order.indexOf(l.level) >= order.indexOf(level)));
+    // newest first when not tailing, oldest first when tailing with `after`
+    rows = after ? rows.slice(0, limit) : rows.slice(-limit).reverse();
+    return json({ logs: rows });
+  }
+  if (p === '/strategies/families') return json(families);
+  if (p === '/markets') return json(markets);
+  if (p === '/research') return json(flags.includes('empty') ? { empty: true } : research);
+  return json({ error: `Mock has no route for ${method} ${p}` }, 404);
+}
+
+const realFetch = window.fetch.bind(window);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.origin);
+  if (url.origin !== location.origin || !url.pathname.startsWith('/api/')) return realFetch(input, init);
+  await delay();
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+  return handle(method, url, body);
+};
+console.info('[stonks] mock API active (VITE_MOCK=1)');

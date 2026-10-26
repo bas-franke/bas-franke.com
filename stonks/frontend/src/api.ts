@@ -1,0 +1,105 @@
+import type {
+  BotSettings,
+  EquityPoint,
+  FamilyInfo,
+  Fill,
+  LogRow,
+  MarketInfo,
+  Order,
+  Overview,
+  ResearchResponse,
+} from './types';
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public body: unknown,
+  ) {
+    super(message);
+  }
+  /** Field-level validation errors, if the backend sent any: `{ errors: {field: msg} }` or `[{path, message}]`. */
+  get fieldErrors(): Record<string, string> {
+    const b = this.body as { errors?: unknown; details?: unknown } | null;
+    const raw = b?.errors ?? b?.details;
+    const out: Record<string, string> = {};
+    if (Array.isArray(raw)) {
+      for (const e of raw as { path?: string | (string | number)[]; field?: string; message?: string }[]) {
+        const path = Array.isArray(e.path) ? e.path.join('.') : (e.path ?? e.field ?? '');
+        if (path) out[path] = e.message ?? 'Invalid';
+        else if (e.message) out._ = e.message;
+      }
+    } else if (raw && typeof raw === 'object') {
+      for (const [k, v] of Object.entries(raw)) out[k] = String(v);
+    }
+    return out;
+  }
+}
+
+/** Called on any 401 from an authenticated endpoint, so the app can fall back to the login screen. */
+let onUnauthorized: () => void = () => {};
+export const setUnauthorizedHandler = (fn: () => void) => {
+  onUnauthorized = fn;
+};
+
+async function request<T>(method: string, path: string, body?: unknown, opts: { quiet401?: boolean } = {}): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method,
+    credentials: 'same-origin',
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let data: unknown = null;
+  const text = await res.text();
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+  if (!res.ok) {
+    if (res.status === 401 && !opts.quiet401) onUnauthorized();
+    const d = (data && typeof data === 'object' ? data : {}) as { error?: unknown; message?: unknown };
+    const msg = String(d.error ?? d.message ?? `${res.status} ${res.statusText}`);
+    throw new ApiError(res.status, msg, data);
+  }
+  return data as T;
+}
+
+const qs = (q: Record<string, string | number | undefined | null>) => {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
+  const s = p.toString();
+  return s ? `?${s}` : '';
+};
+
+export interface ListQuery {
+  mode?: string;
+  market?: string;
+  limit?: number;
+  before?: string | number;
+}
+
+export const api = {
+  me: () => request<{ loggedIn: boolean }>('GET', '/auth/me', undefined, { quiet401: true }),
+  login: (password: string) => request<{ ok: true }>('POST', '/auth/login', { password }, { quiet401: true }),
+  logout: () => request<{ ok: true }>('POST', '/auth/logout'),
+  overview: () => request<Overview>('GET', '/overview'),
+  updateBot: (patch: Partial<BotSettings> & { confirmLive?: boolean }) => request<BotSettings>('PUT', '/bot', patch),
+  start: () => request<BotSettings>('POST', '/bot/start'),
+  stop: () => request<BotSettings>('POST', '/bot/stop'),
+  orders: (q: ListQuery) => request<{ orders: Order[] }>('GET', `/orders${qs({ ...q })}`),
+  fills: (q: ListQuery) => request<{ fills: Fill[] }>('GET', `/fills${qs({ ...q })}`),
+  equity: (q: { mode?: string; days?: number }) => request<{ points: EquityPoint[] }>('GET', `/equity${qs(q)}`),
+  logs: (q: { level?: string; after?: number; limit?: number }) => request<{ logs: LogRow[] }>('GET', `/logs${qs(q)}`),
+  families: () => request<FamilyInfo[] | { families: FamilyInfo[] }>('GET', '/strategies/families'),
+  markets: () => request<MarketInfo[] | { markets: MarketInfo[] } | string[]>('GET', '/markets'),
+  research: () => request<ResearchResponse>('GET', '/research'),
+};
+
+export const unwrapFamilies = (r: FamilyInfo[] | { families: FamilyInfo[] }) => (Array.isArray(r) ? r : (r.families ?? []));
+export const unwrapMarkets = (r: MarketInfo[] | { markets: MarketInfo[] } | string[]): MarketInfo[] => {
+  const arr = Array.isArray(r) ? r : (r.markets ?? []);
+  return (arr as (MarketInfo | string)[]).map((m) => (typeof m === 'string' ? { market: m } : m));
+};

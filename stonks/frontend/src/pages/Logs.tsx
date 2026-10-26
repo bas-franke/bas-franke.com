@@ -1,0 +1,147 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from '../api';
+import { IconPause, IconPlay } from '../components/icons';
+import { ErrorBox, Segmented, Skeleton, useVisibleInterval } from '../components/ui';
+import { dateOnly, timeOnly } from '../format';
+import type { LogRow } from '../types';
+
+const MAX_ROWS = 1000;
+type Level = '' | 'info' | 'warn' | 'error';
+
+export default function LogsPage() {
+  const [level, setLevel] = useState<Level>('');
+  const [paused, setPaused] = useState(false);
+  const [rows, setRows] = useState<LogRow[]>([]);
+  const [fresh, setFresh] = useState<Set<number>>(new Set());
+  const [error, setError] = useState<Error | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const lastId = useRef(0);
+  const busy = useRef(false);
+
+  const merge = (got: LogRow[], markNew: boolean) => {
+    if (!got.length) return;
+    lastId.current = Math.max(lastId.current, ...got.map((l) => l.id));
+    setRows((r) => {
+      const seen = new Set(r.map((l) => l.id));
+      const add = got.filter((l) => !seen.has(l.id));
+      return [...r, ...add].sort((a, b) => b.id - a.id).slice(0, MAX_ROWS);
+    });
+    if (markNew) setFresh(new Set(got.map((l) => l.id)));
+  };
+
+  const initial = useCallback(async () => {
+    lastId.current = 0;
+    setRows([]);
+    setLoaded(false);
+    try {
+      const { logs } = await api.logs({ level: level || undefined, limit: 200 });
+      merge(logs, false);
+      setError(null);
+    } catch (e) {
+      setError(e as Error);
+    } finally {
+      setLoaded(true);
+    }
+  }, [level]);
+
+  useEffect(() => {
+    initial();
+  }, [initial]);
+
+  useVisibleInterval(
+    async () => {
+      if (busy.current || !loaded) return;
+      busy.current = true;
+      try {
+        const { logs } = await api.logs({ level: level || undefined, after: lastId.current, limit: 200 });
+        merge(logs, true);
+        setError(null);
+      } catch (e) {
+        setError(e as Error);
+      } finally {
+        busy.current = false;
+      }
+    },
+    3000,
+    !paused,
+  );
+
+  let lastDay = '';
+  return (
+    <div className="stack">
+      <div className="page-head">
+        <div>
+          <span className="eyebrow">Logs</span>
+          <h1>The bot’s diary</h1>
+          <p className="lede">Everything it notices and does, as it happens. New lines appear every few seconds while this page is open.</p>
+        </div>
+      </div>
+      <div className="row">
+        <Segmented<Level>
+          label="Level"
+          value={level}
+          onChange={setLevel}
+          options={[
+            { value: '', label: 'Everything' },
+            { value: 'info', label: 'Info & up' },
+            { value: 'warn', label: 'Warnings' },
+            { value: 'error', label: 'Errors' },
+          ]}
+        />
+        <span className="spacer" />
+        <span className={`chip ${paused ? '' : 'gain pulse'}`}>
+          <span className="dot" />
+          {paused ? 'Paused' : 'Live tail'}
+        </span>
+        <button className="btn small" onClick={() => setPaused((p) => !p)}>
+          {paused ? <IconPlay width={15} /> : <IconPause width={15} />}
+          {paused ? 'Resume' : 'Pause'}
+        </button>
+      </div>
+      {error && <ErrorBox error={error} onRetry={initial} />}
+      <section className="card" style={{ padding: '6px 0' }}>
+        {!loaded && (
+          <div className="stack" style={{ padding: 20, gap: 10 }}>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} h={16} />
+            ))}
+          </div>
+        )}
+        {loaded && rows.length === 0 && <p className="soft small" style={{ padding: '30px 24px' }}>Nothing logged yet{level ? ' at this level' : ''}.</p>}
+        <div className="log-list">
+          {rows.map((l) => {
+            const day = dateOnly(l.ts);
+            const header = day !== lastDay;
+            lastDay = day;
+            const hasData = l.data !== null && l.data !== undefined && !(typeof l.data === 'object' && Object.keys(l.data as object).length === 0);
+            return (
+              <div key={l.id}>
+                {header && (
+                  <div className="eyebrow" style={{ padding: '12px 24px 6px', fontFamily: 'var(--sans)' }}>
+                    {day}
+                  </div>
+                )}
+                <div className={`log-row lv-${l.level}${fresh.has(l.id) ? ' new' : ''}`}>
+                  <span className="ts">{timeOnly(l.ts)}</span>
+                  <span className={`lvl ${l.level}`}>{l.level}</span>
+                  <span className="event" title={l.event}>
+                    {l.event}
+                  </span>
+                  <div className="msg">
+                    {l.message}
+                    {hasData && (
+                      <details>
+                        <summary>data</summary>
+                        <pre>{JSON.stringify(l.data, null, 2)}</pre>
+                      </details>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
