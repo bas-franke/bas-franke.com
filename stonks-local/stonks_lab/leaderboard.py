@@ -490,7 +490,8 @@ def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> 
             lead += f" ({vb:+.1f} points vs buy and hold)"
         parts.append(lead + ".")
     parts.append("Cross-coin strategies are tested on the coins that were the top 10 at each moment (no "
-                 "hindsight); ones built on today's top-10 list are only shown when they also win that way.")
+                 "hindsight; coins Bitvavo has delisted, like EOS, are missing, so a little survivorship remains); "
+                 "ones built on today's top-10 list are only shown when they also win that way, with that score.")
     lessons = [f["text"] for f in registry.findings(limit=3)]
     if lessons:
         parts.append("Latest lessons: " + " / ".join(lessons))
