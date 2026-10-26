@@ -49,7 +49,7 @@ void main() {
   // Zenith-to-horizon gradient: the horizon colour holds through the lowest ~20 degrees (more on the sun side), then
   // turns to the zenith colour. Mixed in a gamma-ish space so violet-to-orange dusk skies pass through a saturated
   // pink-magenta (and blue-to-peach day skies through clean light blues), not grey.
-  float t = pow(clamp(y, 0.0, 1.0), mix(0.62, 0.9, side * side));
+  float t = pow(clamp(y, 0.0, 1.0), mix(0.42, 0.72, side * side));
   vec3 col = mix(sqrt(uHorizon), sqrt(uTop), t);
   col *= col;
   col = mix(col, uHorizon * 1.08, side * side * 0.35 * (1.0 - t) * (1.0 - t));

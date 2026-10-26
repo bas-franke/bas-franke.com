@@ -21,7 +21,7 @@ void main() {
   float ang = aSeed.x * 6.2831853;
   vec2 dir = vec2(cos(ang), sin(ang));
   // Radius in screen units (1 = frame edge on that axis), so lines live in a ring at the edges of the image.
-  float r = mix(0.62, 1.25, aSeed.y);
+  float r = mix(0.78, 1.3, aSeed.y);
   vec2 xy = dir * r * vec2(uAspect, 1.0) * uTanHalf;
   float len = uLen * (0.6 + 0.8 * aSeed.w);
   float d = position.x > 0.0 ? depth + len : depth;
@@ -169,7 +169,7 @@ export class AirSystem {
     lu.uLen.value = 6 + 22 * s + 20 * boost;
     lu.uAspect.value = camera.aspect;
     lu.uTanHalf.value = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    lu.uIntensity.value = THREE.MathUtils.smoothstep(s, 0.6, 1.1) * 0.05 + boost * 0.12;
+    lu.uIntensity.value = THREE.MathUtils.smoothstep(s, 0.6, 1.1) * 0.03 + boost * 0.06;
 
     const mu = this.moteMat.uniforms;
     mu.uTime.value = time;

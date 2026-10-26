@@ -165,9 +165,9 @@ void main() {
   vec2 d = uv - focus;
   float r = length(d * vec2(aspect, 1.0));
   // Grows towards the frame edges, where the streaks in the concept art are strongest.
-  float mask = smoothstep(0.12, 0.85, r) * (1.0 + 0.5 * smoothstep(0.55, 1.0, r));
+  float mask = smoothstep(0.4, 1.0, r) * (1.0 + 0.5 * smoothstep(0.7, 1.1, r));
   mask *= mix(0.45, 1.0, smoothstep(0.3, 0.0, d.y));       // the sky above the focus smears less...
-  mask *= 1.0 + 0.9 * smoothstep(0.0, -0.45, d.y);        // ...and the ground below it more
+  mask *= 1.0 + 0.4 * smoothstep(0.0, -0.45, d.y);        // ...and the ground below it more
   vec2 pe = (uv - podMask.xy) / podMask.zw;
   mask *= smoothstep(0.75, 1.35, length(pe));             // keep the player's pod crisp
   float amount = blur * mask;

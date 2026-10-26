@@ -27,7 +27,7 @@ const SPECS: Record<Quality, QualitySpec> = {
 };
 
 /** Upper limit of the blur, as a fraction of the distance to the focus point. */
-const MAX_BLUR = 0.11;
+const MAX_BLUR = 0.045;
 
 export interface PostFxDebug extends PostFx {
   /** Render the post chain (not the scene) `n` times and return GPU-synced milliseconds per run. */
@@ -115,18 +115,18 @@ export function createPostFx(ctx: WorldContext): PostFxDebug {
     blur: { value: 0 },
     ca: { value: 0 },
     podMask: { value: new THREE.Vector4(0.5, 0.3, 0.001, 0.001) },
-    bloomStrength: { value: 0.4 },
+    bloomStrength: { value: 0.3 },
     sunUv: { value: new THREE.Vector2(0.8, 0.8) },
     sunOn: { value: 0 },
     sunColor: { value: sunColor },
     shaftStrength: { value: 0.55 },
-    veilStrength: { value: 0.06 },
+    veilStrength: { value: 0.025 },
     hazeColor: { value: hazeColor },
-    saturation: { value: 1.08 },
-    whiteBalance: { value: new THREE.Vector3(1.05, 1.01, 0.88) },
-    lift: { value: new THREE.Vector3(0.026, 0.018, 0.032) },
+    saturation: { value: 1.0 },
+    whiteBalance: { value: new THREE.Vector3(1.02, 1.0, 0.98) },
+    lift: { value: new THREE.Vector3(0.024, 0.012, 0.026) },
     highTint: { value: new THREE.Vector3(1.0, 0.975, 0.9) },
-    contrast: { value: 1.1 },
+    contrast: { value: 1.18 },
     hueKeep: { value: 0.55 },
     vignette: { value: 0.28 },
     noiseSeed: { value: 0 },

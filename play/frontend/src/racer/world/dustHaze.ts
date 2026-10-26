@@ -220,7 +220,7 @@ export const buildDustHaze: WorldBuilder = (ctx) => {
       uTime: { value: 0 },
       uPlayerS: { value: 0 },
       uWake: { value: [0, 0] },
-      uNear: { value: new THREE.Vector4(6, 22, 45, 110) },
+      uNear: { value: new THREE.Vector4(6, 22, 110, 260) },
       uSun: { value: sunDir },
       uTex: { value: tex },
       uLit: { value: lit },
@@ -274,7 +274,7 @@ export const buildDustHaze: WorldBuilder = (ctx) => {
         const lat = (r() * 2 - 1) * (half + 6);
         const base = track.toWorld(s, lat, 0, new THREE.Vector3());
         const right = f.tangent.clone().setY(0).normalize().cross(UP).normalize();
-        items.push({ p: [base.x, base.y, base.z, 6 + r() * 5], d: [r(), 1, 0.7, 0.22 + r() * 0.12], q: [right.x, 0, right.z, s] });
+        items.push({ p: [base.x, base.y, base.z, 6 + r() * 5], d: [r(), 1, 0.7, 0.11 + r() * 0.07], q: [right.x, 0, right.z, s] });
       }
     }
     if (!items.length) continue;

@@ -154,10 +154,12 @@ vec3 sandAlbedo(vec3 p, out float h) {
   float big = tFbm(p.xz * 0.011);
   // Rusty packed sand: dirt base, warmer sand in the drifts, long soft streaks combed by the wind. A touch warmer than
   // the theme colours so the dusk sky light does not turn it pink.
-  vec3 c = mix(uDirt, uSand, smoothstep(0.3, 0.75, big) * 0.75) * vec3(0.94, 1.1, 0.52);
+  vec3 c = mix(uDirt, uSand, smoothstep(0.3, 0.75, big) * 0.75) * vec3(1.2, 1.36, 0.74);
   vec2 q = vec2(dot(p.xz, vec2(0.8, 0.6)), dot(p.xz, vec2(-0.6, 0.8)));
   float st = tNoise(vec2(q.x * 0.006, q.y * 0.09)) * 0.6 + tNoise(vec2(q.x * 0.02, q.y * 0.35)) * 0.4;
-  c *= 0.78 + 0.38 * st;
+  c *= 0.74 + 0.46 * st;
+  // Lighter dust combed out along the streaks (sunlit, they read as pale terracotta against the rust).
+  c = mix(c, uSand * vec3(1.3, 1.22, 0.85), smoothstep(0.58, 0.85, st) * 0.4);
   c *= 0.86 + 0.24 * smoothstep(0.2, 0.8, tFbm(q * vec2(0.004, 0.03) + 5.0));
   c = mix(c, uDirt * vec3(0.8, 0.62, 0.5), smoothstep(0.45, 0.15, st) * 0.3);
   float rip = sin(dot(p.xz, vec2(0.9, 0.45)) * 1.4 + tNoise(p.xz * 0.07) * 7.0) * 0.5 + 0.5;
