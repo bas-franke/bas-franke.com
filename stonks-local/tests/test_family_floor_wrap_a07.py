@@ -54,3 +54,23 @@ def test_multi_market_split_and_no_look_ahead():
     for k in (300, 450):
         part = FAM.targets({m: d.iloc[:k] for m, d in cd.items()}, s).to_numpy()
         assert np.array_equal(np.nan_to_num(part, nan=-1), np.nan_to_num(full[:k], nan=-1))
+
+
+def test_floor_sma_keeps_the_floor_only_above_the_average():
+    from stonks_lab import indicators as ind
+    cd = candles()
+    inner_fam = FAMILIES["stale_trend"]
+    raw = inner_fam.targets(cd, normalize_spec({"family": "stale_trend", "markets": ["BTC-EUR"], "interval": "1d",
+                                                "params": SMA["params"]}, inner_fam))["BTC-EUR"].to_numpy()
+    s = spec(0.4)
+    s["params"]["floorSma"] = 120
+    b = FAM.targets(cd, s)["BTC-EUR"].to_numpy()
+    c = cd["BTC-EUR"]["close"].to_numpy()
+    sm = ind.sma(c, 120)
+    ok = np.isfinite(raw) & np.isfinite(sm)
+    out = ok & (raw == 0)
+    assert (out & (c > sm)).any() and (out & (c <= sm)).any()
+    assert np.allclose(b[out & (c > sm)], 0.4) and np.allclose(b[out & (c <= sm)], 0.0)
+    assert np.allclose(b[ok & (raw == 1)], 1.0)
+    part = FAM.targets({m: d.iloc[:400] for m, d in cd.items()}, s)["BTC-EUR"].to_numpy()
+    assert np.array_equal(np.nan_to_num(part, nan=-1), np.nan_to_num(b[:400], nan=-1))
