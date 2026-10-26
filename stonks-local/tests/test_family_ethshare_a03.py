@@ -60,3 +60,31 @@ def test_min_out_and_core():
     falling = bars([(x, x, x, x) for x in [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]])
     w2 = FAM.targets({"BTC-EUR": falling, "ETH-EUR": eth}, spec(coreSma=2))["BTC-EUR"].to_numpy()
     assert (w2[2:] == 0).all()
+
+
+def test_day_hour_on_hourly_candles():
+    from stonks_lab.families.ethshare_a03 import daily_candles
+    H = 3_600_000
+    n = 24 * 12
+    rng = np.random.default_rng(3)
+    ts = 1_600_041_600_000 + H * np.arange(n, dtype=np.int64)   # starts at 00:00 UTC
+    def hourly(vol):
+        df = flat(n, vol)
+        df.index = __import__("pandas").Index(ts, name="ts")
+        return df
+    btc, eth = hourly(np.ones(n) * 10), hourly(rng.uniform(0.5, 2.0, n))
+    cd = {"BTC-EUR": btc, "ETH-EUR": eth}
+    s = normalize_spec({"family": "ethshare_a03", "markets": ["BTC-EUR"], "interval": "1h",
+                        "params": {"turnLen": 2, "rankLen": 3, "exitQ": 0.8, "band": 0.1, "minOut": 0,
+                                   "coreSma": 0, "dayHour": 0}}, FAM)
+    w = FAM.targets(cd, s)["BTC-EUR"].to_numpy()
+    # hour 0 = native daily candles: decisions only at 23:00 UTC and equal to the 1d run on daily sums
+    dec = np.flatnonzero(np.isfinite(w))
+    assert len(dec) and ((ts[dec] // H) % 24 == 23).all()
+    dd = {m: daily_candles(df, 0)[0] for m, df in cd.items()}
+    s1 = {**s, "interval": "1d"}
+    w1 = FAM.targets(dd, s1)["BTC-EUR"].to_numpy()
+    assert list(w[dec]) == list(w1[np.isfinite(w1)])
+    s7 = {**s, "params": {**s["params"], "dayHour": 7}}
+    dec7 = np.flatnonzero(np.isfinite(FAM.targets(cd, s7)["BTC-EUR"].to_numpy()))
+    assert len(dec7) and ((ts[dec7] // H) % 24 == 6).all()

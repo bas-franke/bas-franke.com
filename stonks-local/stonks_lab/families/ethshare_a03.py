@@ -12,6 +12,9 @@ ETH/BTC lead still gave ETH -4.6 % (5/7 yrs negative), a high lead without high 
 euro traders crowd into ETH relative to BTC, speculation is running hot.
 
 Every traded market gets maxWeight / len(markets) while held. Decisions at bar t use candles up to t only.
+
+``dayHour`` (only on 1h candles): build daily candles closing at that UTC hour from the 1h data and decide once a
+day there (the close-hour check of finding #505; run with execution timeoutBars 24). Ignored on other intervals.
 """
 from __future__ import annotations
 
@@ -28,10 +31,12 @@ BOT_READY = False
 MULTI_MARKET = True
 
 BTC, ETH = "BTC-EUR", "ETH-EUR"
+H_MS = 3_600_000
+D_MS = 86_400_000
 
 
 def default_params() -> dict:
-    return {"turnLen": 14, "rankLen": 180, "exitQ": 0.8, "band": 0.1, "minOut": 0, "coreSma": 0}
+    return {"turnLen": 14, "rankLen": 180, "exitQ": 0.8, "band": 0.1, "minOut": 0, "coreSma": 0, "dayHour": 0}
 
 
 def param_space() -> dict:
@@ -48,6 +53,8 @@ def param_space() -> dict:
                    "description": "stay out at least this many candles after an exit (0 = no minimum)"},
         "coreSma": {"type": "int", "min": 20, "max": 400, "zero": True, "log": True,
                     "description": "also require the close above this SMA (0 = no trend core)"},
+        "dayHour": {"type": "int", "min": 0, "max": 23,
+                    "description": "on 1h candles only: daily candles close and decisions happen at this UTC hour"},
     }
 
 
@@ -114,7 +121,57 @@ def _asof(df: pd.DataFrame, values: np.ndarray, idx: np.ndarray) -> np.ndarray:
     return out
 
 
+def daily_candles(df: pd.DataFrame, hour: int) -> tuple[pd.DataFrame, np.ndarray]:
+    """Daily candles opening at ``hour`` UTC built from 1h candles, plus each one's last-hour timestamp.
+    Only complete days (data reaches the last hour) are kept (same rule as phase_shift / osc_core_a09)."""
+    ts = np.asarray(df.index, dtype=np.int64)
+    if len(ts) == 0:
+        return df.iloc[:0], np.zeros(0, dtype=np.int64)
+    key = (ts - hour * H_MS) // D_MS
+    g = df.groupby(key, sort=True)
+    out = pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
+                        "close": g["close"].last(), "volume": g["volume"].sum()})
+    k = out.index.to_numpy(np.int64)
+    last = k * D_MS + hour * H_MS + 23 * H_MS
+    keep = last <= ts[-1]
+    out = out[keep]
+    out.index = pd.Index(k[keep] * D_MS + hour * H_MS, name="ts")
+    return out, last[keep]
+
+
 def targets(candles, spec, start_time=None):
+    if spec.get("interval") == "1h":
+        return _targets_hourly(candles, spec)
+    return _targets(candles, spec)
+
+
+def _targets_hourly(candles, spec):
+    """Daily decisions at dayHour on 1h data: the daily logic on shifted daily candles, placed at each day's last
+    hour; NaN (no decision) on the other hours."""
+    hour = int(spec["params"].get("dayHour") or 0) % 24
+    markets = list(spec["markets"])
+    need = list(dict.fromkeys([*markets, BTC, ETH]))
+    daily = {}
+    for m in need:
+        if m in candles:
+            daily[m] = daily_candles(candles[m], hour)[0]
+    d = _targets(daily, spec)
+    idx = union_index(candles, markets)
+    out = {}
+    for m in markets:
+        v = d[m].to_numpy(np.float64)
+        # daily row ts (day open) -> that day's last 1h candle
+        last = np.asarray(d.index, dtype=np.int64) + 23 * H_MS
+        col = np.full(len(idx), np.nan)
+        pos = np.searchsorted(idx, last, side="left")
+        ok = (pos < len(idx)) & np.isfinite(v)
+        ok[ok] &= idx[pos[ok]] == last[ok]
+        col[pos[ok]] = v[ok]
+        out[m] = col
+    return frame(idx, out)
+
+
+def _targets(candles, spec):
     p = spec["params"]
     markets = list(spec["markets"])
     idx = union_index(candles, markets)
@@ -142,18 +199,21 @@ def targets(candles, spec, start_time=None):
 
 def explain(spec) -> dict:
     p, iv = spec["params"], spec.get("interval")
+    biv = "1d" if iv == "1h" else iv
     mk = market_names(spec)
     k = len(spec.get("markets") or [])
     q, band = float(p["exitQ"]), float(p["band"])
     core_n = int(p.get("coreSma") or 0)
     steps = [f"It holds {mk}" + (f" ({100 / k:.0f} % of the money per coin)" if k > 1 else "")
-             + (f" while the price is above its {bars_text(core_n, iv)} average" if core_n else "") + ".",
+             + (f" while the price is above its {bars_text(core_n, biv)} average" if core_n else "") + ".",
              f"Every day it measures how much of the euro trading in bitcoin and ether on Bitvavo went to ether over "
-             f"the last {bars_text(p['turnLen'], iv)}, and compares that share with the last "
-             f"{bars_text(p['rankLen'], iv)}.",
+             f"the last {bars_text(p['turnLen'], biv)}, and compares that share with the last "
+             f"{bars_text(p['rankLen'], biv)}.",
+             *([f"It decides once a day at {int(p['dayHour']):02d}:00 UTC on daily candles closing then."]
+               if iv == "1h" else []),
              f"When ether's share is higher than on {q * 100:.0f} % of those days (traders crowding into ether), it "
              f"sells and holds euros; it buys back once the share drops below the {(q - band) * 100:.0f} % level"
-             + (f" and at least {bars_text(p['minOut'], iv)} have passed." if int(p.get('minOut') or 0) else ".")]
+             + (f" and at least {bars_text(p['minOut'], biv)} have passed." if int(p.get('minOut') or 0) else ".")]
     return {
         "summary": f"Holds {mk} and steps aside while euro traders crowd into ether relative to bitcoin.",
         "howItWorks": steps + risk_steps(spec),
