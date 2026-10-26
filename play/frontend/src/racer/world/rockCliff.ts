@@ -113,13 +113,13 @@ export function addCliff(geo: GeoBuilder, cols: CliffColumn[], strata: Strata, o
         // Mostly sheer faces; a soft layer under a hard one is cut back into an overhang only in some columns, and
         // a few layers step back into a ledge.
         const r = hash(k * 5.1 + Math.floor(c.along / o.period) * 1.3 + o.seed * 7);
-        if (h < 0.3 && r < 0.4) {
+        if (h < 0.3 && r < 0.25) {
           ob = base + 0.3;
           ot = base + 2.2;
           sh = 0.72;
         } else {
           ob = base;
-          ot = base + (r > 0.82 ? 2.5 : 0.25);
+          ot = base + (r > 0.88 ? 2.5 : 0.25);
         }
         crestOt = ot;
       }

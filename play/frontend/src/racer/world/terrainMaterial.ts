@@ -93,12 +93,13 @@ vec3 fracture(float u, float y, float px, out float major, out vec2 tilt) {
   float cw = wm * 6.5;
   float dm = min(fm, 1.0 - fm) * cw;
   // Tall blocks stacked in each narrow column (vertical columnar joints dominate), joints staggered column to column.
-  float bh = 5.0 + 13.0 * tH1(m * 1.73 + M * 0.37);
+  float bh = 6.0 + 20.0 * tH1(m * 1.73 + M * 0.37);
   float Y = (y + tH1(m * 3.1 + 0.5) * bh) / bh;
   float row = floor(Y);
   float fy = Y - row;
   float dy = min(fy, 1.0 - fy) * bh;
-  float id = tH1(m * 13.1 + row * 7.7 + M * 3.3);
+  // Block id: mostly the column's own (so the columns read as tall vertical pillars), varied per block.
+  float id = fract(tH1(m * 5.3 + M * 1.1) + 0.35 * tH1(m * 13.1 + row * 7.7 + M * 3.3));
   // Anti-aliased crack widths: the minor joints fade out once they get thinner than a couple of pixels.
   float jw = max(0.22, px * 1.3);
   float minorFade = 1.0 - smoothstep(0.35, 1.4, px);
@@ -150,10 +151,11 @@ vec3 sandAlbedo(vec3 p, out float h) {
   float big = tFbm(p.xz * 0.011);
   // Rusty packed sand: dirt base, warmer sand in the drifts, long soft streaks combed by the wind. A touch warmer than
   // the theme colours so the dusk sky light does not turn it pink.
-  vec3 c = mix(uDirt, uSand, smoothstep(0.3, 0.75, big) * 0.75) * vec3(1.12, 0.92, 0.6);
+  vec3 c = mix(uDirt, uSand, smoothstep(0.3, 0.75, big) * 0.75) * vec3(0.94, 1.1, 0.52);
   vec2 q = vec2(dot(p.xz, vec2(0.8, 0.6)), dot(p.xz, vec2(-0.6, 0.8)));
   float st = tNoise(vec2(q.x * 0.006, q.y * 0.09)) * 0.6 + tNoise(vec2(q.x * 0.02, q.y * 0.35)) * 0.4;
-  c *= 0.82 + 0.3 * st;
+  c *= 0.78 + 0.38 * st;
+  c *= 0.86 + 0.24 * smoothstep(0.2, 0.8, tFbm(q * vec2(0.004, 0.03) + 5.0));
   c = mix(c, uDirt * vec3(0.8, 0.62, 0.5), smoothstep(0.45, 0.15, st) * 0.3);
   float rip = sin(dot(p.xz, vec2(0.9, 0.45)) * 1.4 + tNoise(p.xz * 0.07) * 7.0) * 0.5 + 0.5;
   c *= 0.96 + 0.04 * rip;
@@ -209,7 +211,7 @@ const MAIN_FRAGMENT = /* glsl */ `
   albedo = mix(albedo, mix(albedo, uTop, 0.4) * 1.1, smoothstep(0.15, 0.7, sunF) * r * 0.7);
   float foot = vRock > 0.99 && vRock < 1.5 ? smoothstep(0.98, 0.7, vShade) : 0.0;
   vec3 violet = uShade * vec3(1.1, 0.9, 1.3) + uLitDeep * 0.12;
-  albedo = mix(albedo, violet * (0.85 + 0.3 * tNoise(vTW.xz * 0.05 + vTW.y * 0.03)), r * max((1.0 - lit) * 0.7, foot * 0.5));
+  albedo = mix(albedo, violet * (0.7 + 0.3 * tNoise(vTW.xz * 0.05 + vTW.y * 0.03)), r * max((1.0 - lit) * 0.7, foot * 0.5));
   diffuseColor.rgb = albedo * vShade;
   // Cool blue-violet fill in the joints, on undersides and on shaded faces (the sky bounce in the concept art).
   float under = smoothstep(-0.1, -0.6, wN.y);
