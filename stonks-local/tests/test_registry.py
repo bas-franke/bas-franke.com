@@ -181,6 +181,23 @@ def test_payload_matches_spec_shape(r):
     json.dumps(p)
 
 
+def test_placebo_is_a_luck_line_not_a_candidate(r):
+    _fill(r)
+    for seed, sc in ((1, 2.95), (2, -5.0), (3, 0.5)):
+        s = spec("placebo_timing", seed=seed, meanIn=60, meanOut=30, coreSma=0)
+        r.claim(s)
+        r.record(s, result(sc))
+    top = leaderboard.rank(r, n=5)
+    assert "placebo_timing" not in [e["family"] for e in top]
+    p = leaderboard.build_payload(r)
+    assert "Luck line" in p["summary"]["notes"] and "best of 3 = 3.0" in p["summary"]["notes"]
+    t = p["top"][0]                                          # ema 3.0 on BTC 4h beats the best placebo (2.95)
+    assert t["luck"]["n"] == 3 and t["luck"]["bestScore"] == 2.95 and t["luck"]["sameCell"] and t["luck"]["beatsLuck"]
+    assert "Luck check: the best of 3" in t["explanation"]["vsLuck"] and "beats luck" in t["explanation"]["vsBuyHold"]
+    assert not p["top"][1]["luck"]["beatsLuck"]              # 2.8 < 2.95
+    assert leaderboard.validate_payload(p) == []
+
+
 def test_vs_buy_hold_sentence_honest():
     m = {"returnPct": -5.0, "maxDrawdownPct": 10.0, "testPeriod": ["2024-01-01", "2025-01-01"]}
     s = leaderboard.vs_buy_hold_sentence(m, 40.0, 50.0, ["BTC-EUR"])

@@ -17,7 +17,9 @@ from typing import Any
 
 from . import registry as reg
 
-EXCLUDED_FAMILIES = {"buy_hold", "buy_and_hold", "hold", "benchmark"}
+PLACEBO_FAMILY = "placebo_timing"      # random in/out timing: the luck benchmark (findings #475/#476/#482)
+EXCLUDED_FAMILIES = {"buy_hold", "buy_and_hold", "hold", "benchmark", PLACEBO_FAMILY}
+LUCK_EXPOSURE_BAND = 15.0              # placebo runs within this many exposure points count as "similar exposure"
 MARKET_NAMES = {"BTC-EUR": "BTC", "ETH-EUR": "ETH"}
 
 METRIC_KEYS = ["finalEur", "returnPct", "cagrPct", "maxDrawdownPct", "sharpe", "trades", "winRatePct", "feesEur",
@@ -195,6 +197,67 @@ def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance
         if len(chosen) >= n:
             break
     return chosen
+
+
+# --------------------------------------------------------------------------------------------- luck benchmark
+
+def exposure_pct(e: dict) -> float | None:
+    v = ((e.get("metrics") or {}).get("scoreParts") or {}).get("medianExposurePct")
+    return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else None
+
+
+def luck_for(registry: reg.Registry, e: dict, band: float = LUCK_EXPOSURE_BAND) -> dict | None:
+    """Best-of-N placebo_timing score on the same market(s) and interval at a similar median fold exposure (within
+    ``band`` points), current eval version: what the best of N random timings scores (``sameCell`` True). When that
+    cell has no placebo (placebo_timing is single-market, so baskets never have one), the most-run placebo cell is
+    given as a reference instead (``sameCell`` False). None when no placebo exists at all."""
+    x = exposure_pct(e)
+    q = """SELECT score, markets, interval, json_extract(metrics, '$.scoreParts.medianExposurePct') ex
+           FROM experiments WHERE family=? AND status='done' AND eval_version=? AND score IS NOT NULL"""
+    try:
+        with registry._conn() as c:
+            rows = c.execute(q + " AND interval=? AND markets=?", (PLACEBO_FAMILY, reg.EVAL_VERSION, e["interval"],
+                                                                   reg.markets_key(e["markets"]))).fetchall()
+            same = bool(rows)
+            if not rows:
+                ref = c.execute("""SELECT markets, interval FROM experiments WHERE family=? AND status='done'
+                                   AND eval_version=? AND score IS NOT NULL GROUP BY markets, interval
+                                   ORDER BY COUNT(*) DESC LIMIT 1""", (PLACEBO_FAMILY, reg.EVAL_VERSION)).fetchone()
+                if ref is not None:
+                    rows = c.execute(q + " AND interval=? AND markets=?", (PLACEBO_FAMILY, reg.EVAL_VERSION,
+                                                                           ref["interval"], ref["markets"])).fetchall()
+    except Exception:  # noqa: BLE001 - the luck line is best effort
+        return None
+    if not rows:
+        return None
+    cell = {"markets": rows[0]["markets"], "interval": rows[0]["interval"], "sameCell": same}
+    pts = [(float(r["score"]), r["ex"]) for r in rows]
+    if x is not None:
+        near = [s for s, ex in pts if isinstance(ex, (int, float)) and abs(float(ex) - x) <= band]
+        if len(near) >= 10:
+            pts = [(s, None) for s in near]
+    scores = [s for s, _ in pts]
+    if not scores:
+        return None
+    best = max(scores)
+    return {**cell, "n": len(scores), "bestScore": round(best, 3), "meanScore": round(sum(scores) / len(scores), 3),
+            "exposurePct": None if x is None else round(x, 1), "beatsLuck": bool(e.get("score") is not None
+                                                                                and e["score"] > best)}
+
+
+def luck_sentence(e: dict, luck: dict | None) -> str:
+    if not luck:
+        return ""
+    what = luck["markets"].replace("-EUR", "").replace(",", "/") + " " + luck["interval"]
+    exp = f" at about {luck['exposurePct']:.0f} % exposure" if luck.get("exposurePct") is not None else ""
+    if not luck.get("sameCell"):
+        return (f"Luck check: no random-timing placebo has been run on these coins at this interval yet; for "
+                f"reference, the best of {luck['n']} placebos on {what}{exp} scores {luck['bestScore']:.1f} "
+                f"(average {luck['meanScore']:.1f}) against this strategy's {float(e['score']):.1f}.")
+    verdict = ("so it beats luck" if luck["beatsLuck"] else "so its score is within what luck alone reaches")
+    return (f"Luck check: the best of {luck['n']} random-timing placebos on {what}{exp} scores "
+            f"{luck['bestScore']:.1f} (average {luck['meanScore']:.1f}); this strategy scores "
+            f"{float(e['score']):.1f}, {verdict}.")
 
 
 # --------------------------------------------------------------------------------------------- metrics
@@ -376,7 +439,7 @@ def family_bot_ready(family: str, fallback: Any = None) -> bool:
     return bool(fallback)
 
 
-def explanation_for(e: dict, metrics: dict) -> dict:
+def explanation_for(e: dict, metrics: dict, luck: dict | None = None) -> dict:
     ex = dict(family_explain(e["family"], e["spec"]))
     bh = (e.get("curves") or {}).get("buyHoldEquity") or []
     h = e.get("holdout") or {}
@@ -401,6 +464,10 @@ def explanation_for(e: dict, metrics: dict) -> dict:
         "whenItLoses": ex.get("whenItLoses") or "",
         "vsBuyHold": vs,
     }
+    ls = luck_sentence(e, luck)
+    if ls:
+        out["vsBuyHold"] = vs + " " + ls
+        out["vsLuck"] = ls
     return out
 
 
@@ -476,6 +543,23 @@ def data_range(entries: list[dict]) -> list[str | None]:
     return [min(t[0] for t in tps), max(t[1] for t in tps)] if tps else [None, None]
 
 
+def luck_note(registry: reg.Registry) -> str:
+    """One sentence: the best placebo score per market/interval (the bar a lead must clear)."""
+    try:
+        with registry._conn() as c:
+            rows = c.execute("""SELECT markets, interval, COUNT(*) n, MAX(score) best FROM experiments
+                                WHERE family=? AND status='done' AND eval_version=? AND score IS NOT NULL
+                                GROUP BY markets, interval ORDER BY n DESC LIMIT 3""",
+                             (PLACEBO_FAMILY, reg.EVAL_VERSION)).fetchall()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not rows:
+        return ""
+    cells = ", ".join(f"{r['markets'].replace('-EUR', '')} {r['interval']} best of {r['n']} = {r['best']:.1f}"
+                      for r in rows)
+    return f"Luck line (random-timing placebos, scored like strategies): {cells}; a lead should score above it."
+
+
 def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> str:
     st = registry.stats()
     parts = [f"{st['done']} experiments finished by {st['agents']} agent{'s' if st['agents'] != 1 else ''} over "
@@ -492,6 +576,9 @@ def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> 
     parts.append("Cross-coin strategies are tested on the coins that were the top 10 at each moment (no "
                  "hindsight; coins Bitvavo has delisted, like EOS, are missing, so a little survivorship remains); "
                  "ones built on today's top-10 list are only shown when they also win that way, with that score.")
+    ln = luck_note(registry)
+    if ln:
+        parts.append(ln)
     lessons = [f["text"] for f in registry.findings(limit=3)]
     if lessons:
         parts.append("Latest lessons: " + " / ".join(lessons))
@@ -499,8 +586,9 @@ def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> 
     return s if len(s) <= max_chars else s[: max_chars - 1] + "…"
 
 
-def entry_payload(rank_no: int, e: dict) -> dict:
+def entry_payload(rank_no: int, e: dict, registry: reg.Registry | None = None) -> dict:
     metrics = metrics_for(e)
+    luck = luck_for(registry, e) if registry is not None else None
     curves = e.get("curves") or {}
     spec = dict(e["spec"])
     return {
@@ -510,7 +598,8 @@ def entry_payload(rank_no: int, e: dict) -> dict:
         "metrics": metrics,
         "equity": reg.downsample(curves.get("equity") or []),
         "buyHoldEquity": reg.downsample(curves.get("buyHoldEquity") or []),
-        "explanation": explanation_for(e, metrics),
+        "explanation": explanation_for(e, metrics, luck),
+        "luck": luck,
         "lineage": {"experimentId": e["spec_hash"], "agent": e.get("agent"), "round": e.get("round"),
                     "parent": e.get("parent")},
         "score": _num(e.get("score")),
@@ -528,7 +617,7 @@ def build_payload(registry: reg.Registry | None = None, n: int = 5) -> dict:
                     "dataRange": data_range(entries), "notes": notes(registry, entries)},
         "benchmark": btc,
         "benchmarks": others,
-        "top": [entry_payload(i + 1, e) for i, e in enumerate(entries)],
+        "top": [entry_payload(i + 1, e, registry) for i, e in enumerate(entries)],
     }
 
 
