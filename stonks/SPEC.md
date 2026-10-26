@@ -17,8 +17,11 @@ The bot runs **inside** the backend process (one project = one PM2 process). It 
   broker charge these. Limit orders that rest on the book pay maker; market orders and limit orders that cross pay taker.
 - Every research backtest starts with **€1000** cash and no coins.
 - Amounts are decimal strings on the wire to Bitvavo; internally numbers (EUR amounts are small enough for doubles).
-  Round prices/amounts to the market's `pricePrecision` (significant digits) / `quantityDecimals` from `GET /v2/markets`,
-  and respect `minOrderInQuoteAsset` (usually €5).
+  Prices must be a multiple of the market's `tickSize` (`pricePrecision` is deprecated and comes back null; fallback
+  5 significant digits), amounts are rounded down to `quantityDecimals`, and orders must meet both
+  `minOrderInQuoteAsset` (usually €5) and `minOrderInBaseAsset` (all from `GET /v2/markets`).
+- Bitvavo's `clientOrderId` must be a UUID. The `orders` table stores `stonks-<uuid>` and only the UUID is sent; the bot
+  only ever touches orders that have such a row. It never calls `DELETE /orders` (that cancels every order in a market).
 
 ## 2. Strategy spec (shared by backtests and the bot)
 
@@ -71,7 +74,12 @@ orders; differences smaller than €5 or 2 % of equity are ignored (no churn).
   **taker fee + 5 bps slippage**.
 - **Market** orders fill at the next bar's open + 5 bps slippage (adverse), taker fee.
 - Fees are paid in EUR (buy: you pay `amount*price*(1+fee)`; sell: you get `amount*price*(1-fee)`).
-- Stops (`stopLossPct`, `trailingStopPct`) are checked against bar lows and exit as market orders.
+- Stops (`stopLossPct`, `trailingStopPct`) are checked against bar lows and exit as market orders; within one bar stops are
+  checked before take profit (pessimistic). Take profit also exits at market. The average entry for stops/take profit is
+  the plain average fill price. After a stop the market is locked until the strategy's target for it returns to 0.
+- Limit buys reserve their cash while open (as on Bitvavo). Buys at one close are scaled together to the free cash; market
+  buys leave room for fee + slippage. Cash from sells placed at the same close is only spent once it has arrived, so a
+  rotation takes one extra bar.
 
 ## 3. Families the bot implements (v1)
 
@@ -89,13 +97,23 @@ Research may invent new families in Python. A family is **bot-ready** only once 
 | `rotation_momentum` | market movement: rank the `universe` (top-10 EUR markets) by `lookback`-bar return, hold the top `top` equally if their return > 0 (and optionally only if BTC is above its SMA `regimeSma`), else cash | `lookback`, `top`, `regimeSma` |
 
 Indicator definitions (both sides must match): EMA seeded with the SMA of the first `n` closes, `alpha = 2/(n+1)`;
-RSI = Wilder's smoothing; Bollinger = SMA ± k·population std; MACD = EMA(fast) − EMA(slow), signal = EMA(signal) of MACD.
+RSI = Wilder's smoothing, 50 when prices are flat; Bollinger = SMA ± k·population std; MACD = EMA(fast) − EMA(slow),
+signal = EMA(signal) of MACD; Donchian levels use the N bars **before** the current one. An indicator that isn't warm
+yet means "out" (TS returns weight 0, Python NaN = no decision; fixtures start at the first valid bar).
+
+Family details both sides implement (the docstrings in `stonks_lab/families/*.py` and `src/strategies/*.ts` are exact):
+- `dca_dip` runs a fee-free virtual portfolio anchored at the strategy's start time (backtest: window start), measures
+  the recent high from bar highs, re-arms dip buys only after the price recovers above the dip threshold, and keeps
+  selling `sellFraction` each bar while above the take-profit level.
+- `rotation_momentum` measures each market's lookback return on its own series, gives each slot `maxWeight/top` (unused
+  slots stay cash), breaks ties by market name, and needs a BTC candle at bar t when the regime filter is on.
+- Research uses today's top-10 for rotation and basket benchmarks, so those results carry survivorship bias.
 
 ## 4. Database (`stonks`, migrations in `backend/src/migrations.ts`)
 
 | table | what |
 |---|---|
-| `settings` | `key text PK, value jsonb, updated_at`. Keys: `bot` (see §5), `paper_wallet` (`{ "EUR": 1000, "BTC": 0, ... }`) |
+| `settings` | `key text PK, value jsonb, updated_at`. Keys: `bot` (see §5), `paper_wallet` (`{ "EUR": 1000, "BTC": 0, ... }`), `bot_state` (per-mode day baseline, last decided bar, stop locks, trailing peaks) |
 | `sessions` | dashboard logins: `token_hash bytea PK, created_at, expires_at, ip` |
 | `orders` | one row per order the bot placed: mode, exchange ids, market, side, type, price, amount, filled, fee, status, strategy id, reason, raw |
 | `fills` | one row per execution (Bitvavo trade or paper fill), unique on `(mode, exchange_trade_id)` |
@@ -120,7 +138,11 @@ RSI = Wilder's smoothing; Bollinger = SMA ± k·population std; MACD = EMA(fast)
 Daily loss guard: at 00:00 Europe/Amsterdam the bot records start-of-day equity. When `startOfDay - equityNow ≥
 dailyLossLimitEur` it cancels its open orders, sets `enabled: false`, logs an `error` event `daily_loss_limit` and stays
 off until the owner turns it on again. Deposits/withdrawals are not trades: equity changes not explained by fills
-reset the start-of-day baseline (logged as `warn`).
+(beyond max(€2, 0.5 % of equity)) shift the start-of-day baseline by their EUR value (logged as `warn`), so the day's
+real losses still count.
+
+In live mode the bot treats the whole Bitvavo account as its portfolio (owner's choice): coins the strategy doesn't want
+are sold. `maxExposureEur` caps how much EUR it puts into coins.
 
 The bot only ever touches orders it created (its `clientOrderId`s start with the prefix `stonks-`) and never withdraws.
 
@@ -134,6 +156,9 @@ The bot only ever touches orders it created (its `clientOrderId`s start with the
 
 Everything except `GET /api/health` and `POST /api/auth/login` needs the session cookie `stonks_session`
 (HttpOnly, Secure in production, SameSite=Strict, 30 days). The password is `STONKS_ADMIN_PASSWORD` from the env.
+State-changing requests need `Content-Type: application/json` (body-less POSTs may instead carry an `Origin` matching
+the host); an `Origin` that doesn't match the host is refused. Errors are `{ error: "message" }`. Responses use
+camelCase and numbers (not numeric strings).
 
 | method + path | body / query | returns |
 |---|---|---|
@@ -146,8 +171,8 @@ Everything except `GET /api/health` and `POST /api/auth/login` needs the session
 | `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot` (stop also cancels the bot's open orders) |
 | `GET /api/orders` | `?mode=&market=&limit=&before=` | `{ orders:[...] }` newest first |
 | `GET /api/fills` | same | `{ fills:[...] }` |
-| `GET /api/equity` | `?mode=&days=` | `{ points:[{ts,totalEur}] }` |
-| `GET /api/logs` | `?level=&after=<id>&limit=` | `{ logs:[...] }` (the dashboard polls with `after` for a live tail) |
+| `GET /api/equity` | `?mode=&days=` | `{ mode, points:[{ts,totalEur,cashEur}] }` (≤ 1500 points; optional `buyHold:[{ts,totalEur}]`) |
+| `GET /api/logs` | `?level=&after=<id>&before=<id>&limit=` | `{ logs:[...] }` newest first; `level` is a minimum; `after` returns the oldest entries after that id so a live tail never skips |
 | `GET /api/strategies/families` | | the bot-ready families with param descriptions |
 | `GET /api/markets` | | Bitvavo EUR markets (cached 1 h) |
 | `GET /api/research` | | newest research snapshot payload or `{ empty:true }` |
