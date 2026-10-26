@@ -7,12 +7,13 @@ Timeline of one bar t (bars are [open, high, low, close] with ts = open time):
 2. Resting limit orders: a buy at p fills when low[t] < p, a sell when high[t] > p (strictly: touching is not
    enough), at p, maker fee. Sells before buys. postOnly limits always rest (the engine prices them away from the
    last close, so they can never be marketable when placed).
-3. Risk exits on every open position: stopLossPct (average entry*(1-x)) and trailingStopPct (highest high since entry,
-   from bars before t, *(1-x)) trigger when low[t] <= the stop and sell everything as a market order at
+3. Risk exits on every open position, like the bot's stopHit: the average entry includes the EUR buy fees.
+   stopLossPct (entry*(1-x)) and trailingStopPct (peak*(1-x), peak = highest of the entry fill and the highs of
+   the bars since, excluding bar t) trigger when low[t] <= the stop and sell everything as a market order at
    min(open[t], stop)*(1-5 bps), taker (for a position opened during this bar: stop*(1-5 bps)). takeProfitPct
-   triggers when high[t] > entry*(1+x) and fills there at maker (it is a resting limit). Stops win over take profit.
-   After a risk exit the market is "stood down": no new buys until its target drops to 0 or rises above the level
-   it had at the exit (otherwise a still-positive target would simply buy back on the next bar).
+   triggers when high[t] >= entry*(1+x) and also sells at market: max(open[t], level)*(1-5 bps), taker. Stops are
+   checked before take profit (the pessimistic order within one bar). After a risk exit the market is locked like
+   in the bot: no new buys until the strategy's own target for it goes back to 0.
 4. Equity is marked at close[t] (cash + coins*close; no exit fee is deducted for open positions).
 5. Limit orders that have now been live for `timeoutBars` bars are cancelled, or with fallback "market" become a
    market order for the next open.
@@ -20,8 +21,10 @@ Timeline of one bar t (bars are [open, high, low, close] with ts = open time):
    (cash + coins at close). Per market: delta = w*E - coins*close. Target 0 sells the whole position (if worth
    >= EUR 5). Otherwise |delta| < max(EUR 5, 2 % of E) is ignored (no churn). A market that already has an open
    order keeps it if it still wants the same side, else the order is cancelled. Limit buys reserve their EUR (plus
-   maker fee) from free cash like Bitvavo does, so a rotation sells first and buys on the next decision; market buys
-   may also use the expected proceeds of market sells placed at the same close. Orders under EUR 5 are skipped.
+   maker fee) from free cash like Bitvavo does; buys share the free cash (scaled down together when it is short,
+   room left for the fee and, for market orders, the slippage), exactly like the bot's planOrders. Cash from sells
+   placed at the same close is not spent until it has arrived, so a rotation sells first and buys on the next
+   decision. Orders under EUR 5 are skipped.
    Limit prices: buy close*(1-limitOffsetBps), sell close*(1+limitOffsetBps).
 
 Weights are clipped to >= 0 and each row is scaled down to sum <= risk.maxWeight.
@@ -209,7 +212,6 @@ def _simulate(W, index, O, H, L, C, CF, markets, i0, i1, start_eur, fees, risk, 
     peak = [0.0] * M
     orders = [None] * M  # [side, kind, price, qty_or_eur, age, reason, reserve]
     blocked = [None] * M
-    last_w = [0.0] * M
     trades = []
 
     def fill_sell(j, t, q, px, fee_rate, liq, reason):
@@ -244,11 +246,10 @@ def _simulate(W, index, O, H, L, C, CF, markets, i0, i1, start_eur, fees, risk, 
         u = units[j]
         if u <= 0:
             peak[j] = px
-            avg[j] = px
-        else:
-            avg[j] = (avg[j] * u + px * q) / (u + q)
+            basis[j] = 0.0
         units[j] = u + q
         basis[j] += eur + fee
+        avg[j] = basis[j] / units[j]  # average entry incl. the EUR fee, like the bot's replayPosition
         trades.append({"time": ts[t], "market": markets[j], "side": "buy", "price": px, "amount": q, "eur": eur,
                        "fee": fee, "liquidity": liq, "reason": reason, "pnl": 0.0, "closed": False})
 
@@ -334,12 +335,14 @@ def _simulate(W, index, O, H, L, C, CF, markets, i0, i1, start_eur, fees, risk, 
                         cancel(j)
                         fill_sell(j, t, units[j], ref * slip_dn, taker, "taker", why)
                         exited = True
-                    elif tpp and Hl[j][t] > avg[j] * (1.0 + tpp):
+                    elif tpp and Hl[j][t] >= avg[j] * (1.0 + tpp):
+                        tpx = avg[j] * (1.0 + tpp)
+                        ref = max(Ol[j][t], tpx) if held[j] else tpx
                         cancel(j)
-                        fill_sell(j, t, units[j], avg[j] * (1.0 + tpp), maker, "maker", "take_profit")
+                        fill_sell(j, t, units[j], ref * slip_dn, taker, "taker", "take_profit")
                         exited = True
                     if exited:
-                        blocked[j] = last_w[j]
+                        blocked[j] = True
                     elif held[j]:
                         hv = Hl[j][t]
                         if hv > peak[j]:
@@ -376,7 +379,6 @@ def _simulate(W, index, O, H, L, C, CF, markets, i0, i1, start_eur, fees, risk, 
                     E += units[j] * CFl[j][t]
             thresh = max(MIN_ORDER_EUR, CHURN_PCT * E)
             buys = []
-            est_proceeds = 0.0
             for j in range(M):
                 w = row[j]
                 if w != w:
@@ -384,10 +386,8 @@ def _simulate(W, index, O, H, L, C, CF, markets, i0, i1, start_eur, fees, risk, 
                 c = CFl[j][t]
                 if c != c or C[j][t] != C[j][t]:  # no candle now: cannot price a fresh order
                     continue
-                if blocked[j] is not None:
-                    if w <= 1e-12 or w > blocked[j] + 1e-9:
-                        blocked[j] = None
-                last_w[j] = w
+                if blocked[j] is not None and w <= 0.0:
+                    blocked[j] = None
                 cur = units[j] * c
                 want = 0
                 amount = 0.0
@@ -411,19 +411,23 @@ def _simulate(W, index, O, H, L, C, CF, markets, i0, i1, start_eur, fees, risk, 
                         continue
                     if use_market:
                         orders[j] = [_SELL, _MARKET, 0.0, amount, 0, "signal", 0.0]
-                        est_proceeds += amount * c * (1.0 - taker)
                     else:
                         orders[j] = [_SELL, _LIMIT, c * (1.0 + off), amount, 0, "signal", 0.0]
                 elif want == _BUY:
                     buys.append((j, amount, c))
+            if buys:
+                # Buys share the free cash, scaled down together when it is short (like the bot's planOrders).
+                spendable = max(0.0, (cash - reserved) / (1.0 + (taker + SLIPPAGE if use_market else maker)))
+                wanted = 0.0
+                for _, amount, _ in buys:
+                    wanted += amount
+                scale = spendable / wanted if wanted > spendable else 1.0
             for j, amount, c in buys:
+                eur = amount * scale
                 if use_market:
-                    eur = min(amount, (cash - reserved + est_proceeds) / (1.0 + taker))
                     if eur >= MIN_ORDER_EUR:
                         orders[j] = [_BUY, _MARKET, 0.0, eur, 0, "signal", 0.0]
-                        est_proceeds -= eur * (1.0 + taker)
                 else:
-                    eur = min(amount, (cash - reserved) / (1.0 + maker))
                     if eur >= MIN_ORDER_EUR:
                         res = eur * (1.0 + maker)
                         reserved += res
