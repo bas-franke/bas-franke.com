@@ -113,17 +113,57 @@ def same_outcome(a: dict, b: dict, min_corr: float = 0.995) -> bool:
     return float(np.corrcoef(ra, rb)[0, 1]) > min_corr
 
 
+PIT = "top10_pit"
+
+
+def survivorship_biased(e: dict) -> bool:
+    """A fixed list of more than two coins chosen today (e.g. today's top 10) knows which coins survived."""
+    return (e.get("spec") or {}).get("universe") != PIT and len(e.get("markets") or []) > 2
+
+
+def pit_twin_spec(spec: dict) -> dict:
+    """The same strategy on the point-in-time top-10 universe (stonks_lab/universe.py)."""
+    from .universe import pit_pool
+    twin = {k: v for k, v in spec.items() if k not in ("id", "name")}
+    twin["markets"] = pit_pool()
+    twin["universe"] = PIT
+    return twin
+
+
+def pit_check(registry: reg.Registry, e: dict) -> dict | None:
+    """For a survivorship-biased experiment: its point-in-time twin's verdict, or None when the twin has not been
+    evaluated (with the current method) yet. ``passed`` = the twin is eligible and beat buy and hold of the
+    point-in-time members (mean fold excess > 0)."""
+    try:
+        t = registry.get(reg.spec_hash(pit_twin_spec(e["spec"])))
+    except Exception:  # noqa: BLE001 - missing universe module/data
+        return None
+    if not t or t.get("status") != "done" or t.get("eval_version") != reg.EVAL_VERSION:
+        return None
+    parts = (t.get("metrics") or {}).get("scoreParts") or {}
+    mx = parts.get("meanExcessLogPct")
+    return {"hash": t["spec_hash"], "score": t.get("score"), "meanExcessLogPct": mx,
+            "passed": bool(t.get("score") is not None and parts.get("eligible") and mx is not None and mx > 0)}
+
+
 def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance: float = 0.25,
          bot_ready_only: bool = False, pool: int = 3000, min_test_trades: int = 5) -> list[dict]:
     """The best ``n`` diverse done experiments of the current evaluation version, best first. Skips ineligible
     specs (:func:`ineligible_reason`), more than ``per_family`` per family, parameter near-duplicates of a chosen
-    one, and specs that trade the same as a chosen one (:func:`same_outcome`), so only the best-scoring copy stays."""
+    one, and specs that trade the same as a chosen one (:func:`same_outcome`), so only the best-scoring copy stays.
+    A survivorship-biased spec (today's top-10 list) is ranked only when its point-in-time twin (``lab.py
+    pit-twins``) also beat buy and hold; the payload then says so."""
     chosen: list[dict] = []
     per: dict[str, int] = {}
     for e in registry.top(pool, bot_ready_only=bot_ready_only):
         fam = e["family"]
         if ineligible_reason(e, min_test_trades):
             continue
+        if survivorship_biased(e):             # ranked only when it also wins on the point-in-time universe
+            chk = pit_check(registry, e)
+            if not chk or not chk["passed"]:
+                continue
+            e = dict(e, pitCheck=chk)
         if per.get(fam, 0) >= per_family:
             continue
         if any(c["family"] == fam and c["interval"] == e["interval"] and c["markets"] == e["markets"]
@@ -329,12 +369,18 @@ def explanation_for(e: dict, metrics: dict) -> dict:
         bh_mdd = cs["maxDrawdownPct"] if bh_mdd is None else bh_mdd
     elif bh_ret is None and metrics.get("returnPct") is not None and metrics.get("vsBuyHoldPct") is not None:
         bh_ret = metrics["returnPct"] - metrics["vsBuyHoldPct"]
+    vs = vs_buy_hold_sentence(metrics, bh_ret, bh_mdd, e["markets"])
+    chk = e.get("pitCheck")
+    if chk:
+        vs += (f" Caution: it trades today's top-10 coins, which flatters any backtest (it 'knows' which coins "
+               f"survived). Re-run on the coins that were the top 10 at each moment, it still beat buy and hold "
+               f"(by {chk['meanExcessLogPct']:+.1f} log-points per test period on average).")
     out = {
         "summary": ex.get("summary") or "",
         "howItWorks": list(ex.get("howItWorks") or []),
         "whenItWins": ex.get("whenItWins") or "",
         "whenItLoses": ex.get("whenItLoses") or "",
-        "vsBuyHold": vs_buy_hold_sentence(metrics, bh_ret, bh_mdd, e["markets"]),
+        "vsBuyHold": vs,
     }
     return out
 
@@ -424,6 +470,8 @@ def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> 
         if vb is not None:
             lead += f" ({vb:+.1f} points vs buy and hold)"
         parts.append(lead + ".")
+    parts.append("Cross-coin strategies are tested on the coins that were the top 10 at each moment (no "
+                 "hindsight); ones built on today's top-10 list are only shown when they also win that way.")
     lessons = [f["text"] for f in registry.findings(limit=3)]
     if lessons:
         parts.append("Latest lessons: " + " / ".join(lessons))

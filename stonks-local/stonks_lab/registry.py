@@ -138,7 +138,9 @@ def canonical(spec: dict) -> dict:
     risk.update(spec.get("risk") or {})
     execution = dict(DEFAULT_EXECUTION)
     execution.update(spec.get("execution") or {})
+    extra = {"universe": spec["universe"]} if spec.get("universe") else {}   # absent = old hashes unchanged
     return _norm({
+        **extra,
         "family": spec["family"],
         "familyVersion": spec.get("familyVersion", 1),
         "interval": spec["interval"],
@@ -321,7 +323,7 @@ class Registry:
         status = "failed" if (error or result is None) else "done"
         score = metrics = holdout = curves = fingerprint = eval_version = None
         if result is not None:
-            eval_version = result.get("evalVersion")
+            eval_version = result.get("evalVersion") or ((result.get("scoreParts") or {}).get("evalVersion"))
             fingerprint = result.get("fingerprint")
             score, metrics, holdout, curves = _result_columns(result)
         with self._tx() as c:
@@ -365,6 +367,17 @@ class Registry:
         for r in rows:
             r["spec"] = _lj(r["spec"])
         return rows[:limit] if limit else rows
+
+    def backfill_eval_version(self) -> int:
+        """Rows whose stored result says which eval version made it but whose column is NULL (written by a process
+        that still had the pre-migration registry loaded) get the column set. Returns the number fixed."""
+        with self._tx() as c:
+            cur = c.execute("""UPDATE experiments SET eval_version = CAST(COALESCE(json_extract(metrics, '$.evalVersion'),
+                                   json_extract(metrics, '$.scoreParts.evalVersion')) AS INTEGER)
+                               WHERE eval_version IS NULL AND metrics IS NOT NULL
+                                 AND COALESCE(json_extract(metrics, '$.evalVersion'),
+                                              json_extract(metrics, '$.scoreParts.evalVersion')) IS NOT NULL""")
+            return cur.rowcount
 
     def rescore(self, h: str, result: dict) -> bool:
         """Replace a done experiment's evaluation with a newer-version ``result`` in place. The previous score,

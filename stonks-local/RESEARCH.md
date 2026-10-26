@@ -32,7 +32,8 @@ Repeat until the file `stonks-local/STOP` exists (check before each step; if it 
    without losing more than 10 % return on BTC 4h". It goes in `--hypothesis` and is stored with every experiment.
 4. **Experiment**:
    - Parameter search: `$PY lab.py sweep --family F --interval I --markets BTC-EUR --samples 40 --agent A --round R --hypothesis "..."`
-     (`--markets ETH-EUR`, `BTC-EUR ETH-EUR`, or `top10`; `--grid` for a grid; `--params '{"trendSma":200}'` holds
+     (`--markets ETH-EUR`, `BTC-EUR ETH-EUR` (multi-market families only), or `top10_pit` for cross-coin ideas;
+     `--grid` for a grid; `--params '{"trendSma":200}'` holds
      params fixed; `--risk '{"stopLossPct":0.08}'` and `--execution '{"orderType":"market"}'` set overlays).
    - One hand-written spec: `$PY lab.py run spec.json --agent A --round R --hypothesis "..."` (or `-` for stdin,
      or inline JSON). `$PY lab.py check spec.json` tells you first whether it's been done.
@@ -89,6 +90,13 @@ not walls: if your finding points into another lane, write it down and pick that
   `run --retry-failed`.
 - **Modest CPU**: at most 2 workers, one sweep at a time. 20 agents share 12 cores.
 - **No look-ahead**: a decision at bar t may only use candles up to and including bar t.
+- **No hindsight in the coin list**: cross-coin ideas (rotation, breadth, baskets) use `--markets top10_pit`
+  (`"markets": "top10_pit"` in a spec): at every bar only the 10 coins of a fixed historical pool with the highest
+  trailing 90-day EUR volume on Bitvavo (days before that bar) may be held, and buy and hold is those members.
+  `top10` is *today's* list and knows which coins survived (rotation on it: +12 vs -16 log-points point-in-time);
+  such results are only ranked when `lab.py pit-twins` shows the same spec also beats buy and hold on `top10_pit`.
+  Pool and sources: `stonks_lab/universe.py`. Point-in-time candles exist for 1d and 1W only; ask the coordinator
+  for other intervals (agents never download).
 - **Agents don't commit** registry data or `FINDINGS.md`; the coordinator runs `lab.py digest` and commits.
   A new family you wrote (module + test) is committed by you, on its own, with pathspecs
   (`git commit --only -m "stonks-local: family <name>" -- <paths>`), only when its tests pass.

@@ -98,7 +98,8 @@ def canonical_spec(spec: dict) -> dict:
     s = normalize_spec(spec, fam)
     return _canon({"family": s["family"], "familyVersion": int(s.get("familyVersion") or fam.version),
                    "markets": list(s["markets"]), "interval": s["interval"], "params": s["params"],
-                   "risk": s["risk"], "execution": s["execution"]})
+                   "risk": s["risk"], "execution": s["execution"],
+                   **({"universe": s["universe"]} if s.get("universe") else {})})
 
 
 def spec_hash(spec: dict) -> str:
@@ -125,16 +126,30 @@ def _load(markets, interval, start=None, end=None):
     return data.load_many(markets, interval, start, end)
 
 
-def _targets_for(fam, spec, candles, full_targets, start):
+def _targets_for(fam, spec, candles, full_targets, start, members=None):
     if fam.anchored:
-        return fam.targets(candles, spec, start_time=bt.anchor_time(candles, spec, start))
+        tg = fam.targets(candles, spec, start_time=bt.anchor_time(candles, spec, start))
+        if members is not None:
+            from . import universe
+            tg = universe.apply_pit(tg, members)
+        return tg
     return full_targets
 
 
-def _run_window(fam, spec, candles, full_targets, index, a, b, fees, start_eur):
-    bh = bt.buy_and_hold(spec["markets"], candles, start_eur, fees, start=a, end=b, interval=spec["interval"],
-                         index=index)
-    tg = _targets_for(fam, spec, candles, full_targets, a)
+def _bh_markets(spec, full_targets, index, members, a):
+    """Buy and hold of the same markets; for a point-in-time universe: the members at the window start."""
+    if members is None:
+        return spec["markets"]
+    i = min(int(np.searchsorted(index, int(a), side="left")), len(index) - 1)
+    cols = list(full_targets.columns)
+    ms = [m for j, m in enumerate(cols) if members[i, j]]
+    return ms or spec["markets"]
+
+
+def _run_window(fam, spec, candles, full_targets, index, a, b, fees, start_eur, members=None):
+    bh = bt.buy_and_hold(_bh_markets(spec, full_targets, index, members, a), candles, start_eur, fees, start=a,
+                         end=b, interval=spec["interval"], index=index)
+    tg = _targets_for(fam, spec, candles, full_targets, a, members)
     res = bt.run(spec, candles, start_eur, fees, start=a, end=b, targets=tg, bh_equity=bh.equity)
     return res, bh
 
@@ -267,6 +282,9 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
     err = fam.validate(spec)
     if err:
         raise ValueError(f"invalid params for {fam.name}: {err}")
+    universe_name = spec.get("universe")
+    if universe_name not in (None, "top10_pit"):
+        raise ValueError(f"unknown universe {universe_name!r} (known: top10_pit)")
     interval = spec["interval"]
     ims = mt.INTERVAL_MS[interval]
     markets = list(spec["markets"])
@@ -278,6 +296,12 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
 
     full_targets = fam.targets(candles, spec)
     index = np.asarray(full_targets.index, dtype=np.int64)
+    members = None
+    if universe_name is not None:              # point-in-time universe (stonks_lab/universe.py)
+        from . import universe
+        daily = candles if interval == "1d" else None
+        members = universe.pit_members(index, list(full_targets.columns), daily=daily)
+        full_targets = universe.apply_pit(full_targets, members)
     valid = ~np.isnan(full_targets.to_numpy(np.float64)).all(axis=1)
     if not valid.any():
         raise ValueError("strategy never produces a decision on this data (warm-up longer than the history?)")
@@ -310,7 +334,8 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
             return int(index[min(int(np.searchsorted(index, int(x), side="left")), len(index) - 1)])
 
         if h > t0:
-            insample, insample_bh = _run_window(fam, spec, candles, full_targets, index, t0, h, fees, start_eur)
+            insample, insample_bh = _run_window(fam, spec, candles, full_targets, index, t0, h, fees, start_eur,
+                                                 members)
         for f in range(k):
             a = snap(d0 + seg * (f + 2))
             b = snap(d0 + seg * (f + 3)) if f < k - 1 else h
@@ -318,7 +343,7 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
                 skipped.append({"fold": f + 1, "testPeriod": [mt.iso_day(a), mt.iso_day(b - 1)],
                                 "reason": "warm-up not finished at the fold start"})
                 continue
-            res, bh = _run_window(fam, spec, candles, full_targets, index, a, b, fees, start_eur)
+            res, bh = _run_window(fam, spec, candles, full_targets, index, a, b, fees, start_eur, members)
             if len(res.ts) < 2:
                 continue
             fold_results.append((res, bh))
@@ -335,7 +360,7 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
     holdout = None
     equity = bh_equity = []
     if h < t_end:
-        hres, hbh = _run_window(fam, spec, candles, full_targets, index, h, t_end, fees, start_eur)
+        hres, hbh = _run_window(fam, spec, candles, full_targets, index, h, t_end, fees, start_eur, members)
         holdout = dict(hres.metrics)
         holdout["testPeriod"] = [mt.iso_day(h), mt.iso_day(t_end - 1)]
         holdout["trainReturnPct"] = insample.metrics["returnPct"] if insample is not None else None
@@ -354,6 +379,10 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
     explanation["vsBuyHold"] = vs
     if skipped:
         parts["skippedFolds"] = skipped
+    if universe_name is not None:
+        parts["universe"] = universe_name
+    elif len(markets) > 2:
+        parts["survivorshipBiased"] = True     # a fixed list picked today: see universe.is_survivorship_biased
     return {
         "score": score,
         "scoreParts": parts,

@@ -83,6 +83,19 @@ def top10() -> list[str]:
     return list(t10())
 
 
+PIT = "top10_pit"
+
+
+def universe_of(tokens) -> str | None:
+    """"top10_pit" when the markets given name the point-in-time universe (string or list), else None."""
+    if tokens is None:
+        return None
+    if isinstance(tokens, str):
+        tokens = [tokens]
+    parts = [x.strip().lower() for t in tokens for x in str(t).split(",")]
+    return PIT if PIT in parts else None
+
+
 def resolve_markets(tokens: list[str] | None, fam=None) -> list[str]:
     if not tokens:
         return top10() if fam is not None and is_multi_market(fam) else ["BTC-EUR"]
@@ -94,6 +107,9 @@ def resolve_markets(tokens: list[str] | None, fam=None) -> list[str]:
                 continue
             if p.lower() in ("top10", "universe"):
                 out.extend(top10())
+            elif p.lower() == PIT:
+                from stonks_lab.universe import pit_pool  # type: ignore
+                out.extend(pit_pool())
             else:
                 p = p.upper()
                 out.append(p if "-" in p else f"{p}-EUR")
@@ -106,6 +122,9 @@ def normalize_markets(v) -> list[str]:
         return []
     if isinstance(v, str):
         v = [v]
+    if universe_of(v):
+        from stonks_lab.universe import pit_pool  # type: ignore
+        return pit_pool()                      # the point-in-time universe is always the whole pool
     return resolve_markets([str(x) for x in v]) if v else []
 
 
@@ -148,12 +167,14 @@ def markets_label(markets: list[str]) -> str:
 
 
 def make_spec(family: str, interval: str, markets: list[str], params: dict, risk: dict | None = None,
-              execution: dict | None = None, family_version: int | None = None) -> dict:
+              execution: dict | None = None, family_version: int | None = None, universe: str | None = None) -> dict:
     fam = families().get(family)
     fv = family_version or (fam_attr(fam, "version") or fam_attr(fam, "familyVersion") or 1 if fam else 1)
     spec = {"family": family, "familyVersion": int(fv), "markets": sorted(markets), "interval": interval,
             "params": params, "risk": {**reg.DEFAULT_RISK, **(risk or {})},
             "execution": {**reg.DEFAULT_EXECUTION, **(execution or {})}}
+    if universe:
+        spec["universe"] = universe
     return complete_spec(spec)
 
 
@@ -168,13 +189,13 @@ def complete_spec(spec: dict) -> dict:
         if "familyVersion" not in spec or spec["familyVersion"] is None:
             spec["familyVersion"] = fam_attr(fam, "version") or 1
     h = reg.spec_hash(spec)
-    label = markets_label(spec["markets"])
+    label = "top10pit" if spec.get("universe") == PIT else markets_label(spec["markets"])
     spec.setdefault("id", f"{spec['family']}-{label}-{spec['interval']}-{h[:6]}")
     spec.setdefault("familyVersion", 1)
     if "name" not in spec:
         title = (fam_attr(fam, "title") or fam_attr(fam, "label")) if fam is not None else None
         title = title or spec["family"].replace("_", " ").capitalize()
-        mk = label.upper() if label != "top10" else "top-10"
+        mk = {"top10": "top-10", "top10pit": "point-in-time top-10"}.get(label, label.upper())
         spec["name"] = f"{title}, {mk} {spec['interval']}"
     return spec
 
@@ -406,6 +427,8 @@ def load_spec_arg(src: str) -> dict:
     text = sys.stdin.read() if src == "-" else (Path(src).read_text(encoding="utf-8") if Path(src).exists() else src)
     spec = json.loads(text)
     if "markets" in spec:
+        if universe_of(spec["markets"]):
+            spec["universe"] = PIT
         spec["markets"] = normalize_markets(spec["markets"])
     return complete_spec(spec)
 
@@ -501,7 +524,7 @@ def cmd_run(a, r):
 
 
 def candidates(fam, family: str, interval: str, markets: list[str], fixed: dict, risk: dict, execution: dict,
-               samples: int, grid: bool, seed: int | None):
+               samples: int, grid: bool, seed: int | None, universe: str | None = None):
     space = dict(fam_call(fam, "param_space") or {})
     base = dict(fam_call(fam, "default_params") or {})
     for k in fixed:
@@ -517,7 +540,7 @@ def candidates(fam, family: str, interval: str, markets: list[str], fixed: dict,
         stream = ({**base, **sample_params(space, rng), **fixed} for _ in range(samples * 30))
     for params in stream:
         if param_error(fam, params) is None:
-            yield make_spec(family, interval, markets, params, risk, execution)
+            yield make_spec(family, interval, markets, params, risk, execution, universe=universe)
 
 
 def cmd_sweep(a, r):
@@ -535,7 +558,10 @@ def cmd_sweep(a, r):
     workers = max(1, min(a.workers, 6))
     db = str(r.path)
     submitted, skipped_seen, skipped_near, results = 0, 0, 0, []
-    gen = candidates(fam, a.family, a.interval, markets, fixed, risk, execution, a.samples, a.grid, a.seed)
+    uni = universe_of(a.markets)
+    if uni:
+        markets = normalize_markets(a.markets)
+    gen = candidates(fam, a.family, a.interval, markets, fixed, risk, execution, a.samples, a.grid, a.seed, uni)
     inflight: dict = {}
     print(f"sweep {a.family} {a.interval} {markets_label(markets)}: up to {a.samples} new specs, {workers} workers")
     try:
@@ -615,6 +641,9 @@ def cmd_rescore(a, r):
     """Re-evaluate done experiments of older evaluation versions in place (old score kept in metrics.history).
     Resumable (it only picks rows still below the current version), idempotent, low priority."""
     _low_priority()
+    fixed = r.backfill_eval_version()
+    if fixed:
+        print(f"backfilled eval_version on {fixed} rows that already had a current result", flush=True)
     todo = r.stale_versions(limit=a.limit)
     workers = max(1, min(a.workers, 6))
     print(f"rescore: {len(todo)} done experiments below eval version {reg.EVAL_VERSION}, {workers} workers "
@@ -652,6 +681,39 @@ def cmd_rescore(a, r):
     print(f"rescore finished: {n_ok} re-evaluated ({n_same} were already current), {n_fail} failed and left at "
           f"their old version{', STOP file present' if STOP_FILE.exists() else ''}; "
           f"{r.stats()['staleEval']} still below version {reg.EVAL_VERSION}", flush=True)
+
+
+def cmd_pit_twins(a, r):
+    """Evaluate the point-in-time-universe twin of the best survivorship-biased specs (fixed lists of > 2 coins,
+    e.g. today's top 10), so the leaderboard can check they also beat buy and hold without hindsight."""
+    from stonks_lab.universe import is_survivorship_biased, pit_pool  # type: ignore
+    _low_priority()
+    todo, seen = [], set()
+    for e in r.top(5000):
+        if not is_survivorship_biased(e["markets"], (e.get("spec") or {}).get("universe")):
+            continue
+        fam = families().get(e["family"])
+        if fam is None or not is_multi_market(fam) or e["family"] in leaderboard.EXCLUDED_FAMILIES:
+            continue
+        twin = leaderboard.pit_twin_spec(e["spec"])
+        h = reg.spec_hash(twin)
+        if h in seen or r.seen(twin):
+            continue
+        if market_error(fam, e["family"], e["interval"], pit_pool(), twin.get("params")):
+            continue
+        seen.add(h)
+        todo.append((e, complete_spec(twin)))
+        if len(todo) >= a.n:
+            break
+    print(f"pit-twins: {len(todo)} point-in-time twins to evaluate", flush=True)
+    for e, twin in todo:
+        if not r.claim(twin, agent=a.agent, round=a.round, hypothesis=f"point-in-time twin of {e['spec_hash']}",
+                       parent=e["spec_hash"]):
+            continue
+        res = evaluate_and_record(twin, str(r.path), a.agent, a.round, f"point-in-time twin of {e['spec_hash']}",
+                                  e["spec_hash"])
+        print(f"  {e['spec_hash'][:10]} {e['family']} {e['interval']} today's list {fnum(e['score'], 2)} -> "
+              f"point-in-time {fnum(res.get('score'), 2)}", flush=True)
 
 
 def cmd_finding(a, r):
@@ -803,8 +865,9 @@ def main(argv=None):
     sp = add("sweep", cmd_sweep, "random/grid search over a family's param_space")
     sp.add_argument("--family", required=True)
     sp.add_argument("--interval", required=True, choices=reg.INTERVALS)
-    sp.add_argument("--markets", nargs="*", help="BTC-EUR ETH-EUR | BTC,ETH | top10 (default BTC-EUR, top10 for "
-                                                 "multi-market families)")
+    sp.add_argument("--markets", nargs="*", help="BTC-EUR ETH-EUR | BTC,ETH | top10_pit (point-in-time top 10, use "
+                                                 "this for cross-asset ideas) | top10 (today's list: survivorship-"
+                                                 "biased) (default BTC-EUR, top10 for multi-market families)")
     sp.add_argument("--samples", type=int, default=20, help="new specs to evaluate")
     sp.add_argument("--grid", action="store_true", help="enumerate the grid (shuffled) instead of random sampling")
     sp.add_argument("--params", help="JSON of params to hold fixed")
@@ -826,6 +889,10 @@ def main(argv=None):
     sp = add("publish", cmd_publish, "upload the top 5 to the dashboard")
     sp.add_argument("--dry-run", action="store_true", help="only write out/research.json")
     add("digest", cmd_digest, "regenerate FINDINGS.md")
+    sp = add("pit-twins", cmd_pit_twins, "evaluate point-in-time twins of the best today's-top-10 specs")
+    sp.add_argument("-n", type=int, default=40)
+    sp.add_argument("--agent", default="maintainer")
+    sp.add_argument("--round", type=int, default=0)
     sp = add("rescore", cmd_rescore, "re-evaluate done experiments of an older eval version in place (resumable)")
     sp.add_argument("--workers", type=int, default=3, help="parallel low-priority processes (max 6)")
     sp.add_argument("--limit", type=int, help="at most this many experiments")
