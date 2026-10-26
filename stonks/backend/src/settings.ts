@@ -97,12 +97,16 @@ export async function getBotSettings(): Promise<BotSettings> {
   return safeParse(rows[0].value, defaults);
 }
 
-function safeParse(stored: Record<string, unknown>, defaults: BotSettings): BotSettings {
+async function safeParse(stored: Record<string, unknown>, defaults: BotSettings): Promise<BotSettings> {
   try {
     return checkSettings({ ...defaults, ...stored });
   } catch (err) {
-    // A stored value broke (e.g. a family version bump). Keep the bot off rather than guess.
-    void log('error', 'settings_invalid', `Stored bot settings are invalid, the bot stays off: ${(err as Error).message}`);
+    // A stored value broke (e.g. a family version bump). Keep the bot off rather than guess, and store that: a later
+    // deploy that makes the old value valid again must not switch the bot back on by itself.
+    if (stored.enabled !== false) {
+      await query("UPDATE settings SET value = jsonb_set(value, '{enabled}', 'false'::jsonb), updated_at = now() WHERE key = 'bot'").catch(() => undefined);
+      await log('error', 'settings_invalid', `Stored bot settings are invalid, the bot is switched off: ${(err as Error).message}`);
+    }
     const merged = { ...defaults, ...stored, enabled: false } as Record<string, unknown>;
     try {
       return checkSettings(merged);
