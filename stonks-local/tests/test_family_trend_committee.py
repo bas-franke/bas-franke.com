@@ -75,3 +75,17 @@ def test_no_lookahead():
                     d[col] = x
                 pert[m] = d
             np.testing.assert_array_equal(FAM.targets(pert, s).to_numpy()[: k + 1], full[: k + 1])
+
+
+def test_late_listed_market_holds_cash_slice():
+    btc = synth(600, 1)
+    sol = synth(300, 3, price=100)
+    sol.index = btc.index[300:]
+    s = spec(markets=("BTC-EUR", "SOL-EUR"), mode="avg")
+    t = FAM.targets({"BTC-EUR": btc, "SOL-EUR": sol}, s)
+    v = t.to_numpy()
+    first = FAM.warmup(P)
+    assert np.isnan(v[:first]).all() and not np.isnan(v[first:]).any()
+    assert (v[first:300 + first, 1] == 0).all()           # SOL not listed / warming up: its half stays in euros
+    alone = FAM.targets({"BTC-EUR": btc}, spec(mode="avg"))["BTC-EUR"].to_numpy()
+    np.testing.assert_allclose(v[first:, 0], 0.5 * alone[first:])

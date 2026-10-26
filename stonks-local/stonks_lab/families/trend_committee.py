@@ -7,8 +7,9 @@ Voters (each exactly the rule of its v1 family, computed on the market's own can
 
 mode "avg":      weight = share * (voters in) / 3 (a third of the coin's slice per voter).
 mode "majority": weight = share while at least two voters are in, else 0.
-Multi-market: each market gets share = maxWeight / number of markets. A row is decided once every voter of every
-market has finished its warm-up.
+Multi-market: each market gets share = maxWeight / number of markets. v2: a row is decided once any market has
+finished its warm-up; a market that is not listed yet or still warming up keeps its slice in euros (weight 0), so a
+top-10 basket can start before the youngest coin is listed (v1 waited for every market).
 
 Why: single trend rules on ETH 1d are cliffs (macd_trend slow 165 -> -17, 195 -> +11); averaging three different
 trend definitions should keep most of the edge with smoother parameter neighbourhoods.
@@ -22,7 +23,7 @@ from .. import indicators as ind
 from ._base import bars_text, frame, market_names, max_weight, pct, risk_steps
 
 NAME = "trend_committee"
-VERSION = 1
+VERSION = 2
 TITLE = "Trend committee (EMA + MACD + Donchian vote)"
 BOT_READY = False
 MULTI_MARKET = True
@@ -110,7 +111,8 @@ def targets(candles, spec, start_time=None):
         index = idx if index is None else np.union1d(index, idx)
     cols = {m: s.reindex(index).ffill().to_numpy(np.float64) for m, s in series.items()}
     out = frame(index, cols)
-    out.iloc[out.isna().any(axis=1).to_numpy(), :] = np.nan
+    decided = out.notna().any(axis=1).to_numpy()
+    out.iloc[decided, :] = out.iloc[decided, :].fillna(0.0)
     return out
 
 
