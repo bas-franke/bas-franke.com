@@ -8,17 +8,22 @@ is cash unless BTC-EUR closes above its SMA(regimeSma) at that bar (same gate as
 
 A coin is rankable once it has `window` candles of its own. Rows before the first rankable bar (and before the
 regime SMA is defined, if used) are NaN. Decisions at bar t use closes up to t only.
+
+v2: with ``spec["universe"] == "top10_pit"`` only the point-in-time members at bar t (``universe.pit_members``,
+past data only) are ranked, so the `top` picks are never coins the universe would turn into cash. Specs without a
+universe trade exactly as in v1.
 """
 from __future__ import annotations
 
 import numpy as np
 
 from .. import indicators as ind
+from .. import universe as uni
 from ._base import bars_text, frame, market_names, max_weight, risk_steps, union_index
 from .rotation_blend import _regime
 
 NAME = "high_rotation"
-VERSION = 1
+VERSION = 2
 TITLE = "Near-the-high rotation"
 BOT_READY = False
 MULTI_MARKET = True
@@ -73,6 +78,9 @@ def targets(candles, spec, start_time=None):
             r[window - 1:] = c[window - 1:] / c[: len(c) - window + 1] - 1.0
             ret[j, pos] = r
     ready = np.isfinite(prox)
+    if spec.get("universe") == uni.PIT_NAME:
+        daily = {m: candles[m] for m in markets} if spec.get("interval") == "1d" else None
+        ready &= uni.pit_members(idx, markets, daily).T
     warm = ready.any(axis=0)
     regime_ok = np.ones(n, dtype=bool)
     if regime_n > 0:

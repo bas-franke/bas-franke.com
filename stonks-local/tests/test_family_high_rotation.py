@@ -91,3 +91,27 @@ def test_regime_gate_goes_to_cash():
     w = FAM.targets(cd, spec(markets=["BTC-EUR", "ETH-EUR"], window=10, top=1, minProx=0, regimeSma=20))
     assert w["ETH-EUR"].iloc[60] == 1.0
     assert w.iloc[110].sum() == 0.0
+
+
+def test_pit_universe_ranks_only_members(monkeypatch):
+    import stonks_lab.universe as uni
+    n = 60
+    t = np.arange(n, dtype=np.float64)
+    a = 100 * 1.005 ** t          # at its high every bar, but not a member before bar 50
+    b = 100 * 1.003 ** t          # also at its high, always a member
+    c = 100 * 0.99 ** t
+    cd = {"BTC-EUR": frame_of(a), "ETH-EUR": frame_of(b), "SOL-EUR": frame_of(c)}
+
+    def fake_members(index, markets, daily=None, **kw):
+        m = np.ones((len(index), len(markets)), dtype=bool)
+        m[:50, markets.index("BTC-EUR")] = False
+        return m
+
+    monkeypatch.setattr(uni, "pit_members", fake_members)
+    s = spec(window=20, top=1, minProx=0, regimeSma=0)
+    plain = FAM.targets(cd, s)
+    assert plain["BTC-EUR"].iloc[40] == 1.0
+    s["universe"] = "top10_pit"
+    w = FAM.targets(cd, s)
+    assert w["BTC-EUR"].iloc[40] == 0.0 and w["ETH-EUR"].iloc[40] == 1.0
+    assert w["BTC-EUR"].iloc[55] == 1.0
