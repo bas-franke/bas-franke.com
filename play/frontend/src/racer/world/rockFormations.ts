@@ -40,35 +40,42 @@ function finish(g: THREE.BufferGeometry, cls = ROCK_EDGE): THREE.BufferGeometry 
   return flat;
 }
 
-/** A rounded, faceted boulder of unit radius, sunk a little into the sand. */
+/** A fractured boulder of unit radius, sunk a little into the sand: a lumpy ball sheared off by six cleavage planes,
+ * so it breaks into a few big flat faces and sharp edges, like a block fallen off the walls. */
 function boulderShape(seed: number, detail: number, cls: number) {
   const g = new THREE.IcosahedronGeometry(1, detail);
   const p = g.attributes.position as THREE.BufferAttribute;
   const v = new THREE.Vector3();
-  const planes = [0, 1, 2, 3].map((k) => new THREE.Vector3(Math.sin(k * 2.3 + seed), Math.cos(k * 1.7 + seed) * 0.6, Math.cos(k * 2.9 - seed)).normalize());
+  const planes = [0, 1, 2, 3, 4, 5].map((k) => new THREE.Vector3(Math.sin(k * 2.3 + seed), Math.cos(k * 1.7 + seed) * 0.7, Math.cos(k * 2.9 - seed)).normalize());
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i);
-    v.multiplyScalar(1 + (noise2(v.x * 1.9 + seed, v.z * 1.9 + v.y * 1.5) - 0.5) * 0.4);
-    for (const pl of planes) {
+    v.multiplyScalar(1 + (noise2(v.x * 1.9 + seed, v.z * 1.9 + v.y * 1.5) - 0.5) * 0.25);
+    for (const [k, pl] of planes.entries()) {
       const d = v.dot(pl);
-      if (d > 0.8) v.addScaledVector(pl, 0.8 - d);
+      const cutAt = 0.6 + 0.12 * hash2(k, seed);
+      if (d > cutAt) v.addScaledVector(pl, cutAt - d);
     }
-    p.setXYZ(i, v.x, (Math.max(v.y, -0.6) + 0.35) / 1.35, v.z);
+    // A flat top more often than not: sandstone splits along its bedding.
+    v.y = Math.min(v.y, 0.72);
+    p.setXYZ(i, v.x, (Math.max(v.y, -0.6) + 0.35) / 1.07, v.z);
   }
   return finish(g, cls);
 }
 
-/** A weathered sandstone block, 2 x 1 x 2 (unit half-width), tapering up, with ledges and a lumpy top. */
+/** A fractured sandstone block, 2 x 1 x 2 (unit half-width), tapering up: it steps in at two or three bedding joints,
+ * and round its sides vertical joints split it into columns that stand a little proud of or behind each other. */
 function blockShape(seed: number, cls: number) {
-  const g = new THREE.BoxGeometry(2, 1, 2, 3, 5, 3);
+  const g = new THREE.BoxGeometry(2, 1, 2, 4, 6, 4);
   const p = g.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i);
     const z = p.getZ(i);
     const y = p.getY(i) + 0.5;
     // Same displacement for every copy of a corner, so the faces stay closed.
-    const k = (1 - 0.2 * y) * (1 + (noise2(x * 1.3 + seed, z * 1.3 + y * 2.1) - 0.5) * 0.35) * (1 - 0.07 * (Math.floor(y * 3.2) % 2));
-    const top = y > 0.99 ? (noise2(x * 2 + seed, z * 2) - 0.5) * 0.16 : 0;
+    const tier = Math.floor(y * 2.6 + 0.0001);
+    const col = Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 6 + seed);
+    const k = (1 - 0.16 * y) * (1 - 0.1 * hash2(tier, seed)) * (1 + (hash2(col * 3.1 + tier * 0.7, seed) - 0.5) * 0.2) * (1 + (noise2(x * 1.3 + seed, z * 1.3 + y * 2.1) - 0.5) * 0.1);
+    const top = y > 0.99 ? (Math.floor(noise2(x * 1.5 + seed, z * 1.5) * 3) / 3 - 0.33) * 0.12 : 0;
     p.setXYZ(i, x * k, y + top, z * k);
   }
   return finish(g, cls);
