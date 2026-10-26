@@ -151,9 +151,11 @@ export class TerrainField {
         const cell = Math.floor(u);
         const fu = u - cell;
         const block = (hash(cell * 3.7 + si * 19) - 0.45) * 14 * smoothstep(0.05, 0.15, fu) * (1 - smoothstep(0.85, 0.95, fu));
-        this.crest[si][i] = f.pos.y + H + ((noise1(f.s * 0.015, si * 7 + 1) - 0.5) * 8 + block) * Math.min(1, H / 30);
+        // Tall (slot canyon) walls get proportionally bigger towers and notches: blocky columns along the rim.
+        this.crest[si][i] = f.pos.y + H + ((noise1(f.s * 0.015, si * 7 + 1) - 0.5) * 8 + block) * Math.min(1, H / 30) * Math.max(1, H / 80);
         this.dEnd[si][i] = Number.isFinite(W) ? W + 4 : Math.min(110, rMax);
-        this.plat[si][i] = 80 + 170 * noise1(f.s * 0.005, si * 5 + 2);
+        // Wide plateaus: their sloped back edges (the heightfield cannot be sheer) stay far out in the haze.
+        this.plat[si][i] = 200 + 300 * noise1(f.s * 0.005, si * 5 + 2);
       }
     }
     this.baseY = sumY / n - 4;
@@ -441,12 +443,13 @@ export class TerrainField {
         const P = this.plat[si][i];
         y = ad < W + P ? top : lerp(top, this.desert(x, z), smoothstep(W + P, W + P + 40, ad));
         this.rock = 0.5;
-        mesaMask = smoothstep(W + P + 40, W + P + 120, ad);
+        // The heightfield's sloped buttes only far out: near the course the landmarks' sheer mesas and spires stand.
+        mesaMask = smoothstep(W + P + 260, W + P + 420, ad);
       }
     } else {
       const de = this.dEnd[si][i];
       y = ad < de ? this.groundY(i, side, ad, x, z) - 2.5 * smoothstep(de, de - 6, ad) : this.openFar(i, ad, x, z);
-      mesaMask = smoothstep(220, 320, ad);
+      mesaMask = smoothstep(420, 560, ad);
     }
     if (this.city) {
       const dc = Math.hypot(x - this.city.pos.x, z - this.city.pos.z);
