@@ -45,7 +45,7 @@ def param_space() -> dict:
                     "description": "days of history the share is ranked against (percentile)"},
         "side": {"type": "choice", "values": ["out_high", "in_high"],
                  "description": "out_high = step out when the share ranks high; in_high = hold only then"},
-        "thr": {"type": "float", "min": 0.5, "max": 0.95, "description": "percentile threshold"},
+        "thr": {"type": "float", "min": 0.05, "max": 0.95, "description": "percentile threshold"},
         "combine": {"type": "choice", "values": ["none", "and", "or"],
                     "description": "combine with a daily SMA core: none, and (both), or (either)"},
         "coreLen": {"type": "int", "min": 10, "max": 400, "log": True, "description": "SMA core length in days"},
