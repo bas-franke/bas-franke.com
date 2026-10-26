@@ -58,3 +58,9 @@ def test_btc_scope_and_or_core():
     w = FAM.targets(cd, spec(markets=("BTC-EUR",), scope="own", coreLen=3, combine="or",
                              enter=0.7, exit=0.7))["BTC-EUR"].to_numpy()
     assert (w[5:] == 1).all()
+
+
+def test_btc_scope_on_eth_alone_needs_btc_data():
+    s = spec(markets=("ETH-EUR",), scope="btc")
+    assert "BTC-EUR" in FAM.required_markets(s)
+    assert FAM.required_markets(spec(markets=("ETH-EUR",))) == ["ETH-EUR"]

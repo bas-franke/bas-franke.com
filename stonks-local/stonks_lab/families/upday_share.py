@@ -55,6 +55,12 @@ def warmup(p: dict) -> int:
     return max(int(p["look"]) + 1, int(p.get("coreLen") or 0))
 
 
+def required_markets(spec: dict) -> list[str]:
+    ms = list(spec.get("markets") or [])
+    scope = (spec.get("params") or {}).get("scope", "own")
+    return ms + (["BTC-EUR"] if scope == "btc" and "BTC-EUR" not in ms else [])
+
+
 def up_share(close: np.ndarray, look: int) -> np.ndarray:
     c = np.asarray(close, dtype=np.float64)
     up = np.full(len(c), np.nan)
@@ -83,10 +89,9 @@ def targets(candles, spec, start_time=None):
     if not markets:
         raise ValueError("upday_share needs at least one market")
     scope = p.get("scope", "own")
-    src = markets + (["BTC-EUR"] if scope == "btc" and "BTC-EUR" not in markets else [])
     if scope == "btc" and "BTC-EUR" not in candles:
         raise KeyError("upday_share scope=btc needs BTC-EUR candles")
-    idx = union_index(candles, src)
+    idx = union_index(candles, markets)  # BTC's signal (scope btc) is taken as of each traded bar
     look, enter, exit_ = int(p["look"]), float(p["enter"]), float(p["exit"])
     core_len, combine = int(p.get("coreLen") or 0), p.get("combine", "and")
     each = max_weight(spec) / len(markets)
