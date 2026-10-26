@@ -283,6 +283,39 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
     }
   }
 
+  // Stepped mesas close by where the canyon opens: flat tops and ledges just over the low rim, like the plateaus on
+  // the right of the concept art, with the spire forest behind and between them.
+  const mesaStep = low ? 900 : 550;
+  for (let s = 200; s < track.length - 200; s += mesaStep * (0.7 + r() * 0.6)) {
+    if (zones.openness(s) < 0.5) continue;
+    const side = r() < 0.5 ? -1 : 1;
+    const W = zones.wallOffset(s, side);
+    if (!Number.isFinite(W)) continue;
+    const f = track.frameAt(s);
+    const flatRight = f.right.clone().setY(0).normalize();
+    const rad = 45 + r() * 40;
+    const dist = W + 40 + rad * 1.3 + r() * 120;
+    const x = f.pos.x + flatRight.x * side * dist;
+    const z = f.pos.z + flatRight.z * side * dist;
+    if (nearestTrack(x, z) < W + 30 + rad * 1.25 || blocked(x, z, rad * 1.3)) continue;
+    if (archFeet.some((p) => Math.hypot(p.x - x, p.z - z) < 120 + rad)) continue;
+    nearPlaced.push({ x, z });
+    tint();
+    const nb = nearAt(s);
+    nb.tint = skyline.tint;
+    addMesa(nb, r, {
+      x,
+      z,
+      ground: Math.min(ground, f.pos.y - 8),
+      height: zones.wallHeight(s, side) + 40 + r() * 70,
+      radius: rad,
+      elong: 1.4 + r() * 0.8,
+      rot: Math.atan2(f.tangent.z, f.tangent.x) + (r() - 0.5) * 0.6,
+      seg: Math.round(16 * segScale),
+      kind: 'mesa',
+    });
+  }
+
   for (const layer of LAYERS) {
     const sc = layer.scale;
     const seg = (n: number) => Math.max(7, Math.round(n * segScale * (layer.near > 1200 ? 0.65 : 1)));
