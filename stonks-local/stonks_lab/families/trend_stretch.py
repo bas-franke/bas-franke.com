@@ -28,7 +28,7 @@ MULTI_MARKET = True
 
 
 def default_params() -> dict:
-    return {"fast": 12, "slow": 182, "signal": 30, "stretchLen": 50, "volLen": 90, "exitZ": 2.0,
+    return {"fast": 12, "slow": 182, "signal": 30, "stretchLen": 50, "volLen": 90, "exitZ": 1.1,
             "rearm": "cross", "concentrate": False}
 
 
@@ -41,7 +41,7 @@ def param_space() -> dict:
                        "description": "EMA the stretch is measured from (0 = no stretch exit, plain MACD)"},
         "volLen": {"type": "int", "min": 20, "max": 365, "log": True,
                    "description": "candles of log returns in the volatility estimate"},
-        "exitZ": {"type": "float", "min": 0.8, "max": 5.0,
+        "exitZ": {"type": "float", "min": 0.5, "max": 2.0,
                   "description": "sell when the stretch reaches this many volatility units"},
         "rearm": {"type": "choice", "values": ["cross", "calm"],
                   "description": "after a stretch exit: wait for a MACD recross (cross) or for the stretch to halve (calm)"},
