@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { memorySessionStore, parseCookies, passwordMatches, RateLimiter, rateKey } from '../src/auth.js';
 import { validateResearch } from '../src/api/research.js';
-import { researchPayload, startHarness, type Harness } from './helpers/api-harness.js';
+import { FakeSettingsError, researchPayload, researchPayloadV2, startHarness, type Harness } from './helpers/api-harness.js';
 
 describe('auth helpers', () => {
   test('passwordMatches is exact and refuses an empty configured password', () => {
@@ -347,6 +347,198 @@ describe('research', () => {
       assert.equal(got.summary.experiments, 18234);
     } finally {
       await h.close();
+    }
+  });
+});
+
+describe('research v2 buckets', () => {
+  test('validateResearch accepts buckets, keeps v1, and caps sizes', () => {
+    const good: any = validateResearch(researchPayloadV2());
+    assert.deepEqual(Object.keys(good.buckets), ['minute', 'hourly', 'daily', 'weekly']);
+    assert.equal(good.buckets.minute.top.length, 0);
+    assert.equal(good.buckets.hourly.top.length, 3);
+    assert.equal(good.buckets.minute.holdScore, -20.1);
+    assert.equal(good.buckets.minute.luckLine.best, -8);
+    assert.equal(good.buckets.minute.benchmark.name, 'Buy and hold BTC');
+    assert.equal(good.top.length, 3);
+    // v1 payloads have no buckets key at all
+    assert.equal('buckets' in validateResearch(researchPayload()), false);
+    // with buckets, top may be empty (the daily bucket found nothing)
+    const emptyTop: any = researchPayloadV2();
+    emptyTop.top = [];
+    assert.equal(validateResearch(emptyTop).top.length, 0);
+    // unknown bucket names are dropped
+    const extra: any = researchPayloadV2();
+    extra.buckets.monthly = extra.buckets.weekly;
+    assert.equal('monthly' in (validateResearch(extra) as any).buckets, false);
+    const bad = (mut: (p: any) => void) => {
+      const p: any = researchPayloadV2();
+      mut(p);
+      assert.throws(() => validateResearch(p));
+    };
+    bad((p) => (p.buckets = []));
+    bad((p) => (p.buckets = { monthly: p.buckets.weekly }));
+    bad((p) => p.buckets.hourly.top.push(...p.buckets.daily.top));
+    bad((p) => (p.buckets.hourly.top[1].rank = 1));
+    bad((p) => (p.buckets.minute.holdScore = 'bad'));
+    bad((p) => (p.buckets.minute.luckLine = { nested: { a: 1 } }));
+    bad((p) => (p.buckets.minute.notes = 'x'.repeat(4001)));
+    bad((p) => (p.buckets.minute.benchmark.equity = Array.from({ length: 5001 }, (_, i) => [i, 1])));
+    bad((p) => (p.buckets.weekly.top[0].equity = Array.from({ length: 1001 }, (_, i) => [i, 1])));
+    bad((p) => (p.buckets.weekly.top[0].spec.family = 42));
+  });
+
+  test('upload v2 and read it back', async () => {
+    const h = await startHarness();
+    try {
+      const cookie = await h.login();
+      const up = await h.req('POST', '/api/research', { json: researchPayloadV2(), cookie });
+      assert.equal(up.status, 200);
+      const got = (await (await h.req('GET', '/api/research', { cookie })).json()) as any;
+      assert.equal(got.buckets.hourly.top[0].rank, 1);
+      assert.equal(got.buckets.weekly.label, 'Weekly trading');
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe('POST /api/bot/activate', () => {
+  let h: Harness;
+  let cookie: string;
+  let started = 0;
+  before(async () => {
+    h = await startHarness({
+      validateSpec: (spec) => {
+        const f = (spec as { family?: unknown } | null)?.family;
+        if (f !== 'ema_cross') throw new Error(`unknown family "${String(f)}"`);
+      },
+      enableTrading: async () => {
+        started++;
+        return Object.assign(h.settings, { enabled: true });
+      },
+    });
+    cookie = await h.login();
+  });
+  after(() => h.close());
+  const activate = (json: unknown) => h.req('POST', '/api/bot/activate', { json, cookie });
+  const error = async (res: Response) => ((await res.json()) as any).error as string;
+
+  test('needs a session and research', async () => {
+    assert.equal((await h.req('POST', '/api/bot/activate', { json: { researchId: 1, bucket: 'hourly', rank: 1 } })).status, 401);
+    const none = await activate({ researchId: 1, bucket: 'hourly', rank: 1 });
+    assert.equal(none.status, 400);
+    assert.match(await error(none), /no research/);
+    assert.equal((await h.req('POST', '/api/research', { json: researchPayloadV2(), cookie })).status, 200);
+  });
+
+  test('validates the request', async () => {
+    for (const body of [
+      [1],
+      { bucket: 'hourly', rank: 1 },
+      { researchId: '1', bucket: 'hourly', rank: 1 },
+      { researchId: 1, bucket: 'monthly', rank: 1 },
+      { researchId: 1, bucket: 'hourly', rank: 6 },
+      { researchId: 1, bucket: 'hourly', rank: 1, start: 'yes' },
+    ])
+      assert.equal((await activate(body)).status, 400, JSON.stringify(body));
+    const missing = await activate({ researchId: 1, bucket: 'minute', rank: 1 });
+    assert.equal(missing.status, 400);
+    assert.match(await error(missing), /no number 1 in the minute list/);
+  });
+
+  test('refuses entries that are not bot-ready or whose family the bot lacks', async () => {
+    const notReady = await activate({ researchId: 1, bucket: 'hourly', rank: 3 });
+    assert.equal(notReady.status, 400);
+    assert.match(await error(notReady), /waiting to be ported/);
+    const unknown = await activate({ researchId: 1, bucket: 'hourly', rank: 2 });
+    assert.equal(unknown.status, 400);
+    assert.match(await error(unknown), /unknown family "mystery_family"/);
+    assert.equal(h.settings.strategy, undefined);
+  });
+
+  test('activates the stored spec, never one from the body, without starting', async () => {
+    const res = await activate({ researchId: 1, bucket: 'hourly', rank: 1, start: false, spec: { family: 'evil' } });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as any;
+    assert.equal(body.started, false);
+    assert.equal(started, 0);
+    assert.equal((h.settings.strategy as any).id, 'ema_cross-btc-1h-1');
+    assert.equal((h.settings.strategy as any).interval, '1h');
+    const ar = h.settings.activeResearch as any;
+    assert.deepEqual({ ...ar, activatedAt: 0 }, { researchId: 1, bucket: 'hourly', rank: 1, name: 'ema_cross BTC 1h #1', activatedAt: 0 });
+    assert.ok(!Number.isNaN(Date.parse(ar.activatedAt)));
+    assert.deepEqual(body.activeResearch, ar);
+    assert.ok(h.logs.some((l) => l.event === 'research_activated'));
+    const ov = (await (await h.req('GET', '/api/overview', { cookie })).json()) as any;
+    assert.equal(ov.bot.activeResearch.bucket, 'hourly');
+  });
+
+  test('start: true switches the bot on', async () => {
+    const res = await activate({ researchId: 1, bucket: 'weekly', rank: 1, start: true });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as any;
+    assert.equal(body.started, true);
+    assert.equal(body.bot.enabled, true);
+    assert.equal(started, 1);
+    assert.equal((h.settings.activeResearch as any).bucket, 'weekly');
+    Object.assign(h.settings, { enabled: false });
+  });
+
+  test('v1 snapshots: daily maps to top', async () => {
+    assert.equal((await h.req('POST', '/api/research', { json: researchPayload(2), cookie })).status, 200);
+    assert.equal((await activate({ researchId: 2, bucket: 'hourly', rank: 1 })).status, 400);
+    const ok = await activate({ researchId: 2, bucket: 'daily', rank: 2 });
+    assert.equal(ok.status, 200);
+    assert.equal((h.settings.strategy as any).id, 'ema_cross-btc-4h-1');
+  });
+
+  test('a stale snapshot id is a 409', async () => {
+    const stale = await activate({ researchId: 1, bucket: 'hourly', rank: 1 });
+    assert.equal(stale.status, 409);
+    assert.match(await error(stale), /updated since this page loaded/);
+    assert.equal((h.settings.activeResearch as any).researchId, 2);
+  });
+
+  test('live mode needs confirmLive', async () => {
+    Object.assign(h.settings, { mode: 'live' });
+    const before = JSON.stringify(h.settings.strategy);
+    for (const json of [
+      { researchId: 2, bucket: 'daily', rank: 1, start: true },
+      { researchId: 2, bucket: 'daily', rank: 1, start: false },
+      { researchId: 2, bucket: 'daily', rank: 1, start: true, confirmLive: false },
+    ]) {
+      const res = await activate(json);
+      assert.equal(res.status, 400);
+      assert.match(await error(res), /confirmLive/);
+    }
+    assert.equal(JSON.stringify(h.settings.strategy), before);
+    assert.equal(started, 1);
+    const ok = await activate({ researchId: 2, bucket: 'daily', rank: 1, start: true, confirmLive: true });
+    assert.equal(ok.status, 200);
+    assert.equal(((await ok.json()) as any).started, true);
+    assert.equal(started, 2);
+    assert.equal(h.settings.mode, 'live');
+    Object.assign(h.settings, { mode: 'paper', enabled: false });
+  });
+
+  test('a refused start still reports the activation', async () => {
+    const h2 = await startHarness({
+      enableTrading: async () => {
+        throw new FakeSettingsError('Live trading needs BITVAVO_API_KEY');
+      },
+    });
+    try {
+      const c = await h2.login();
+      await h2.req('POST', '/api/research', { json: researchPayloadV2(), cookie: c });
+      const res = await h2.req('POST', '/api/bot/activate', { json: { researchId: 1, bucket: 'daily', rank: 1, start: true }, cookie: c });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as any;
+      assert.equal(body.started, false);
+      assert.match(body.startError, /BITVAVO_API_KEY/);
+      assert.equal((h2.settings.activeResearch as any).bucket, 'daily');
+    } finally {
+      await h2.close();
     }
   });
 });

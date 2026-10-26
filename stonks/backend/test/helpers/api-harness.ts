@@ -134,3 +134,38 @@ export function researchPayload(topCount = 5) {
     })),
   };
 }
+
+
+/** A v2 payload (SPEC §8): per-timeframe buckets, `top` = the daily bucket. */
+export function researchPayloadV2() {
+  const v1 = researchPayload(3);
+  const entry = (rank: number, interval: string, family = 'ema_cross', botReady = true) => ({
+    ...v1.top[0],
+    rank,
+    botReady,
+    spec: { ...v1.top[0].spec, id: `${family}-btc-${interval}-${rank}`, name: `${family} BTC ${interval} #${rank}`, family, interval },
+  });
+  const bucket = (label: string, intervals: string[], top: unknown[]) => ({
+    label,
+    intervals,
+    profile: { holdoutDays: 60, folds: 6, foldSpanDays: 56, dataFrom: '2025-09-21' },
+    holdScore: -20.1,
+    luckLine: { median: -35, best: -8, exposure: 0.7 },
+    benchmark: v1.benchmark,
+    notes: 'plain notes',
+    top,
+  });
+  return {
+    ...v1,
+    buckets: {
+      minute: bucket('Minute trading', ['1m', '5m', '15m'], []),
+      hourly: bucket('Hourly trading', ['30m', '1h', '2h', '4h'], [
+        entry(1, '1h'),
+        entry(2, '4h', 'mystery_family'),
+        entry(3, '2h', 'ema_cross', false),
+      ]),
+      daily: bucket('Daily trading', ['6h', '8h', '12h', '1d'], v1.top),
+      weekly: bucket('Weekly trading', ['1W'], [entry(1, '1W')]),
+    },
+  };
+}

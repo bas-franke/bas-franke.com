@@ -22,7 +22,7 @@ export interface ApiDeps {
   enableTrading: () => Promise<unknown>;
   disableTrading: (reason: string) => Promise<unknown>;
   listMarkets: () => Promise<unknown[]>;
-  getBotSettings: () => Promise<{ mode: string }>;
+  getBotSettings: () => Promise<{ mode: string; enabled?: boolean }>;
   updateBotSettings: (patch: Record<string, unknown>, opts: { confirmLive?: boolean }) => Promise<unknown>;
   /** True for the settings module's SettingsError (shown to the owner as a 400). */
   isSettingsError: (err: unknown) => boolean;

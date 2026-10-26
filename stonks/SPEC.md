@@ -132,7 +132,8 @@ Family details both sides implement (the docstrings in `stonks_lab/families/*.py
   "maxExposureEur": null,        // null = may use the whole portfolio
   "dailyLossLimitEur": 100,      // loss since 00:00 Europe/Amsterdam (realized + unrealized) that switches the bot off
   "fees": { "maker": 0.0015, "taker": 0.0025 },
-  "paperStartEur": 1000
+  "paperStartEur": 1000,
+  "activeResearch": null         // set by POST /api/bot/activate (§8); reset to null when the strategy is changed by hand
 }
 ```
 
@@ -167,8 +168,9 @@ camelCase and numbers (not numeric strings).
 | `POST /api/auth/login` | `{ password }` | `{ ok:true }` + cookie; 401 wrong; 429 after 10 tries / 10 min per IP |
 | `POST /api/auth/logout` | | `{ ok:true }` |
 | `GET /api/auth/me` | | `{ loggedIn:true }` or 401 |
-| `GET /api/overview` | | `{ bot: settings.bot, running:bool, lastTickAt, bitvavo:{connected, error?}, balances:[{symbol, available, inOrder, eurValue}], equityEur, todayPnlEur, dailyLossLimitEur, openOrders:n, strategyExplanation }` |
+| `GET /api/overview` | | `{ bot: settings.bot, running:bool, lastTickAt, bitvavo:{connected, error?}, balances:[{symbol, available, inOrder, eurValue}], equityEur, todayPnlEur, dailyLossLimitEur, openOrders:n, strategyExplanation, activeResearch }` |
 | `PUT /api/bot` | partial `settings.bot` | updated `settings.bot`; switching `mode` to `live` needs `{ confirmLive:true }`; validated |
+| `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
 | `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot` (stop also cancels the bot's open orders) |
 | `GET /api/orders` | `?mode=&market=&limit=&before=` | `{ orders:[...] }` newest first |
 | `GET /api/fills` | same | `{ fills:[...] }` |

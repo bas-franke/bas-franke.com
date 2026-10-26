@@ -29,6 +29,8 @@ export interface Overview {
   dailyLossLimitEur: number;
   openOrders: number;
   strategyExplanation: string;
+  /** The research strategy activated from the dashboard (SPEC §8), or null. */
+  activeResearch: BotSettings['activeResearch'];
 }
 
 export function startBot(): void {
@@ -86,6 +88,7 @@ export async function getOverview(): Promise<Overview> {
     dailyLossLimitEur: s.dailyLossLimitEur,
     openOrders: (await openOrders(s.mode)).length,
     strategyExplanation: explainStrategy(s.strategy),
+    activeResearch: s.activeResearch ?? null,
   };
 }
 

@@ -3,6 +3,9 @@ import type { Request } from 'express';
 /** A bad request: the router turns it into a 400 with this message. */
 export class ValidationError extends Error {}
 
+/** The request is fine but no longer matches what is stored (e.g. a newer research upload): 409. */
+export class ConflictError extends Error {}
+
 export const fail = (message: string): never => {
   throw new ValidationError(message);
 };

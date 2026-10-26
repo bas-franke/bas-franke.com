@@ -3,7 +3,7 @@ import type { ApiDeps } from './deps.js';
 import { fail, iso, num } from './util.js';
 
 // Research lab uploads (SPEC.md §7 "Research payload"). The payload is validated and rebuilt from known fields,
-// so the dashboard only ever renders the documented shape. The newest KEEP rows are kept.
+// so the dashboard only ever renders the documented shape. v2 adds per-timeframe `buckets` (§8). The newest KEEP rows are kept.
 
 const KEEP = 200;
 const MAX_TOP_POINTS = 1000; // SPEC says ≤ 400; a little slack so a slightly long curve does not fail the upload
@@ -122,16 +122,49 @@ function entry(v: unknown, path: string) {
   };
 }
 
+/** A ranked list of 0..5 (min given) entries, unique ranks, rank 1 first. */
+function topList(v: unknown, path: string, min: number) {
+  if (!Array.isArray(v) || v.length < min || v.length > 5) fail(`${path} must have ${min} to 5 entries`);
+  const top = (v as unknown[]).map((e, i) => entry(e, `${path}[${i}]`));
+  if (new Set(top.map((t) => t.rank)).size !== top.length) fail(`${path} ranks must be unique`);
+  return top.sort((a, b) => a.rank - b.rank);
+}
+
+/** Timeframe buckets (SPEC.md §8), in display order. */
+export const BUCKETS = ['minute', 'hourly', 'daily', 'weekly'] as const;
+export type Bucket = (typeof BUCKETS)[number];
+
+const optFinite = (v: unknown, path: string) => (v === undefined || v === null ? null : finite(v, path));
+
+function bucket(v: unknown, path: string) {
+  const b = obj(v, path);
+  return {
+    label: optStr(b.label, `${path}.label`, 100) ?? '',
+    intervals: b.intervals === undefined ? [] : strArray(b.intervals, `${path}.intervals`, 12, 10),
+    profile: b.profile === undefined || b.profile === null ? null : flat(b.profile, `${path}.profile`, 20),
+    holdScore: optFinite(b.holdScore, `${path}.holdScore`),
+    luckLine: b.luckLine === undefined || b.luckLine === null ? null : flat(b.luckLine, `${path}.luckLine`, 20),
+    benchmark: b.benchmark === undefined || b.benchmark === null ? null : benchmark(b.benchmark, `${path}.benchmark`),
+    notes: optStr(b.notes, `${path}.notes`, 4000) ?? '',
+    top: topList(b.top ?? [], `${path}.top`, 0),
+  };
+}
+
 /** Validates a research upload and returns the cleaned copy that gets stored. Throws ValidationError. */
 export function validateResearch(body: unknown) {
   const p = obj(body, 'payload');
   const generatedAt = str(p.generatedAt, 'generatedAt', 40);
   if (Number.isNaN(Date.parse(generatedAt))) fail('generatedAt must be an ISO date');
   const s = obj(p.summary, 'summary');
-  if (!Array.isArray(p.top) || p.top.length < 1 || p.top.length > 5) fail('top must have 1 to 5 entries');
-  const top = (p.top as unknown[]).map((e, i) => entry(e, `top[${i}]`));
-  if (new Set(top.map((t) => t.rank)).size !== top.length) fail('top ranks must be unique');
-  top.sort((a, b) => a.rank - b.rank);
+  // v2 (SPEC §8): `buckets` per timeframe; `top` stays (= the daily bucket) and may then be empty.
+  let buckets: Partial<Record<Bucket, ReturnType<typeof bucket>>> | undefined;
+  if (p.buckets !== undefined) {
+    const raw = obj(p.buckets, 'buckets');
+    buckets = {};
+    for (const k of BUCKETS) if (raw[k] !== undefined && raw[k] !== null) buckets[k] = bucket(raw[k], `buckets.${k}`);
+    if (!Object.keys(buckets).length) fail(`buckets must contain at least one of ${BUCKETS.join(', ')}`);
+  }
+  const top = topList(p.top ?? (buckets ? [] : undefined), 'top', buckets ? 0 : 1);
   const benchmarks = p.benchmarks === undefined ? [] : p.benchmarks;
   if (!Array.isArray(benchmarks) || benchmarks.length > 10) fail('benchmarks must be an array of at most 10');
   return {
@@ -146,7 +179,12 @@ export function validateResearch(body: unknown) {
     benchmark: benchmark(p.benchmark, 'benchmark'),
     benchmarks: (benchmarks as unknown[]).map((b, i) => benchmark(b, `benchmarks[${i}]`)),
     top,
+    ...(buckets ? { buckets } : {}),
   };
+}
+
+function researchCount(p: ReturnType<typeof validateResearch>) {
+  return p.buckets ? Object.values(p.buckets).reduce((n, b) => n + (b?.top.length ?? 0), 0) : p.top.length;
 }
 
 export function researchRoutes(deps: ApiDeps) {
@@ -172,7 +210,7 @@ export function researchRoutes(deps: ApiDeps) {
       `DELETE FROM research_snapshots WHERE id NOT IN (SELECT id FROM research_snapshots ORDER BY id DESC LIMIT ${KEEP})`,
     );
     const id = num(rows[0].id);
-    await deps.log('info', 'research_upload', `research snapshot ${id} uploaded (${payload.top.length} strategies)`, {
+    await deps.log('info', 'research_upload', `research snapshot ${id} uploaded (${researchCount(payload)} strategies)`, {
       id,
       generatedAt: payload.generatedAt,
     });

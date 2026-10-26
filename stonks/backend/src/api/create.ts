@@ -4,7 +4,7 @@ import { botRoutes } from './bot.js';
 import type { ApiDeps } from './deps.js';
 import { historyRoutes } from './history.js';
 import { researchRoutes } from './research.js';
-import { ValidationError } from './util.js';
+import { ConflictError, ValidationError } from './util.js';
 
 /** Body limit for everything except research uploads, and for those (parsed only after the session check). */
 const SMALL_BODY = '32kb';
@@ -61,6 +61,10 @@ export function createApi(rawDeps: ApiDeps) {
   const onError: ErrorRequestHandler = (err, _req, res, next) => {
     if (err instanceof ValidationError || deps.isSettingsError(err)) {
       res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    if (err instanceof ConflictError) {
+      res.status(409).json({ error: err.message });
       return;
     }
     const type = err && typeof err === 'object' ? (err as { type?: unknown }).type : undefined;

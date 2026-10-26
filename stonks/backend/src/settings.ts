@@ -11,6 +11,16 @@ export interface BotSettings {
   dailyLossLimitEur: number;
   fees: { maker: number; taker: number };
   paperStartEur: number;
+  /** The research strategy the owner activated (SPEC §8); null once the strategy is changed any other way. */
+  activeResearch: ActiveResearch | null;
+}
+
+export interface ActiveResearch {
+  researchId: number;
+  bucket: string;
+  rank: number;
+  name: string;
+  activatedAt: string;
 }
 
 /** Thrown for invalid settings changes; the API answers these with 400 and the message. */
@@ -38,7 +48,20 @@ export function defaultBotSettings(): BotSettings {
     dailyLossLimitEur: 100,
     fees: { maker: 0.0015, taker: 0.0025 },
     paperStartEur: 1000,
+    activeResearch: null,
   };
+}
+
+function checkActiveResearch(v: unknown): ActiveResearch | null {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v)) throw new SettingsError('activeResearch must be an object or null');
+  const { researchId, bucket, rank, name, activatedAt } = v;
+  if (typeof researchId !== 'number' || !Number.isInteger(researchId) || researchId < 1) throw new SettingsError('activeResearch.researchId must be a snapshot id');
+  if (typeof bucket !== 'string' || bucket.length > 20) throw new SettingsError('activeResearch.bucket must be a bucket name');
+  if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 1 || rank > 5) throw new SettingsError('activeResearch.rank must be 1 to 5');
+  if (typeof name !== 'string' || name.length > 200) throw new SettingsError('activeResearch.name must be a string');
+  if (typeof activatedAt !== 'string' || Number.isNaN(Date.parse(activatedAt))) throw new SettingsError('activeResearch.activatedAt must be an ISO date');
+  return { researchId, bucket, rank, name, activatedAt };
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -75,6 +98,7 @@ export function checkSettings(s: Record<string, unknown>): BotSettings {
     dailyLossLimitEur: limit,
     fees: { maker: maker as number, taker: taker as number },
     paperStartEur,
+    activeResearch: checkActiveResearch(s.activeResearch),
   };
 }
 
@@ -116,7 +140,7 @@ async function safeParse(stored: Record<string, unknown>, defaults: BotSettings)
   }
 }
 
-const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur']);
+const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur', 'activeResearch']);
 
 let chain: Promise<unknown> = Promise.resolve();
 /** Serializes settings writes inside this process. */
@@ -143,6 +167,8 @@ export function updateBotSettings(patch: Record<string, unknown>, opts: { confir
     if (merged.mode === 'live' && before.mode !== 'live' && !confirm)
       throw new SettingsError('Switching to live trading needs confirmLive: true');
     const after = checkSettings(merged);
+    // A strategy picked by hand is no longer the activated research strategy.
+    if (!keys.includes('activeResearch') && JSON.stringify(after.strategy) !== JSON.stringify(before.strategy)) after.activeResearch = null;
     await query(
       `INSERT INTO settings (key, value, updated_at) VALUES ('bot', $1, now())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
