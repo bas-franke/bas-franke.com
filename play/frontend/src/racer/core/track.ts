@@ -34,6 +34,8 @@ export const KICKER_TAPER = 5;
 /** Shortcuts: corridor width there (times def.width), lane width, and the ledge's and tunnel's profiles. */
 export const SHORTCUT_WIDTH = 2.1;
 export const LANE_WIDTH = 18;
+/** A tunnel's sunken lane is wider than a ledge's: it is dark and roofed, so it needs more room. */
+export const TUNNEL_LANE_WIDTH = 26;
 export const LEDGE_RISE = 7;
 export const LEDGE_UP = 45;
 export const LEDGE_DROP = 8;
@@ -42,9 +44,9 @@ export const TUNNEL_DROP = 14;
 export const TUNNEL_UP = 50;
 /** Underside of a tunnel's roof above the corridor's surface, metres. */
 export const ROOF_CLEAR = 2.5;
-/** Slot walls: the gap between two rocks (a flat pod needs 6.2 m, one on its side 2.4 m: at 5 m it has to be rolled
- * well over) and the corridor width. */
-export const SLOT_GAP = 5;
+/** Slot walls: the gap between two rocks (a flat pod needs 6.2 m, one on its side 2.4 m: at 5.8 m it still has to be
+ * rolled, but a part roll does) and the corridor width. */
+export const SLOT_GAP = 5.8;
 export const SLOT_WIDTH = 1.3;
 /** Depth of a slot formation along the course: from a single wall of rocks to a small rock massif. */
 export const SLOT_LEN_MIN = 4;
@@ -267,7 +269,7 @@ export class Track {
       return { s, x: lat * (this.frameAt(s).width / 2 - 6) };
     });
     // The lane's pad is the shortcut's reward: on the ledge's top, or where pods land in the tunnel.
-    for (const c of this.shortcuts) this.pads.push({ s: c.kind === 'ledge' ? c.s0 + LEDGE_UP + 6 : c.roof0 + 4, x: c.side * (c.xIn + LANE_WIDTH / 2 + 1.5) });
+    for (const c of this.shortcuts) this.pads.push({ s: c.kind === 'ledge' ? c.s0 + LEDGE_UP + 6 : c.roof0 + 4, x: c.side * ((c.xIn + c.xOut) / 2 + 1.5) });
     this.kickers.push(...this.pickKickers());
     this.kickers.sort((a, b) => a.lip - b.lip);
     this.obstacles = this.placeObstacles();
@@ -531,7 +533,7 @@ export class Track {
         side: c.k > 0 ? -1 : 1,
         s0: c.s0,
         s1,
-        xIn: hw - LANE_WIDTH,
+        xIn: hw - (kind === 'tunnel' ? TUNNEL_LANE_WIDTH : LANE_WIDTH),
         xOut: hw,
         roof0: c.s0 + 62,
         roof1: s1 - TUNNEL_UP + 6,
@@ -664,23 +666,23 @@ export class Track {
       }
       group++;
     };
-    // Shortcuts: the ridge between the lane and the field, and rocks to weave round in the lane (boulders on a ledge,
-    // pillars holding up a tunnel's roof).
+    // Shortcuts: the ridge between the lane and the field, and boulders to weave round on a ledge (a tunnel's lane is
+    // kept clear: it is hard enough in the dark).
     for (const c of this.shortcuts) {
       const ledge = c.kind === 'ledge';
       const a = c.s0 + (ledge ? 14 : 10);
       const b = ledge ? c.s1 : c.s1 - 8;
       for (let ss = a; ss <= b; ss += 4.5) rock(ss, c.side * (c.xIn - 0.5), 3.4, 12, 'ridge', 0, (ss - a) / (b - a));
       group++;
+      if (!ledge) continue;
       const lane = (u: number) => c.side * (c.xIn + u);
-      const from = ledge ? c.s0 + LEDGE_UP + 20 : c.roof0 + 14;
-      const to = ledge ? c.s1 - 30 : c.roof1 - 14;
+      const from = c.s0 + LEDGE_UP + 20;
+      const to = c.s1 - 30;
       const n = Math.max(2, Math.floor((to - from) / 30));
       for (let k = 0; k <= n; k++) {
         const ss = from + ((to - from) * k) / n + (r() - 0.5) * 6;
         const u = k % 2 ? 13.5 : 5.5;
-        if (ledge) rock(ss, lane(u), 2.4 + r() * 0.4, 3.4, 'boulder', 0, 0);
-        else rock(ss, lane(u), 2.2, TUNNEL_DEPTH + ROOF_CLEAR + 0.5, 'pillar', 0, 0);
+        rock(ss, lane(u), 2.4 + r() * 0.4, 3.4, 'boulder', 0, 0);
         group++;
       }
     }

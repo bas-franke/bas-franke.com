@@ -3,13 +3,6 @@
 
 export const DR_TRACKS: { id: string; name: string }[] = [
   { id: 'redrock', name: 'Redrock Run' },
-  { id: 'falls', name: 'Thunder Falls' },
-  { id: 'mesa', name: 'Mesa Run' },
-  { id: 'spires', name: 'Needle Spires' },
-  { id: 'archway', name: 'Archway Gorge' },
-  { id: 'dustbowl', name: 'Dust Bowl Dash' },
-  { id: 'sunspire', name: 'Sunspire Stage' },
-  { id: 'crown', name: 'The Crown' },
 ];
 
 export const drTrackById = (id: string) => DR_TRACKS.find((t) => t.id === id);

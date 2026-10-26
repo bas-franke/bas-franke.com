@@ -1,20 +1,8 @@
 {
   "dustrunners": [
     {
-      "file": "dustrunners-falls.jpg",
-      "caption": "Thunder Falls"
-    },
-    {
       "file": "dustrunners-redrock.jpg",
       "caption": "Redrock Run"
-    },
-    {
-      "file": "dustrunners-mesa.jpg",
-      "caption": "Mesa Run"
-    },
-    {
-      "file": "dustrunners-spires.jpg",
-      "caption": "Needle Spires"
     }
   ],
   "rockets": [

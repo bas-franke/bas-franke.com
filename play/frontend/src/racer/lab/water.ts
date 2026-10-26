@@ -12,7 +12,7 @@ import { mount as mountWorld } from './world';
 
 export function mount(el: HTMLElement): () => void {
   const p = new URLSearchParams(location.search);
-  const track = new Track(trackById(p.get('track') ?? 'falls'));
+  const track = new Track(trackById(p.get('track') ?? 'redrock'));
   const zones = zonesFor(track);
   const g = zones.gorges[0];
   const mid = g ? (g.s0 + g.s1) / 2 : 0;

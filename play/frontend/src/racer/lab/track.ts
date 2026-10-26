@@ -13,7 +13,7 @@ import { zonesFor } from '../world/zones';
 
 export function mount(el: HTMLElement): () => void {
   const p = new URLSearchParams(location.search);
-  const def = trackById(p.get('track') ?? 'falls');
+  const def = trackById(p.get('track') ?? 'redrock');
   const track = new Track(def);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));

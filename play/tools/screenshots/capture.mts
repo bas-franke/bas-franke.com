@@ -222,10 +222,7 @@ async function shootRockets(context: BrowserContext): Promise<Shot[]> {
 
 /** Dustrunners tracks shown: one room race per track, a few seconds after the green light with the pack in view. */
 const RACER_SHOTS = [
-  { track: 'falls', caption: 'Thunder Falls' },
   { track: 'redrock', caption: 'Redrock Run' },
-  { track: 'mesa', caption: 'Mesa Run' },
-  { track: 'spires', caption: 'Needle Spires' },
 ];
 
 async function shootDustrunners(context: BrowserContext): Promise<Shot[]> {
