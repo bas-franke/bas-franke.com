@@ -59,11 +59,14 @@ function build(track: Track): Zones {
   const r = rng(track.def.seed * 7 + 3);
   const L = track.length;
   const theme = track.def.theme;
+  // Long courses repeat a base layout in blocks (TrackDef.blocks): the wall's waves and the vistas and extra stands
+  // come once per block, so they keep the spacing they have on a base layout.
+  const B = track.blocks;
 
   // Smooth periodic noise along the track per side: a few sines with random phases.
   const wave = (k: number[]) => {
     const ph = k.map(() => r() * Math.PI * 2);
-    return (s: number) => k.reduce((sum, kk, i) => sum + Math.sin((s / L) * Math.PI * 2 * kk + ph[i]) / k.length, 0);
+    return (s: number) => k.reduce((sum, kk, i) => sum + Math.sin((s / L) * Math.PI * 2 * kk * B + ph[i]) / k.length, 0);
   };
   const nl = wave([3, 7, 13]);
   const nr = wave([4, 9, 17]);
@@ -78,13 +81,14 @@ function build(track: Track): Zones {
     { s0: finishS - 150, s1: finishS + 30, side: 1 },
     { s0: finishS - 110, s1: finishS + 10, side: -1 },
   ];
-  const extraStand = 0.3 + r() * 0.35;
-  stands.push({ s0: track.raceS(extraStand), s1: track.raceS(extraStand) + 120, side: r() < 0.5 ? -1 : 1 });
+  for (let k = 0; k < B; k++) {
+    const extraStand = (k + 0.3 + r() * 0.35) / B;
+    stands.push({ s0: track.raceS(extraStand), s1: track.raceS(extraStand) + 120, side: r() < 0.5 ? -1 : 1 });
+  }
 
   const gorges: Zones['gorges'] = [];
   const waterfalls: Zones['waterfalls'] = [];
-  if (track.gorgeS !== null) {
-    const at = track.gorgeS;
+  for (const at of track.gorges) {
     const g = { s0: at - 110, s1: at + 110, depth: 90 };
     gorges.push(g);
     // Falls pour into the gorge from cliffs up- and downstream of the bridge, facing the bridge.
@@ -103,8 +107,10 @@ function build(track: Track): Zones {
   }
 
   const vistas: Zones['vistas'] = [];
-  const vAt = L * (0.15 + r() * 0.1);
-  vistas.push({ s0: vAt, s1: vAt + L * 0.12, side: r() < 0.5 ? -1 : 1 });
+  for (let k = 0; k < B; k++) {
+    const vAt = (L * (k + 0.15 + r() * 0.1)) / B;
+    vistas.push({ s0: vAt, s1: vAt + (L * 0.12) / B, side: r() < 0.5 ? -1 : 1 });
+  }
 
   let arch: Zones['arch'] = null;
   if (theme.arches) {
@@ -116,12 +122,24 @@ function build(track: Track): Zones {
 
   let city: Zones['city'] = null;
   if (theme.skyCity) {
-    // Outside the loop, beyond the bounding box, on the side facing the start straight.
+    // Out in the desert near the finish, beyond the course on the side facing the finish straight: the first spot,
+    // stepping further out, that is well clear of every part of the course.
     const c = track.bounds.getCenter(new THREE.Vector3());
     const f = track.frameAt(L * 0.95);
-    const dir = f.pos.clone().sub(c).setY(0).normalize();
-    const size = track.bounds.getSize(new THREE.Vector3());
-    const pos = c.clone().addScaledVector(dir, Math.max(size.x, size.z) / 2 + 500);
+    const flatRight = f.right.clone().setY(0).normalize();
+    const side = flatRight.dot(c.clone().sub(f.pos)) > 0 ? -1 : 1;
+    const clearOf = (p: THREE.Vector3) => {
+      for (let i = 0; i < track.frames.length; i += 10) {
+        const q = track.frames[i].pos;
+        if (Math.hypot(q.x - p.x, q.z - p.z) < 160 + 520) return false;
+      }
+      return true;
+    };
+    let pos = f.pos.clone().addScaledVector(flatRight, side * 700);
+    for (let d = 700; d <= 2400; d += 100) {
+      pos = f.pos.clone().addScaledVector(flatRight, side * d);
+      if (clearOf(pos)) break;
+    }
     pos.y = 0;
     city = { pos, radius: 160, height: 120 };
   }

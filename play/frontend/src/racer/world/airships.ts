@@ -130,14 +130,24 @@ export function buildAirships(ctx: WorldContext, city: { pos: THREE.Vector3; hei
   const low = quality === 'low';
   const group = new THREE.Group();
   group.name = 'airships';
-  const c = track.bounds.getCenter(new THREE.Vector3());
   const size = track.bounds.getSize(new THREE.Vector3());
-  const span = Math.max(size.x, size.z) / 2;
+  // Long courses repeat a base layout in blocks (TrackDef.blocks): each block gets its own fleet, circling the middle
+  // of its stretch of the course at the scale of a base layout.
+  const B = track.blocks;
+  const span = Math.max(size.x, size.z) / 2 / B;
   const ground = track.bounds.min.y;
+  const centreOf = (k: number) => {
+    if (B === 1) return track.bounds.getCenter(new THREE.Vector3());
+    const a = track.frameAt((track.length * k) / B).pos;
+    const b = track.frameAt((track.length * (k + 1)) / B).pos;
+    return a.clone().add(b).multiplyScalar(0.5);
+  };
 
   const ships: Flight[] = [];
   const nShips = low ? 2 : 3;
-  for (let i = 0; i < nShips; i++) {
+  for (let n = 0; n < nShips * B; n++) {
+    const i = n % nShips;
+    const c = centreOf(Math.floor(n / nShips));
     const R = span * (0.35 + i * 0.3) + r() * 120;
     // Speed 8-14 m/s along the loop.
     const v = 8 + r() * 6;
@@ -159,7 +169,8 @@ export function buildAirships(ctx: WorldContext, city: { pos: THREE.Vector3; hei
   }
   const specks: Flight[] = [];
   const nSpecks = low ? 4 : 8;
-  for (let i = 0; i < nSpecks; i++) {
+  for (let i = 0; i < nSpecks * B; i++) {
+    const c = centreOf(Math.floor(i / nSpecks));
     const R = span + 900 + r() * 1400;
     const v = 18 + r() * 25;
     specks.push({

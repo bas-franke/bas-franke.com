@@ -13,7 +13,7 @@ const race = new Race(trackById(id), solo ? all.filter((r) => !r.ai) : all, {});
 race.autopilot = true;
 const slow = new Map<object, number>();
 const reported = new Set<string>();
-while (race.time < 300) {
+while (race.time < 1800) {
   race.update(1 / 60);
   if (race.time < 6) continue;
   for (const r of race.racers) {

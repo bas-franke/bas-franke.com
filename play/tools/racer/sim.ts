@@ -105,7 +105,7 @@ for (const cup of cups) {
       let speedSum = 0;
       let speedN = 0;
       const dt = 1 / 60;
-      while (race.time < 600) {
+      while (race.time < 1800) {
         race.update(dt);
         if (race.time < 0) continue;
         for (const r of race.racers) {

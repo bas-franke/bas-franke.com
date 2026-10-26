@@ -51,6 +51,9 @@ export interface TrackDef {
   boostPads: [number, number][];
   /** Jump ramps: where the lip is, as a fraction of the race. */
   jumps: number[];
+  /** How many times the base layout repeats along the course (see course()); set pieces placed per stretch of a
+   * base layout's length (caves, shortcuts, gorges, vistas) come once per block. Default 1. */
+  blocks?: number;
   theme: Theme;
   /** Seed for scenery placement. */
   seed: number;
@@ -103,6 +106,52 @@ function stage(legs: [number, number, number][], hills: [number, number][] = [[0
     return keys[keys.length - 1][1];
   };
   return pts.map((p) => [p.x, p.z, height(p.d / d)]);
+}
+
+/** How a block of a long course re-uses the base legs: in order or back to front, bends as drawn or mirrored, and a
+ * scale for its straights and bend radii. */
+interface Variant {
+  reverse: boolean;
+  mirror: boolean;
+  straight: number;
+  radius: number;
+}
+
+const v = (reverse: boolean, mirror: boolean, straight: number, radius: number): Variant => ({ reverse, mirror, straight, radius });
+/** Default four-block plan: as drawn, back to front and mirrored, mirrored, back to front. The mirrored blocks turn
+ * the other way, so the course's overall heading stays near where it started and it never curls back on itself. */
+const BLOCKS: Variant[] = [v(false, false, 1, 1), v(true, true, 1.06, 1.04), v(false, true, 0.92, 1.08), v(true, false, 1.02, 0.96)];
+
+/**
+ * A long course from a short base layout: the base legs (all but the last, the run-off straight, which comes once at
+ * the end) repeated in blocks with variations (see Variant). Hills, jumps and boost pads repeat with them, so they are
+ * as dense on the long course as on the base one. Returns the TrackDef fields it fills in.
+ */
+function course(
+  legs: [number, number, number][],
+  hills: [number, number][],
+  jumps: number[],
+  boostPads: [number, number][],
+  blocks: Variant[] = BLOCKS,
+): Pick<TrackDef, 'points' | 'jumps' | 'boostPads' | 'blocks'> {
+  const body = legs.slice(0, -1);
+  const out: [number, number, number][] = [];
+  const keys: [number, number][] = [];
+  const js: number[] = [];
+  const pads: [number, number][] = [];
+  const B = blocks.length;
+  blocks.forEach((b, k) => {
+    const seq = b.reverse ? [...body].reverse() : body;
+    for (const [len, deg, rad] of seq) out.push([Math.round(len * b.straight), b.mirror ? -deg : deg, Math.round(rad * b.radius)]);
+    // A block run back to front runs its hills, jumps and pads back to front too; keys keep 2% off the block's ends
+    // so neighbouring blocks blend.
+    const at = (f: number) => (k + (b.reverse ? 1 - f : f)) / B;
+    for (const [f, y] of hills) keys.push([(k + 0.02 + 0.96 * (b.reverse ? 1 - f : f)) / B, y]);
+    for (const f of jumps) js.push(at(f));
+    for (const [f, x] of boostPads) pads.push([at(f), b.mirror ? -x : x]);
+  });
+  out.push(legs[legs.length - 1]);
+  return { points: stage(out, keys), jumps: js.sort((a, b) => a - b), boostPads: pads.sort((a, b) => a[0] - b[0]), blocks: B };
 }
 
 const noon: Theme = {
@@ -187,9 +236,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'Wide sweepers under the stands. A gentle start.',
     width: 48,
     widthVar: 0.12,
-    points: stage([[300, 35, 420], [260, -55, 380], [320, 70, 340], [200, -30, 500], [340, -60, 300], [260, 75, 320], [300, -40, 400], [280, -50, 380], [320, 65, 340], [260, -35, 450], [300, 45, 400], [260, -60, 360], [380, 0, 0]], [[0, 0], [0.25, 12], [0.5, -6], [0.75, 8], [1, 0]]),
-    jumps: [0.18, 0.4, 0.62, 0.84],
-    boostPads: [[0.08, 0], [0.3, 0.4], [0.52, -0.3], [0.73, 0], [0.93, 0.3]],
+    ...course(
+      [[300, 35, 420], [260, -55, 380], [320, 70, 340], [200, -30, 500], [340, -60, 300], [260, 75, 320], [300, -40, 400], [280, -50, 380], [320, 65, 340], [260, -35, 450], [300, 45, 400], [260, -60, 360], [380, 0, 0]],
+      [[0, 0], [0.25, 12], [0.5, -6], [0.75, 8], [1, 0]],
+      [0.18, 0.4, 0.62, 0.84],
+      [[0.08, 0], [0.3, 0.4], [0.52, -0.3], [0.73, 0], [0.93, 0.3]],
+    ),
     theme: noon,
     seed: 11,
   },
@@ -199,9 +251,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'Bridges over the gorge and a long run past the waterfalls.',
     width: 44,
     widthVar: 0.15,
-    points: stage([[260, -45, 300], [300, 60, 280], [220, 50, 360], [360, -80, 260], [280, -30, 420], [340, 65, 300], [250, -50, 340], [300, -40, 320], [260, 55, 300], [300, -45, 360], [260, 60, 320], [400, 0, 0]], [[0, 0], [0.2, 16], [0.45, 4], [0.62, -8], [0.85, 10], [1, 4]]),
-    jumps: [0.2, 0.42, 0.7, 0.88],
-    boostPads: [[0.1, 0.3], [0.33, -0.3], [0.56, 0], [0.78, 0.4]],
+    ...course(
+      [[260, -45, 300], [300, 60, 280], [220, 50, 360], [360, -80, 260], [280, -30, 420], [340, 65, 300], [250, -50, 340], [300, -40, 320], [260, 55, 300], [300, -45, 360], [260, 60, 320], [400, 0, 0]],
+      [[0, 0], [0.2, 16], [0.45, 4], [0.62, -8], [0.85, 10], [1, 4]],
+      [0.2, 0.42, 0.7, 0.88],
+      [[0.1, 0.3], [0.33, -0.3], [0.56, 0], [0.78, 0.4]],
+    ),
     theme: noon,
     seed: 23,
   },
@@ -211,9 +266,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'Golden hour on the mesa tops. Long straights, tight hairpins.',
     width: 44,
     widthVar: 0.2,
-    points: stage([[500, 95, 140], [380, -100, 150], [450, 40, 400], [300, -95, 160], [520, 70, 220], [400, -85, 160], [420, 90, 150], [350, -40, 300], [350, 0, 0]], [[0, 0], [0.15, 24], [0.4, 6], [0.6, -10], [0.85, 14], [1, 10]]),
-    jumps: [0.18, 0.4, 0.62, 0.82],
-    boostPads: [[0.08, 0.4], [0.36, 0], [0.62, -0.4], [0.9, 0]],
+    ...course(
+      [[500, 95, 140], [380, -100, 150], [450, 40, 400], [300, -95, 160], [520, 70, 220], [400, -85, 160], [420, 90, 150], [350, -40, 300], [350, 0, 0]],
+      [[0, 0], [0.15, 24], [0.4, 6], [0.6, -10], [0.85, 14], [1, 10]],
+      [0.18, 0.4, 0.62, 0.82],
+      [[0.08, 0.4], [0.36, 0], [0.62, -0.4], [0.9, 0]],
+    ),
     theme: golden,
     seed: 37,
   },
@@ -223,9 +281,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'Rock walls close across the canyon. Find the gap and thread it.',
     width: 42,
     widthVar: 0.1,
-    points: stage([[240, 40, 200], [140, -70, 180], [140, 75, 180], [140, -70, 180], [200, 45, 260], [260, -60, 220], [160, 70, 200], [160, -65, 200], [180, 60, 200], [160, -70, 190], [200, 55, 220], [160, -60, 200], [220, 50, 240], [380, 0, 0]], [[0, 0], [0.2, 10], [0.35, -6], [0.55, 12], [0.8, -4], [1, 0]]),
-    jumps: [0.28, 0.56, 0.8],
-    boostPads: [[0.12, -0.4], [0.42, 0.4], [0.68, 0], [0.9, 0]],
+    ...course(
+      [[240, 40, 200], [140, -70, 180], [140, 75, 180], [140, -70, 180], [200, 45, 260], [260, -60, 220], [160, 70, 200], [160, -65, 200], [180, 60, 200], [160, -70, 190], [200, 55, 220], [160, -60, 200], [220, 50, 240], [380, 0, 0]],
+      [[0, 0], [0.2, 10], [0.35, -6], [0.55, 12], [0.8, -4], [1, 0]],
+      [0.28, 0.56, 0.8],
+      [[0.12, -0.4], [0.42, 0.4], [0.68, 0], [0.9, 0]],
+    ),
     theme: morning,
     seed: 41,
   },
@@ -235,9 +296,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'Through the great arch and down into the gorge.',
     width: 42,
     widthVar: 0.18,
-    points: stage([[320, -50, 260], [260, 85, 220], [300, -40, 380], [220, -70, 200], [340, 90, 240], [280, -35, 400], [300, 60, 260], [240, -80, 220], [280, 45, 320], [260, -50, 300], [400, 0, 0]], [[0, 0], [0.2, 30], [0.38, 26], [0.6, -20], [0.8, -6], [1, -10]]),
-    jumps: [0.2, 0.42, 0.66, 0.86],
-    boostPads: [[0.12, 0], [0.38, -0.4], [0.63, 0.4], [0.9, 0]],
+    ...course(
+      [[320, -50, 260], [260, 85, 220], [300, -40, 380], [220, -70, 200], [340, 90, 240], [280, -35, 400], [300, 60, 260], [240, -80, 220], [280, 45, 320], [260, -50, 300], [400, 0, 0]],
+      [[0, 0], [0.2, 30], [0.38, 26], [0.6, -20], [0.8, -6], [1, -10]],
+      [0.2, 0.42, 0.66, 0.86],
+      [[0.12, 0], [0.38, -0.4], [0.63, 0.4], [0.9, 0]],
+    ),
     theme: golden,
     seed: 53,
   },
@@ -247,9 +311,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'Short, fast and crowded. Elbows out.',
     width: 46,
     widthVar: 0.08,
-    points: stage([[420, 60, 260], [300, -90, 220], [380, 70, 260], [350, -60, 280], [300, 40, 300], [450, 0, 0]], [[0, 0], [0.3, 8], [0.55, -4], [0.8, 6], [1, 0]]),
-    jumps: [0.3, 0.55, 0.8],
-    boostPads: [[0.15, 0], [0.55, 0.4], [0.88, 0]],
+    ...course(
+      [[420, 60, 260], [300, -90, 220], [380, 70, 260], [350, -60, 280], [300, 40, 300], [450, 0, 0]],
+      [[0, 0], [0.3, 8], [0.55, -4], [0.8, 6], [1, 0]],
+      [0.3, 0.55, 0.8],
+      [[0.15, 0], [0.55, 0.4], [0.88, 0]],
+    ),
     theme: morning,
     seed: 67,
   },
@@ -259,9 +326,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'Racing into the setting sun. Watch the glare.',
     width: 42,
     widthVar: 0.16,
-    points: stage([[280, 50, 220], [200, -75, 200], [260, 40, 320], [220, -60, 240], [300, 80, 200], [240, -45, 300], [200, 55, 260], [220, -60, 240], [260, 70, 220], [200, -50, 280], [240, 45, 260], [380, 0, 0]], [[0, 0], [0.2, 18], [0.4, 4], [0.6, 22], [0.8, -6], [1, 0]]),
-    jumps: [0.2, 0.46, 0.7, 0.9],
-    boostPads: [[0.1, 0.4], [0.33, -0.4], [0.58, 0], [0.8, 0.4]],
+    ...course(
+      [[280, 50, 220], [200, -75, 200], [260, 40, 320], [220, -60, 240], [300, 80, 200], [240, -45, 300], [200, 55, 260], [220, -60, 240], [260, 70, 220], [200, -50, 280], [240, 45, 260], [380, 0, 0]],
+      [[0, 0], [0.2, 18], [0.4, 4], [0.6, 22], [0.8, -6], [1, 0]],
+      [0.2, 0.46, 0.7, 0.9],
+      [[0.1, 0.4], [0.33, -0.4], [0.58, 0], [0.8, 0.4]],
+    ),
     theme: sunset,
     seed: 79,
   },
@@ -271,9 +341,12 @@ export const TRACKS: TrackDef[] = [
     blurb: 'The championship course. Every corner bites.',
     width: 40,
     widthVar: 0.2,
-    points: stage([[240, -60, 160], [180, 90, 150], [200, -45, 240], [160, -80, 160], [260, 100, 150], [180, -55, 200], [220, 60, 180], [160, -70, 170], [200, 75, 160], [180, -60, 170], [220, 80, 150], [160, -55, 180], [380, 0, 0]], [[0, 0], [0.12, 20], [0.3, 30], [0.42, 6], [0.6, -16], [0.8, 10], [1, 4]]),
-    jumps: [0.16, 0.38, 0.62, 0.84],
-    boostPads: [[0.08, 0], [0.28, 0.5], [0.52, -0.4], [0.73, 0.4], [0.93, -0.3]],
+    ...course(
+      [[240, -60, 160], [180, 90, 150], [200, -45, 240], [160, -80, 160], [260, 100, 150], [180, -55, 200], [220, 60, 180], [160, -70, 170], [200, 75, 160], [180, -60, 170], [220, 80, 150], [160, -55, 180], [380, 0, 0]],
+      [[0, 0], [0.12, 20], [0.3, 30], [0.42, 6], [0.6, -16], [0.8, 10], [1, 4]],
+      [0.16, 0.38, 0.62, 0.84],
+      [[0.08, 0], [0.28, 0.5], [0.52, -0.4], [0.73, 0.4], [0.93, -0.3]],
+    ),
     theme: sunset,
     seed: 97,
   },

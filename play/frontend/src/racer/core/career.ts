@@ -135,7 +135,7 @@ export interface CareerSave {
   stats: { races: number; wins: number; podiums: number; earnings: number };
   /** Best run time per track id (seconds). */
   bestLaps: Record<string, number>;
-  /** 2 = best times are point-to-point runs (older saves held circuit laps). */
+  /** 3 = best times are runs on the long (4x) point-to-point courses (2: the short ones, older: circuit laps). */
   courses?: number;
 }
 
@@ -153,7 +153,7 @@ export function newCareer(pilot = 'You'): CareerSave {
     active: null,
     stats: { races: 0, wins: 0, podiums: 0, earnings: 0 },
     bestLaps: {},
-    courses: 2,
+    courses: 3,
   };
 }
 
@@ -163,8 +163,8 @@ export function loadCareer(): CareerSave | null {
     if (!raw) return null;
     const s = JSON.parse(raw) as CareerSave;
     if (s.version !== 1) return null;
-    // Best times from the old lapped circuits do not compare with the point-to-point courses.
-    if (s.courses !== 2) return { ...s, bestLaps: {}, courses: 2 };
+    // Best times from the old lapped circuits and the short courses do not compare with the long courses.
+    if (s.courses !== 3) return { ...s, bestLaps: {}, courses: 3 };
     return s;
   } catch {
     return null;

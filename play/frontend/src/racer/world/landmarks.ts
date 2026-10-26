@@ -34,7 +34,9 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
   const zones = zonesFor(track);
   const r = rng(track.def.seed * 13 + 101);
   const low = quality === 'low';
-  const density = low ? 0.55 : quality === 'medium' ? 0.8 : 1;
+  // Long courses (TrackDef.blocks) get as many landmarks per kilometre as a base layout.
+  const B = track.blocks;
+  const density = (low ? 0.55 : quality === 'medium' ? 0.8 : 1) * B;
   const segScale = low ? 0.6 : 1;
 
   // Track footprint for distance queries (every ~8 m), and the general ground level.
@@ -43,31 +45,35 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
   let ground = 0;
   for (const p of pts) ground += p.y;
   ground = ground / pts.length - 6;
+  /** Distance to the nearest point of the track; that point is left in `nearestPt`. */
+  let nearestPt = pts[0];
   const nearestTrack = (x: number, z: number) => {
     let best = Infinity;
     for (const p of pts) {
       const dx = p.x - x;
       const dz = p.z - z;
       const d = dx * dx + dz * dz;
-      if (d < best) best = d;
+      if (d < best) {
+        best = d;
+        nearestPt = p;
+      }
     }
     return Math.sqrt(best);
   };
   const keepOut = keepOutAreas(track, zones);
   const blocked = (x: number, z: number, rad: number) => keepOut.some((k) => k.test(x, z, rad));
 
-  const centre = track.bounds.getCenter(new THREE.Vector3());
-  const size = track.bounds.getSize(new THREE.Vector3());
-  const extent = Math.max(size.x, size.z) / 2;
 
   const placed: { x: number; z: number; rad: number }[] = [];
-  /** Random spot whose nearest track distance is inside [near, far] (after allowing for the rock's own footprint). */
+  /** Random spot whose nearest track distance is inside [near, far] (after allowing for the rock's own footprint).
+   * Candidates are thrown out sideways from a random point of the course, so long, thin courses get them all along. */
   const findSpot = (layer: Layer, rad: number, spacing: number): { x: number; z: number; d: number } | null => {
     for (let tries = 0; tries < 60; tries++) {
+      const p = pts[Math.floor(r() * pts.length)];
       const a = r() * Math.PI * 2;
-      const dist = Math.sqrt(r()) * (extent + layer.far + 200);
-      const x = centre.x + Math.cos(a) * dist;
-      const z = centre.z + Math.sin(a) * dist;
+      const dist = layer.near + rad + r() * (layer.far - layer.near + 200);
+      const x = p.x + Math.cos(a) * dist;
+      const z = p.z + Math.sin(a) * dist;
       const d = nearestTrack(x, z) - rad;
       if (d < layer.near || d > layer.far) continue;
       if (blocked(x, z, rad)) continue;
@@ -113,10 +119,10 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
   // few hundred metres out. Towering spires there are what you see framed between the walls, as in the concept art.
   const heroes = Math.round((low ? 4 : 7) * density);
   const heroLayer: Layer = { near: 280, far: 800, spires: 0, buttes: 0, mesas: 0, scale: 1 };
-  const step = track.length / 24;
+  const step = track.length / (24 * B);
   const offset = r() * step;
-  for (let i = 0, made = 0; i < 24 && made < heroes; i++) {
-    const s = offset + i * step * 2.3;
+  for (let i = 0, made = 0; i < 24 * B && made < heroes; i++) {
+    const s = (offset + i * step * 2.3) % track.length;
     const f = track.frameAt(s);
     // Only from corners: the straight-ahead line must be leaving the track.
     if (track.maxCurvature(s, 250) < 0.0016) continue;
@@ -165,10 +171,12 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
       const rad = (90 + r() * 110) * sc;
       const spot = findSpot(layer, rad * 1.35, 0.75);
       if (!spot) continue;
+      const near = nearestPt;
       placed.push({ x: spot.x, z: spot.z, rad: rad * 1.35 });
       tint();
-      // Far mesas stretch sideways (along the ring around the circuit) into long ridges that close the horizon.
-      const toward = Math.atan2(spot.z - centre.z, spot.x - centre.x);
+      // Far mesas stretch sideways (square to the line to the nearest part of the course) into long ridges that close
+      // the horizon.
+      const toward = Math.atan2(spot.z - near.z, spot.x - near.x);
       addMesa(skyline, r, {
         x: spot.x,
         z: spot.z,
@@ -184,7 +192,7 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
   }
 
   // One or two arches on the skyline, facing the circuit so their openings show against the sky.
-  const skyArches = low ? 1 : 2;
+  const skyArches = (low ? 1 : 2) * B;
   for (let i = 0; i < skyArches; i++) {
     const layer: Layer = { near: 700, far: 1500, spires: 0, buttes: 0, mesas: 0, scale: 1 };
     const span = 160 + r() * 90;

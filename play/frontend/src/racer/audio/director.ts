@@ -96,8 +96,8 @@ export class MusicDirector {
       parts.edge = Math.abs(st.roll) > 0.5 ? 0.1 : 0;
       const h = p.parts.health;
       parts.tension = clamp01(Math.max((0.6 - h.hull) / 0.5, (Math.max(p.damage[0], p.damage[1], p.damage[2]) - 0.55) / 0.4));
-      const frac = p.progress / race.track.raceLength;
-      const finale = frac >= 0.9 && p.finish === null;
+      // The finale is the last tenth of a base layout's length (long courses repeat it in blocks).
+      const finale = p.progress >= race.track.raceLength - 0.1 * race.track.blockLength && p.finish === null;
       if (finale && !m.finale) this.finaleRise = 1;
       this.finaleRise = Math.max(0, this.finaleRise - dt / 2.5);
       riser = this.finaleRise * 0.8;

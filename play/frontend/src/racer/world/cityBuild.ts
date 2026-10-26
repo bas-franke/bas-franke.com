@@ -56,7 +56,12 @@ export function buildCity(ctx: WorldContext, city: CitySpot): WorldPart {
   const topY = mesa.topY + 1.2;
   const topR = mesa.topR * 0.92;
 
-  const tc = ctx.track.bounds.getCenter(new THREE.Vector3());
+  // Facing the nearest part of the course.
+  let tc = ctx.track.frames[0].pos;
+  for (let i = 0; i < ctx.track.frames.length; i += 10) {
+    const q = ctx.track.frames[i].pos;
+    if (Math.hypot(q.x - city.pos.x, q.z - city.pos.z) < Math.hypot(tc.x - city.pos.x, tc.z - city.pos.z)) tc = q;
+  }
   const toTrack = Math.atan2(tc.z - city.pos.z, tc.x - city.pos.x);
 
   // --- Buildings on top. A free-placement disc: the tower in the middle, then rejection-sampled round buildings.

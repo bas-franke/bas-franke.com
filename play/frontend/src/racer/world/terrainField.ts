@@ -158,7 +158,10 @@ export class TerrainField {
     }
     this.baseY = sumY / n - 4;
 
-    // Coarse nearest-frame grid over the whole area (brute force on every 4th frame, then refined).
+    // Coarse nearest-frame grid over the whole area: every 4th frame is the candidate, then refined. Candidates are
+    // sorted into buckets of BC metres first; per bucket only the frames that can be nearest to some point in it are
+    // searched (those within the bucket centre's nearest distance plus the bucket's diagonal), so long courses with
+    // their large areas stay fast.
     const b = track.bounds;
     this.area = new THREE.Box2(new THREE.Vector2(b.min.x - margin, b.min.z - margin), new THREE.Vector2(b.max.x + margin, b.max.z + margin));
     this.gx0 = this.area.min.x;
@@ -166,22 +169,74 @@ export class TerrainField {
     this.gnx = Math.ceil((this.area.max.x - this.area.min.x) / this.gc) + 1;
     this.gnz = Math.ceil((this.area.max.y - this.area.min.y) / this.gc) + 1;
     this.near = new Int32Array(this.gnx * this.gnz);
-    for (let cz = 0; cz < this.gnz; cz++) {
-      const z = this.gz0 + cz * this.gc;
-      for (let cx = 0; cx < this.gnx; cx++) {
-        const x = this.gx0 + cx * this.gc;
-        let best = 0;
+    const per = 8; // grid cells per bucket side
+    const BC = this.gc * per;
+    const bnx = Math.ceil(this.gnx / per);
+    const bnz = Math.ceil(this.gnz / per);
+    const bucketOf = (i: number) => {
+      const bx = Math.min(bnx - 1, Math.max(0, Math.floor((this.posX[i] - this.gx0) / BC)));
+      const bz = Math.min(bnz - 1, Math.max(0, Math.floor((this.posZ[i] - this.gz0) / BC)));
+      return bz * bnx + bx;
+    };
+    // Bucketed candidate frames, CSR style.
+    const start = new Int32Array(bnx * bnz + 1);
+    for (let i = 0; i < n; i += 4) start[bucketOf(i) + 1]++;
+    for (let k = 0; k < bnx * bnz; k++) start[k + 1] += start[k];
+    const fill = start.slice(0, bnx * bnz);
+    const items = new Int32Array(start[bnx * bnz]);
+    for (let i = 0; i < n; i += 4) items[fill[bucketOf(i)]++] = i;
+    const ring = (bx: number, bz: number, r: number, visit: (i: number) => void) => {
+      for (let z = bz - r; z <= bz + r; z++) {
+        if (z < 0 || z >= bnz) continue;
+        const edge = z === bz - r || z === bz + r;
+        for (let x = bx - r; x <= bx + r; x += edge ? 1 : 2 * r) {
+          if (x >= 0 && x < bnx) for (let k = start[z * bnx + x]; k < start[z * bnx + x + 1]; k++) visit(items[k]);
+          if (r === 0) break;
+        }
+      }
+    };
+    const halfDiag = (BC / 2) * Math.SQRT2;
+    const maxR = Math.max(bnx, bnz);
+    const cand: number[] = [];
+    for (let bz = 0; bz < bnz; bz++) {
+      for (let bx = 0; bx < bnx; bx++) {
+        const cx0 = this.gx0 + (bx + 0.5) * BC;
+        const cz0 = this.gz0 + (bz + 0.5) * BC;
         let bd = Infinity;
-        for (let i = 0; i < n; i += 4) {
-          const dx = this.posX[i] - x;
-          const dz = this.posZ[i] - z;
-          const d = dx * dx + dz * dz;
-          if (d < bd) {
-            bd = d;
-            best = i;
+        const closest = (i: number) => {
+          const d = Math.hypot(this.posX[i] - cx0, this.posZ[i] - cz0);
+          if (d < bd) bd = d;
+        };
+        let r = 0;
+        for (; r <= maxR; r++) {
+          ring(bx, bz, r, closest);
+          if (bd <= (r + 0.5) * BC) break;
+        }
+        const reach = bd + 2 * halfDiag;
+        cand.length = 0;
+        for (let rr = 0; rr <= Math.min(maxR, Math.ceil(reach / BC + 0.5)); rr++) {
+          ring(bx, bz, rr, (i) => {
+            if (Math.hypot(this.posX[i] - cx0, this.posZ[i] - cz0) <= reach) cand.push(i);
+          });
+        }
+        for (let cz = bz * per; cz < Math.min(this.gnz, (bz + 1) * per); cz++) {
+          const z = this.gz0 + cz * this.gc;
+          for (let cx = bx * per; cx < Math.min(this.gnx, (bx + 1) * per); cx++) {
+            const x = this.gx0 + cx * this.gc;
+            let best = 0;
+            let bd2 = Infinity;
+            for (const i of cand) {
+              const dx = this.posX[i] - x;
+              const dz = this.posZ[i] - z;
+              const d = dx * dx + dz * dz;
+              if (d < bd2) {
+                bd2 = d;
+                best = i;
+              }
+            }
+            this.near[cz * this.gnx + cx] = this.refine(x, z, best, 4);
           }
         }
-        this.near[cz * this.gnx + cx] = this.refine(x, z, best, 4);
       }
     }
 

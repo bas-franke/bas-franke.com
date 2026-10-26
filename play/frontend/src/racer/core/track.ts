@@ -149,7 +149,9 @@ export class Track {
   readonly slotWalls: SlotWall[];
   /** Boost pad centres in track space: the course's own (def.boostPads) and one in each shortcut lane. */
   readonly pads: { s: number; x: number }[];
-  /** Middle of the gorge bridge (themes with waterfalls), or null. Kept clear of jumps and rocks. */
+  /** Middles of the gorge bridges (themes with waterfalls: one per block of the course), kept clear of jumps and rocks. */
+  readonly gorges: number[];
+  /** The first gorge bridge, or null. */
   readonly gorgeS: number | null;
   /** 2D outline for the minimap, normalised to a 0..1 square (x right, y down), one point per ~10 m. */
   readonly minimap: { points: [number, number][]; project(p: THREE.Vector3): [number, number] };
@@ -192,8 +194,10 @@ export class Track {
     const ramps = def.jumps.map((f) => {
       let lip = this.raceS(f);
       let best = Infinity;
-      for (let g = Math.max(0.05, f - 0.06); g <= Math.min(0.95, f + 0.06); g += 0.004) {
-        const score = bend(this.raceS(g)) + Math.abs(g - f) * 0.01;
+      // Search +-0.06 of a base layout's race, wherever the jump is on a long course.
+      const win = 0.06 / this.blocks;
+      for (let g = Math.max(0.05 / this.blocks, f - win); g <= Math.min(1 - 0.05 / this.blocks, f + win); g += 0.004 / this.blocks) {
+        const score = bend(this.raceS(g)) + Math.abs(g - f) * this.blocks * 0.01;
         if (score < best) {
           best = score;
           lip = this.raceS(g);
@@ -235,7 +239,8 @@ export class Track {
       this.bounds.expandByPoint(spaced[i]);
     }
 
-    this.gorgeS = def.theme.waterfalls ? this.pickGorge() : null;
+    this.gorges = def.theme.waterfalls ? this.pickGorges() : [];
+    this.gorgeS = this.gorges[0] ?? null;
     this.caves = this.pickCaves();
     // The grid and the finish under the stands, the gorge bridge and the caves get fixed widths; elsewhere the corridor
     // breathes. Each blends over ~80 m.
@@ -243,7 +248,7 @@ export class Track {
       [0, this.startS + 60, def.width * 1.1],
       [this.finishS - 120, approx, def.width * 1.1],
     ];
-    if (this.gorgeS !== null) fixed.push([this.gorgeS - 130, this.gorgeS + 130, def.width]);
+    for (const g of this.gorges) fixed.push([g - 130, g + 130, def.width]);
     for (const c of this.caves) fixed.push([c.s0 - 10, c.s1 + 10, CAVE_WIDTH]);
     this.shortcuts = this.pickShortcuts();
     for (const c of this.shortcuts) fixed.push([c.s0 - 30, c.s1 + 30, def.width * SHORTCUT_WIDTH]);
@@ -286,6 +291,28 @@ export class Track {
   /** Track distance of a fraction of the race (0 = start line, 1 = finish line). */
   raceS(frac: number) {
     return this.startS + frac * (this.finishS - this.startS);
+  }
+
+  /** How many times the base layout repeats along the course (TrackDef.blocks). */
+  get blocks() {
+    return Math.max(1, Math.round(this.def.blocks ?? 1));
+  }
+
+  /** Race fraction of fraction f (0..1) of block k. */
+  private blockF(k: number, f: number) {
+    return (k + f) / this.blocks;
+  }
+
+  /** Windows [a, b] given as fractions of a base layout's race, repeated in every block, as fractions of the race. */
+  private perBlock(windows: number[][]): [number, number][] {
+    const out: [number, number][] = [];
+    for (let k = 0; k < this.blocks; k++) for (const [a, b] of windows) out.push([this.blockF(k, a), this.blockF(k, b)]);
+    return out;
+  }
+
+  /** Race length of one block: what the counts of set pieces are based on. */
+  get blockLength() {
+    return this.raceLength / this.blocks;
   }
 
   clamp(s: number) {
@@ -401,35 +428,38 @@ export class Track {
     return m;
   }
 
-  /** Bridge in the second half of the race, on the straightest stretch at least 250 m from any jump. */
-  private pickGorge(): number {
-    let best = this.raceS(0.62);
-    let bestK = Infinity;
-    for (let f = 0.5; f <= 0.76; f += 0.01) {
-      const s = this.raceS(f);
-      if (this.jumps.some((j) => Math.abs(j.lip - s) < 250)) continue;
-      const k = this.maxCurvature(s - 120, 240);
-      if (k < bestK) {
-        bestK = k;
-        best = s;
+  /** A bridge in the second half of each block, on the straightest stretch at least 250 m from any jump. */
+  private pickGorges(): number[] {
+    return this.perBlock([[0.5, 0.76]]).map(([a, b]) => {
+      let best = this.raceS((a + b) / 2);
+      let bestK = Infinity;
+      for (let f = a; f <= b; f += 0.01 / this.blocks) {
+        const s = this.raceS(f);
+        if (this.jumps.some((j) => Math.abs(j.lip - s) < 250)) continue;
+        const k = this.maxCurvature(s - 120, 240);
+        if (k < bestK) {
+          bestK = k;
+          best = s;
+        }
       }
-    }
-    return best;
+      return best;
+    });
   }
 
-  /** Caves on gentle stretches clear of jumps, the gorge and the start and finish: one, or two on long courses. */
+  /** Caves on gentle stretches clear of jumps, the gorges and the start and finish: one per block, or two on long
+   * base layouts. */
   private pickCaves(): Span[] {
     const r = rng(this.def.seed * 11 + 5);
     const out: Span[] = [];
-    const windows = this.raceLength > 5200 ? [[0.26, 0.44], [0.62, 0.8]] : [[0.4, 0.62]];
+    const windows = this.perBlock(this.blockLength > 5200 ? [[0.26, 0.44], [0.62, 0.8]] : [[0.4, 0.62]]);
     for (const [a, b] of windows) {
       const len = 170 + r() * 90;
       let best: number | null = null;
       let bestK = Infinity;
-      for (let f = a; f <= b; f += 0.01) {
+      for (let f = a; f <= b; f += 0.01 / this.blocks) {
         const mid = this.raceS(f);
         if (this.jumps.some((j) => j.lip > mid - len / 2 - 160 && j.s0 < mid + len / 2 + 140)) continue;
-        if (this.gorgeS !== null && Math.abs(this.gorgeS - mid) < len / 2 + 330) continue;
+        if (this.gorges.some((g) => Math.abs(g - mid) < len / 2 + 330)) continue;
         const k = this.maxCurvature(mid - len / 2 - 40, len + 80);
         if (k < bestK) {
           bestK = k;
@@ -455,34 +485,39 @@ export class Track {
     return (
       this.jumps.some((j) => near(j.s0, j.s1 + 140)) ||
       this.kickers.some((k) => near(k.s0, k.s1 + 220)) ||
-      (this.gorgeS !== null && near(this.gorgeS - 170, this.gorgeS + 170)) ||
+      this.gorges.some((g) => near(g - 170, g + 170)) ||
       this.caves.some((c) => near(c.s0, c.s1)) ||
       this.def.boostPads.some(([f]) => near(this.raceS(f) - 20, this.raceS(f) + 20, 30))
     );
   }
 
   /**
-   * Shortcut lanes on the insides of the most sustained bends: two, three on long courses, ledges and tunnels in turn.
+   * Shortcut lanes on the insides of the most sustained bends: two per block, three on long base layouts, ledges and
+   * tunnels in turn.
    * The lane hugs the inside, so it is shorter than the racing line round the outside of the field.
    */
   private pickShortcuts(): Shortcut[] {
     const r = rng(this.def.seed * 17 + 3);
-    const count = this.raceLength > 4500 ? 3 : 2;
-    const cands: { s0: number; s1: number; k: number }[] = [];
-    for (let f = 0.1; f <= 0.9; f += 0.005) {
-      const len = 250;
-      const mid = this.raceS(f);
-      const s0 = mid - len / 2;
-      const s1 = mid + len / 2;
-      if (s0 < this.startS + 260 || s1 > this.finishS - 300 || this.busy(s0, s1 + 120, 30)) continue;
-      cands.push({ s0, s1, k: this.meanCurvature(s0, s1) });
-    }
-    cands.sort((a, b) => Math.abs(b.k) - Math.abs(a.k));
-    const picked: typeof cands = [];
-    for (const c of cands) {
-      if (picked.length >= count) break;
-      if (picked.some((p) => c.s1 + 250 > p.s0 && c.s0 - 250 < p.s1)) continue;
-      picked.push(c);
+    const count = this.blockLength > 4500 ? 3 : 2;
+    const picked: { s0: number; s1: number; k: number }[] = [];
+    for (const [a, b] of this.perBlock([[0, 1]])) {
+      const cands: typeof picked = [];
+      for (let f = Math.max(a, 0.1 / this.blocks); f <= Math.min(b, 1 - 0.1 / this.blocks); f += 0.005 / this.blocks) {
+        const len = 250;
+        const mid = this.raceS(f);
+        const s0 = mid - len / 2;
+        const s1 = mid + len / 2;
+        if (s0 < this.startS + 260 || s1 > this.finishS - 300 || this.busy(s0, s1 + 120, 30)) continue;
+        cands.push({ s0, s1, k: this.meanCurvature(s0, s1) });
+      }
+      cands.sort((p, q) => Math.abs(q.k) - Math.abs(p.k));
+      let n = 0;
+      for (const c of cands) {
+        if (n >= count) break;
+        if (picked.some((p) => c.s1 + 250 > p.s0 && c.s0 - 250 < p.s1)) continue;
+        picked.push(c);
+        n++;
+      }
     }
     picked.sort((a, b) => a.s0 - b.s0);
     const hw = (this.def.width * SHORTCUT_WIDTH) / 2;
@@ -505,22 +540,22 @@ export class Track {
   }
 
   /**
-   * Slot formations on straight stretches, one at a time (never one straight behind another): two on a course, three
-   * on long ones. Each is a different depth, from a single wall to a massif with a canyon through it, and has two slots.
+   * Slot formations on straight stretches, one at a time (never one straight behind another): two per block, three
+   * on long base layouts. Each is a different depth, from a single wall to a massif with a canyon through it, and has two slots.
    */
   private pickSlotWalls(): SlotWall[] {
     const r = rng(this.def.seed * 23 + 9);
-    const runs = this.raceLength > 5200 ? 3 : 2;
+    const runs = this.blockLength > 5200 ? 3 : 2;
     const out: SlotWall[] = [];
     const taken: [number, number][] = this.shortcuts.map((c) => [c.s0 - 150, c.s1 + 250]);
-    const windows = runs === 3 ? [[0.2, 0.4], [0.45, 0.65], [0.7, 0.88]] : [[0.25, 0.48], [0.58, 0.85]];
+    const windows = this.perBlock(runs === 3 ? [[0.2, 0.4], [0.45, 0.65], [0.7, 0.88]] : [[0.25, 0.48], [0.58, 0.85]]);
     // Depths for this course's formations, shuffled so a course gets a mix: a wall, a short block, a long massif.
     const depths = [SLOT_LEN_MIN + r() * 4, 14 + r() * 10, 30 + r() * (SLOT_LEN_MAX - 30)].sort(() => r() - 0.5);
     windows.forEach(([a, b], i) => {
       const len = depths[i % depths.length];
       let best: number | null = null;
       let bestK = Infinity;
-      for (let f = a; f <= b; f += 0.005) {
+      for (let f = a; f <= b; f += 0.005 / this.blocks) {
         const s0 = this.raceS(f);
         const s1 = s0 + len;
         if (this.busy(s0, s1, 70) || taken.some(([t0, t1]) => s1 + 60 > t0 && s0 - 60 < t1)) continue;
@@ -541,30 +576,35 @@ export class Track {
     return out.sort((a, b) => a.s - b.s);
   }
 
-  /** Extra kickers on straight stretches clear of everything else (one, two on long courses), off to one side or the middle. */
+  /** Extra kickers on straight stretches clear of everything else (one per block, two on long base layouts), off to
+   * one side or the middle. */
   private pickKickers(): Kicker[] {
     const r = rng(this.def.seed * 31 + 5);
-    const count = this.raceLength > 5200 ? 2 : 1;
+    const count = this.blockLength > 5200 ? 2 : 1;
     const out: Kicker[] = [];
     const taken: [number, number][] = [
       ...this.shortcuts.map((c): [number, number] => [c.s0 - 150, c.s1 + 250]),
       ...this.slotWalls.map((w): [number, number] => [w.s - 150, w.s + w.len + 150]),
     ];
-    const cands: { lip: number; k: number }[] = [];
-    for (let f = 0.1; f <= 0.9; f += 0.005) {
-      const lip = this.raceS(f);
-      const s0 = lip - KICKER_LEN;
-      if (s0 < this.startS + 250 || lip + 300 > this.finishS || this.busy(s0, lip + 220, 30)) continue;
-      if (taken.some(([t0, t1]) => lip + 240 > t0 && s0 - 40 < t1)) continue;
-      cands.push({ lip, k: this.maxCurvature(s0 - 60, KICKER_LEN + 340) });
-    }
-    cands.sort((a, b) => a.k - b.k);
-    for (const c of cands) {
-      if (out.length >= count) break;
-      if ([...out, ...this.kickers].some((k) => Math.abs(k.lip - c.lip) < 500)) continue;
-      const hw = this.frameAt(c.lip).width / 2;
-      const room = Math.max(0, hw - KICKER_HALF - KICKER_TAPER - 9);
-      out.push({ s0: c.lip - KICKER_LEN, lip: c.lip, s1: c.lip + KICKER_DROP, x: (r() * 2 - 1) * room });
+    for (const [a, b] of this.perBlock([[0, 1]])) {
+      const cands: { lip: number; k: number }[] = [];
+      for (let f = Math.max(a, 0.1 / this.blocks); f <= Math.min(b, 1 - 0.1 / this.blocks); f += 0.005 / this.blocks) {
+        const lip = this.raceS(f);
+        const s0 = lip - KICKER_LEN;
+        if (s0 < this.startS + 250 || lip + 300 > this.finishS || this.busy(s0, lip + 220, 30)) continue;
+        if (taken.some(([t0, t1]) => lip + 240 > t0 && s0 - 40 < t1)) continue;
+        cands.push({ lip, k: this.maxCurvature(s0 - 60, KICKER_LEN + 340) });
+      }
+      cands.sort((p, q) => p.k - q.k);
+      let n = 0;
+      for (const c of cands) {
+        if (n >= count) break;
+        if ([...out, ...this.kickers].some((k) => Math.abs(k.lip - c.lip) < 500)) continue;
+        const hw = this.frameAt(c.lip).width / 2;
+        const room = Math.max(0, hw - KICKER_HALF - KICKER_TAPER - 9);
+        out.push({ s0: c.lip - KICKER_LEN, lip: c.lip, s1: c.lip + KICKER_DROP, x: (r() * 2 - 1) * room });
+        n++;
+      }
     }
     return out.sort((a, b) => a.lip - b.lip);
   }
@@ -591,7 +631,7 @@ export class Track {
       this.shortcuts.some((c) => s > c.s0 - 90 && s < c.s1 + (c.kind === 'ledge' ? 200 : 60)) ||
       this.slotWalls.some((w) => s > w.s - 90 && s < w.s + w.len + 90) ||
       pads.some((p) => Math.abs(p - s) < 45) ||
-      (this.gorgeS !== null && Math.abs(this.gorgeS - s) < 170) ||
+      this.gorges.some((g) => Math.abs(g - s) < 170) ||
       this.inCave(s, 70);
     let group = 0;
     const rock = (s: number, x: number, rad: number, h: number, kind: ObstacleKind, side: -1 | 0 | 1, t: number) =>
