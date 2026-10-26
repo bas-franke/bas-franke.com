@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { memorySessionStore, parseCookies, passwordMatches, RateLimiter } from '../src/auth.js';
+import { memorySessionStore, parseCookies, passwordMatches, RateLimiter, rateKey } from '../src/auth.js';
 import { validateResearch } from '../src/api/research.js';
 import { researchPayload, startHarness, type Harness } from './helpers/api-harness.js';
 
@@ -348,5 +348,78 @@ describe('research', () => {
     } finally {
       await h.close();
     }
+  });
+});
+
+describe('security hardening', () => {
+  test('rateKey groups an IPv6 /64 and unwraps IPv4-mapped addresses', () => {
+    assert.equal(rateKey('203.0.113.7'), '203.0.113.7');
+    assert.equal(rateKey('::ffff:203.0.113.7'), '203.0.113.7');
+    assert.equal(rateKey('2001:db8:1:2:aaaa::1'), '2001:db8:1:2::/64');
+    assert.equal(rateKey('2001:0db8:0001:0002:ffff:1:2:3'), '2001:db8:1:2::/64');
+    assert.equal(rateKey('2001:db8::1'), '2001:db8:0:0::/64');
+    assert.equal(rateKey('::1'), '0:0:0:0::/64');
+  });
+
+  test('changing the password signs every session out', async () => {
+    let password = 'first-pass';
+    const h = await startHarness({ password: () => password });
+    try {
+      const cookie = await h.login('first-pass');
+      assert.equal((await h.req('GET', '/api/auth/me', { cookie })).status, 200);
+      password = 'second-pass';
+      assert.equal((await h.req('GET', '/api/auth/me', { cookie })).status, 401);
+      password = '';
+      assert.equal((await h.req('GET', '/api/auth/me', { cookie })).status, 401);
+    } finally {
+      await h.close();
+    }
+  });
+
+  test('failed logins from everywhere together pause login for an hour, and refusals are logged once', async () => {
+    const h = await startHarness({ maxLoginAttempts: 1000 });
+    try {
+      for (let i = 0; i < 50; i++) assert.equal((await h.req('POST', '/api/auth/login', { json: { password: 'x' } })).status, 401);
+      const res = await h.req('POST', '/api/auth/login', { json: { password: 'test-pass' } });
+      assert.equal(res.status, 429);
+      assert.equal(res.headers.get('set-cookie'), null);
+      assert.equal(h.logs.filter((l) => l.event === 'login_paused').length, 1);
+    } finally {
+      await h.close();
+    }
+    const h2 = await startHarness({ maxLoginAttempts: 2 });
+    try {
+      for (let i = 0; i < 6; i++) await h2.req('POST', '/api/auth/login', { json: { password: 'x' } });
+      assert.equal(h2.logs.filter((l) => l.event === 'login_rate_limited').length, 1);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  test('anonymous bodies get a small limit; research uploads may be large once logged in', async () => {
+    const h = await startHarness();
+    try {
+      const padding = 'x'.repeat(100_000);
+      const anon = await h.req('POST', '/api/auth/login', { json: { password: 'x', padding } });
+      assert.equal(anon.status, 413);
+      const big = researchPayload();
+      const curve = Array.from({ length: 5000 }, (_, i) => [1700000000 + i * 86400, 1000 + i / 7]);
+      big.benchmarks = Array.from({ length: 10 }, (_, i) => ({ name: `b${i}`, returnPct: 1, maxDrawdownPct: 1, equity: curve }));
+      assert.ok(JSON.stringify(big).length > 1_000_000);
+      assert.equal((await h.req('POST', '/api/research', { json: big })).status, 401);
+      assert.equal((await h.req('POST', '/API/Research', { json: big })).status, 401);
+      const cookie = await h.login();
+      assert.equal((await h.req('POST', '/api/research', { json: big, cookie })).status, 200);
+      assert.equal((await h.req('PUT', '/api/bot', { json: { dailyLossLimitEur: 50, padding }, cookie })).status, 413);
+      assert.equal((await h.req('PUT', '/api/bot', { json: '{"dailyLossLimitEur": ', cookie })).status, 400);
+    } finally {
+      await h.close();
+    }
+  });
+
+  test('research maps cannot carry a __proto__ key', () => {
+    const p: any = researchPayload(1);
+    p.top[0].metrics = JSON.parse('{"__proto__": null, "returnPct": 1}');
+    assert.throws(() => validateResearch(p), /forbidden key/);
   });
 });

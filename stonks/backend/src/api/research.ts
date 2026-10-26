@@ -64,6 +64,7 @@ function flat(v: unknown, path: string, maxKeys: number) {
   const out: Json = {};
   for (const k of keys) {
     if (k.length > 60) fail(`${path} has a key longer than 60 characters`);
+    if (k === '__proto__') fail(`${path} has a forbidden key`); // would set the copy's prototype instead
     const x = o[k];
     const ok = (y: unknown) =>
       y === null ||

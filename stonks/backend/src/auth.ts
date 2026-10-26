@@ -1,9 +1,12 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { isIPv6 } from 'node:net';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 /**
  * Dashboard login (SPEC.md §7). One password from STONKS_ADMIN_PASSWORD, a random session token in an HttpOnly
- * cookie, and only the token's SHA-256 in the `sessions` table so a database leak cannot be replayed as a login.
+ * cookie, and only an HMAC of the token in the `sessions` table so a database leak cannot be replayed as a login.
+ * The HMAC key is derived from the password, so changing STONKS_ADMIN_PASSWORD (and restarting) signs every
+ * existing session out: a leaked password can be revoked without touching the database.
  */
 
 export const SESSION_COOKIE = 'stonks_session';
@@ -11,6 +14,9 @@ export const SESSION_DAYS = 30;
 const SESSION_MS = SESSION_DAYS * 24 * 60 * 60 * 1000;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const CLEANUP_EVERY_MS = 60 * 60 * 1000;
+/** Failed logins from all addresses together per hour: caps guessing spread over many IPs (or an IPv6 range). */
+const GLOBAL_FAILURES = 50;
+const GLOBAL_WINDOW_MS = 60 * 60 * 1000;
 /** 32 random bytes as base64url. */
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -70,6 +76,25 @@ export function memorySessionStore(now: () => number = Date.now): SessionStore &
 
 const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest();
 
+/** What the sessions table stores for a token: HMAC-SHA256 keyed by the current password. */
+export const sessionHash = (token: string, password: string): Buffer =>
+  createHmac('sha256', sha256(`stonks-session:${password}`)).update(token).digest();
+
+/**
+ * Rate-limit key for an address. IPv6 clients usually control a whole /64, so those count as one; IPv4-mapped
+ * IPv6 addresses count as the IPv4 address.
+ */
+export function rateKey(ip: string): string {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+  if (mapped) return mapped[1];
+  if (!isIPv6(ip)) return ip;
+  const [head, tail] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const groups = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
+}
+
 /** Constant-time password check. An empty configured password never matches, so login is refused entirely. */
 export function passwordMatches(given: unknown, expected: string): boolean {
   if (!expected || typeof given !== 'string') return false;
@@ -118,6 +143,12 @@ export class RateLimiter {
     return entry.count <= this.max;
   }
 
+  /** Attempts recorded for the key in its current window (without recording one). */
+  count(key: string): number {
+    const entry = this.hits.get(key);
+    return entry && entry.resetAt > this.now() ? entry.count : 0;
+  }
+
   /** Seconds until the key may try again. */
   retryAfter(key: string): number {
     const entry = this.hits.get(key);
@@ -141,14 +172,17 @@ function sessionCookie(token: string, production: boolean, maxAgeSeconds: number
   return parts.join('; ');
 }
 
-const tokenHashFrom = (req: Request): Buffer | undefined => {
+const tokenHashFrom = (req: Request, password: string): Buffer | undefined => {
+  if (!password) return undefined; // no password configured: no session is valid either
   const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-  return token && TOKEN_RE.test(token) ? sha256(token) : undefined;
+  return token && TOKEN_RE.test(token) ? sessionHash(token, password) : undefined;
 };
 
 export function createAuth(opts: AuthOptions) {
   const now = opts.now ?? Date.now;
-  const limiter = new RateLimiter(opts.maxAttempts ?? 10, RATE_WINDOW_MS, now);
+  const maxAttempts = opts.maxAttempts ?? 10;
+  const limiter = new RateLimiter(maxAttempts, RATE_WINDOW_MS, now);
+  const failures = new RateLimiter(GLOBAL_FAILURES, GLOBAL_WINDOW_MS, now);
   let lastCleanup = 0;
 
   const cleanup = async () => {
@@ -163,10 +197,18 @@ export function createAuth(opts: AuthOptions) {
 
   const login: RequestHandler = async (req, res) => {
     const ip = req.ip ?? 'unknown';
-    if (!limiter.hit(ip)) {
-      res.setHeader('Retry-After', String(limiter.retryAfter(ip)));
+    const key = rateKey(ip);
+    if (!limiter.hit(key)) {
+      res.setHeader('Retry-After', String(limiter.retryAfter(key)));
       res.status(429).json({ error: 'Too many login attempts. Try again in a few minutes.' });
-      await opts.log('warn', 'login_rate_limited', `login rate limit hit from ${ip}`, { ip });
+      // Once per window, so a flood of refused attempts cannot flood the bot log.
+      if (limiter.count(key) === maxAttempts + 1)
+        await opts.log('warn', 'login_rate_limited', `login rate limit hit from ${key}`, { ip });
+      return;
+    }
+    if (failures.count('all') >= GLOBAL_FAILURES) {
+      res.setHeader('Retry-After', String(failures.retryAfter('all')));
+      res.status(429).json({ error: 'Too many failed logins. Login is paused for a while.' });
       return;
     }
     const expected = opts.password();
@@ -177,27 +219,30 @@ export function createAuth(opts: AuthOptions) {
     }
     const password = (req.body as { password?: unknown } | undefined)?.password;
     if (!passwordMatches(password, expected)) {
+      failures.hit('all');
       res.status(401).json({ error: 'Wrong password.' });
       await opts.log('warn', 'login_failed', `failed login from ${ip}`, { ip });
+      if (failures.count('all') === GLOBAL_FAILURES)
+        await opts.log('error', 'login_paused', `${GLOBAL_FAILURES} failed logins within an hour: login is paused for everyone`, { ip });
       return;
     }
     await cleanup();
     const token = randomBytes(32).toString('base64url');
-    await opts.store.create(sha256(token), new Date(now() + SESSION_MS), ip);
+    await opts.store.create(sessionHash(token, expected), new Date(now() + SESSION_MS), ip);
     res.setHeader('Set-Cookie', sessionCookie(token, opts.production, SESSION_MS / 1000));
     res.json({ ok: true });
     await opts.log('info', 'login', `dashboard login from ${ip}`, { ip });
   };
 
   const logout: RequestHandler = async (req, res) => {
-    const hash = tokenHashFrom(req);
+    const hash = tokenHashFrom(req, opts.password());
     if (hash) await opts.store.delete(hash);
     res.setHeader('Set-Cookie', sessionCookie('', opts.production, 0));
     res.json({ ok: true });
   };
 
   const requireAuth: RequestHandler = async (req: Request, res: Response, next: NextFunction) => {
-    const hash = tokenHashFrom(req);
+    const hash = tokenHashFrom(req, opts.password());
     if (!hash || !(await opts.store.valid(hash))) {
       res.status(401).json({ error: 'Not logged in.' });
       return;

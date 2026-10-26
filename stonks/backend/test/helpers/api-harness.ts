@@ -67,7 +67,6 @@ export async function startHarness(overrides: Partial<ApiDeps> = {}, tables: Rec
   };
 
   const app = express();
-  app.use(express.json({ limit: '4mb' }));
   app.use('/api', createApi(deps));
   app.use('/api', (_req, res) => void res.status(404).json({ error: 'Not found' }));
   app.use(((_err, _req, res, _next) => void res.status(500).json({ error: 'Internal error' })) as ErrorRequestHandler);
