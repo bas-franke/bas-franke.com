@@ -2,7 +2,8 @@
 // rarely drives the tunnel lane). Gets past the nickname gate first.
 //   node tools/racer/caveshot.mjs <baseUrl> <outDir> <shot,shot,...> [track] [WxH] [waitMs]
 // A shot is cave:<i>:<m> (m metres past cave i's entry, on the centre line) or tunnel:<i>:<m> (m metres past tunnel
-// shortcut i's roof start, in its sunken lane); add :<lookAhead> to aim further down the course (default 40 m).
+// shortcut i's roof start, in its sunken lane); then optionally :<lookAhead>:<camera height>:<target height> (metres;
+// look ahead 40 by default).
 // Example: node tools/racer/caveshot.mjs http://127.0.0.1:5247 shots cave:0:20,cave:0:200,tunnel:0:-10 redrock
 // Saves <outDir>/<track>-<kind><i>-<m>.jpg and prints the fps and page errors.
 
@@ -54,9 +55,9 @@ console.log(JSON.stringify(info));
 
 // Another session's edit can hot-reload the page mid-shot: reopen the lab and try that shot again.
 const once = async (shot) => {
-  const [kind, idx, m, ahead = "40", up = ""] = shot.split(":");
+  const [kind, idx, m, ahead = "40", up = "", look = ""] = shot.split(":");
   const ok = await page.evaluate(
-    ({ kind, i, m, ahead, up }) => {
+    ({ kind, i, m, ahead, up, look }) => {
       const { track, camera, controls } = window.__lab;
       const tun = track.shortcuts.filter((c) => c.kind === 'tunnel')[i];
       const cave = track.caves[i];
@@ -64,13 +65,13 @@ const once = async (shot) => {
       const s = kind === 'tunnel' ? tun.roof0 + m : cave.s0 + m;
       const x = kind === 'tunnel' ? tun.side * (tun.xIn + (tun.xOut - tun.xIn) / 2) : 0;
       const p = track.toWorld(s, x, up !== "" ? Number(up) : kind === "tunnel" ? 2.2 : 3);
-      const q = track.toWorld(s + ahead, x, kind === "tunnel" ? 1.8 : 2.5);
+      const q = track.toWorld(s + ahead, x, look !== "" ? Number(look) : kind === "tunnel" ? 1.8 : 2.5);
       camera.position.copy(p);
       controls.target.copy(q);
       controls.update();
       return true;
     },
-    { kind, i: Number(idx), m: Number(m), ahead: Number(ahead), up },
+    { kind, i: Number(idx), m: Number(m), ahead: Number(ahead), up, look },
   );
   if (!ok) {
     console.log(`no ${kind} ${idx}`);
@@ -86,7 +87,7 @@ const once = async (shot) => {
         requestAnimationFrame(f);
       }),
   );
-  const out = `${outDir}/${track}-${kind}${idx}-${m}${ahead !== "40" ? `-a${ahead}` : ""}${up ? `-h${up}` : ""}.jpg`;
+  const out = `${outDir}/${track}-${kind}${idx}-${m}${ahead !== "40" ? `-a${ahead}` : ""}${up ? `-h${up}` : ""}${look ? `-l${look}` : ""}.jpg`;
   await page.screenshot({ path: out, type: 'jpeg', quality: 85 });
   console.log(`saved ${out} (~${fps} fps)`);
 };

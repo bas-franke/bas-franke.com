@@ -50,7 +50,7 @@ varying vec3 vKey;`)
       )
       .replace(
         '#include <fog_fragment>',
-        THREE.ShaderChunk.fog_fragment.replace(/mix\(\s*gl_FragColor\.rgb\s*,\s*fogColor\s*,\s*fogFactor\s*\)/, 'mix( gl_FragColor.rgb, fogColor, fogFactor * 0.7 )'),
+        THREE.ShaderChunk.fog_fragment.replace(/mix\(\s*gl_FragColor\.rgb\s*,\s*fogColor\s*,\s*fogFactor\s*\)/, 'mix( gl_FragColor.rgb, fogColor, fogFactor * 0.55 )'),
       );
   };
   mat.customProgramCacheKey = () => 'cave-rock';
@@ -125,7 +125,7 @@ export interface Shaft {
   x: number;
 }
 
-/** A mouth to glow: centre of the opening, unit normal pointing into the cave, half sizes across and up. */
+/** A mouth (or skylight) to glow: centre of the opening, unit normal pointing into the cave, half sizes across and up. */
 export interface Mouth {
   center: THREE.Vector3;
   normal: THREE.Vector3;
@@ -133,6 +133,8 @@ export interface Mouth {
   width: number;
   height: number;
   color: THREE.Color;
+  /** 0: a rim of light hugging the opening (mouths); 1: a filled blaze of sky (skylights seen from below). */
+  fill?: number;
 }
 
 /** Sparks for a tunnel: points sampled inside it and the direction of travel there. */
@@ -261,6 +263,7 @@ void main() {
 
 const MOUTH_FRAG = /* glsl */ `
 uniform vec3 uColor;
+uniform float uFill;
 varying vec2 vUv;
 varying vec3 vN;
 varying vec3 vView;
@@ -268,7 +271,7 @@ void main() {
   float d = length(vView);
   float r = length(vUv);
   // A bright rim hugging the opening plus a softer veil over it.
-  float k = 0.22 * pow(max(0.0, 1.0 - r), 1.5) + 0.4 * exp(-pow((r - 0.8) / 0.3, 2.0));
+  float k = mix(0.22 * pow(max(0.0, 1.0 - r), 1.5) + 0.4 * exp(-pow((r - 0.8) / 0.3, 2.0)), 1.0 - smoothstep(0.5, 1.0, r), uFill);
   float face = max(0.0, dot(normalize(vN), -vView / d));
   float fade = smoothstep(6.0, 40.0, d) * (1.0 - smoothstep(320.0, 520.0, d));
   gl_FragColor = vec4(uColor * k * face * fade, 1.0);
@@ -418,7 +421,7 @@ export function buildCaveFx(track: Track, quality: Quality, shafts: Shaft[], mou
   // Mouth glows.
   for (const m of mouths) {
     const g = new THREE.PlaneGeometry(2, 2, 1, 1);
-    const mesh = new THREE.Mesh(g, additive(MOUTH_VERT, MOUTH_FRAG, { uColor: { value: m.color } }));
+    const mesh = new THREE.Mesh(g, additive(MOUTH_VERT, MOUTH_FRAG, { uColor: { value: m.color }, uFill: { value: m.fill ?? 0 } }));
     const up = new THREE.Vector3().crossVectors(m.normal, m.across).normalize();
     if (up.y < 0) up.negate();
     const across = new THREE.Vector3().crossVectors(up, m.normal).normalize();

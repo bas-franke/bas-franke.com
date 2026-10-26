@@ -295,13 +295,13 @@ function blockStep(s: number, th: number, size: number, bands: number, seed: num
 }
 
 const C = (hex: string) => new THREE.Color(hex);
-const ROCK_DARK = C('#6a1d17');
-const ROCK_RED = C('#9a3220');
+const ROCK_DARK = C('#581815');
+const ROCK_RED = C('#8a2a1c');
 const ROCK_DUST = C('#a4482a');
 const ROCK_LIT = C('#c8642c');
 const WARM = new THREE.Color(1.0, 0.42, 0.13);
 const VIOLET = new THREE.Color(0.42, 0.16, 0.85);
-const BLUE = new THREE.Color(0.22, 0.32, 1.0);
+const BLUE = new THREE.Color(0.1, 0.24, 1.0);
 const EXIT = new THREE.Color(1.0, 0.36, 0.08);
 
 /**
@@ -398,6 +398,7 @@ function caveGeometry(
   // Skylights (halls only): pick where each shaft should land, follow it up towards the sun to the roof, and cut the
   // cells round that point out of both shells.
   const shafts: Shaft[] = [];
+  const skylights: Mouth[] = [];
   const holes: { cc: number; jc: number; rc: number; rj: number; land: THREE.Vector3; s: number; x: number }[] = [];
   if (!lane) {
     const sun = sunDirection(track.def.theme);
@@ -445,6 +446,20 @@ function caveGeometry(
     if (!n) continue;
     top.multiplyScalar(1 / n);
     const h = holes[hi];
+    // And a blaze of sky in the opening at the hill's surface, seen from below through the jagged cut.
+    const sky = new THREE.Vector3();
+    for (let i = 0; i < cols - 1; i++) {
+      for (let j = 0; j < ROWS - 1; j++) {
+        if (cut[i * (ROWS - 1) + j] !== hi) continue;
+        const o = (i * ROWS + j) * 3;
+        sky.x += outer[o];
+        sky.y += outer[o + 1];
+        sky.z += outer[o + 2];
+      }
+    }
+    sky.multiplyScalar(1 / n);
+    const fr = track.frameAt(h.s);
+    skylights.push({ center: sky.setY(sky.y + 1.5), normal: new THREE.Vector3(0, -1, 0), across: new THREE.Vector3(fr.right.x, 0, fr.right.z).normalize(), width: h.rj * 4.5, height: h.rc * 3.6, color: new THREE.Color(2.6, 1.7, 0.9), fill: 1 });
     const cell = (s1 - s0) / (cols - 1);
     shafts.push({ top, bottom: h.land.clone(), radius: Math.max(2.5, Math.sqrt((n * cell * 2.6) / Math.PI) * 0.75), s: h.s, x: h.x });
   }
@@ -490,13 +505,13 @@ function caveGeometry(
       if (lane) {
         // Lit red from the glowing exit (and a little from the way in), cool blue in the crevices and low on the walls.
         const low = 1 - THREE.MathUtils.smoothstep(hgt, 1, 5);
-        const ex = 0.25 + 2.6 * Math.max(0, 1 - dExit / 70) ** 2;
-        const en = 0.12 + 1.0 * Math.max(0, 1 - dEntry / 40) ** 2;
+        const ex = 0.6 + 2.6 * Math.max(0, 1 - dExit / 80) ** 2;
+        const en = 0.25 + 1.0 * Math.max(0, 1 - dEntry / 40) ** 2;
         addKey(v, exitP, ex);
         addKey(v, entryP, en);
         warm = (ex + en) * (1 - 0.5 * cv);
-        warmC.copy(col).multiply(EXIT).multiplyScalar(warm * 0.55);
-        coolC.copy(BLUE).multiplyScalar(0.05 + 0.16 * cv ** 1.5 + 0.06 * low);
+        warmC.copy(col).multiply(EXIT).multiplyScalar(warm * 0.75);
+        coolC.copy(BLUE).multiplyScalar(0.015 + 0.42 * cv ** 2 + 0.12 * low);
       } else {
         // Warm from the shafts (towards the nearest point of each) and the mouths, violet fill in the recesses.
         warm = 0;
@@ -573,7 +588,7 @@ function caveGeometry(
 
   // Mouths: rings from the inner arch out to the hill's outline, and a glow just outside each one, facing in.
   const RINGS = 5;
-  const mouths: Mouth[] = [];
+  const mouths: Mouth[] = skylights;
   for (const [c, dir] of [[0, -1], [cols - 1, 1]] as const) {
     const s = sAt(c);
     const f = track.frameAt(s);
