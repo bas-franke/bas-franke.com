@@ -104,7 +104,7 @@ export const buildSky: WorldBuilder = (ctx) => {
   // Sky fill above, warm sand bounce below.
   // Skylight: a cool lavender-violet whatever the hour, so shade on red rock goes red-violet (never black, and not
   // the blood red a warm skylight times warm rock gives); bluer under a day sky, more violet under a dusk one.
-  const hemiSky = C(theme.skyTop).lerp(C(theme.skyHorizon), 0.25).lerp(C('#b8b0d8'), 0.6);
+  const hemiSky = C(theme.skyTop).lerp(C(theme.skyHorizon), 0.25).lerp(C('#c4aec4'), 0.6);
   const hemiGround = C(theme.sand).lerp(C(theme.rockLit), 0.35).lerp(C('#d0b0a0'), 0.25);
   const hemi = new THREE.HemisphereLight(hemiSky, hemiGround, 1.45);
   group.add(hemi);

@@ -146,6 +146,7 @@ uniform vec3 hazeColor;
 uniform float saturation;
 uniform vec3 whiteBalance;
 uniform vec3 lift;
+uniform vec3 highTint;   // multiplies the highlights (warm: pushes pink-white sky and lit rock towards peach-gold)
 uniform float contrast;
 uniform float hueKeep;
 uniform float vignette;
@@ -230,10 +231,13 @@ void main() {
   col = aces;
 #endif
 
-  // --- Display-referred grade: filmic contrast around mid grey, shadows lifted towards violet, light vignette.
+  // --- Display-referred grade: filmic contrast around mid grey, warm highlights, shadows lifted towards violet,
+  // light vignette.
   vec3 g = pow(col, vec3(1.0 / 2.2));
   g = clamp((g - 0.5) * contrast + 0.5, 0.0, 1.0);
   g = mix(g, g * g * (3.0 - 2.0 * g), 0.25);
+  // Split tone: warm highlights against the violet-lifted shadows below.
+  g = mix(g, g * highTint, smoothstep(0.35, 0.95, dot(g, vec3(0.2126, 0.7152, 0.0722))));
   col = pow(g, vec3(2.2));
   col += lift * pow(1.0 - min(col, 1.0), vec3(3.0));
   vec2 vq = (vUv - 0.5) * vec2(aspect, 1.0) / sqrt(aspect * aspect + 1.0) * 2.0;
