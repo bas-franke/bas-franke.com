@@ -12,6 +12,8 @@ Pool at bar t (``pool``):
            Bitvavo, counting only coins in the CoinMarketCap top 15 (no stablecoins) of the latest January/July
            snapshot before that day (``universe.pit_eligible``), from the 28-coin point-in-time pool.
 - "young": as "pit" but only coins first listed on Bitvavo after 2019 (none of the 2019 coins): an out-of-pool test.
+- ``cohortLag`` > 0 (v2): pit/young use the members of ``cohortLag`` days earlier (a cohort that ages, as the 2019
+  pool did), still only while those coins trade.
 
 Signal: mean ``lookback``-candle log return of the pool members minus BTC's. Sell everything when it is above
 ``threshold``; buy back once it is below ``threshold - band``. While fewer than ``minPool`` members have a return
@@ -29,7 +31,7 @@ from ._base import bars_text, frame, market_names, max_weight, pct, risk_steps, 
 from .alt_froth import OLD_ALTS
 
 NAME = "pool_froth_a17"
-VERSION = 1
+VERSION = 2                    # v2: cohortLag (0 = v1 behaviour)
 TITLE = "Altcoin froth exit, point-in-time pool"
 BOT_READY = False
 MULTI_MARKET = True
@@ -39,7 +41,8 @@ PIT_ALL = [f"{b}-EUR" for b in sorted(uni.PIT_POOL)]
 
 
 def default_params() -> dict:
-    return {"lookback": 120, "threshold": 0.1, "band": 0.05, "pool": "pit", "universe": 10, "minPool": 3}
+    return {"lookback": 120, "threshold": 0.1, "band": 0.05, "pool": "pit", "universe": 10, "minPool": 3,
+            "cohortLag": 0}
 
 
 def param_space() -> dict:
@@ -56,6 +59,9 @@ def param_space() -> dict:
                      "description": "pit/young: rank this many eligible coins by trailing 90 d EUR turnover"},
         "minPool": {"type": "int", "min": 1, "max": 6,
                     "description": "fewer pool members than this with a return: not frothy (hold)"},
+        "cohortLag": {"type": "int", "min": 90, "max": 1500, "zero": True,
+                      "description": "pit/young: use the pool members of this many days ago (an aging cohort, "
+                                     "like the fixed 2019 pool); 0 = today's members"},
     }
 
 
@@ -113,18 +119,19 @@ def _members(candles: dict, p: dict, idx: np.ndarray, names: list[str]) -> np.nd
     ranked = [m for m in PIT_ALL if m in candles and len(candles[m])]
     if not ranked:
         return np.zeros((len(idx), len(names)), dtype=bool)
-    d0 = (int(idx.min()) // _DAY) * _DAY - 100 * _DAY
+    lag = int(p.get("cohortLag") or 0) * _DAY
+    d0 = (int(idx.min()) // _DAY) * _DAY - 100 * _DAY - lag
     days = np.arange(d0, (int(idx.max()) // _DAY) * _DAY + _DAY, _DAY, dtype=np.int64)
     vol = pd.DataFrame({m: _turnover_days(candles[m], days) for m in ranked}, index=days)
     trailing = vol.rolling(90, min_periods=90).sum().shift(1)          # days before only
     trailing = trailing.where(uni.pit_eligible(days, ranked))
     rank = trailing.rank(axis=1, ascending=False, method="first")
     member_day = ((rank <= int(p["universe"])) & trailing.notna())
-    pos = np.searchsorted(days, (idx // _DAY) * _DAY, side="right") - 1
+    pos = np.searchsorted(days, (idx // _DAY) * _DAY - lag, side="right") - 1
     out = np.zeros((len(idx), len(names)), dtype=bool)
     for j, m in enumerate(names):
         if m in member_day.columns:
-            out[:, j] = member_day[m].to_numpy(bool)[pos]
+            out[:, j] = np.where(pos >= 0, member_day[m].to_numpy(bool)[np.maximum(pos, 0)], False)
     return out
 
 
@@ -195,6 +202,8 @@ def explain(spec) -> dict:
         "young": f"the altcoins listed after 2019 among the {int(p['universe'])} biggest coins of that moment "
                  "(CoinMarketCap top 15, ranked by euro trading volume over the previous 90 days)",
     }[p["pool"]]
+    if p["pool"] != "y2019" and int(p.get("cohortLag") or 0):
+        who = who.replace("of that moment", f"of {bars_text(int(p['cohortLag']), '1d')} earlier")
     steps = [
         f"It holds {mk}" + (f" ({100 / k:.0f} % of the money per coin)" if k > 1 else "") + " by default.",
         f"After every {iv} candle it compares the average return over {bars_text(p['lookback'], iv)} of {who} "

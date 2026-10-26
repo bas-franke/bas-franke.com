@@ -81,3 +81,16 @@ def test_membership_by_turnover_and_young_pool():
     assert (FAM.targets(cd3, spec(pool="young"))["BTC-EUR"].to_numpy()[5:] == 1).all()
     # minPool: two members are too few at minPool 3 -> hold
     assert (FAM.targets(cd, spec(minPool=3))["BTC-EUR"].to_numpy()[5:] == 1).all()
+
+
+def test_cohort_lag_uses_earlier_members():
+    # SOL trades heavily in the first 200 days, then DOGE takes over; the pump is at bar 300.
+    flat, pump = [10.0] * 350, [10.0] * 300 + [15.0] * 10 + [10.0] * 40
+    sol, doge = daily(pump), daily(flat)
+    sol["volume"] = [50.0] * 200 + [0.001] * 150
+    doge["volume"] = [0.001] * 200 + [50.0] * 150
+    cd = {"BTC-EUR": daily(flat, 100.0), "SOL-EUR": sol, "DOGE-EUR": doge}
+    now = FAM.targets(cd, spec(universe=2))["BTC-EUR"].to_numpy()                   # members at 300: BTC + DOGE
+    lag = FAM.targets(cd, spec(universe=2, cohortLag=100))["BTC-EUR"].to_numpy()   # members at day 200: BTC + SOL
+    assert (now[5:] == 1).all()
+    assert (lag[300:305] == 0).all() and lag[305] == 1
