@@ -1,7 +1,7 @@
 // Billowing sand clouds kicked up under and behind the pods: one instanced draw of camera-facing puffs in a ring
 // buffer. The CPU only writes a particle once when it spawns; the vertex shader flies it (drag towards rest, a slow
 // rise, growth) and stretches it along its motion relative to the camera, so dust streaks past at speed. The fragment
-// shader lights each puff's lumps from the sun (warm sand on top, violet-brown shade below) and fades it into the
+// shader lights each puff's lumps from the sun (warm orange-gold on top, pink-violet shade below, glowing when backlit) and fades it into the
 // road surface and away near the camera, which stands in for soft particles.
 
 import * as THREE from 'three';
@@ -31,6 +31,7 @@ varying float vSize;
 varying float vTone;
 varying float vK;
 varying vec3 vSunV;
+varying vec3 vView;
 void main() {
   vK = aK;
   float age = uTime - aT.x;
@@ -64,6 +65,7 @@ void main() {
   vAlpha = aM.z * smoothstep(0.0, 0.04, u) * (1.0 - smoothstep(0.25, 1.0, u)) * near * size / (size + sl * 0.7);
   vTone = fract(aM.x * 13.7);
   vSunV = normalize(mat3(viewMatrix) * uSun);
+  vView = mvPosition.xyz;
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
 }
@@ -75,6 +77,7 @@ const FRAG = /* glsl */ `
 uniform sampler2D uTex;
 uniform vec3 uLit;
 uniform vec3 uShade;
+uniform vec3 uGlow;
 varying vec2 vUv;
 varying vec2 vSph;
 varying vec2 vDir;
@@ -84,6 +87,7 @@ varying float vSize;
 varying float vTone;
 varying float vK;
 varying vec3 vSunV;
+varying vec3 vView;
 void main() {
   vec4 t = texture2D(uTex, vUv);
   float a = t.r * vAlpha * smoothstep(-0.1 * vSize, 0.4 * vSize, vH);
@@ -95,6 +99,9 @@ void main() {
   vec3 n = normalize(vec3(vDir * q.x + nrm * q.y, 0.6));
   float l = dot(n, vSunV);
   vec3 col = mix(uShade, uLit, smoothstep(-0.45, 0.7, l));
+  // Backlit dust glows (forward scattering towards the sun), most in the thin edges of each puff.
+  float fwd = pow(max(dot(normalize(vView), vSunV), 0.0), 3.0);
+  col += uGlow * fwd * (1.15 - t.r);
   col *= (0.9 + 0.2 * vTone) * vK;
   gl_FragColor = vec4(col, min(a, 0.9));
   #include <tonemapping_fragment>
@@ -149,8 +156,10 @@ export class DustSystem {
     const dirt = linear(theme.dirt);
     const sun = linear(theme.sunColor);
     const sky = linear(theme.skyTop);
-    const lit = saturate(sand.clone().lerp(dirt, 0.15).multiply(sun), 1.08).multiplyScalar(1.3);
-    const shade = saturate(dirt.clone().multiplyScalar(0.78).lerp(sky.multiplyScalar(0.6), 0.08), 1.1).add(new THREE.Vector3(0.02, 0.0, 0.025));
+    // Pulled towards the concept art's luminous orange-gold, with a pink-violet shade, whatever the ground colour.
+    const lit = saturate(sand.clone().lerp(dirt, 0.15).multiply(sun), 1.08).multiplyScalar(1.3).lerp(linear('#ff9a4c').multiply(sun).multiplyScalar(1.35), 0.55);
+    const shade = saturate(dirt.clone().multiplyScalar(0.78).lerp(sky.multiplyScalar(0.6), 0.08), 1.1).add(new THREE.Vector3(0.02, 0.0, 0.025)).lerp(linear('#c46a78'), 0.4);
+    const glow = tint ? new THREE.Vector3() : linear('#ffb766').multiply(sun).multiplyScalar(0.9);
     this.mat = fxMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
@@ -163,6 +172,7 @@ export class DustSystem {
         uTex: { value: null },
         uLit: { value: tint?.lit ?? lit },
         uShade: { value: tint?.shade ?? shade },
+        uGlow: { value: glow },
       },
     });
     this.mat.uniforms.uTex.value = this.tex;

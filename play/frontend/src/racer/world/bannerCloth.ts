@@ -1,5 +1,5 @@
 // Tall team banners: one InstancedMesh of a segmented cloth strip. The instance colour is the banner colour; the
-// white emblem (a ring with a bar through its open top and a dot below, after the concept art), a dark hem and a
+// pale emblem (a ring round a flame-tipped trident after the concept art, glowing via the emissive term), a dark hem and a
 // fringed bottom are drawn in the fragment shader, so no textures. The cloth ripples in the wind in the vertex shader,
 // pinned at the top, swinging more towards the bottom.
 
@@ -61,31 +61,49 @@ export function buildBanners(banners: Banner[], emblem: THREE.Color, castShadow:
         `#include <common>
         uniform vec3 uEmblem;
         varying vec2 vBUv;
-        varying vec2 vBSize;`,
+        varying vec2 vBSize;
+        float bMark = 0.0;`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
           // Emblem space: units of a third of the width, centred in the upper middle of the cloth.
-          vec2 p = vec2((vBUv.x - 0.5) * vBSize.x, (vBUv.y - 0.62) * vBSize.y) / (vBSize.x / 3.0);
+          vec2 p = vec2((vBUv.x - 0.5) * vBSize.x, (vBUv.y - 0.64) * vBSize.y) / (vBSize.x / 3.0);
           float aa = 0.05;
-          float ring = 1.0 - smoothstep(0.16 - aa, 0.16 + aa, abs(length(p) - 0.9));
-          // Open the ring at the top where the bar comes through.
-          ring *= 1.0 - (1.0 - smoothstep(0.34, 0.34 + aa, abs(p.x))) * step(0.0, p.y);
-          float bar = (1.0 - smoothstep(0.14, 0.14 + aa, abs(p.x))) * (1.0 - smoothstep(0.0, aa, abs(p.y - 0.35) - 0.95));
-          float mark = max(ring, bar);
+          float rl = length(p);
+          float ring = 1.0 - smoothstep(0.11 - aa, 0.11 + aa, abs(rl - 1.0));
+          // Trident: a shaft with a flame-shaped tip, two side prongs joined by a cup at the bottom.
+          float shaft = (1.0 - smoothstep(0.08, 0.08 + aa, abs(p.x))) * step(-0.78, p.y) * step(p.y, 0.45);
+          float tipW = 0.26 * clamp((0.85 - p.y) / 0.4, 0.0, 1.0) * clamp((p.y - 0.3) / 0.12, 0.0, 1.0);
+          float tip = (1.0 - smoothstep(tipW - aa * 0.5, tipW + aa * 0.5, abs(p.x + 0.04 * sin(p.y * 9.0)))) * step(0.001, tipW);
+          vec2 cq = p - vec2(0.0, -0.05);
+          float cup = (1.0 - smoothstep(0.08, 0.08 + aa, abs(length(cq) - 0.46))) * step(cq.y, 0.0);
+          float prongW = 0.08 * clamp((0.62 - p.y) / 0.25, 0.0, 1.0);
+          float prong = (1.0 - smoothstep(prongW, prongW + aa, abs(abs(p.x) - 0.46 - max(0.0, p.y - 0.3) * 0.25))) * step(-0.05, p.y) * step(p.y, 0.62);
+          float mark = max(max(ring, shaft), max(max(tip, cup), prong));
           float yb = vBUv.y * vBSize.y;
           vec3 c = diffuseColor.rgb;
-          // Dark edging along the sides and the top, a white stripe above the tasselled bottom.
-          float edge = max(step(min(vBUv.x, 1.0 - vBUv.x) * vBSize.x, 0.1), step((1.0 - vBUv.y) * vBSize.y, 0.25));
-          c = mix(c, c * 0.4, edge);
-          float stripe = step(0.5, yb) * step(yb, 0.75);
-          c = mix(c, uEmblem, max(mark, stripe));
+          // Soft lighter halo round the emblem, as if it shone through the cloth.
+          c = mix(c, c * 1.6 + uEmblem * 0.06, exp(-pow(max(rl - 1.0, 0.0) * 2.2, 2.0)) * 0.55);
+          // Dark edging along the sides and the top, a pale stripe above the tasselled bottom.
+          float edge = max(step(min(vBUv.x, 1.0 - vBUv.x) * vBSize.x, 0.14), step((1.0 - vBUv.y) * vBSize.y, 0.35));
+          c = mix(c, c * 0.35, edge);
+          float stripe = step(0.5, yb) * step(yb, 0.68);
+          bMark = mark;
+          c = mix(c, uEmblem, max(mark, stripe * 0.8));
           if (yb < 0.4 && fract(vBUv.x * vBSize.x * 2.5) > 0.6) discard;
-          c *= 0.82 + 0.18 * vBUv.y;
+          c *= 0.78 + 0.22 * vBUv.y;
           diffuseColor.rgb = c;
         }`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        // The emblem glows so it reads from far down the course and blooms like the concept art.
+        totalEmissiveRadiance += uEmblem * bMark * 0.9;
+        // A little light through the cloth keeps the purple rich in the shade instead of going black.
+        totalEmissiveRadiance += diffuseColor.rgb * (1.0 - bMark) * 0.85;`,
       );
   };
   const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, banners.length));
