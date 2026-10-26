@@ -374,6 +374,8 @@ export interface BlockSpireOpts {
   talus?: number;
   /** How much the column narrows from foot to top (default 0.5). */
   taper?: number;
+  /** Number of stacked drums (default 4-7; far silhouettes use 2-3). */
+  drums?: number;
 }
 
 /**
@@ -414,7 +416,7 @@ export function addBlockSpire(b: RockBuilder, r: Rand, o: BlockSpireOpts) {
   } else {
     ring(-60, R * 1.2, flat, 0);
   }
-  const n = 4 + Math.floor(r() * 4);
+  const n = o.drums ?? 4 + Math.floor(r() * 4);
   // Uneven drum heights: a few tall blocks and some short ones.
   const hs = Array.from({ length: n }, () => 0.4 + r());
   const sum = hs.reduce((a, v) => a + v, 0);
@@ -436,8 +438,9 @@ export function addBlockSpire(b: RockBuilder, r: Rand, o: BlockSpireOpts) {
     cx += (r() - 0.5) * rad * 0.25;
     cz += (r() - 0.5) * rad * 0.25;
   }
-  // A small broken crown on top.
+  // A broken crown on top: a low stub, or (half the time, unless capped) a chiselled point.
   const crown = Array.from({ length: seg }, () => 0.6 + r() * 0.5);
-  ring(y + H * 0.02, R * 0.32, crown, turn);
+  if (!cap && r() < 0.5) ring(y + H * (0.04 + r() * 0.05), R * 0.12, crown, turn);
+  else ring(y + H * 0.02, R * 0.32, crown, turn);
   b.rings(rings, true, 0);
 }

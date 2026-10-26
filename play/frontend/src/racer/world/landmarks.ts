@@ -335,6 +335,38 @@ export const buildLandmarks: WorldBuilder = (ctx) => {
     }
   }
 
+  // Haze silhouettes: many more spire clusters out to ~2.6 km, cheap (four-sided columns of two or three drums), so
+  // layer after layer of needles recedes into the orange haze behind the near ones.
+  const haze: Layer[] = [
+    { near: 450, far: 1100, spires: low ? 10 : 26, buttes: 0, mesas: 0, scale: 1.15 },
+    { near: 1100, far: 2600, spires: low ? 10 : 30, buttes: 0, mesas: 0, scale: 1.6 },
+  ];
+  for (const layer of haze) {
+    for (let i = 0; i < Math.round(layer.spires * B); i++) {
+      const sc = layer.scale * (0.8 + r() * 0.4);
+      const spot = findSpot(layer, 40 * sc, 0.8);
+      if (!spot) continue;
+      placed.push({ x: spot.x, z: spot.z, rad: 40 * sc });
+      const n = 2 + Math.floor(r() * 3);
+      const main = (170 + r() * 170) * sc;
+      for (let k = 0; k < n; k++) {
+        const a = r() * Math.PI * 2;
+        const off = k === 0 ? 0 : (12 + r() * 30) * sc;
+        tint();
+        addBlockSpire(skyline, r, {
+          x: spot.x + Math.cos(a) * off,
+          z: spot.z + Math.sin(a) * off,
+          ground,
+          height: k === 0 ? main : main * (0.4 + r() * 0.5),
+          radius: (k === 0 ? 15 + r() * 8 : 9 + r() * 8) * sc,
+          seg: 4 + Math.floor(r() * 2),
+          talus: k === 0 ? 0.5 : 0,
+          drums: 2 + Math.floor(r() * 2),
+        });
+      }
+    }
+  }
+
   // One or two arches on the skyline, facing the circuit so their openings show against the sky.
   const skyArches = (low ? 1 : 2) * B;
   for (let i = 0; i < skyArches; i++) {
