@@ -91,15 +91,15 @@ not walls: if your finding points into another lane, write it down and pick that
 - **Modest CPU**: at most 2 workers, one sweep at a time. 20 agents share 12 cores.
 - **No look-ahead**: a decision at bar t may only use candles up to and including bar t.
 - **No hindsight in the coin list**: cross-coin ideas (rotation, breadth, baskets) use `--markets top10_pit`
-  (`"markets": "top10_pit"` in a spec): at every bar only the 10 coins of a fixed historical pool with the highest
-  trailing 90-day EUR volume on Bitvavo (days before that bar) may be held, and buy and hold is those members.
-  `top10` is *today's* list and knows which coins survived (rotation on it: +12 vs -16 log-points point-in-time);
-  such results are only ranked when `lab.py pit-twins` shows the same spec also beats buy and hold on `top10_pit`.
-  Pool and sources: `stonks_lab/universe.py`. Point-in-time candles exist for 1d and 1W only; ask the coordinator
-  for other intervals (agents never download).
-- **Agents don't commit** registry data or `FINDINGS.md`; the coordinator runs `lab.py digest` and commits.
-  A new family you wrote (module + test) is committed by you, on its own, with pathspecs
-  (`git commit --only -m "stonks-local: family <name>" -- <paths>`), only when its tests pass.
+  (`"markets": "top10_pit"` in a spec). At every bar a coin may be held only when it was in the CoinMarketCap top 15
+  (no stablecoins) at the latest January/July snapshot before that day, AND among those it is one of the 10 with the
+  highest trailing 90-day EUR volume on Bitvavo (days before that bar). Weight a strategy puts on any other coin is
+  held as cash, so a family that ranks coins should rank only `universe.pit_members(...)`. Buy and hold is the
+  members at the window start. `top10` is *today's* list and knows which coins survived (rotation on it: +12 vs
+  -16 log-points point-in-time); such results are only ranked when `lab.py pit-twins` shows the same spec also beats
+  buy and hold on `top10_pit`. Some survivorship remains: delisted coins (EOS, BSV, MATIC before POL, DASH, XMR)
+  have no Bitvavo data. Snapshots, pool and rules: `stonks_lab/universe.py`. Point-in-time candles exist for 1d and
+  1W only; ask the coordinator for other intervals (agents never download).
 
 ## Score (how experiments are ranked)
 
@@ -139,7 +139,8 @@ ranked or published. Buy and hold is the benchmark of every fold, never a candid
 **Versions**: every result carries `evalVersion`. The leaderboard, `top`, `publish` and the coverage "best" only
 compare results of the current version; `lab.py rescore` re-evaluates older rows in place (the old score stays in
 `metrics.history`). Version 1 started each spec's folds after its own warm-up and used the median of x_f
-(findings #21/#22). `lab.py show <hash>` has `scoreParts`, every fold and the holdout.
+(findings #21/#22); version 3 dated the point-in-time eligibility (findings #258-#260; other results carried
+forward unchanged). `lab.py show <hash>` has `scoreParts`, every fold and the holdout.
 
 ## Adding a family
 

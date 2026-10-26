@@ -49,7 +49,9 @@ Buy and hold is the benchmark of every fold, never a candidate.
 
 EVAL_VERSION (= registry.EVAL_VERSION) is stored with every result; the leaderboard only compares results of the current
 version, and ``lab.py rescore`` re-evaluates older rows in place. Version 1 (until 2026-10-26) started the folds after
-each spec's own warm-up and used the median of x_f (findings #21/#22).
+each spec's own warm-up and used the median of x_f (findings #21/#22). Version 3 only changes the point-in-time
+universe (coins eligible only from their first CoinMarketCap top-15 snapshot, findings #258-#260); results without
+a universe are identical to version 2 (``lab.py rescore`` carries them forward without re-running).
 """
 from __future__ import annotations
 
@@ -74,7 +76,7 @@ MIN_TRADES = 20
 TRADE_PENALTY = 10.0
 # Kept literal (not imported from registry) so a worker process that already holds an older registry module
 # still imports this one; tests assert it equals registry.EVAL_VERSION.
-EVAL_VERSION = 2
+EVAL_VERSION = 3   # 3: point-in-time universe with dated CMC eligibility (universe.PIT_VERSION 2)
 MIN_PARTICIPATION_PCT = 10.0   # median fold exposure needed to be ranked (eligible)
 DAY_MS = 86_400_000
 START_EUR = 1000.0

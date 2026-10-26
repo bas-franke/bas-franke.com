@@ -644,6 +644,9 @@ def cmd_rescore(a, r):
     fixed = r.backfill_eval_version()
     if fixed:
         print(f"backfilled eval_version on {fixed} rows that already had a current result", flush=True)
+    carried = r.carry_forward()
+    if carried:
+        print(f"carried {carried} rows forward to eval version {reg.EVAL_VERSION} (their result is unchanged)", flush=True)
     todo = r.stale_versions(limit=a.limit)
     workers = max(1, min(a.workers, 6))
     print(f"rescore: {len(todo)} done experiments below eval version {reg.EVAL_VERSION}, {workers} workers "

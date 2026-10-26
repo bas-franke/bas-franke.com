@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -16,6 +17,11 @@ from stonks_lab import universe as u  # noqa: E402
 
 DAY = 86_400_000
 START = 1_500_000_000_000 - 1_500_000_000_000 % DAY
+
+
+@pytest.fixture(autouse=True)
+def all_eligible(monkeypatch):
+    monkeypatch.setattr(u, "_TEST_ALL_ELIGIBLE", True)
 
 
 def daily(n, seed, vol_eur):
@@ -42,12 +48,12 @@ def test_membership_uses_only_past_volume():
     assert m2.iloc[201]["C0-EUR"] and not m1.iloc[201]["C0-EUR"]
 
 
-def test_apply_pit_drops_non_members_and_keeps_the_total():
+def test_apply_pit_turns_non_member_weight_into_cash():
     t = pd.DataFrame({"A": [np.nan, 0.5, 0.25], "B": [np.nan, 0.5, 0.25], "C": [np.nan, 0.0, 0.5]})
     mem = np.array([[True, True, True], [True, False, True], [False, False, False]])
     out = u.apply_pit(t, mem).to_numpy()
     assert np.isnan(out[0]).all()
-    assert np.allclose(out[1], [1.0, 0.0, 0.0]) and np.allclose(out[2], [0.0, 0.0, 0.0])
+    assert np.allclose(out[1], [0.5, 0.0, 0.0]) and np.allclose(out[2], [0.0, 0.0, 0.0])
 
 
 def test_evaluate_on_pit_universe_and_hash():
@@ -91,3 +97,19 @@ def test_today_top10_spec_needs_a_winning_pit_twin(tmp_path):
     p = leaderboard.build_payload(r2)
     assert "today's top-10" in p["top"][0]["explanation"]["vsBuyHold"]
     assert "top 10 at each moment" in p["summary"]["notes"]
+
+
+def test_eligibility_follows_the_snapshots(monkeypatch):
+    monkeypatch.setattr(u, "_TEST_ALL_ELIGIBLE", False)
+    day = lambda d: int(pd.Timestamp(d, tz="UTC").value // 1_000_000)  # noqa: E731
+    ms = ["SOL-EUR", "SUI-EUR", "HBAR-EUR", "BTC-EUR", "LUNA-EUR", "MIOTA-EUR", "POL-EUR"]
+    el = u.pit_eligible([day("2021-06-01"), day("2021-07-05"), day("2022-03-01"), day("2024-06-01"),
+                         day("2025-03-01"), day("2019-03-08")], ms)
+    col = {m: el[:, j].tolist() for j, m in enumerate(ms)}
+    assert col["SOL-EUR"] == [False, True, True, True, True, False]     # top 15 from the 2021-07-04 snapshot
+    assert col["SUI-EUR"] == [False, False, False, False, True, False]  # only from 2025-01
+    assert not any(col["HBAR-EUR"][:5])                                 # never top 15 before 2025-07
+    assert col["LUNA-EUR"] == [False, False, True, False, False, False] # 2022-01 snapshot only
+    assert col["MIOTA-EUR"][5] and col["POL-EUR"][2] and col["BTC-EUR"] == [True] * 6
+    pool_ok = set().union(*[e for _, e in u.snapshot_eligible()])
+    assert set(u.PIT_POOL) <= pool_ok

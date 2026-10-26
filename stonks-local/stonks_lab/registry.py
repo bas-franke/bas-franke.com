@@ -40,7 +40,9 @@ LANE_STALE_S = 3 * 3600
 
 # Version of the evaluation method (fold boundaries + score formula, see stonks_lab/evaluate.py). Rows of older
 # versions (NULL = 1) are not compared with current ones; `lab.py rescore` re-evaluates them in place.
-EVAL_VERSION = 2
+EVAL_VERSION = 3
+# Older versions whose results are still exact for specs WITHOUT a "universe" (version 3 only changed top10_pit).
+CARRY_FORWARD_NO_UNIVERSE = (2,)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS experiments (
@@ -163,7 +165,7 @@ def markets_key(markets: Iterable[str]) -> str:
 def _flat_numeric(spec: dict) -> tuple[dict, dict]:
     """(numeric knobs, other knobs) of a canonical spec, used for near-duplicate distance."""
     c = canonical(spec)
-    num, other = {}, {}
+    num, other = {}, {"universe": json.dumps(c.get("universe"))}   # top10 vs top10_pit are different strategies
     for section in ("params", "risk", "execution"):
         for k, v in (c.get(section) or {}).items():
             key = f"{section}.{k}"
@@ -175,7 +177,8 @@ def _flat_numeric(spec: dict) -> tuple[dict, dict]:
 
 
 def param_distance(a: dict, b: dict) -> float:
-    """Largest relative difference between two specs' numeric knobs; inf if a non-numeric knob differs."""
+    """Largest relative difference between two specs' numeric knobs; inf if a non-numeric knob (or the universe)
+    differs."""
     na, oa = _flat_numeric(a)
     nb, ob = _flat_numeric(b)
     if oa != ob or set(na) != set(nb):
@@ -377,6 +380,18 @@ class Registry:
                                WHERE eval_version IS NULL AND metrics IS NOT NULL
                                  AND COALESCE(json_extract(metrics, '$.evalVersion'),
                                               json_extract(metrics, '$.scoreParts.evalVersion')) IS NOT NULL""")
+            return cur.rowcount
+
+    def carry_forward(self) -> int:
+        """Set eval_version to the current one on done rows whose result is unchanged by the newer method (see
+        CARRY_FORWARD_NO_UNIVERSE): no re-run needed. Returns the number of rows updated."""
+        if not CARRY_FORWARD_NO_UNIVERSE:
+            return 0
+        q = ",".join("?" * len(CARRY_FORWARD_NO_UNIVERSE))
+        with self._tx() as c:
+            cur = c.execute(f"""UPDATE experiments SET eval_version=? WHERE status='done' AND eval_version IN ({q})
+                                AND json_extract(spec, '$.universe') IS NULL""",
+                            (EVAL_VERSION, *CARRY_FORWARD_NO_UNIVERSE))
             return cur.rowcount
 
     def rescore(self, h: str, result: dict) -> bool:

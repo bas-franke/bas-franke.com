@@ -108,6 +108,9 @@ def test_near_duplicates(r):
     assert r.near_duplicates(spec(markets=("ETH-EUR",), fast=12, slow=48), tolerance=0.5) == []
     other_exec = dict(spec(fast=12, slow=48), execution={"orderType": "market"})
     assert r.near_duplicates(other_exec, tolerance=0.5) == []                       # non-numeric knob differs
+    pit = dict(spec(fast=12, slow=48), universe="top10_pit")
+    assert reg.spec_hash(pit) != reg.spec_hash(base)
+    assert r.near_duplicates(pit, tolerance=0.5) == []                              # other universe
 
 
 def test_findings_lanes_coverage(r):
