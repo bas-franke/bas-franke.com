@@ -1,8 +1,10 @@
 // Sandstone cliff strips: a vertical rock face extruded along a line of columns (the canyon walls beside the track,
-// the walls of a gorge). The cross-section follows the world-space strata: hard pale layers stand proud, soft dark
-// layers are cut back under them (overhangs), every layer steps back a little (chunky ledges), and along the strip the
-// face is broken into big blocky pillars with erosion clefts between them and smaller vertical flutes. The top is a
-// lip that runs back into the plateau behind so the heightfield there joins without a seam.
+// the walls of a gorge). Along the strip the face is broken into sheer blocky columns with clefts between them; up the
+// face the world-space strata cut it into blocks, each (column, layer) block standing in or out by its own amount, so
+// the wall reads as stacked fractured blocks rather than even bands. Only now and then does a layer step back into a
+// ledge or a soft layer cut back under a hard one. Some columns rise above the rim as blocky towers (`crown`), which
+// makes the walls look taller and their skyline stepped. The top is a lip that runs back into the plateau behind so
+// the heightfield there joins without a seam.
 
 import * as THREE from 'three';
 import type { GeoBuilder } from './terrainGeo';
@@ -36,6 +38,8 @@ export interface CliffOpts {
   period: number;
   /** Height of the lip above `top` (negative tucks it under the ground ribbon). */
   lift: number;
+  /** Tallest tower rising above the rim (0 = flat rim). */
+  crown?: number;
   seed: number;
 }
 
@@ -44,12 +48,26 @@ function lateral(a: number, k: number, h: number, o: CliffOpts) {
   const u = a / o.period + 1.2 * noise1(a * 0.009, o.seed);
   const cell = Math.floor(u);
   const f = u - cell;
-  const w = smoothstep(0.03, 0.1, f) * (1 - smoothstep(0.88, 0.95, f));
+  // Sheer sides: the column edges turn in over a few percent of its width.
+  const w = smoothstep(0.02, 0.07, f) * (1 - smoothstep(0.92, 0.97, f));
   const amp = (hash(cell + o.seed * 31) - 0.35) * o.buttress;
-  const jitter = (hash(cell * 7.3 + k * 1.7 + o.seed) - 0.5) * 0.4 * o.buttress * w;
-  const wobble = (noise1(a * 0.045, o.seed + 3) - 0.5) * 2.5;
+  // Every block of the column (one per layer) stands in or out on its own: chunky fracture blocks.
+  const jb = hash(cell * 7.3 + k * 1.7 + o.seed);
+  const jitter = (jb - 0.5) * 0.55 * o.buttress * w;
   const g = 0.5 + 0.5 * Math.cos((a / 6.5) * Math.PI * 2 + 3 * noise1(a * 0.05, o.seed + 7));
-  return w * amp + (1 - w) * o.cleft + jitter + wobble + o.flutes * g * g * (h > 0.75 ? 0.4 : 1);
+  return w * amp + (1 - w) * o.cleft + jitter + o.flutes * 0.35 * g * g * (h > 0.75 ? 0.4 : 1);
+}
+
+/** Extra height of the rim at `a` along the strip: some columns rise as blocky towers, flat-topped and sheer. */
+function crownAt(a: number, o: CliffOpts) {
+  if (!o.crown) return 0;
+  const u = a / (o.period * 0.8) + 0.9 * noise1(a * 0.011, o.seed + 9);
+  const cell = Math.floor(u);
+  const f = u - cell;
+  const hc = hash(cell * 3.7 + o.seed * 11);
+  if (hc < 0.45) return 0;
+  const w = smoothstep(0.04, 0.16, f) * (1 - smoothstep(0.84, 0.96, f));
+  return w * o.crown * (0.3 + 0.7 * ((hc - 0.45) / 0.55));
 }
 
 export function addCliff(geo: GeoBuilder, cols: CliffColumn[], strata: Strata, o: CliffOpts) {
@@ -59,7 +77,7 @@ export function addCliff(geo: GeoBuilder, cols: CliffColumn[], strata: Strata, o
   let ymax = -Infinity;
   for (const c of cols) {
     ymin = Math.min(ymin, c.bottom - 3);
-    ymax = Math.max(ymax, c.top);
+    ymax = Math.max(ymax, c.top + (o.crown ?? 0));
   }
   if (ymax - ymin < 1) return;
   const k0 = strataIndex(ymin - 3.5);
@@ -72,6 +90,7 @@ export function addCliff(geo: GeoBuilder, cols: CliffColumn[], strata: Strata, o
 
   for (let i = 0; i < n; i++) {
     const c = cols[i];
+    const top = c.top + crownAt(c.along, o);
     const colBottom = c.bottom - 3;
     const warp = strataWarp(c.x, c.z);
     let crestOt = 0;
@@ -79,40 +98,41 @@ export function addCliff(geo: GeoBuilder, cols: CliffColumn[], strata: Strata, o
     for (let L = 0; L < layers; L++) {
       const k = k0 + L;
       const ya = L === 0 ? colBottom : strata.bottom[k] + warp;
-      const yb = L === layers - 1 ? Math.max(c.top, strata.bottom[k + 1] + warp) : strata.bottom[k + 1] + warp;
-      const yA = THREE.MathUtils.clamp(ya, colBottom, c.top);
-      const yB = THREE.MathUtils.clamp(yb, colBottom, c.top);
+      const yb = L === layers - 1 ? Math.max(top, strata.bottom[k + 1] + warp) : strata.bottom[k + 1] + warp;
+      const yA = THREE.MathUtils.clamp(ya, colBottom, top);
+      const yB = THREE.MathUtils.clamp(yb, colBottom, top);
       const h = strata.hard[k];
       let ob: number;
       let ot: number;
       let sh = 1;
-      if (ya >= c.top) {
+      if (ya >= top) {
         ob = ot = crestOt;
       } else {
-        let lat = lateral(c.along, k, h, o);
+        const lat = lateral(c.along, k, h, o);
         const base = o.lean * Math.max(0, yA - c.bottom) + lat;
-        if (h > 0.75) {
-          ob = ot = base - 0.5;
-        } else if (h < 0.3) {
+        // Mostly sheer faces; a soft layer under a hard one is cut back into an overhang only in some columns, and
+        // a few layers step back into a ledge.
+        const r = hash(k * 5.1 + Math.floor(c.along / o.period) * 1.3 + o.seed * 7);
+        if (h < 0.3 && r < 0.4) {
           ob = base + 0.3;
-          ot = base + 2.8;
+          ot = base + 2.2;
           sh = 0.72;
         } else {
-          ob = base + 0.2;
-          ot = base + 1.0;
+          ob = base;
+          ot = base + (r > 0.82 ? 2.5 : 0.25);
         }
         crestOt = ot;
       }
-      const lowDim = 0.78 + 0.22 * smoothstep(0, 12, yA - c.bottom);
+      const lowDim = 0.72 + 0.28 * smoothstep(0, 28, yA - c.bottom);
       pts[(row + 0) * 2] = ob;
       pts[(row + 0) * 2 + 1] = yA;
       pts[(row + 1) * 2] = ot;
       pts[(row + 1) * 2 + 1] = yB;
       shade[row] = sh * lowDim;
-      shade[row + 1] = sh * (0.78 + 0.22 * smoothstep(0, 12, yB - c.bottom));
+      shade[row + 1] = sh * (0.72 + 0.28 * smoothstep(0, 28, yB - c.bottom));
       row += 2;
     }
-    const lip = c.top + o.lift;
+    const lip = top + o.lift;
     pts[row * 2] = crestOt + 1.2;
     pts[row * 2 + 1] = lip;
     pts[(row + 1) * 2] = Math.max(c.back, crestOt + 3);

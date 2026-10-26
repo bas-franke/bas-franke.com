@@ -168,7 +168,7 @@ function buildTrackChunks(field: TerrainField, strata: Strata, S: Settings, leng
       let wall: CliffColumn[] = [];
       const flushWall = () => {
         if (wall.length >= 2)
-          addCliff(b, wall, strata, { lean: 0.06, buttress: 10, cleft: 7, flutes: S.flutes, period: 30, lift: 0.4, seed: si * 17 + 3 });
+          addCliff(b, wall, strata, { lean: 0.04, buttress: 9, cleft: 6, flutes: S.flutes, period: 20, lift: 0.4, crown: 16, seed: si * 17 + 3 });
         wall = [];
       };
       for (const cc of chunk) {

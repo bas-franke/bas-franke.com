@@ -1,9 +1,10 @@
 // Sandstone material for the skyline rocks and the great arch: a MeshStandardMaterial (so sun, sky light, shadows and
-// tone mapping match the rest of the world) with the albedo replaced by world-space strata: wavy horizontal bands of
-// pale and deep-red rock, vertical erosion grooves and varnish streaks, sand on flat tops and rubble on the talus.
-// Shadowed faces get a violet bounce tint, and the fog is replaced by layered aerial perspective: the scene fog (or
-// the theme haze if there is none), never fully opaque, drifting towards lavender with distance so far ridges stay
-// readable as pale silhouettes.
+// tone mapping match the rest of the world) with the albedo replaced by world-space blocky fracturing: tall vertical
+// columns split by deep joints, blocks stacked in them with staggered horizontal joints, each block its own tone and
+// a slightly tilted chiselled facet; only a faint trace of bedding. Sunlit faces and tops go burnt orange, faces turned
+// away violet-magenta with a cool blue-violet bounce, and the fog is replaced by layered aerial perspective: the scene
+// fog (or the theme haze if there is none), never fully opaque, drifting towards lavender with distance so far ridges
+// stay readable as pale silhouettes.
 
 import * as THREE from 'three';
 import type { Theme } from '../core/tracks';
@@ -46,14 +47,18 @@ export function createRockMaterial(theme: Theme, opts: RockMaterialOpts = {}): T
       );
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_HEAD}`)
-      .replace('#include <color_fragment>', '#include <color_fragment>\nfloat rockDist = length(vRockPos - cameraPosition);\ndiffuseColor.rgb *= rockAlbedo(vRockPos, normalize(vRockN), rockDist);')
+      .replace(
+        '#include <color_fragment>',
+        '#include <color_fragment>\nfloat rockDist = length(vRockPos - cameraPosition);\nvec3 rockTilt;\ndiffuseColor.rgb *= rockAlbedo(vRockPos, normalize(vRockN), rockDist, length(fwidth(vRockPos)), rockTilt);',
+      )
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(normal + (viewMatrix * vec4(rockTilt, 0.0)).xyz);')
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         {
-          // Violet bounce light in the shade, like the painted shadows in the concept art.
+          // Violet-blue bounce light in the shade, like the painted shadows in the concept art.
           float away = smoothstep(0.15, -0.35, dot(normalize(vRockN), uSunDir));
-          totalEmissiveRadiance += uRockShade * vec3(0.55, 0.5, 1.0) * away * 0.16;
+          totalEmissiveRadiance += (uRockShade * vec3(0.55, 0.5, 1.0) * 0.16 + vec3(0.02, 0.025, 0.08)) * away;
         }`,
       )
       .replace('#include <fog_fragment>', FOG);
@@ -88,44 +93,74 @@ float rNoise(vec2 p) {
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(rHash(i), rHash(i + vec2(1.0, 0.0)), f.x), mix(rHash(i + vec2(0.0, 1.0)), rHash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
-float rBand(float y, float period, float w) {
-  float f = fract(y / period);
-  return smoothstep(0.0, w, f) * smoothstep(w * 2.5, w * 1.5, f);
+float rH1(float n) { return fract(sin(n * 91.345 + 0.17) * 47453.5453); }
+// Irregular 1D cells (boundaries at k + 0.4 * (hash(k) - 0.5)): returns the cell index, f = 0..1 across it, w = width.
+float rCell(float x, float salt, out float f, out float w) {
+  float k = floor(x);
+  float b0 = k + 0.4 * (rH1(k + salt) - 0.5);
+  if (x < b0) { k -= 1.0; b0 = k + 0.4 * (rH1(k + salt) - 0.5); }
+  float b1 = k + 1.0 + 0.4 * (rH1(k + 1.0 + salt) - 0.5);
+  if (x >= b1) { k += 1.0; b0 = b1; b1 = k + 1.0 + 0.4 * (rH1(k + 1.0 + salt) - 0.5); }
+  w = b1 - b0;
+  f = (x - b0) / w;
+  return k;
 }
 
-vec3 rockAlbedo(vec3 p, vec3 n, float dist) {
+// Blocky fracture of a vertical face at (u along it, y up), px metres per pixel: (block id, crack 0..1), tilt = the
+// block's facet slope (along, up). Far away only the wide columns remain.
+vec2 rFracture(float u, float y, float px, out vec2 tilt) {
+  float fM, wM, fm, wm;
+  float M = rCell(u / 34.0, 3.1, fM, wM);
+  float dM = min(fM, 1.0 - fM) * wM * 34.0;
+  float m = rCell(u / 9.0, 7.7, fm, wm);
+  float dm = min(fm, 1.0 - fm) * wm * 9.0;
+  float bh = 7.0 + 20.0 * rH1(m * 1.73 + M * 0.37);
+  float Y = (y + rH1(m * 3.1 + 0.5) * bh) / bh;
+  float row = floor(Y);
+  float fy = Y - row;
+  float dy = min(fy, 1.0 - fy) * bh;
+  float minorFade = 1.0 - smoothstep(0.5, 2.0, px);
+  float id = minorFade > 0.0 ? rH1(m * 13.1 + row * 7.7 + M * 3.3) : rH1(M * 4.7);
+  float crack = (1.0 - smoothstep(0.0, max(0.3, px * 1.3), min(dm, dy))) * minorFade;
+  float major = (1.0 - smoothstep(0.0, max(1.0, px * 1.6), dM)) * (1.0 - smoothstep(4.0, 12.0, px));
+  tilt = vec2(rH1(id * 3.1) - 0.5, (rH1(id * 5.7) - 0.5) * 0.7) * 0.7 * minorFade + vec2((rH1(M * 1.9) - 0.5) * 0.45, 0.0);
+  return vec2(id, max(crack, major));
+}
+
+vec3 rockAlbedo(vec3 p, vec3 n, float dist, float px, out vec3 tilt) {
   float detail = uDetail * (1.0 - smoothstep(700.0, 2600.0, dist));
-  // Strata follow the height but wander gently over the landscape, as real bedding planes do.
-  float y = p.y + (rNoise(p.xz * 0.0035) - 0.5) * 14.0 + (rNoise(p.xz * 0.02) - 0.5) * 3.0;
-  // Big alternating formations: brighter orange and deeper red layers tens of metres thick.
-  float form = rNoise(vec2(y / 38.0, 3.7));
-  vec3 c = mix(uRockLit, mix(uRockLit, uRockShade, 0.45), smoothstep(0.35, 0.8, form));
-  // Pale beds of varying thickness (some barely there), and soft darker partings between them.
-  float bedN = rNoise(vec2(y / 21.0, 1.3));
-  float pale = rBand(y, 21.0, 0.05 + 0.1 * bedN) * smoothstep(0.1, 0.55, bedN);
-  c = mix(c, uRockStrata, pale * 0.6);
-  c = mix(c, uRockStrata, smoothstep(0.55, 0.95, rNoise(vec2(y / 6.0, 7.1))) * 0.18);
-  c *= 1.0 - rBand(y + 2.0, 7.3, 0.08) * 0.12 * detail * rNoise(vec2(y / 7.3, 4.0));
-  // Painterly light: sunlit faces warm and bright, faces turned away deep red-brown, so forms read even in flat light.
-  float sunF = dot(n, uSunDir);
-  vec3 shadeTint = uRockShade / max(uRockLit, vec3(0.02)) * vec3(0.95, 0.92, 1.1);
-  c *= mix(mix(vec3(1.0), shadeTint, 0.55), vec3(1.08, 1.04, 1.0), smoothstep(-0.25, 0.45, sunF));
-  // Horizontal coordinate along the face: vertical grooves and dark desert-varnish streaks run down the cliffs.
+  // Triplanar over the two vertical planes, sharply blended so the facets stay crisp.
+  vec2 w = pow(abs(n.xz) + 1e-3, vec2(6.0));
+  w /= w.x + w.y;
+  vec2 tA = vec2(0.0), tB = vec2(0.0);
+  vec2 fa = w.x > 0.02 ? rFracture(p.z, p.y, px, tA) : vec2(0.0);
+  vec2 fb = w.y > 0.02 ? rFracture(p.x + 31.0, p.y, px, tB) : vec2(0.0);
+  float id = w.x > w.y ? fa.x : fb.x;
+  float crack = (fa.y * w.x + fb.y * w.y) * (0.4 + 0.6 * detail);
+  float vert = 1.0 - smoothstep(0.5, 0.85, abs(n.y));
+  tilt = (vec3(0.0, 0.0, tA.x) * w.x + vec3(tB.x, 0.0, 0.0) * w.y + vec3(0.0, tA.y * w.x + tB.y * w.y, 0.0)) * vert * (0.3 + 0.7 * detail);
+  vec3 deep = mix(uRockLit, uRockShade, 0.35);
+  vec3 c = mix(uRockLit, deep, rH1(id * 9.7));
+  c *= 0.84 + 0.28 * rH1(id * 4.3);
+  // A faint trace of bedding (thick, wandering) so tall faces are not uniform.
+  float y = p.y + (rNoise(p.xz * 0.0035) - 0.5) * 14.0;
+  c = mix(c, uRockStrata, smoothstep(0.6, 0.95, rNoise(vec2(y / 30.0, 1.3))) * 0.18);
+  c *= 0.9 + 0.2 * rNoise(vec2((p.x + p.z) * 0.012, p.y * 0.008));
   vec2 h = normalize(vec2(-n.z, n.x) + 1e-4);
   float u = dot(p.xz, h);
-  // Close up (the great arch, near spires): thin bedding lines and blocky weathering, faded out with distance.
-  float nearD = 1.0 - smoothstep(120.0, 450.0, dist);
-  float bed = fract(y / 2.7 + rNoise(vec2(u * 0.05, y * 0.1)) * 0.3);
-  c *= 1.0 - smoothstep(0.85, 0.95, bed) * 0.1 * nearD;
-  c *= 1.0 + (rNoise(vec2(u / 5.0, y / 2.7)) - 0.5) * 0.18 * nearD;
-  float groove = rNoise(vec2(u * 0.16, p.y * 0.004));
-  c *= mix(1.0, 0.9 + 0.17 * groove, 0.4 + 0.6 * detail);
-  float streak = smoothstep(0.7, 0.95, rNoise(vec2(u * 0.35, p.y * 0.002)));
-  c *= 1.0 - streak * 0.2 * detail;
-  // Flat tops and ledges catch sand and scrub; the talus slopes are lighter rubble.
+  float streak = smoothstep(0.7, 0.95, rNoise(vec2(u * 0.3, p.y * 0.002)));
+  c *= 1.0 - streak * 0.15 * detail;
+  c = mix(c, uRockShade * 0.55, crack * 0.85);
+  // Painterly light: sunlit faces burnt orange, faces turned away violet-magenta, so forms read even in flat light.
+  float sunF = dot(normalize(n + tilt), uSunDir);
+  float lit = smoothstep(-0.2, 0.45, sunF);
+  c = mix(c, mix(c, uRockStrata, 0.4) * 1.1, smoothstep(0.15, 0.7, sunF) * 0.7);
+  vec3 violet = uRockShade * vec3(1.1, 0.9, 1.3) + deep * 0.12;
+  c = mix(c, violet * (0.85 + 0.3 * rH1(id * 2.3)), (1.0 - lit) * 0.7);
+  // Flat tops and ledges: burnt orange with a little sand and scrub; the talus slopes are lighter rubble.
   float top = smoothstep(0.72, 0.9, n.y);
   float talus = smoothstep(0.25, 0.5, n.y) * (1.0 - top);
-  vec3 sandy = mix(uSand, uScrub, smoothstep(0.6, 0.85, rNoise(p.xz * 0.05)) * 0.5);
+  vec3 sandy = mix(mix(uRockStrata, uSand, 0.5), uScrub, smoothstep(0.6, 0.85, rNoise(p.xz * 0.05)) * 0.4);
   c = mix(c, mix(c, mix(uRockStrata, uSand, 0.4), 0.45) * (0.85 + 0.25 * rNoise(p.xz * 0.15)), talus);
   c = mix(c, sandy, top * 0.85);
   return c;
