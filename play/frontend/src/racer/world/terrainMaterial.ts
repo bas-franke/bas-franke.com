@@ -213,10 +213,10 @@ const MAIN_FRAGMENT = /* glsl */ `
   float lit = smoothstep(-0.2, 0.45, sunF);
   float top = smoothstep(0.35, 0.8, wN.y) * r;
   albedo = mix(albedo, uTop * (0.9 + 0.2 * tNoise(vTW.xz * 0.2)), top * (0.35 + 0.3 * lit));
-  albedo = mix(albedo, mix(albedo, uTop, 0.4) * 1.1, smoothstep(0.15, 0.7, sunF) * r * 0.7);
+  albedo = mix(albedo, mix(albedo, uTop, 0.4) * 1.1, smoothstep(0.15, 0.7, sunF) * r * 0.45);
   float foot = vRock > 0.99 && vRock < 1.5 ? smoothstep(0.98, 0.7, vShade) : 0.0;
   vec3 violet = uShade * vec3(1.1, 0.9, 1.3) + uLitDeep * 0.12;
-  albedo = mix(albedo, violet * (0.7 + 0.3 * tNoise(vTW.xz * 0.05 + vTW.y * 0.03)), r * max((1.0 - lit) * 0.7, foot * 0.5));
+  albedo = mix(albedo, violet * (0.7 + 0.3 * tNoise(vTW.xz * 0.05 + vTW.y * 0.03)), r * max((1.0 - lit) * 0.85, foot * 0.55));
   diffuseColor.rgb = albedo * vShade;
   // Cool blue-violet fill in the joints, on undersides and on shaded faces (the sky bounce in the concept art).
   float under = smoothstep(-0.1, -0.6, wN.y);

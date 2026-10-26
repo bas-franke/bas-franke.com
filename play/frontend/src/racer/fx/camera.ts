@@ -1,4 +1,4 @@
-// Chase camera, low and wide like the concept art: about 10.5 m behind and 3.2 m above the pod, pitched down only a
+// Chase camera, low and wide like the concept art: about 10.5 m behind and 3.7 m above the pod, pitched down only a
 // few degrees so the pod sits in the bottom third and the horizon about 45% from the top, leaving room for the sky. It trails the pod's
 // heading (so it swings out a little in turns and the pod slides across the frame), stretches back when the pod
 // surges, widens the field of view with speed and boost, rolls with the road's banking and the turn, shakes on
@@ -22,8 +22,8 @@ export interface CameraTarget {
 
 /** Distance behind and height above the pod's centre at rest, and how far the view is pitched below the heading. */
 const BACK = 10.5;
-const HEIGHT = 3.2;
-const PITCH = 0.05;
+const HEIGHT = 3.7;
+const PITCH = 0.03;
 /** Vertical field of view at rest on a 16:9 screen, and the extra at full speed / on boost / on a pad surge. */
 const FOV = 54;
 const FOV_SPEED = 10;

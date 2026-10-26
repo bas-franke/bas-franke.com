@@ -73,7 +73,7 @@ void main() {
   vec3 rel = uWind * (0.6 + aSeed.w) - uCamVel;
   vec3 streak = -rel * uShutter;
   float sl = length(streak);
-  if (sl > 3.0) streak *= 3.0 / sl;
+  if (sl > 1.8) streak *= 1.8 / sl;
   vec3 a = p + (position.x > 0.0 ? streak : vec3(0.0));
   vec3 view = normalize(cameraPosition - a);
   vec3 sdir = sl > 1e-3 ? normalize(streak) : vec3(1.0, 0.0, 0.0);
@@ -175,7 +175,7 @@ export class AirSystem {
     mu.uTime.value = time;
     mu.uCam.value.copy(camera.position);
     mu.uCamVel.value.copy(camVel);
-    mu.uIntensity.value = 0.08 + 0.22 * Math.min(1, s) + 0.15 * boost;
+    mu.uIntensity.value = 0.05 + 0.12 * Math.min(1, s) + 0.1 * boost;
   }
 
   dispose() {
