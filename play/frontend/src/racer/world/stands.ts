@@ -73,6 +73,9 @@ export const buildStands: WorldBuilder = (ctx) => {
   const woodDark = C('#6b4229');
   const fascia = C('#4a3a33');
   const lampGlass = C('#fff3d0');
+  // Banner frames are near-black iron so the purple cloth and its glowing emblem stand out against the red rock.
+  const pole = C('#231a22');
+  const poleCap = C('#3a2c36');
   const teamA = C(theme.banners[0]);
   const teamB = C(theme.banners[1] ?? theme.banners[0]);
   const emblem = C(theme.banners[2] ?? '#f2f2f2');
@@ -296,7 +299,8 @@ export const buildStands: WorldBuilder = (ctx) => {
     let k = side > 0 ? 1 : 0;
     while (s < track.length - 10) {
       const dense = nearStart(s) || nearStand(s);
-      const next = dense ? 34 + r() * 16 : 80 + r() * 70;
+      // Like the concept art: a banner every few dozen metres on each side, closer still by the stands and the start.
+      const next = dense ? 30 + r() * 14 : 55 + r() * 45;
       if (onGorge(s)) {
         s += next;
         continue;
@@ -316,17 +320,17 @@ export const buildStands: WorldBuilder = (ctx) => {
       foot.y = edge.y;
       // Face the road, turned towards oncoming racers so the emblem reads from the chase camera.
       const facing = out.clone().negate().addScaledVector(fwd, -0.8).normalize();
-      const bw = 3.2;
-      const bh = 8.5 + r() * 2;
+      const bw = 3.0;
+      const bh = 9.5 + r() * 2.5;
       const topH = bh + 3.5;
       const along = new THREE.Vector3().crossVectors(UP, facing).normalize();
       for (const e of [-1, 1]) {
         const pf = foot.clone().addScaledVector(along, e * (bw / 2 + 0.18));
-        struct.beam(pf.clone().addScaledVector(UP, -6), pf.clone().addScaledVector(UP, topH + 0.9), 0.22, steel);
-        struct.box(pf.clone().addScaledVector(UP, topH + 1.05), along, UP, facing, 0.17, 0.17, 0.17, steelLight);
+        struct.beam(pf.clone().addScaledVector(UP, -6), pf.clone().addScaledVector(UP, topH + 1.4), 0.24, pole);
+        struct.box(pf.clone().addScaledVector(UP, topH + 1.6), along, UP, facing, 0.2, 0.22, 0.2, poleCap);
       }
       const top = foot.clone().addScaledVector(UP, topH);
-      struct.beam(top.clone().addScaledVector(along, -(bw / 2 + 0.4)), top.clone().addScaledVector(along, bw / 2 + 0.4), 0.16, steel);
+      struct.beam(top.clone().addScaledVector(along, -(bw / 2 + 0.45)), top.clone().addScaledVector(along, bw / 2 + 0.45), 0.2, pole);
       banners.push({ top: top.addScaledVector(UP, -0.1), facing, width: bw, height: bh, color: k++ % 2 ? teamB : teamA });
       if (dense && !low && r() < 0.35) mast(f.pos.clone().addScaledVector(out, off + 3).setY(edge.y), out.clone().negate(), fwd, 14);
       s += next;

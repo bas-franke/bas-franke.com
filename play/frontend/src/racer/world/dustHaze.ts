@@ -252,17 +252,17 @@ export const buildDustHaze: WorldBuilder = (ctx) => {
         const sunny = THREE.MathUtils.clamp(0.5 - out.dot(sunFlat) * 0.8, 0, 1);
         const room = wall - half;
         const y = track.toWorld(s, side * half, 0, tmp).y;
-        for (let k = 0; k < S.per + (S.tall && r() < 0.5 ? 1 : 0); k++) {
+        for (let k = 0; k < S.per + (S.tall && r() < 0.7 ? 1 : 0); k++) {
           // Keep the plume's inner edge outside the racing line: size limited by the room between road edge and wall.
           // Out in front of the rubble at the wall foot, but its inner edge stays near the road edge.
           // The extra puff on high is a tall, faint billow riding higher up the wall.
           const tall = k >= S.per;
-          const size = THREE.MathUtils.clamp(4 + r() * 6 + room * 0.2, 4, Math.max(4, room * 0.55 + 2)) * (tall ? 1.5 : k ? 0.75 : 1);
+          const size = THREE.MathUtils.clamp(4 + r() * 6 + room * 0.2, 4, Math.max(4, room * 0.55 + 2)) * (tall ? 1.8 : k ? 0.75 : 1);
           const off = THREE.MathUtils.clamp(wall - size * 0.7 - r() * 2, half + size * 0.9, wall);
           const base = f.pos.clone().addScaledVector(out, off).addScaledVector(f.tangent.clone().setY(0).normalize(), (r() - 0.5) * S.every * 0.6);
           base.y = y + 0.3 + (tall ? size * 0.5 : 0);
           const seed = (side > 0 ? 0.5 : 0) + r() * 0.4999;
-          items.push({ p: [base.x, base.y, base.z, size], d: [seed, 0, sunny, (0.55 + r() * 0.25) * (tall ? 0.45 : 1)], q: [-out.x, 0, -out.z, s] });
+          items.push({ p: [base.x, base.y, base.z, size], d: [seed, 0, sunny, (0.55 + r() * 0.25) * (tall ? 0.4 : 1)], q: [-out.x, 0, -out.z, s] });
         }
       }
     }
