@@ -152,6 +152,9 @@ VERSION = 1                    # bump when the logic changes (old results stay u
 TITLE = "Volatility targeting"
 MULTI_MARKET = False           # True if it can hold several markets at once
 BOT_READY = False              # research families are never bot-ready; porting to the bot is separate work
+ANCHORED = False               # True if targets depend on where trading starts (DCA schedules, value averaging,
+                               # anything with a "start" date): each fold then restarts it; without it a DCA family
+                               # looks like plain buy and hold in every fold (#409)
 
 def default_params() -> dict: ...
 def param_space() -> dict:     # name -> {"type": "int"|"float", "min", "max", "log"?, "zero"?} | {"type": "bool"}
