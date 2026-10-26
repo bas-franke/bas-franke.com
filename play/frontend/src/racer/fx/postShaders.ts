@@ -164,7 +164,8 @@ void main() {
   // --- Zoom blur towards the focus point: nothing in the centre, most at the bottom and the edges.
   vec2 d = uv - focus;
   float r = length(d * vec2(aspect, 1.0));
-  float mask = smoothstep(0.12, 0.85, r);
+  // Grows towards the frame edges, where the streaks in the concept art are strongest.
+  float mask = smoothstep(0.12, 0.85, r) * (1.0 + 0.5 * smoothstep(0.55, 1.0, r));
   mask *= mix(0.45, 1.0, smoothstep(0.3, 0.0, d.y));       // the sky above the focus smears less...
   mask *= 1.0 + 0.9 * smoothstep(0.0, -0.45, d.y);        // ...and the ground below it more
   vec2 pe = (uv - podMask.xy) / podMask.zw;

@@ -106,7 +106,7 @@ export const buildSky: WorldBuilder = (ctx) => {
   // the blood red a warm skylight times warm rock gives); bluer under a day sky, more violet under a dusk one.
   const hemiSky = C(theme.skyTop).lerp(C(theme.skyHorizon), 0.25).lerp(C('#c4aec4'), 0.6);
   const hemiGround = C(theme.sand).lerp(C(theme.rockLit), 0.35).lerp(C('#d0b0a0'), 0.25);
-  const hemi = new THREE.HemisphereLight(hemiSky, hemiGround, 1.45);
+  const hemi = new THREE.HemisphereLight(hemiSky, hemiGround, 1.3);
   group.add(hemi);
 
   // Light reflected off sunlit canyon walls, coming from the side opposite the sun, low.
