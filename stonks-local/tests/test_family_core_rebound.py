@@ -77,3 +77,40 @@ def test_core_trend_holds_outside_dips():
     assert np.isnan(w[:2]).all() and (w[2:] == 1).all()
     w0 = FAM.targets({"BTC-EUR": closes(up)}, spec())["BTC-EUR"].to_numpy()
     assert (w0[2:] == 0).all()
+
+
+D1 = 86_400_000
+
+
+def daily(c, vol=1.0):
+    df = bars([(x, x, x, x) for x in c], start=1_600_041_600_000, step=D1)   # midnight UTC
+    df["volume"] = vol
+    return df
+
+
+def test_top10_breadth_matches_breadth_dip():
+    bd = FAMILIES["breadth_dip"]
+    cd = {m: closes(DIP) for m in ["BTC-EUR", "ETH-EUR", "SOL-EUR"]}
+    s = spec(["BTC-EUR"], source="top10", breadthMin=0.6, holdBars=500, sellAbove=70)
+    b = normalize_spec({"family": "breadth_dip", "markets": ["BTC-EUR"], "interval": "4h",
+                        "params": {"rsiPeriod": 2, "rsiBelow": 30, "breadthMin": 0.6, "sellAbove": 70,
+                                   "maxHold": 0, "coreSma": 0}}, bd)
+    np.testing.assert_array_equal(FAM.targets(cd, s).to_numpy(), bd.targets(cd, b).to_numpy())
+
+
+def test_pit10_breadth_uses_only_past_members():
+    n = 130
+    calm = [100.0] * n
+    crash = [100.0] * 110 + [70.0] + [100.0] * (n - 111)
+    early = [100.0] * 40 + [70.0] + [100.0] * (n - 41)     # before 90 days of volume history: no members yet
+    cd = {"BTC-EUR": daily(crash), "ETH-EUR": daily(crash), "XRP-EUR": daily(crash), "ADA-EUR": daily(calm)}
+    s = spec(["BTC-EUR"], source="pit10", signal="drawdown", ddLook=5, ddMin=0.2, breadthMin=0.7, holdBars=2)
+    s["interval"] = "1d"
+    w = FAM.targets(cd, s)["BTC-EUR"].to_numpy()
+    assert np.isnan(w[:90]).all()
+    assert w[110] == 1 and w[111] == 1 and w[112] == 0 and np.nansum(w) == 2
+    cd2 = {m: daily(early) for m in ["BTC-EUR", "ETH-EUR", "XRP-EUR"]}
+    w2 = FAM.targets(cd2, s)["BTC-EUR"].to_numpy()
+    assert np.nansum(w2) == 0
+    trunc = {m: df.iloc[:112] for m, df in cd.items()}
+    np.testing.assert_array_equal(FAM.targets(trunc, s)["BTC-EUR"].to_numpy(), w[:112])

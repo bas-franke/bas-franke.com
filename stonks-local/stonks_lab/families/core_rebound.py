@@ -1,4 +1,4 @@
-"""core_rebound v1: SMA trend core plus a time-boxed rebound buy after a capitulation (agent-19).
+"""core_rebound v2: SMA trend core plus a time-boxed rebound buy after a capitulation (agent-19).
 
 The ablation of breadth_dip (findings #212/#213) showed that its BTC 1d edge needs both legs: an SMA trend core
 that rides uptrends and a panic buy, held for weeks, that catches the V-shaped recoveries the SMA re-enters late.
@@ -8,6 +8,10 @@ same structure works with a panic signal that needs no coin list:
 - source "own":  the traded coin's own signal;
 - source "both": BTC-EUR and ETH-EUR must both signal (a two-coin market-wide panic);
 - source "any":  either BTC-EUR or ETH-EUR signals.
+- source "top10": at least breadthMin of today's top-10 list signal (breadth_dip's list: hindsight, the control);
+- source "pit10": at least breadthMin of the point-in-time top 10 signal: the 10 coins of the universe.PIT_POOL
+  with the largest trailing 90-day Bitvavo EUR volume, decided from the days before (no hindsight in the list).
+(v2 added top10/pit10 and breadthMin; v1 results are own/both/any only.)
 
 Signal (per coin, at the bar close):
 - "rsi":      RSI(rsiPeriod) < rsiBelow;
@@ -24,19 +28,23 @@ import numpy as np
 import pandas as pd
 
 from .. import indicators as ind
+from .. import universe as uni
 from ._base import bars_text, frame, market_names, max_weight, pct, risk_steps, union_index
 
 NAME = "core_rebound"
-VERSION = 1
+VERSION = 2
 TITLE = "Trend core + rebound buy"
 BOT_READY = False
 MULTI_MARKET = True
 SIGNAL_MARKETS = ["BTC-EUR", "ETH-EUR"]
+TOP10_MARKETS = ["BTC-EUR", "ETH-EUR", "XRP-EUR", "BNB-EUR", "SOL-EUR", "DOGE-EUR", "ADA-EUR", "TRX-EUR",
+                 "LINK-EUR", "AVAX-EUR"]
+MIN_BREADTH_COINS = 3
 
 
 def default_params() -> dict:
     return {"coreSma": 130, "signal": "rsi", "source": "own", "rsiPeriod": 12, "rsiBelow": 35,
-            "ddLook": 60, "ddMin": 0.3, "holdBars": 90, "sellAbove": 100.0}
+            "ddLook": 60, "ddMin": 0.3, "holdBars": 90, "sellAbove": 100.0, "breadthMin": 0.8}
 
 
 def param_space() -> dict:
@@ -45,8 +53,11 @@ def param_space() -> dict:
                     "description": "hold while the close is above this SMA (0 = no trend core)"},
         "signal": {"type": "choice", "values": ["rsi", "drawdown"],
                    "description": "capitulation signal: RSI under rsiBelow, or close ddMin under its ddLook high"},
-        "source": {"type": "choice", "values": ["own", "both", "any"],
-                   "description": "whose signal counts: the traded coin's own, BTC and ETH both, or either"},
+        "source": {"type": "choice", "values": ["own", "both", "any", "top10", "pit10"],
+                   "description": "whose signal counts: the traded coin's own, BTC and ETH both, either, or a "
+                                  "breadthMin share of today's top 10 (top10) or of the point-in-time top 10 (pit10)"},
+        "breadthMin": {"type": "float", "min": 0.2, "max": 1.0,
+                       "description": "top10/pit10: share of the coins that must signal at once"},
         "rsiPeriod": {"type": "int", "min": 2, "max": 50, "description": "RSI length in candles"},
         "rsiBelow": {"type": "float", "min": 10, "max": 45, "description": "RSI capitulation level"},
         "ddLook": {"type": "int", "min": 5, "max": 400, "log": True,
@@ -71,8 +82,13 @@ def warmup(p: dict) -> int:
     return max(int(p["rsiPeriod"]), s, c - 1 if c > 0 else 0)
 
 
+def _pool(source: str) -> list[str]:
+    return {"own": [], "both": SIGNAL_MARKETS, "any": SIGNAL_MARKETS, "top10": TOP10_MARKETS,
+            "pit10": uni.pit_pool()}[source]
+
+
 def required_markets(spec: dict) -> list[str]:
-    extra = [] if spec["params"].get("source", "own") == "own" else SIGNAL_MARKETS
+    extra = _pool(spec["params"].get("source", "own"))
     return list(dict.fromkeys(list(spec["markets"]) + extra))
 
 
@@ -104,7 +120,23 @@ def targets(candles, spec, start_time=None):
     n = len(idx)
     source = p.get("source", "own")
     shared = None
-    if source != "own":
+    if source in ("top10", "pit10"):
+        pool = [m for m in _pool(source) if m in candles and len(candles[m])]
+        if source == "pit10":
+            daily = {m: candles[m] for m in pool} if spec.get("interval") == "1d" else None
+            member = uni.pit_members(idx, pool, daily)
+        else:
+            member = np.ones((n, len(pool)), dtype=bool)
+        low, defined = np.zeros(n), np.zeros(n)
+        for j, m in enumerate(pool):
+            f = _asof(candles[m], _signal(candles[m], p), idx)
+            f = np.where(member[:, j], f, np.nan)
+            low += np.nan_to_num(f, nan=0.0)
+            defined += np.isfinite(f)
+        frac = np.divide(low, defined, out=np.zeros(n), where=defined > 0)
+        shared = np.where(defined >= MIN_BREADTH_COINS,
+                          (frac >= float(p.get("breadthMin", 0.8)) - 1e-12).astype(float), np.nan)
+    elif source != "own":
         sigs = [_asof(candles[m], _signal(candles[m], p), idx) for m in SIGNAL_MARKETS]
         a, b = sigs
         ok = np.isfinite(a) & np.isfinite(b)
@@ -152,7 +184,10 @@ def explain(spec) -> dict:
     mk = market_names(spec)
     k = len(spec.get("markets") or [])
     who = {"own": "the coin itself", "both": "both BTC and ETH at the same time",
-           "any": "BTC or ETH"}[p.get("source", "own")]
+           "any": "BTC or ETH",
+           "top10": f"at least {pct(p.get('breadthMin', 0.8))} of today's ten biggest coins at once",
+           "pit10": f"at least {pct(p.get('breadthMin', 0.8))} of the ten most traded coins of that time at once"}[
+        p.get("source", "own")]
     if p.get("signal", "rsi") == "rsi":
         what = (f"the RSI over {bars_text(p['rsiPeriod'], iv)} (a 0-100 score of how hard the price has been "
                 f"falling or rising) drops under {float(p['rsiBelow']):g}")
