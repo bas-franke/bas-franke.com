@@ -5,7 +5,7 @@
 // and replayed from random offsets, so firing and explosions allocate no sample data.
 //
 // Two ways to play:
-// - `play(name, distance)` is flat and centred, the original API (Ruckus, and sounds that happen to the listener).
+// - `play(name, distance)` is flat and centred, the original API (UI sounds and sounds that happen to the listener).
 // - `playAt(name, x, y, z)` is positional: distance attenuation, stereo pan and a muffling low-pass, all relative to
 //   the listener set each frame with `listen()`. Rockets in flight get a looping hiss with doppler via `rocket()`.
 // Positional sounds share a voice budget; when it is full, new far-away sounds are simply dropped.

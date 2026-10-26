@@ -1,10 +1,10 @@
-// Takes the screenshots the lobby shows for each game: a few Rockets maps, every Ruckus minigame and every Last Light map, captured from
+// Takes the screenshots the lobby shows for each game: a few Rockets maps and every Last Light map, captured from
 // a real match against bots in a headless browser, and a few Dustrunners tracks mid-race with the AI flying our pod. Garden Sentinels: hard bots build up
 // the gardens while we call every wave early. Starts its own backend and dev server on spare ports, so a dev
 // server you have open is left alone.
 //
 //   npm run screenshots                          everything
-//   npm run screenshots -- --only rockets        one game (rockets, ruckus, zombies, dustrunners, garden); zombies includes the art
+//   npm run screenshots -- --only rockets        one game (dustrunners, rockets, garden, zombies); zombies includes the art
 //   npm run screenshots -- --only zombies-art    only Last Light's key art (menu and loading screens)
 //   npm run screenshots -- --stale               only the games whose graphics changed since their last capture
 //   npm run screenshots -- --maps foundry,orbit  which Rockets maps (default below)
@@ -23,7 +23,6 @@ import { fileURLToPath } from 'node:url';
 import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
 import { GAME_IDS, GAMES, SOLO_GAME_IDS, SOLO_GAMES, type GameId, type SoloGameId } from '../../backend/src/shared/protocol.js';
 import { MAP_LIST } from '../../backend/src/shared/rockets/maps.js';
-import { MINIGAME_IDS, MINIGAMES, type MinigameId } from '../../backend/src/shared/ruckus/world.js';
 import { ZMAP_LIST } from '../../backend/src/shared/zombies/maps.js';
 import { INPUTS, fingerprint, staleGames, writeLock } from './inputs.mjs';
 
@@ -219,39 +218,6 @@ async function shootRockets(context: BrowserContext): Promise<Shot[]> {
     await page.close();
   }
   return shots;
-}
-
-async function shootRuckus(context: BrowserContext): Promise<Shot[]> {
-  log('Ruckus · one match, a shot of every minigame (takes a few minutes)');
-  const page = await startMatch(context, await createRoom('ruckus'));
-  const got = new Map<MinigameId, Shot>();
-  const deadline = Date.now() + 12 * 60_000;
-  while (Date.now() < deadline && got.size < MINIGAME_IDS.length) {
-    const hud = await page.evaluate(() => {
-      const s = (window as unknown as { __playClient: { hud: { get(): { phase: string; mg: string | null; left: number; ended: unknown } } } }).__playClient.hud.get();
-      return { phase: s.phase, mg: s.mg as MinigameId | null, left: s.left, ended: !!s.ended };
-    });
-    if (hud.ended) break;
-    // A few seconds into the play phase the pawns have spread out and the arena shows what the minigame is about.
-    if (hud.phase === 'play' && hud.mg && !got.has(hud.mg) && MINIGAMES[hud.mg].seconds - hud.left >= 4) {
-      // The chase camera follows our pawn; a spectator's view of the whole arena makes the better picture.
-      await page.evaluate(() => {
-        const c = (window as unknown as { __playClient: { me?: { participating: boolean } } }).__playClient;
-        if (c.me) c.me.participating = false;
-      });
-      await sleep(1300);
-      const file = `ruckus-${hud.mg}.jpg`;
-      await screenshot(page, file);
-      got.set(hud.mg, { file, caption: MINIGAMES[hud.mg].name });
-      log(`  ${MINIGAMES[hud.mg].name}`);
-    }
-    await sleep(400);
-  }
-  await page.close();
-  if (!got.size) fail('No Ruckus round reached the play phase.');
-  const missing = MINIGAME_IDS.filter((id) => !got.has(id));
-  if (missing.length) log(`  missing (round ended too fast): ${missing.join(', ')}; run again for those`);
-  return MINIGAME_IDS.filter((id) => got.has(id)).map((id) => got.get(id)!);
 }
 
 /** Dustrunners tracks shown: one room race per track, a few seconds after the green light with the pack in view. */
@@ -574,7 +540,6 @@ async function shootGarden(context: BrowserContext): Promise<Shot[]> {
 
 const shooters: Record<AnyGame, (context: BrowserContext) => Promise<Shot[]>> = {
   rockets: shootRockets,
-  ruckus: shootRuckus,
   zombies: shootZombies,
   dustrunners: shootDustrunners,
   garden: shootGarden,

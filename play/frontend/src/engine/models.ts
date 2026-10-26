@@ -7,7 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 const loader = new GLTFLoader();
 const cache = new Map<string, Promise<THREE.Group | null>>();
 
-export type ModelName = 'droid' | 'launcher' | 'rocket' | 'healthpack' | 'pawn' | 'bomb' | 'coin' | 'crown';
+export type ModelName = 'droid' | 'launcher' | 'rocket' | 'healthpack';
 
 export function loadModel(name: ModelName): Promise<THREE.Group | null> {
   let p = cache.get(name);

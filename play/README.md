@@ -6,11 +6,10 @@ Node.js + Express + `ws` backend on port **3004**. No database; rooms live in me
 
 | Game        | What it is                                                                                              |
 |-------------|---------------------------------------------------------------------------------------------------------|
-| **Rockets** | First-person rocket arena (Quake 3 "rockets only"): infinite rockets, splash damage, rocket jumps, jump pads, health packs. 5 minutes or 15 frags. |
-| **Ruckus**  | Party game in five rounds (Uther Party style). Each round is a minigame: Hot Potato, Floor is Lava, Coin Rush, Sweeper, Sumo. Points for placement; highest total wins. |
-| **Last Light** | Co-op zombie survival for 1 to 10 SWAT operators (bots fill in): endless waves in a fully destructible grand hotel lobby. Board up the doors, buy guns old and new, ammo, grenades and armor with points, revive each other. |
-| **Garden Sentinels** | Cozy sci-fi tower defense for 1 to 6 players: build and upgrade five kinds of towers along garden paths against crystal aliens. Co-op (one garden, 30 waves) or versus (everyone defends their own garden and sends enemies at the others). |
 | **Dustrunners** | Single-player podracing through red-rock canyons at `/race`: career (cups, prize money, garage), quick race, time trial against AI pilots. Not a room game: listed in the lobby from `SOLO_GAMES`. |
+| **Rockets** | First-person rocket arena (Quake 3 "rockets only"): infinite rockets, splash damage, rocket jumps, jump pads, health packs. 5 minutes or 15 frags. |
+| **Garden Sentinels** | Cozy sci-fi tower defense for 1 to 6 players: build and upgrade five kinds of towers along garden paths against crystal aliens. Co-op (one garden, 30 waves) or versus (everyone defends their own garden and sends enemies at the others). |
+| **Last Light** | Co-op zombie survival for 1 to 10 SWAT operators (bots fill in): endless waves in a fully destructible grand hotel lobby. Board up the doors, buy guns old and new, ammo, grenades and armor with points, revive each other. |
 
 Every room game supports bots (easy / normal / hard), chosen when the room is created or changed by the host in the room.
 
@@ -23,16 +22,13 @@ frontend/src/                          backend/src/
 ├── room/       waiting room, chat,    ├── rooms.ts     Room lifecycle, host, bots, auto-close
 │               mounts the game        ├── games/
 ├── ui/         header, dialogs,       │   ├── rockets/ server.ts (sim + rules), bots.ts, nav.ts
-│               screenshot gallery     │   ├── ruckus/  server.ts (rounds), bots.ts, minigames/*
-│                                      │   └── garden/  server.ts (loop, snapshots), sim.ts, bots.ts
+│               screenshot gallery     │   └── garden/  server.ts (loop, snapshots), sim.ts, bots.ts
 ├── engine/     three.js wrapper,      └── shared/      ← imported by the frontend as @shared/*
 │   input, interpolation, models,          ├── protocol.ts   lobby/room messages, game metadata
 │   effects, synthesized audio             ├── math.ts
 └── games/                                 ├── rockets/      constants, map(s), physics, protocol
-    ├── catalog.ts  screenshots per game   ├── ruckus/       constants, world (layouts + pawn physics), protocol
-    ├── rockets/ client.ts, arena.ts,      └── garden/       constants, towers, enemies, maps, board, protocol
-    │            Hud.tsx
-    ├── ruckus/  client.ts, arena.ts,
+    ├── catalog.ts  screenshots per game   └── garden/       constants, towers, enemies, maps, board, protocol
+    ├── rockets/ client.ts, arena.ts,
     │            Hud.tsx
     └── garden/  client.ts, Hud.tsx and one module
                  per concern (api.ts)
@@ -71,13 +67,6 @@ hopping) with low gravity (18 m/s², a 2.3 m jump). Rockets fly at 30 m/s; splas
 players back, with self-damage reduced and self-knockback boosted so rocket jumps fly high.
 Bots navigate a grid-based nav graph generated from the map (`games/rockets/nav.ts`), strafe, lead their shots, chase
 health packs when low and rocket-jump after players on the high ground (normal and hard only).
-
-### Ruckus
-
-Five rounds in a shuffled order of the five minigames, each with a 4 s intro showing the rules, a timed play phase and
-a 5 s results screen. Pawns move on a disc, a tile grid or a walled square (`shared/ruckus/world.ts`) and have a dash
-that shoves whoever it hits. Placement points: 10, 7, 5, 4, 3, 2, 1, 1. Players who join mid-match watch until the
-next round starts. Each minigame is one small class in `games/ruckus/minigames/`.
 
 ### Last Light
 

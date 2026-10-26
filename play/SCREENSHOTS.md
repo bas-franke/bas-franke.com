@@ -13,7 +13,7 @@ loading screens (`frontend/public/art/lastlight/`, listed in `frontend/src/games
 That covers the arena or world rendering (`frontend/src/games/<game>/arena.ts`, `client.ts`), the HUD
 (`frontend/src/games/<game>/Hud.tsx` and the HUD rules in `styles.css`), the engine (`frontend/src/engine/`, lighting,
 post-processing), the 3D models (`frontend/public/models/`, built by `tools/blender/`), the shared world data
-(`backend/src/shared/<game>/`: Rockets maps, Ruckus layouts) and the minigame or map pool (a new Rockets map is a
+(`backend/src/shared/<game>/`: Rockets maps) and the map pool (a new Rockets map is a
 good reason to add it to the shots, see below). Lobby-only changes do not need new screenshots.
 
 ```bash
@@ -62,7 +62,6 @@ The deploy workflow (`.github/workflows/deploy-play.yml`) runs the checker befor
    game reports `ready`, hides the control hints and takes a 1280×720 JPEG of the whole page, HUD included.
    - **Rockets**: one room per map (`--maps foundry,skyway,canyon,orbit` is the default; any map id from
      `backend/src/shared/rockets/maps.ts` works), camera parked above the highest spawn point looking at the centre.
-   - **Ruckus**: one five-round match, a shot a few seconds into the play phase of every minigame. Takes a few minutes.
    - **Last Light key art** (part of `--only zombies`, or by itself with `--only zombies-art`): one more match with
      eight bots, so the lounge bar and the restaurant are open, in its own 1920×1080 page. Once the first wave is at
      the boards it moves the camera through the shots in `ART_SHOTS` (a camera position and a look-at point each, or

@@ -114,24 +114,11 @@
 }
 /* Portrait phones: no room beside the clock, so the buttons sit centred under it. */
 @media (max-width: 560px) {
-  .touch:not(.ruckus) .touch-ui {
+  .touch .touch-ui {
     left: 50%;
     top: calc(max(12px, env(safe-area-inset-top)) + 122px);
     transform: translateX(-50%);
   }
-}
-/* Ruckus: the clock is top centre and the points top right, so the buttons go top left. */
-.touch.ruckus .touch-ui {
-  left: max(14px, env(safe-area-inset-left));
-}
-@media (max-width: 760px) {
-  .touch.ruckus .touch-ui {
-    top: calc(max(12px, env(safe-area-inset-top)) + 64px);
-  }
-}
-.touch.ruckus .touch-fire {
-  font-size: 20px;
-  background: radial-gradient(circle at 35% 28%, #c9ffe8 0 16%, var(--mint) 18% 70%, #2fbf8c 72%);
 }
 .touch-ui button {
   width: 40px;

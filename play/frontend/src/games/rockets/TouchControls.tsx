@@ -20,7 +20,6 @@ export function useTouchMode() {
 /**
  * On-screen controls for phones and tablets. Left half: a floating move stick. Right half: drag to look.
  * Fire and jump are hold buttons that also look while dragged. All event handling lives in TouchInput.
- * Ruckus uses the same overlay with one action button (`fireLabel="Dash!"`, no jump) and the menu buttons top left.
  */
 export function TouchControls({
   touch,

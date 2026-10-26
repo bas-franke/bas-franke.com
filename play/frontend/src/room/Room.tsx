@@ -39,7 +39,7 @@ interface LastMatch {
   finished: boolean;
   winner: string | null;
   rows: { id: string; value: number; time?: number | null }[];
-  /** What `value` counts: frags in Rockets, points in Ruckus. */
+  /** What `value` counts: frags in Rockets, points elsewhere. */
   unit: string;
   /** Rockets map the match was played on. */
   mapId?: string;

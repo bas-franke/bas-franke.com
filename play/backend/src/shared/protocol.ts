@@ -3,12 +3,12 @@
 
 import type { Look } from './rockets/cosmetics.js';
 import type { RocketsClientMsg, RocketsServerMsg } from './rockets/protocol.js';
-import type { RuckusClientMsg, RuckusServerMsg } from './ruckus/protocol.js';
 import type { ZombiesClientMsg, ZombiesServerMsg } from './zombies/protocol.js';
 import type { GardenClientMsg, GardenServerMsg } from './garden/protocol.js';
 import type { DustrunnersClientMsg, DustrunnersServerMsg } from './dustrunners/protocol.js';
 
-export type GameId = 'rockets' | 'ruckus' | 'zombies' | 'garden' | 'dustrunners';
+/** Object key order of GAMES is the order the lobby lists them in. */
+export type GameId = 'dustrunners' | 'rockets' | 'garden' | 'zombies';
 export type BotDifficulty = 'easy' | 'normal' | 'hard';
 export type RoomState = 'waiting' | 'playing';
 /** Game modes: Rockets' (rules in shared/rockets/modes.ts) and Garden Sentinels' co-op / versus. Other games ignore the mode. */
@@ -31,6 +31,25 @@ export interface GameMeta {
 }
 
 export const GAMES: Record<GameId, GameMeta> = {
+  dustrunners: {
+    id: 'dustrunners',
+    name: 'Dustrunners',
+    tagline: 'Online podracing through red-rock canyons.',
+    description:
+      'Race twin-turbine pods through sun-baked canyons against your friends and bot pilots. Thread the arches, take ' +
+      'the shortcuts, boost down the straights and knife-edge through the gaps; scrape the walls and parts of your pod ' +
+      'come off. Points by finishing place, and the solo career with cups and upgrades is one click away.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    accent: '#ff9a3c',
+    controls: [
+      { keys: 'W / ↑', does: 'Thrust' },
+      { keys: 'S / ↓', does: 'Air brake' },
+      { keys: 'A D / ← →', does: 'Steer' },
+      { keys: 'Space / Shift', does: 'Boost' },
+      { keys: 'Q / E', does: 'Knife-edge roll' },
+    ],
+  },
   rockets: {
     id: 'rockets',
     name: 'Rockets',
@@ -47,44 +66,6 @@ export const GAMES: Record<GameId, GameMeta> = {
       { keys: 'Space', does: 'Jump (hold to bunny-hop)' },
       { keys: 'Left click', does: 'Fire rocket' },
       { keys: 'Tab', does: 'Scoreboard' },
-    ],
-  },
-  ruckus: {
-    id: 'ruckus',
-    name: 'Ruckus',
-    tagline: 'Party minigames, one ruckus after another.',
-    description:
-      'A party game in rounds. Every round is a different minigame: pass the bomb before it blows, survive the crumbling ' +
-      'floor, grab the most coins, dodge the sweeper, or shove everyone off the platform. Points for placement each round; ' +
-      'the highest total after the last round takes the crown.',
-    minPlayers: 2,
-    maxPlayers: 8,
-    accent: '#7cf4c9',
-    controls: [
-      { keys: 'W A S D', does: 'Move' },
-      { keys: 'Space / Left click', does: 'Dash (shoves nearby players)' },
-      { keys: 'Tab', does: 'Scores' },
-    ],
-  },
-  zombies: {
-    id: 'zombies',
-    name: 'Last Light',
-    tagline: 'A SWAT team, a grand hotel lobby, endless dead.',
-    description:
-      'Co-op zombie survival as a SWAT team holding the lobby of the Grand Meridian Hotel. Endless waves break in, one ' +
-      'by one, through the boarded doors and windows. Earn points for every hit to buy guns old and new, ammo, grenades ' +
-      'and armor, nail the barricades back up and revive each other. Everything breaks: marble, glass, columns, the ' +
-      'reception desk. Bigger squads open the lounge bar and the restaurant.',
-    minPlayers: 1,
-    maxPlayers: 10,
-    accent: '#c8463a',
-    controls: [
-      { keys: 'W A S D', does: 'Move (Shift: sprint)' },
-      { keys: 'Mouse', does: 'Look, left click fires, right click aims' },
-      { keys: 'E (hold)', does: 'Rebuild boards, buy, revive' },
-      { keys: 'R / 1 2 / wheel', does: 'Reload, switch weapon' },
-      { keys: 'G / V', does: 'Throw grenade, knife' },
-      { keys: 'F / Tab', does: 'Flashlight, scores' },
     ],
   },
   garden: {
@@ -107,23 +88,25 @@ export const GAMES: Record<GameId, GameMeta> = {
       { keys: 'Tab', does: 'Scores' },
     ],
   },
-  dustrunners: {
-    id: 'dustrunners',
-    name: 'Dustrunners',
-    tagline: 'Online podracing through red-rock canyons.',
+  zombies: {
+    id: 'zombies',
+    name: 'Last Light',
+    tagline: 'A SWAT team, a grand hotel lobby, endless dead.',
     description:
-      'Race twin-turbine pods through sun-baked canyons against your friends and bot pilots. Thread the arches, take ' +
-      'the shortcuts, boost down the straights and knife-edge through the gaps; scrape the walls and parts of your pod ' +
-      'come off. Points by finishing place, and the solo career with cups and upgrades is one click away.',
+      'Co-op zombie survival as a SWAT team holding the lobby of the Grand Meridian Hotel. Endless waves break in, one ' +
+      'by one, through the boarded doors and windows. Earn points for every hit to buy guns old and new, ammo, grenades ' +
+      'and armor, nail the barricades back up and revive each other. Everything breaks: marble, glass, columns, the ' +
+      'reception desk. Bigger squads open the lounge bar and the restaurant.',
     minPlayers: 1,
-    maxPlayers: 8,
-    accent: '#ff9a3c',
+    maxPlayers: 10,
+    accent: '#c8463a',
     controls: [
-      { keys: 'W / ↑', does: 'Thrust' },
-      { keys: 'S / ↓', does: 'Air brake' },
-      { keys: 'A D / ← →', does: 'Steer' },
-      { keys: 'Space / Shift', does: 'Boost' },
-      { keys: 'Q / E', does: 'Knife-edge roll' },
+      { keys: 'W A S D', does: 'Move (Shift: sprint)' },
+      { keys: 'Mouse', does: 'Look, left click fires, right click aims' },
+      { keys: 'E (hold)', does: 'Rebuild boards, buy, revive' },
+      { keys: 'R / 1 2 / wheel', does: 'Reload, switch weapon' },
+      { keys: 'G / V', does: 'Throw grenade, knife' },
+      { keys: 'F / Tab', does: 'Flashlight, scores' },
     ],
   },
 };
@@ -216,8 +199,8 @@ export interface RoomView {
   players: PlayerInfo[];
 }
 
-export type GameClientMsg = RocketsClientMsg | RuckusClientMsg | ZombiesClientMsg | GardenClientMsg | DustrunnersClientMsg;
-export type GameServerMsg = RocketsServerMsg | RuckusServerMsg | ZombiesServerMsg | GardenServerMsg | DustrunnersServerMsg;
+export type GameClientMsg = RocketsClientMsg | ZombiesClientMsg | GardenClientMsg | DustrunnersClientMsg;
+export type GameServerMsg = RocketsServerMsg | ZombiesServerMsg | GardenServerMsg | DustrunnersServerMsg;
 
 export type ClientMsg =
   | { t: 'setBots'; count: number; difficulty?: BotDifficulty }

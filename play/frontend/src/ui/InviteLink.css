@@ -142,15 +142,11 @@
   }
 }
 
-/* ---- Rockets / Ruckus: the lobby-coloured scoreboard card ------------------------------------------------------- */
-.invite-rockets,
-.invite-ruckus {
+/* ---- Rockets: the lobby-coloured scoreboard card ------------------------------------------------------- */
+.invite-rockets {
   margin-top: 14px;
   --inv-bg: rgba(0, 0, 0, 0.2);
   --inv-line: var(--line-strong, rgba(255, 226, 196, 0.18));
-}
-.invite-ruckus {
-  --inv-accent: var(--gold, #ffd166);
 }
 
 /* ---- Last Light: field notes in the side column of the pause menu ---------------------------------------------- */

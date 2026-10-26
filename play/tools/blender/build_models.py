@@ -217,47 +217,6 @@ def healthpack(p):
     export("healthpack", parts)
 
 
-def pawn(p):
-    """Ruckus character: a chubby bean with eyes, 1.1 m tall, facing +Y."""
-    parts = []
-    parts.append(sphere(0.42, (0, 0, 0.55), p["team"], scale=(1, 0.95, 1.2)))
-    parts.append(sphere(0.3, (0, 0.17, 0.46), p["white"], scale=(1, 0.5, 1.0), seg=20))
-    for side in (-1, 1):
-        parts.append(sphere(0.095, (side * 0.15, 0.33, 0.72), p["eye"], seg=16))
-        parts.append(sphere(0.045, (side * 0.16, 0.41, 0.73), p["pupil"], seg=12))
-        parts.append(sphere(0.15, (side * 0.19, 0.05, 0.08), p["dark"], scale=(1, 1.3, 0.55), seg=14))
-    parts.append(cylinder(0.025, 0.2, (0, -0.05, 1.08), p["team"]))
-    parts.append(sphere(0.07, (0, -0.05, 1.2), p["team"], seg=14))
-    export("pawn", parts)
-
-
-def bomb(p):
-    parts = [sphere(0.3, (0, 0, 0), p["bomb"])]
-    parts.append(cylinder(0.1, 0.08, (0, 0, 0.3), p["steel"]))
-    parts.append(cylinder(0.02, 0.22, (0.05, 0, 0.42), p["fuse"], rot=(0, math.radians(25), 0)))
-    parts.append(sphere(0.05, (0.1, 0, 0.52), p["spark"], seg=12))
-    parts.append(sphere(0.07, (-0.12, -0.12, 0.17), p["white"], seg=12))
-    export("bomb", parts)
-
-
-def coin(p):
-    parts = [cylinder(0.32, 0.07, (0, 0, 0), p["gold"], rot=(math.radians(90), 0, 0), verts=32)]
-    parts.append(torus(0.22, 0.025, (0, 0.03, 0), p["gold"], rot=(math.radians(90), 0, 0)))
-    parts.append(torus(0.22, 0.025, (0, -0.03, 0), p["gold"], rot=(math.radians(90), 0, 0)))
-    parts.append(cube((0.1, 0.1, 0.26), (0, 0, 0), p["gold"], bevel=0.01))
-    export("coin", parts)
-
-
-def crown(p):
-    parts = [torus(0.24, 0.045, (0, 0, 0.02), p["gold"])]
-    for i in range(6):
-        a = i * math.pi / 3
-        parts.append(cylinder(0.055, 0.16, (math.cos(a) * 0.24, math.sin(a) * 0.24, 0.12), p["gold"], r2=0.0, verts=10))
-        if i % 2 == 0:
-            parts.append(sphere(0.04, (math.cos(a) * 0.24, math.sin(a) * 0.24, 0.05), p["ruby"], seg=10))
-    export("crown", parts)
-
-
 def build_all():
     clear_scene()
     p = palette()
@@ -265,10 +224,6 @@ def build_all():
     launcher(p)
     rocket(p)
     healthpack(p)
-    pawn(p)
-    bomb(p)
-    coin(p)
-    crown(p)
 
 
 if __name__ == "__main__":

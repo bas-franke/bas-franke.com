@@ -5,7 +5,7 @@ import { type KeyboardEvent, type SyntheticEvent, useEffect, useRef, useState } 
 import './InviteLink.css';
 
 /** `room` for the waiting room; `hud` a neutral dark pause card; the others match one game's pause menu. */
-export type InviteVariant = 'room' | 'hud' | 'rockets' | 'ruckus' | 'll' | 'garden' | 'dustrunners';
+export type InviteVariant = 'room' | 'hud' | 'rockets' | 'll' | 'garden' | 'dustrunners';
 
 export const roomLink = (code: string) => `${location.origin}/room/${code.toUpperCase()}`;
 

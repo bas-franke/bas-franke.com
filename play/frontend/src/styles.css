@@ -2064,46 +2064,12 @@ footer.site {
   font-variant-numeric: tabular-nums;
 }
 
-.dash-meter {
-  width: 120px;
-  height: 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  overflow: hidden;
-  margin-top: 6px;
-}
-.dash-meter i {
-  display: block;
-  height: 100%;
-  background: var(--mint);
-}
-.hud .mini-scores {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 14px;
-  margin-top: 6px;
-}
-.hud .mini-scores div {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 2px 10px;
-  border-radius: 7px;
-  background: rgba(0, 0, 0, 0.45);
-}
-.hud .mini-scores .n {
-  font-family: var(--mono);
-}
-.hud .mini-scores .me {
-  outline: 1px solid rgba(255, 255, 255, 0.35);
-}
 .hud .out {
   color: var(--coral);
   font-weight: 700;
 }
 
-/* ---- Rockets HUD: cel-shaded comic look. Everything is scoped to .hud.rk so Ruckus keeps its own HUD. ---- */
+/* ---- Rockets HUD: cel-shaded comic look. Everything is scoped to .hud.rk. ---- */
 .rk {
   --rk-ink: #0b0b12;
   --rk-red: #ff3b3b;
@@ -3097,23 +3063,6 @@ footer.site {
   .rk .rk-line {
     font-size: 12px;
     padding: 2px 8px;
-  }
-}
-
-/* ---- Ruckus on touch: the dash meter moves up out of the stick's way ------------------------------------- */
-
-.ru.touch-mode .bl {
-  bottom: calc(170px + env(safe-area-inset-bottom));
-}
-@media (max-width: 560px) {
-  .ru .corner {
-    padding: max(10px, env(safe-area-inset-top)) 12px 10px;
-  }
-  .ru .mini-scores {
-    font-size: 12px;
-  }
-  .ru .label {
-    font-size: 10px;
   }
 }
 

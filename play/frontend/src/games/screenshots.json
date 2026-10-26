@@ -17,28 +17,6 @@
       "caption": "Orbit"
     }
   ],
-  "ruckus": [
-    {
-      "file": "ruckus-hotpotato.jpg",
-      "caption": "Hot Potato"
-    },
-    {
-      "file": "ruckus-lava.jpg",
-      "caption": "Floor is Lava"
-    },
-    {
-      "file": "ruckus-coins.jpg",
-      "caption": "Coin Rush"
-    },
-    {
-      "file": "ruckus-sweeper.jpg",
-      "caption": "Sweeper"
-    },
-    {
-      "file": "ruckus-sumo.jpg",
-      "caption": "Sumo"
-    }
-  ],
   "zombies": [
     {
       "file": "zombies-hotel.jpg",

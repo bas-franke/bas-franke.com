@@ -27,10 +27,6 @@ export const INPUTS = {
     routine: true,
     globs: [...ENGINE, 'frontend/src/games/rockets/**', 'frontend/public/models/*.glb', 'backend/src/shared/rockets/**'],
   },
-  ruckus: {
-    routine: true,
-    globs: [...ENGINE, 'frontend/src/games/ruckus/**', 'frontend/public/models/*.glb', 'backend/src/shared/ruckus/**'],
-  },
   zombies: {
     routine: true,
     globs: [
