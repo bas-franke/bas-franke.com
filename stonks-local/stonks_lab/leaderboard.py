@@ -37,14 +37,25 @@ _ALIASES = {
 
 # --------------------------------------------------------------------------------------------- ranking
 
+def test_trades(e: dict) -> int | None:
+    """Fills summed over the walk-forward test folds (evaluate's scoreParts.testTrades), None if unknown."""
+    parts = (e.get("metrics") or {}).get("scoreParts") or {}
+    v = parts.get("testTrades")
+    return int(v) if isinstance(v, (int, float)) else None
+
+
 def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance: float = 0.25,
-         bot_ready_only: bool = False, pool: int = 500) -> list[dict]:
-    """The best ``n`` diverse done experiments, best first."""
+         bot_ready_only: bool = False, pool: int = 500, min_test_trades: int = 5) -> list[dict]:
+    """The best ``n`` diverse done experiments, best first. Specs that (almost) never trade in the test folds
+    (fewer than ``min_test_trades`` fills) are "sit in cash" in disguise and are left out."""
     chosen: list[dict] = []
     per: dict[str, int] = {}
     for e in registry.top(pool, bot_ready_only=bot_ready_only):
         fam = e["family"]
         if fam in EXCLUDED_FAMILIES or e.get("score") is None or not math.isfinite(e["score"]):
+            continue
+        tt = test_trades(e)
+        if tt is not None and tt < min_test_trades:
             continue
         if per.get(fam, 0) >= per_family:
             continue
@@ -181,6 +192,10 @@ def vs_buy_hold_sentence(metrics: dict, bh_return: float | None, bh_mdd: float |
     if r is None or bh_return is None:
         return f"No buy-and-hold comparison is available for {what} {period}."
     diff = r - bh_return
+    if metrics.get("trades") == 0:
+        verb = "avoided" if bh_return < 0 else "missed"
+        return (f"It made no trades {period} and stayed in euros, so it simply {verb} the {_fmt(bh_return)} of "
+                f"buying and holding {what}; that says little about how it trades.")
     risk = ""
     if d is not None and bh_mdd is not None:
         if d < bh_mdd - 1:
@@ -329,7 +344,8 @@ def data_range(entries: list[dict]) -> list[str | None]:
 
 def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> str:
     st = registry.stats()
-    parts = [f"{st['done']} experiments finished by {st['agents']} agents over {st['rounds']} rounds."]
+    parts = [f"{st['done']} experiments finished by {st['agents']} agent{'s' if st['agents'] != 1 else ''} over "
+             f"{st['rounds']} round{'s' if st['rounds'] != 1 else ''}."]
     if entries:
         m = metrics_for(entries[0])
         vb = m.get("vsBuyHoldPct")

@@ -185,3 +185,19 @@ def test_vs_buy_hold_sentence_honest():
 def test_empty_payload_is_valid(r):
     p = leaderboard.build_payload(r)
     assert p["top"] == [] and leaderboard.validate_payload(p) == []
+
+
+def test_rank_skips_specs_that_never_trade(r):
+    _fill(r)
+    s = spec("rsi_dip", period=40, buyBelow=5)
+    res = result(99.0)
+    res["scoreParts"] = {"testTrades": 2}
+    r.claim(s)
+    r.record(s, res)
+    assert all(e["score"] != 99.0 for e in leaderboard.rank(r, n=5))
+
+
+def test_no_trade_sentence():
+    m = {"returnPct": 0.0, "maxDrawdownPct": 0.0, "trades": 0, "testPeriod": ["2025-01-01", "2026-01-01"]}
+    s = leaderboard.vs_buy_hold_sentence(m, -30.0, 50.0, ["BTC-EUR"])
+    assert "no trades" in s and "avoided" in s
