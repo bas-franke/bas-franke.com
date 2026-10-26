@@ -1,4 +1,22 @@
 {
+  "dustrunners": [
+    {
+      "file": "dustrunners-falls.jpg",
+      "caption": "Thunder Falls"
+    },
+    {
+      "file": "dustrunners-redrock.jpg",
+      "caption": "Redrock Run"
+    },
+    {
+      "file": "dustrunners-mesa.jpg",
+      "caption": "Mesa Run"
+    },
+    {
+      "file": "dustrunners-spires.jpg",
+      "caption": "Needle Spires"
+    }
+  ],
   "rockets": [
     {
       "file": "rockets-foundry.jpg",
@@ -15,12 +33,6 @@
     {
       "file": "rockets-orbit.jpg",
       "caption": "Orbit"
-    }
-  ],
-  "zombies": [
-    {
-      "file": "zombies-hotel.jpg",
-      "caption": "Grand Meridian Hotel"
     }
   ],
   "garden": [
@@ -41,22 +53,10 @@
       "caption": "Upgrade to masterworks"
     }
   ],
-  "dustrunners": [
+  "zombies": [
     {
-      "file": "dustrunners-falls.jpg",
-      "caption": "Thunder Falls"
-    },
-    {
-      "file": "dustrunners-redrock.jpg",
-      "caption": "Redrock Run"
-    },
-    {
-      "file": "dustrunners-mesa.jpg",
-      "caption": "Mesa Run"
-    },
-    {
-      "file": "dustrunners-spires.jpg",
-      "caption": "Needle Spires"
+      "file": "zombies-hotel.jpg",
+      "caption": "Grand Meridian Hotel"
     }
   ]
 }
