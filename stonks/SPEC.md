@@ -212,3 +212,49 @@ camelCase and numbers (not numeric strings).
   ]
 }
 ```
+
+## 8. Timeframe buckets (research v2)
+
+Research is ranked separately per **timeframe bucket**, each judged on windows that fit how long its trades last.
+A strategy belongs to the bucket of its decision interval (`spec.interval`):
+
+| bucket | intervals | evaluation profile (eval v4, short buckets only) |
+|---|---|---|
+| `minute` | 1m, 5m, 15m | data: last 400 days (1m) / since 2019 (5m, 15m) but folds only over the last 400 days; holdout = last 60 days; 6 folds of equal length before it |
+| `hourly` | 30m, 1h, 2h, 4h | folds over the last 3 years; holdout = last 120 days; 6 folds |
+| `daily` | 6h, 8h, 12h, 1d | unchanged eval v3 (folds since 2019, holdout = last 365 days) |
+| `weekly` | 1W | eval v3 windows on weekly bars (folds since 2019, holdout = last 365 days) |
+
+Scores are only comparable within a bucket. Each bucket carries its own buy-and-hold reference score and placebo
+(random timing) luck line computed on the same profile. Fees and fill rules (§1-2) are identical in every bucket.
+
+### Research payload v2
+
+The payload keeps every v1 field (old dashboards still work: `top` = the daily bucket) and adds:
+
+```jsonc
+"buckets": {
+  "minute": {
+    "label": "Minute trading", "intervals": ["1m","5m","15m"],
+    "profile": { "holdoutDays": 60, "folds": 6, "foldSpanDays": 56, "dataFrom": "2025-09-21" },
+    "holdScore": -20.1, "luckLine": { "median": -35.0, "best": -8.0, "exposure": 0.7 },
+    "benchmark": { /* buy and hold BTC over this bucket's holdout, same shape as §7 benchmark */ },
+    "notes": "plain-language state of this bucket",
+    "top": [ /* 0-5 entries, same shape as §7 top entries */ ]
+  },
+  "hourly": { ... }, "daily": { ... }, "weekly": { ... }
+}
+```
+
+A bucket may have fewer than 5 (or 0) entries when nothing qualifies; its `notes` say why (e.g. "nothing beats
+buy and hold after fees at minute level").
+
+### Activating a research strategy in the bot
+
+Every top entry with `botReady: true` can be activated from the dashboard with one action:
+`POST /api/bot/activate` body `{ "researchId": <snapshot id>, "bucket": "hourly", "rank": 2, "start": true|false,
+"confirmLive"?: true }`. The backend copies that entry's `spec` from the stored snapshot (never from the request
+body), validates it, saves it as `settings.bot.strategy` (cancelling the bot's open orders for the old strategy),
+records `settings.bot.activeResearch = { researchId, bucket, rank, name, activatedAt }`, and when `start` is true
+also switches the bot on in its current mode (live mode still needs `confirmLive: true`). Entries with
+`botReady: false` cannot be activated; the dashboard shows them as "waiting to be ported to the bot".
