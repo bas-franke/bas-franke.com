@@ -15,10 +15,11 @@ import numpy as np
 from ._base import anchor_index, bars_text, frame, market_names, max_weight, risk_steps, single_market
 
 NAME = "value_avg"
-VERSION = 1
+VERSION = 2               # v1 lacked ANCHORED: every fold saw the schedule from the data start (= hold)
 TITLE = "Value averaging"
 BOT_READY = False
 MULTI_MARKET = False
+ANCHORED = True           # the schedule restarts at every test window
 
 
 def default_params() -> dict:
