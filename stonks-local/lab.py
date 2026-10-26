@@ -122,15 +122,19 @@ def make_spec(family: str, interval: str, markets: list[str], params: dict, risk
 
 def complete_spec(spec: dict) -> dict:
     spec = dict(spec)
-    spec.setdefault("familyVersion", 1)
     spec["markets"] = sorted(spec.get("markets") or [])
     spec["risk"] = {**reg.DEFAULT_RISK, **(spec.get("risk") or {})}
     spec["execution"] = {**reg.DEFAULT_EXECUTION, **(spec.get("execution") or {})}
+    fam = families().get(spec["family"]) if _families_ok() else None
+    if fam is not None:  # fill the family's defaults so {"fast": 12} and the full param set hash the same
+        spec["params"] = {**(fam_call(fam, "default_params") or {}), **(spec.get("params") or {})}
+        if "familyVersion" not in spec or spec["familyVersion"] is None:
+            spec["familyVersion"] = fam_attr(fam, "version") or 1
     h = reg.spec_hash(spec)
     label = markets_label(spec["markets"])
     spec.setdefault("id", f"{spec['family']}-{label}-{spec['interval']}-{h[:6]}")
+    spec.setdefault("familyVersion", 1)
     if "name" not in spec:
-        fam = families().get(spec["family"]) if _families_ok() else None
         title = (fam_attr(fam, "title") or fam_attr(fam, "label")) if fam is not None else None
         title = title or spec["family"].replace("_", " ").capitalize()
         mk = label.upper() if label != "top10" else "top-10"
@@ -146,60 +150,32 @@ def _families_ok() -> bool:
         return False
 
 
-def sample_value(space, rng: random.Random):
-    """One value from a param-space entry: a list of choices, (lo, hi), or {min, max, step?, log?, type?}."""
-    if isinstance(space, (list, set)) or (isinstance(space, tuple) and len(space) != 2):
-        return rng.choice(list(space))
-    if isinstance(space, tuple):
-        lo, hi = space
-        if isinstance(lo, int) and isinstance(hi, int) and not isinstance(lo, bool):
-            return rng.randint(lo, hi)
-        return round(rng.uniform(lo, hi), 6)
-    if isinstance(space, dict):
-        if "choices" in space or "values" in space:
-            return rng.choice(list(space.get("choices") or space.get("values")))
-        lo, hi = space.get("min", space.get("lo")), space.get("max", space.get("hi"))
-        kind = space.get("type") or ("int" if isinstance(lo, int) and isinstance(hi, int) else "float")
-        if space.get("log") and lo > 0:
-            v = math.exp(rng.uniform(math.log(lo), math.log(hi)))
-        else:
-            v = rng.uniform(lo, hi)
-        step = space.get("step")
-        if step:
-            v = lo + round((v - lo) / step) * step
-        if kind == "int":
-            return int(round(v))
-        if kind == "bool":
-            return rng.random() < 0.5
-        return round(v, 6)
-    return space  # a fixed value
+def grid_values(d: dict, n: int = 5) -> list:
+    """A handful of values for one param-space descriptor (see stonks_lab/families/_base.py)."""
+    t = d.get("type")
+    if t == "bool":
+        return [False, True]
+    if t == "choice":
+        return list(d["values"])
+    lo, hi = d["min"], d["max"]
+    if d.get("log") and lo > 0:
+        vals = [math.exp(math.log(lo) + (math.log(hi) - math.log(lo)) * i / (n - 1)) for i in range(n)]
+    else:
+        vals = [lo + (hi - lo) * i / (n - 1) for i in range(n)]
+    vals = [int(round(v)) for v in vals] if t == "int" else [round(v, 4) for v in vals]
+    if d.get("zero"):
+        vals = [0] + vals
+    return sorted(dict.fromkeys(vals))
 
 
-def grid_values(space) -> list:
-    if isinstance(space, (list, set)) or (isinstance(space, tuple) and len(space) != 2):
-        return list(space)
-    if isinstance(space, dict) and ("choices" in space or "values" in space):
-        return list(space.get("choices") or space.get("values"))
-    if isinstance(space, dict) and space.get("step"):
-        lo, hi, step = space["min"], space["max"], space["step"]
-        n = int(math.floor((hi - lo) / step + 1e-9)) + 1
-        vals = [lo + i * step for i in range(n)]
-        return [int(v) if (space.get("type") == "int" or isinstance(step, int)) else round(v, 6) for v in vals]
-    if isinstance(space, dict) or isinstance(space, tuple):
-        rng = random.Random(0)
-        return sorted({sample_value(space, rng) for _ in range(5)})
-    return [space]
-
-
-def valid_params(fam, params: dict) -> bool:
-    fn = fam_attr(fam, "validate") or fam_attr(fam, "valid_params")
-    if fn is None or not callable(fn):
-        return True
-    try:
-        r = fn(params)
-        return r is None or bool(r)
-    except Exception:  # noqa: BLE001
-        return False
+def param_error(fam, params: dict) -> str | None:
+    fn = fam_attr(fam, "validate")
+    if callable(fn):
+        try:
+            return fn({"params": params})
+        except Exception as e:  # noqa: BLE001
+            return f"{e.__class__.__name__}: {e}"
+    return None
 
 
 # --------------------------------------------------------------------------------------------- evaluation
@@ -296,12 +272,19 @@ def coverage_data(r: reg.Registry) -> dict:
     # map rotation/top-10 market sets to the label "top10" for untried-cell bookkeeping
     tried = {(c["family"], c["interval"], markets_label(c["markets"].split(",")) if c["markets"].count(",") > 1
               else c["markets"]) for c in cov["cells"] if c["done"]}
+    have = set()
+    try:
+        from stonks_lab import data  # type: ignore
+        have = {(x[0], x[1]) for x in data.available() if x[4]}
+    except Exception:  # noqa: BLE001
+        pass
     untried = []
     for name, fam in fams.items():
         for iv in reg.INTERVALS:
             for ms in market_sets_for(fam):
                 if (name, iv, ms) not in tried:
-                    untried.append({"family": name, "interval": iv, "markets": ms})
+                    has = (ms if ms != "top10" else "BTC-EUR", iv) in have
+                    untried.append({"family": name, "interval": iv, "markets": ms, "data": has})
     cov["untried"] = untried
     return cov
 
@@ -344,9 +327,11 @@ def cmd_coverage(a, r):
     print(f"\nuntried cells ({len(untried)}):")
     by_fam: dict[str, list[str]] = {}
     for u in untried:
-        by_fam.setdefault(f"{u['family']} [{u['markets']}]", []).append(u["interval"])
+        by_fam.setdefault(f"{u['family']} [{u['markets']}]", []).append(u["interval"] + ("" if u["data"] else "*"))
     for k, ivs in by_fam.items():
         print(f"  {k}: {' '.join(ivs)}")
+    if any(not u["data"] for u in untried):
+        print("  * no candles downloaded yet: tools/download.py --markets <m> --intervals <iv> first")
 
 
 def cmd_findings(a, r):
@@ -446,6 +431,12 @@ def _print_run(res: dict, spec: dict) -> None:
 
 def cmd_run(a, r):
     spec = load_spec_arg(a.spec)
+    fam = families().get(spec["family"])
+    if fam is None:
+        sys.exit(f"unknown family {spec['family']}; known: {', '.join(families())}")
+    err = param_error(fam, spec["params"])
+    if err:
+        sys.exit(f"invalid params: {err}")
     near = [n for n in r.near_duplicates(spec, a.tolerance) if n["spec_hash"] != reg.spec_hash(spec)]
     if near and not a.allow_near:
         print(f"refused: near-duplicate of {', '.join(n['spec_hash'][:10] for n in near[:5])} "
@@ -476,14 +467,13 @@ def candidates(fam, family: str, interval: str, markets: list[str], fixed: dict,
         keys = list(space)
         combos = list(itertools.product(*[grid_values(space[k]) for k in keys]))
         rng.shuffle(combos)
-        for combo in combos:
-            yield make_spec(family, interval, markets, {**base, **dict(zip(keys, combo)), **fixed}, risk, execution)
-        return
-    for _ in range(samples * 30):
-        params = {**base, **{k: sample_value(v, rng) for k, v in space.items()}, **fixed}
-        if not valid_params(fam, params):
-            continue
-        yield make_spec(family, interval, markets, params, risk, execution)
+        stream = ({**base, **dict(zip(keys, combo)), **fixed} for combo in combos)
+    else:
+        from stonks_lab.families import sample_params  # type: ignore
+        stream = ({**base, **sample_params(space, rng), **fixed} for _ in range(samples * 30))
+    for params in stream:
+        if param_error(fam, params) is None:
+            yield make_spec(family, interval, markets, params, risk, execution)
 
 
 def cmd_sweep(a, r):
