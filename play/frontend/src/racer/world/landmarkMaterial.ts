@@ -110,18 +110,22 @@ float rCell(float x, float salt, out float f, out float w) {
 // block's facet slope (along, up). Far away only the wide columns remain.
 vec2 rFracture(float u, float y, float px, out vec2 tilt) {
   float fM, wM, fm, wm;
-  float M = rCell(u / 34.0, 3.1, fM, wM);
-  float dM = min(fM, 1.0 - fM) * wM * 34.0;
-  float m = rCell(u / 9.0, 7.7, fm, wm);
-  float dm = min(fm, 1.0 - fm) * wm * 9.0;
-  float bh = 7.0 + 20.0 * rH1(m * 1.73 + M * 0.37);
+  float M = rCell(u / 40.0, 3.1, fM, wM);
+  float dM = min(fM, 1.0 - fM) * wM * 40.0;
+  float m = rCell(u / 14.0, 7.7, fm, wm);
+  float dm = min(fm, 1.0 - fm) * wm * 14.0;
+  float bh = 12.0 + 30.0 * rH1(m * 1.73 + M * 0.37);
   float Y = (y + rH1(m * 3.1 + 0.5) * bh) / bh;
   float row = floor(Y);
   float fy = Y - row;
   float dy = min(fy, 1.0 - fy) * bh;
   float minorFade = 1.0 - smoothstep(0.5, 2.0, px);
-  float id = minorFade > 0.0 ? rH1(m * 13.1 + row * 7.7 + M * 3.3) : rH1(M * 4.7);
-  float crack = (1.0 - smoothstep(0.0, max(0.3, px * 1.3), min(dm, dy))) * minorFade;
+  float id = minorFade > 0.0 ? fract(rH1(m * 5.3 + M * 1.1) + 0.35 * rH1(m * 13.1 + row * 7.7 + M * 3.3)) : rH1(M * 4.7);
+  // Not every joint is open: each gets its own width, many stay hairline-closed.
+  float jw = max(0.3, px * 1.3);
+  float openV = smoothstep(0.35, 0.9, rH1((fm < 0.5 ? m : m + 1.0) * 2.7 + 0.3));
+  float openH = smoothstep(0.3, 0.9, rH1(m * 4.1 + (fy < 0.5 ? row : row + 1.0) * 1.9));
+  float crack = max((1.0 - smoothstep(0.0, jw, dm)) * openV, (1.0 - smoothstep(0.0, jw, dy)) * openH) * minorFade;
   float major = (1.0 - smoothstep(0.0, max(1.0, px * 1.6), dM)) * (1.0 - smoothstep(4.0, 12.0, px));
   tilt = vec2(rH1(id * 3.1) - 0.5, (rH1(id * 5.7) - 0.5) * 0.7) * 0.7 * minorFade + vec2((rH1(M * 1.9) - 0.5) * 0.45, 0.0);
   return vec2(id, max(crack, major));
@@ -141,7 +145,7 @@ vec3 rockAlbedo(vec3 p, vec3 n, float dist, float px, out vec3 tilt) {
   tilt = (vec3(0.0, 0.0, tA.x) * w.x + vec3(tB.x, 0.0, 0.0) * w.y + vec3(0.0, tA.y * w.x + tB.y * w.y, 0.0)) * vert * (0.3 + 0.7 * detail);
   vec3 deep = mix(uRockLit, uRockShade, 0.35);
   vec3 c = mix(uRockLit, deep, rH1(id * 9.7));
-  c *= 0.84 + 0.28 * rH1(id * 4.3);
+  c *= 0.88 + 0.2 * rH1(id * 4.3);
   // A faint trace of bedding (thick, wandering) so tall faces are not uniform.
   float y = p.y + (rNoise(p.xz * 0.0035) - 0.5) * 14.0;
   c = mix(c, uRockStrata, smoothstep(0.6, 0.95, rNoise(vec2(y / 30.0, 1.3))) * 0.18);
@@ -150,7 +154,7 @@ vec3 rockAlbedo(vec3 p, vec3 n, float dist, float px, out vec3 tilt) {
   float u = dot(p.xz, h);
   float streak = smoothstep(0.7, 0.95, rNoise(vec2(u * 0.3, p.y * 0.002)));
   c *= 1.0 - streak * 0.15 * detail;
-  c = mix(c, uRockShade * 0.55, crack * 0.85);
+  c = mix(c, uRockShade * 0.55, crack * 0.7);
   // Painterly light: sunlit faces burnt orange, faces turned away violet-magenta, so forms read even in flat light.
   float sunF = dot(normalize(n + tilt), uSunDir);
   float lit = smoothstep(-0.2, 0.45, sunF);

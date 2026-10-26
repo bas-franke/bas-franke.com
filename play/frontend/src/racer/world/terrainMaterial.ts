@@ -103,7 +103,10 @@ vec3 fracture(float u, float y, float px, out float major, out vec2 tilt) {
   // Anti-aliased crack widths: the minor joints fade out once they get thinner than a couple of pixels.
   float jw = max(0.22, px * 1.3);
   float minorFade = 1.0 - smoothstep(0.35, 1.4, px);
-  float crack = (1.0 - smoothstep(0.0, jw, min(dm, dy))) * minorFade;
+  // Not every joint is open: each vertical and horizontal joint gets its own width, many stay hairline-closed.
+  float openV = smoothstep(0.35, 0.9, tH1((fm < 0.5 ? m : m + 1.0) * 2.7 + 0.3));
+  float openH = smoothstep(0.3, 0.9, tH1(m * 4.1 + (fy < 0.5 ? row : row + 1.0) * 1.9));
+  float crack = max((1.0 - smoothstep(0.0, jw, dm)) * openV, (1.0 - smoothstep(0.0, jw, dy)) * openH) * minorFade;
   major = 1.0 - smoothstep(0.0, max(0.7, px * 1.6), dM);
   major *= 1.0 - smoothstep(3.0, 9.0, px);
   // Each block is a chiselled plane tilted its own way (the wide column adds a common lean); the joints are grooves.
@@ -131,7 +134,7 @@ vec3 rockAlbedo(vec3 p, vec3 n, float px, out float h, out float cr, out vec3 dn
   dn = (vec3(0.0, 0.0, tA.x) * w.x + vec3(tB.x, 0.0, 0.0) * w.y + vec3(0.0, tA.y * w.x + tB.y * w.y, 0.0)) * vert;
   // Per-block tone: vermilion to deeper red, brightness jitter.
   vec3 c = mix(uLit, uLitDeep, tH1(id * 9.7));
-  c *= 0.84 + 0.28 * tH1(id * 4.3);
+  c *= 0.88 + 0.2 * tH1(id * 4.3);
   // Faint strata tint: hard layers a touch paler and oranger, soft ones deeper.
   float t = strataT(p.y - strataWarp(p.xz));
   float hard = uHard[int(clamp(floor(t) - (${STRATA_K0}.0), 0.0, ${STRATA_COUNT - 1}.0))];
@@ -142,7 +145,7 @@ vec3 rockAlbedo(vec3 p, vec3 n, float px, out float h, out float cr, out vec3 dn
   float sz = tNoise(vec2(p.x * 0.3, p.y * 0.015));
   c *= 1.0 - smoothstep(0.6, 0.95, sx * w.x + sz * w.y) * 0.18;
   // Cracks: dark violet-red.
-  c = mix(c, uShade * 0.55, cr * 0.85);
+  c = mix(c, uShade * 0.55, cr * 0.7);
   h = f.z;
   return c;
 }
@@ -215,7 +218,7 @@ const MAIN_FRAGMENT = /* glsl */ `
   diffuseColor.rgb = albedo * vShade;
   // Cool blue-violet fill in the joints, on undersides and on shaded faces (the sky bounce in the concept art).
   float under = smoothstep(-0.1, -0.6, wN.y);
-  totalEmissiveRadiance += uCool * r * vShade * (cr * 0.07 + under * 0.06 + (1.0 - lit) * 0.035 + foot * 0.02);
+  totalEmissiveRadiance += uCool * r * vShade * (cr * 0.035 + under * 0.06 + (1.0 - lit) * 0.035 + foot * 0.02);
   #ifndef TERRAIN_LOW
   // Bump from the procedural height (three's perturbNormalArb, in view space): rock facets at full strength, the
   // sand's ripples gently.
