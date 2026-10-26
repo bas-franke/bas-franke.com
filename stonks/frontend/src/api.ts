@@ -99,7 +99,15 @@ export const api = {
 };
 
 export const unwrapFamilies = (r: FamilyInfo[] | { families: FamilyInfo[] }) => (Array.isArray(r) ? r : (r.families ?? []));
+/** The biggest EUR markets first (roughly by market cap), then the rest alphabetically. */
+export const POPULAR = ['BTC', 'ETH', 'XRP', 'SOL', 'BNB', 'DOGE', 'ADA', 'TRX', 'LINK', 'AVAX', 'XLM', 'SUI', 'DOT', 'LTC', 'BCH', 'SHIB', 'TON', 'UNI', 'NEAR', 'AAVE'];
 export const unwrapMarkets = (r: MarketInfo[] | { markets: MarketInfo[] } | string[]): MarketInfo[] => {
   const arr = Array.isArray(r) ? r : (r.markets ?? []);
-  return (arr as (MarketInfo | string)[]).map((m) => (typeof m === 'string' ? { market: m } : m));
+  const rank = (m: string) => {
+    const i = POPULAR.indexOf(m.split('-')[0]);
+    return i < 0 ? POPULAR.length : i;
+  };
+  return (arr as (MarketInfo | string)[])
+    .map((m) => (typeof m === 'string' ? { market: m } : m))
+    .sort((a, b) => rank(a.market) - rank(b.market) || a.market.localeCompare(b.market));
 };

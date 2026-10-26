@@ -10,10 +10,15 @@ type Tab = 'orders' | 'fills';
 
 const pick = <T,>(...v: T[]) => v.find((x) => x !== undefined && x !== null);
 
+/** Fees are in EUR on Bitvavo EUR markets; anything else is shown with its currency. */
+const feeText = (fee: unknown, currency?: string | null) =>
+  fee === undefined || fee === null ? '–' : !currency || currency === 'EUR' ? eur(fee) : `${amount(fee)} ${currency}`;
+
 const statusChip = (s: string) => {
   const k = s.toLowerCase();
-  const cls = k === 'filled' ? 'gain' : k === 'new' || k.includes('partial') || k === 'open' ? 'brass' : k.includes('reject') || k.includes('error') ? 'loss' : '';
-  const label = k === 'new' ? 'open' : k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
+  const open = ['new', 'open', 'pending', 'awaitingtrigger'].includes(k) || k.includes('partial');
+  const cls = k === 'filled' ? 'gain' : open ? 'brass' : k.includes('reject') || k.includes('error') ? 'loss' : '';
+  const label = k === 'new' ? 'open' : s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
   return <span className={`chip ${cls}`}>{label}</span>;
 };
 
@@ -144,7 +149,7 @@ function OrdersTable({ rows }: { rows: Order[] }) {
         {rows.map((o) => {
           const filled = num(pick(o.filled, o.filledAmount));
           const amt = num(o.amount);
-          const fee = pick(o.feeEur, o.fee);
+          const fee = pick(o.feeEur, o.feePaid, o.fee);
           return (
             <tr key={String(o.id)} title={o.reason ?? undefined}>
               <td data-label="When" className="nowrap">
@@ -168,7 +173,7 @@ function OrdersTable({ rows }: { rows: Order[] }) {
                 {Number.isFinite(filled) ? (amt ? `${Math.round((filled / amt) * 100)}%` : amount(filled)) : '–'}
               </td>
               <td data-label="Fee" className="r">
-                {fee === undefined ? '–' : eur(fee)}
+                {feeText(fee, o.feeCurrency)}
               </td>
               <td data-label="Status">{statusChip(o.status)}</td>
             </tr>
@@ -201,7 +206,7 @@ function FillsTable({ rows }: { rows: Fill[] }) {
           return (
             <tr key={String(f.id)}>
               <td data-label="When" className="nowrap">
-                {dateTime(pick(f.ts, f.createdAt, f.created_at))}
+                {dateTime(pick(f.executedAt, f.ts, f.createdAt, f.created_at))}
                 {f.mode === 'live' && <span className="chip live" style={{ marginLeft: 8, padding: '0 7px' }}>live</span>}
               </td>
               <td data-label="Market">{f.market}</td>
@@ -218,8 +223,7 @@ function FillsTable({ rows }: { rows: Fill[] }) {
                 {eur(num(f.price) * num(f.amount))}
               </td>
               <td data-label="Fee" className="r">
-                {fee === undefined ? '–' : eur(fee)}
-                {f.feeCurrency && f.feeCurrency !== 'EUR' ? ` ${f.feeCurrency}` : ''}
+                {feeText(fee, f.feeCurrency)}
               </td>
               <td data-label="Liquidity">{liq ? <span className={`chip ${liq === 'maker' ? 'gain' : 'brass'}`}>{liq}</span> : '–'}</td>
             </tr>

@@ -30,9 +30,11 @@ export default function OverviewPage() {
               <div className="hero-num">{eur(o.equityEur)}</div>
             </div>
             <div className="row">
-              <span className={`chip ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>{signedEur(o.todayPnlEur)} today</span>
+              {o.todayPnlEur !== null && (
+                <span className={`chip ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>{signedEur(o.todayPnlEur)} today</span>
+              )}
               <ModeBadge mode={o.bot.mode} />
-              <span className="chip">{o.running ? 'Bot is awake' : 'Bot is resting'}</span>
+              <span className="chip">{o.running ? 'Bot is awake' : o.bot.enabled ? 'Bot is waking up' : 'Bot is resting'}</span>
             </div>
           </>
         ) : (
@@ -105,7 +107,9 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
           </div>
           <div className="sub">
             {on
-              ? `Last look at the market ${ago(o.lastTickAt)}.`
+              ? o.lastTickAt
+                ? `Last look at the market ${ago(o.lastTickAt)}.`
+                : 'Getting ready for its first look at the market.'
               : 'Switched off. Nothing will be bought or sold until you turn it on.'}
           </div>
         </div>
@@ -121,9 +125,9 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
             Bitvavo connected
           </span>
         ) : (
-          <span className="chip loss" title={o.bitvavo.error}>
+          <span className={`chip ${live ? 'loss' : 'brass'}`} title={o.bitvavo.error}>
             <span className="dot" />
-            Bitvavo offline
+            {live ? 'Bitvavo offline' : 'Bitvavo: prices only'}
           </span>
         )}
         <a
@@ -138,7 +142,7 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
           {o.openOrders} open order{o.openOrders === 1 ? '' : 's'}
         </a>
       </div>
-      {!o.bitvavo.connected && o.bitvavo.error && <div className="callout loss">{o.bitvavo.error}</div>}
+      {!o.bitvavo.connected && o.bitvavo.error && <div className={`callout ${live ? 'loss' : ''}`}>{o.bitvavo.error}</div>}
 
       <Modal
         open={confirming}
@@ -181,7 +185,8 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
 }
 
 function LossCard({ o }: { o: Overview }) {
-  const loss = Math.max(0, -o.todayPnlEur);
+  const pnl = o.todayPnlEur;
+  const loss = Math.max(0, -(pnl ?? 0));
   const frac = Math.min(1, loss / (o.dailyLossLimitEur || 1));
   // Calm sage → brass → terracotta as the day's loss nears the limit.
   const color = frac < 0.4 ? 'var(--gain)' : frac < 0.75 ? 'var(--brass)' : 'var(--loss)';
@@ -194,7 +199,7 @@ function LossCard({ o }: { o: Overview }) {
         </Tip>
       </div>
       <div className="row" style={{ alignItems: 'baseline' }}>
-        <span className={`mid-num ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>{signedEur(o.todayPnlEur)}</span>
+        <span className={`mid-num ${pnl === null ? 'muted' : pnl >= 0 ? 'gain' : 'loss'}`}>{pnl === null ? '€ 0,00' : signedEur(pnl)}</span>
         <span className="spacer" />
         <span className="small muted">daily loss limit {eur(o.dailyLossLimitEur, true)}</span>
       </div>
@@ -207,10 +212,12 @@ function LossCard({ o }: { o: Overview }) {
         aria-valuenow={loss}
         aria-label="Today's loss compared to the daily limit"
       >
-        <span style={{ width: `${Math.max(frac * 100, o.todayPnlEur < 0 ? 2 : 0)}%`, background: color }} />
+        <span style={{ width: `${Math.max(frac * 100, (pnl ?? 0) < 0 ? 2 : 0)}%`, background: color }} />
       </div>
       <p className="small soft" style={{ marginTop: 10 }}>
-        {o.todayPnlEur >= 0
+        {pnl === null
+          ? 'Today’s count starts once the bot has recorded its first value of the day.'
+          : pnl >= 0
           ? 'Up for the day. Nothing to worry about.'
           : frac < 0.75
             ? `${Math.round(frac * 100)}% of today’s loss budget used. ${eur(o.dailyLossLimitEur - loss)} left before the bot pauses.`

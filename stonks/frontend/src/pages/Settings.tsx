@@ -121,7 +121,7 @@ export default function SettingsPage() {
     } catch (e) {
       if (e instanceof ApiError) {
         const fe = e.fieldErrors;
-        setErrors(Object.keys(fe).length ? fe : { _: e.message });
+        setErrors(Object.keys(fe).length ? fe : { _: e.message, ...fieldFromMessage(e.message) });
       } else setErrors({ _: (e as Error).message });
     } finally {
       setSaving(false);
@@ -200,7 +200,7 @@ export default function SettingsPage() {
               <input className="input" value={s.name} onChange={(e) => setStrategy({ name: e.target.value })} />
             </Field>
           </div>
-          {family?.description && <p className="small soft" style={{ marginTop: 14 }}>{family.description}</p>}
+          {(family?.description ?? family?.summary) && <p className="small soft" style={{ marginTop: 14 }}>{family?.description ?? family?.summary}</p>}
           {!family && fam.data && (
             <div className="callout loss" style={{ marginTop: 14 }}>
               “{familyLabel(s.family)}” isn’t implemented in the bot yet, so it can’t be saved. Pick one of the algorithms above.
@@ -210,7 +210,8 @@ export default function SettingsPage() {
             <div className="field" style={{ marginTop: 16 }}>
               <span className="label">Markets it may hold ({s.markets.length})</span>
               <div className="params">
-                {markets.slice(0, 20).map((m) => {
+                {[...new Set([...markets.slice(0, 20).map((x) => x.market), ...s.markets])].map((market) => {
+                  const m = { market };
                   const on = s.markets.includes(m.market);
                   return (
                     <button
@@ -471,6 +472,18 @@ export default function SettingsPage() {
       </Modal>
     </div>
   );
+}
+
+/** The API answers with one sentence; when it names a field ("execution.limitOffsetBps must be…"), show it there too. */
+function fieldFromMessage(msg: string): Record<string, string> {
+  const short = msg.replace(/^Strategy is not valid:\s*(Invalid strategy:\s*)?/i, '');
+  const strat = /(execution|risk|params)\.(\w+)/.exec(msg);
+  if (strat) return { [`strategy.${strat[1]}.${strat[2]}`]: short };
+  const top = /(maxExposureEur|dailyLossLimitEur|paperStartEur|mode)/.exec(msg);
+  if (top) return { [top[1]]: short };
+  const s = /(markets|interval|name|family)/.exec(short);
+  if (s && /strategy/i.test(msg)) return { [`strategy.${s[1]}`]: short };
+  return {};
 }
 
 function Section({ title, intro, children }: { title: string; intro: string; children: ReactNode }) {

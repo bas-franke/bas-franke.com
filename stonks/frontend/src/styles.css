@@ -1207,7 +1207,7 @@ dialog.modal[open] {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 28px;
+  top: 22px;
   transform: translateX(-50%);
   z-index: 60;
   background: var(--ink);
@@ -1626,7 +1626,7 @@ dialog.modal[open] {
     border-radius: 18px;
   }
   .toast {
-    bottom: calc(90px + env(safe-area-inset-bottom));
+    top: calc(14px + env(safe-area-inset-top));
   }
 
   .tabbar {

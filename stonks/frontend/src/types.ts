@@ -55,7 +55,8 @@ export interface Overview {
   bitvavo: { connected: boolean; error?: string };
   balances: Balance[];
   equityEur: number;
-  todayPnlEur: number;
+  /** null until the bot has recorded today's start-of-day equity. */
+  todayPnlEur: number | null;
   dailyLossLimitEur: number;
   openOrders: number;
   strategyExplanation: string;
@@ -75,6 +76,9 @@ export interface Order {
   filledAmount?: number | string;
   fee?: number | string;
   feeEur?: number | string;
+  feePaid?: number | string | null;
+  feeCurrency?: string | null;
+  filledQuote?: number | string | null;
   status: string;
   strategyId?: string;
   reason?: string | null;
@@ -99,6 +103,7 @@ export interface Fill {
   orderId?: number | string;
   exchangeTradeId?: string;
   ts?: string;
+  executedAt?: string;
   createdAt?: string;
   created_at?: string;
 }
@@ -138,6 +143,7 @@ export interface FamilyInfo {
   version?: number;
   familyVersion?: number;
   description?: string;
+  summary?: string;
   multiMarket?: boolean;
   params: ParamDescription[] | Record<string, ParamDescription>;
 }
