@@ -243,6 +243,100 @@ const rotation: FamilyRun = (candles, spec) => {
   });
 };
 
+/** alt_froth's signal-only pool: altcoins already listed on Bitvavo in 2019 (no hindsight in the list). Never traded. */
+export const ALT_FROTH_POOL = ['XRP-EUR', 'ADA-EUR', 'LINK-EUR', 'TRX-EUR', 'LTC-EUR', 'BCH-EUR', 'XLM-EUR', 'XTZ-EUR', 'MIOTA-EUR'];
+export const ALT_FROTH_BTC = 'BTC-EUR';
+const ALT_FROTH_MIN_POOL = 3;
+
+/**
+ * "As of" lookup: for every time in `times` (ascending), the value of the last candle of `cs` whose open time is
+ * <= that time (NaN before the first candle). `cs` is sorted by time.
+ */
+function asOf(cs: Candle[], values: number[], times: number[]): number[] {
+  const out = new Array<number>(times.length).fill(NaN);
+  let j = -1;
+  for (let i = 0; i < times.length; i++) {
+    while (j + 1 < cs.length && cs[j + 1][0] <= times[i]) j++;
+    if (j >= 0) out[i] = values[j];
+  }
+  return out;
+}
+
+/** log(close[i]) - log(close[i-n]) on the market's own series; NaN for the first n candles. */
+function logReturn(cs: Candle[], n: number): number[] {
+  const lc = cs.map((c) => Math.log(c[4]));
+  return lc.map((v, i) => (i >= n ? v - lc[i - n] : NaN));
+}
+
+/**
+ * Bars = union of the open times of spec.markets. froth[t] = mean `lookback` log return of the ALT_FROTH_POOL markets
+ * that have a defined return as of t (each on its own series, "as of" t; NaN with fewer than 3 of them) minus BTC-EUR's
+ * `lookback` log return as of t. One shared state, starting "in": when froth is defined, in -> out when froth >
+ * threshold; out -> in when froth < threshold - band and at least `minOut` defined bars have passed since the exit.
+ * Weight per market = maxWeight / markets.length while in, times (with trendSma > 0) [close > SMA(trendSma)] of that
+ * market as of t; 0 while out, before the market's first candle, or while the signal is undefined.
+ */
+const altFroth: FamilyRun = (candles, spec) => {
+  const lookback = num(spec, 'lookback');
+  const thr = num(spec, 'threshold');
+  const band = num(spec, 'band');
+  const minOut = num(spec, 'minOut');
+  const tsma = num(spec, 'trendSma');
+  const own = new Map(spec.markets.map((m) => [m, cleanCandles(candles[m])]));
+  const times = new Set<number>();
+  for (const cs of own.values()) for (const c of cs) times.add(c[0]);
+  const idx = [...times].sort((a, b) => a - b);
+  const n = idx.length;
+  const tot = new Array<number>(n).fill(0);
+  const cnt = new Array<number>(n).fill(0);
+  for (const m of ALT_FROTH_POOL) {
+    const cs = cleanCandles(candles[m]);
+    if (!cs.length) continue;
+    const r = asOf(cs, logReturn(cs, lookback), idx);
+    for (let i = 0; i < n; i++)
+      if (Number.isFinite(r[i])) {
+        tot[i] += r[i];
+        cnt[i]++;
+      }
+  }
+  const btcCs = cleanCandles(candles[ALT_FROTH_BTC]);
+  const btc = btcCs.length ? asOf(btcCs, logReturn(btcCs, lookback), idx) : new Array<number>(n).fill(NaN);
+  const state = new Array<number>(n).fill(NaN);
+  let out = false;
+  let since = 0;
+  for (let i = 0; i < n; i++) {
+    const s = cnt[i] >= ALT_FROTH_MIN_POOL ? tot[i] / cnt[i] - btc[i] : NaN;
+    if (!Number.isFinite(s)) continue;
+    if (out) {
+      since++;
+      if (s < thr - band && since >= minOut) out = false;
+    } else if (s > thr) {
+      out = true;
+      since = 0;
+    }
+    state[i] = out ? 0 : 1;
+  }
+  const each = spec.risk.maxWeight / spec.markets.length;
+  const trend = new Map<string, number[]>();
+  for (const [m, cs] of own) {
+    let ok: number[];
+    if (tsma > 0) {
+      const closes = cs.map((c) => c[4]);
+      const s = sma(closes, tsma);
+      ok = closes.map((c, i) => (Number.isFinite(s[i]) ? (c > s[i] ? 1 : 0) : NaN));
+    } else ok = cs.map(() => 1);
+    trend.set(m, asOf(cs, ok, idx));
+  }
+  return idx.map((t, i) => {
+    const w: Weights = {};
+    for (const m of spec.markets) {
+      const v = state[i] * trend.get(m)![i] * each;
+      w[m] = Number.isFinite(v) ? v : 0;
+    }
+    return [t, w];
+  });
+};
+
 export const runners: Record<FamilyName, FamilyRun> = {
   ema_cross: emaCross,
   macd_trend: macdTrend,
@@ -251,6 +345,7 @@ export const runners: Record<FamilyName, FamilyRun> = {
   bollinger_reversion: bollinger,
   dca_dip: dcaDip,
   rotation_momentum: rotation,
+  alt_froth: altFroth,
 };
 
 export const families: FamilyInfo[] = [
@@ -339,6 +434,20 @@ export const families: FamilyInfo[] = [
       { name: 'lookback', type: 'int', default: 30, min: 2, max: 1000, description: 'Bars over which the return is measured.' },
       { name: 'top', type: 'int', default: 3, min: 1, max: 10, description: 'How many of the best coins to hold.' },
       { name: 'regimeSma', type: 'int', default: 0, min: 0, max: 1000, description: 'Only hold coins while BTC is above this SMA; 0 turns the filter off.' },
+    ],
+  },
+  {
+    family: 'alt_froth',
+    title: 'Altcoin froth exit',
+    summary: 'Holds the coin, but sells while old altcoins race far ahead of Bitcoin (a sign of a frothy top) and buys back once they cool off.',
+    version: 1,
+    multiMarket: true,
+    params: [
+      { name: 'lookback', type: 'int', default: 90, min: 5, max: 400, description: "Candles over which the old altcoins' return is compared with Bitcoin's." },
+      { name: 'threshold', type: 'number', default: 0.25, min: 0, max: 1, description: 'Sell when the old altcoins beat Bitcoin by more than this log return (0.1 is about 10.5 %).' },
+      { name: 'band', type: 'number', default: 0.1, min: 0, max: 0.5, description: 'Buy back once their lead is under threshold minus this.' },
+      { name: 'minOut', type: 'int', default: 0, min: 0, max: 400, description: 'Stay out at least this many candles after a froth exit; 0 = no minimum.' },
+      { name: 'trendSma', type: 'int', default: 0, min: 0, max: 600, description: 'Also stay out of a coin while it is under this SMA (10 or more); 0 turns the filter off.' },
     ],
   },
 ];

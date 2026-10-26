@@ -1,6 +1,6 @@
 """Parity fixtures (SPEC §6): real candles + the Python family's target weights, replayed by the TypeScript bot.
 
-    python -m stonks_lab.parity            # export all v1 families
+    python -m stonks_lab.parity            # export all bot-ready families
     python -m stonks_lab.parity ema_cross  # just one
 
 Each fixture is ``stonks/backend/test/fixtures/parity/<family>.json``:
@@ -11,7 +11,9 @@ Each fixture is ``stonks/backend/test/fixtures/parity/<family>.json``:
 
 ``targets`` starts at the first bar where the Python family makes a decision (indicators warm) and covers every
 bar after it; the TypeScript side must match each weight to 1e-9. Candles are ~600 real 4h Bitvavo candles that end
-at a fixed date, so re-exporting gives the same file unless a family changes.
+at a fixed date, so re-exporting gives the same file unless a family changes. A FIXTURE_SPECS entry may override
+``interval`` and ``nCandles``; ``candles`` holds every market the family reads (``markets_needed``), so signal-only
+markets (e.g. alt_froth's altcoin pool) are replayed too while ``targets`` only lists the traded ``markets``.
 """
 from __future__ import annotations
 
@@ -43,13 +45,17 @@ FIXTURE_SPECS: dict[str, dict] = {
                            "sellFraction": 0.3}},
     "rotation_momentum": {"markets": ["BTC-EUR", "ETH-EUR"], "risk": {"maxWeight": 0.9},
                           "params": {"lookback": 24, "top": 1, "regimeSma": 100}},
+    # the lab's best spec (be006bebdb); 1d over ~2.7 years so the froth state machine exits and re-enters
+    "alt_froth": {"markets": ["BTC-EUR"], "interval": "1d", "nCandles": 1000,
+                  "params": {"lookback": 120, "threshold": 0.1, "band": 0.05, "minOut": 0, "trendSma": 0}},
 }
+BOT_FAMILIES = [*V1_FAMILIES, *(f for f in FIXTURE_SPECS if f not in V1_FAMILIES)]
 
 
-def _load(market: str) -> pd.DataFrame:
+def _load(market: str, interval: str = INTERVAL, n: int = N_CANDLES) -> pd.DataFrame:
     from . import data
-    df = data.load_candles(market, INTERVAL, end=END_MS)
-    return df.iloc[-N_CANDLES:]
+    df = data.load_candles(market, interval, end=END_MS)
+    return df.iloc[-n:]
 
 
 def fixture_spec(family: str) -> dict:
@@ -61,7 +67,7 @@ def fixture_spec(family: str) -> dict:
         "family": family,
         "familyVersion": fam.version,
         "markets": base["markets"],
-        "interval": INTERVAL,
+        "interval": base.get("interval", INTERVAL),
         "params": base["params"],
         "risk": base.get("risk", {}),
         "execution": {},
@@ -81,7 +87,8 @@ def build_fixture(family: str, candles: dict[str, pd.DataFrame] | None = None) -
     spec = fixture_spec(family)
     markets = fam.markets_needed(spec)
     if candles is None:
-        candles = {m: _load(m) for m in markets}
+        n = int(FIXTURE_SPECS[family].get("nCandles", N_CANDLES))
+        candles = {m: _load(m, spec["interval"], n) for m in markets}
     t = fam.targets(candles, spec)
     v = t.to_numpy(np.float64)
     valid = ~np.isnan(v).all(axis=1)
@@ -122,11 +129,11 @@ def export_fixture(family: str, out_dir: Path | str | None = None, candles=None)
 
 
 def export_all(out_dir=None) -> list[Path]:
-    return [export_fixture(f, out_dir) for f in V1_FAMILIES]
+    return [export_fixture(f, out_dir) for f in BOT_FAMILIES]
 
 
 def main(argv: list[str]) -> int:
-    fams = argv or V1_FAMILIES
+    fams = argv or BOT_FAMILIES
     for f in fams:
         p = export_fixture(f)
         print(f"{f:20s} -> {p.relative_to(REPO)}  ({summarize(json.loads(p.read_text()))})")

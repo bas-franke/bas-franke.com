@@ -95,6 +95,7 @@ Research may invent new families in Python. A family is **bot-ready** only once 
 | `bollinger_reversion` | buy at lower band, sell at middle/upper | `period`, `stdDev`, `exitAt` ("middle"\|"upper") |
 | `dca_dip` | DCA: deploy the starting cash in `tranches` equal buys every `everyBars` bars; a drop of `dipPct` from the recent `lookback` high buys an extra tranche; take profit sells `sellFraction` of the position at `takeProfitPct` above average entry | `everyBars`, `tranches`, `dipPct`, `lookback`, `takeProfitPct`, `sellFraction` |
 | `rotation_momentum` | market movement: rank the `universe` (top-10 EUR markets) by `lookback`-bar return, hold the top `top` equally if their return > 0 (and optionally only if BTC is above its SMA `regimeSma`), else cash | `lookback`, `top`, `regimeSma` |
+| `alt_froth` | hold the markets equally, but go to cash while a fixed pool of 9 altcoins listed since 2019 (XRP ADA LINK TRX LTC BCH XLM XTZ MIOTA; signal-only, never traded) beats BTC's `lookback`-bar log return by > `threshold`; back in under `threshold - band` after `minOut` bars; optional per-market SMA filter `trendSma` | `lookback`, `threshold`, `band`, `minOut`, `trendSma` |
 
 Indicator definitions (both sides must match): EMA seeded with the SMA of the first `n` closes, `alpha = 2/(n+1)`;
 RSI = Wilder's smoothing, 50 when prices are flat; Bollinger = SMA ± k·population std; MACD = EMA(fast) − EMA(slow),

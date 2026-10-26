@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ema, macd, priorMax, priorMin, rsi, sma, stdPop } from '../src/strategies/indicators.js';
-import { explainStrategy, families, targets, targetSeries, validateSpec, warmupBars, type Candle, type StrategySpec } from '../src/strategies/index.js';
+import { ALT_FROTH_POOL, dataMarkets, explainStrategy, families, targets, targetSeries, validateSpec, warmupBars, type Candle, type StrategySpec } from '../src/strategies/index.js';
 
 const close = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 const H = 3_600_000;
@@ -169,7 +169,7 @@ test('validateSpec fills defaults and rejects bad specs with readable messages',
 });
 
 test('every family has info, valid defaults and an explanation', () => {
-  assert.equal(families.length, 7);
+  assert.equal(families.length, 8);
   for (const f of families) {
     const markets = f.multiMarket ? ['BTC-EUR', 'ETH-EUR', 'SOL-EUR'] : ['BTC-EUR'];
     const s = validateSpec({ family: f.family, markets, interval: '1d' });
@@ -200,4 +200,21 @@ test('the bot loads enough warmup that a long EMA matches the full-history value
   }
   const rot = validateSpec({ family: 'rotation_momentum', markets: ['BTC-EUR', 'ETH-EUR'], interval: '1d', params: { lookback: 30, top: 1, regimeSma: 200 } });
   assert.ok(warmupBars(rot) >= 202 && warmupBars(rot) <= 1440, 'rotation only needs its lookback');
+});
+
+test('alt_froth reads its altcoin pool as signal-only markets and only ever trades its own markets', () => {
+  const s = validateSpec({ family: 'alt_froth', markets: ['BTC-EUR'], interval: '1d', params: { lookback: 5, threshold: 0.2, band: 0.1 } });
+  assert.deepEqual(dataMarkets(s).sort(), ['BTC-EUR', ...ALT_FROTH_POOL].sort());
+  const flat = Array.from({ length: 16 }, () => 10);
+  const pump = Array.from({ length: 16 }, (_, i) => (i < 8 ? 10 : 15));
+  const data = { 'BTC-EUR': candles(flat), 'XRP-EUR': candles(pump), 'ADA-EUR': candles(pump), 'LTC-EUR': candles(pump) };
+  const series = targetSeries(data, s);
+  for (const [, w] of series) assert.deepEqual(Object.keys(w), ['BTC-EUR']);
+  // spread at i8..i12 = ln 1.5 > 0.2 -> out; back in once it is 0 < 0.1 (as in the Python tests)
+  assert.deepEqual(series.slice(5).map(([, w]) => w['BTC-EUR']), [1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1]);
+  // with only two pool coins the signal is undefined: stay out
+  const two = targetSeries({ 'BTC-EUR': candles(flat), 'XRP-EUR': candles(pump), 'ADA-EUR': candles(pump) }, s);
+  assert.ok(two.every(([, w]) => w['BTC-EUR'] === 0));
+  assert.throws(() => validateSpec({ ...s, params: { ...s.params, trendSma: 5 } }), /trendSma/);
+  assert.match(explainStrategy(s), /^Holds Bitcoin, but sells when old altcoins race far ahead of Bitcoin/);
 });

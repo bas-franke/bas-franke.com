@@ -1,4 +1,4 @@
-import { families, REGIME_MARKET, runners } from './families.js';
+import { ALT_FROTH_BTC, ALT_FROTH_POOL, families, REGIME_MARKET, runners } from './families.js';
 import {
   INTERVAL_MS,
   INTERVALS,
@@ -14,7 +14,7 @@ import {
 } from './types.js';
 
 export * from './types.js';
-export { families, REGIME_MARKET } from './families.js';
+export { ALT_FROTH_POOL, families, REGIME_MARKET } from './families.js';
 export { cleanCandles } from './families.js';
 
 export const DEFAULT_RISK: RiskSpec = { maxWeight: 1, stopLossPct: null, takeProfitPct: null, trailingStopPct: null };
@@ -94,6 +94,8 @@ export function validateSpec(input: unknown): StrategySpec {
     fail('buyBelow must be smaller than sellAbove');
   if (family === 'rotation_momentum' && (params.top as number) > markets.length)
     fail('top cannot be larger than the number of markets');
+  if (family === 'alt_froth' && (params.trendSma as number) > 0 && (params.trendSma as number) < 10)
+    fail('trendSma must be 0 (off) or at least 10');
 
   const r = input.risk ?? {};
   if (!isObj(r)) fail('"risk" must be an object');
@@ -139,10 +141,14 @@ function hashParams(s: string): string {
 
 export const intervalMs = (interval: Interval) => INTERVAL_MS[interval];
 
-/** Markets whose candles the family needs (rotation with a regime filter also needs BTC-EUR). */
+/**
+ * Markets whose candles the family needs: the traded markets plus signal-only markets that are read but never traded
+ * (rotation's regime filter reads BTC-EUR; alt_froth reads BTC-EUR and its fixed altcoin pool).
+ */
 export function dataMarkets(spec: StrategySpec): string[] {
   const set = new Set(spec.markets);
   if (spec.family === 'rotation_momentum' && Number(spec.params.regimeSma) > 0) set.add(REGIME_MARKET);
+  if (spec.family === 'alt_froth') for (const m of [ALT_FROTH_BTC, ...ALT_FROTH_POOL]) set.add(m);
   return [...set];
 }
 
@@ -227,6 +233,14 @@ export function explainStrategy(specInput: StrategySpec): string {
     case 'rotation_momentum':
       parts.push(`Every ${intervalText[spec.interval]} candle it ranks ${spec.markets.length} coins (${spec.markets.map(coin).join(', ')}) by their return over the last ${p.lookback} candles and holds the best ${p.top} in equal parts, but only coins that actually went up${Number(p.regimeSma) > 0 ? ` and only while BTC is above its ${p.regimeSma}-bar average` : ''}; the rest stays in euros.`);
       break;
+    case 'alt_froth': {
+      const held = spec.markets.length === 1 && spec.markets[0] === 'BTC-EUR' ? 'Bitcoin' : spec.markets.map(coin).join(', ');
+      parts.push(`Holds ${held}, but sells when old altcoins race far ahead of Bitcoin, which has often come just before a crash. It loses in slow bear markets and in long altcoin rallies that keep going, and rests on two or three well-timed exits.`);
+      const thr = Number(p.threshold);
+      const back = thr - Number(p.band);
+      parts.push(`After every ${intervalText[spec.interval]} candle it compares the return over the last ${p.lookback} candles of nine altcoins that were already trading in 2019 (${ALT_FROTH_POOL.map(coin).join(', ')}; only watched, never traded) with Bitcoin's; when they are more than ${pctText(Math.expm1(thr))} ahead it sells and waits in euros, and it buys back once their lead is under ${pctText(Math.expm1(back))}${Number(p.minOut) > 0 ? ` and at least ${p.minOut} candles have passed` : ''}.${Number(p.trendSma) > 0 ? ` It also stays out of a coin while its price is under its ${p.trendSma}-bar average.` : ''}`);
+      break;
+    }
   }
   const r = spec.risk;
   parts.push(r.maxWeight < 1 ? `At most ${pctText(r.maxWeight)} of the portfolio is ever in coins.` : 'It may put the whole portfolio into coins.');

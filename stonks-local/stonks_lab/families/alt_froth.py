@@ -22,7 +22,7 @@ from ._base import bars_text, frame, market_names, max_weight, pct, risk_steps, 
 NAME = "alt_froth"
 VERSION = 1
 TITLE = "Altcoin froth exit"
-BOT_READY = False
+BOT_READY = True
 MULTI_MARKET = True
 OLD_ALTS = ["XRP-EUR", "ADA-EUR", "LINK-EUR", "TRX-EUR", "LTC-EUR", "BCH-EUR", "XLM-EUR", "XTZ-EUR", "MIOTA-EUR"]
 MIN_POOL = 3
