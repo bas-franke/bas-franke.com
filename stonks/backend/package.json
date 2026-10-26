@@ -10,7 +10,7 @@
     "dev": "tsx watch --env-file-if-exists=.env.local src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --experimental-test-module-mocks --test test/*.test.ts"
   },
   "dependencies": {
     "express": "^5.3.0",

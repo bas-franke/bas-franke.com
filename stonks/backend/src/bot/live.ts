@@ -29,6 +29,7 @@ export class LiveBroker implements Broker {
 
   async place(intent: OrderIntent, ctx: PlaceContext): Promise<OrderRow | null> {
     let row: OrderRow | null = null;
+    let res: BitvavoOrder;
     try {
       const rules = await ruleFor(intent.market);
       let price = intent.price;
@@ -54,10 +55,7 @@ export class LiveBroker implements Broker {
       } else if (intent.amountQuote) params.amountQuote = intent.amountQuote;
       else params.amount = intent.amount;
       await log('info', 'order_sending', `Live ${intent.orderType} ${intent.side} ${intent.amount ?? `€${intent.amountQuote}`} ${intent.market}${price ? ` at ${price}` : ''} (${intent.reason})`, { orderId: row.id, clientOrderId: uuid });
-      const res = await bitvavo.placeOrder(params);
-      await this.apply(row, res);
-      await log('info', 'order_placed', `Live order ${row.id} accepted by Bitvavo: ${res.status}`, { orderId: row.id, exchangeOrderId: res.orderId });
-      return row;
+      res = await bitvavo.placeOrder(params);
     } catch (err) {
       if (!row) {
         await log('error', 'order_failed', `Live ${intent.side} ${intent.market} not sent: ${errText(err)}`);
@@ -73,6 +71,16 @@ export class LiveBroker implements Broker {
       await log('warn', 'order_uncertain', `Live order ${row.id} outcome unknown (${errText(err)}); will check with Bitvavo`, { orderId: row.id });
       return row;
     }
+    // Bitvavo accepted the order. Whatever fails from here on (DB, reading fills, a rate limit) must never mark it
+    // rejected: the row stays open so the next sync reads it back by its id.
+    try {
+      await this.apply(row, res);
+      await log('info', 'order_placed', `Live order ${row.id} accepted by Bitvavo: ${res.status}`, { orderId: row.id, exchangeOrderId: res.orderId });
+    } catch (err) {
+      await updateOrder(row.id, { exchangeOrderId: res.orderId ?? null }, { error: errText(err) }).catch(() => undefined);
+      await log('warn', 'order_record_failed', `Live order ${row.id} was accepted by Bitvavo but recording it failed (${errText(err)}); will check with Bitvavo`, { orderId: row.id, exchangeOrderId: res.orderId });
+    }
+    return row;
   }
 
   async cancel(order: OrderRow, why: string): Promise<boolean> {
@@ -134,23 +142,14 @@ export class LiveBroker implements Broker {
     return this.apply(o, ex);
   }
 
-  /** Copies the exchange's view of an order into the DB and records its fills. Returns new fills. */
+  /**
+   * Copies the exchange's view of an order into the DB and records its fills. Returns new fills.
+   * The fills are recorded BEFORE the status moves: if reading them fails, the row keeps its old (open) status and
+   * the next sync tries again, instead of a closed order whose fills are never recorded.
+   */
   private async apply(o: OrderRow, ex: BitvavoOrder): Promise<number> {
     const prev = o.status;
-    await updateOrder(
-      o.id,
-      {
-        status: ex.status,
-        exchangeOrderId: ex.orderId,
-        filledAmount: Number(ex.filledAmount ?? 0),
-        filledQuote: Number(ex.filledAmountQuote ?? 0),
-        feePaid: Number(ex.feePaid ?? 0),
-        feeCurrency: ex.feeCurrency ?? null,
-        amount: ex.amount ?? (o.amount || ex.filledAmount),
-        price: ex.price ?? o.price,
-      },
-      { exchange: { status: ex.status, updated: ex.updated, amountRemaining: ex.amountRemaining } },
-    );
+    if (ex.orderId && o.exchangeOrderId !== ex.orderId) await updateOrder(o.id, { exchangeOrderId: ex.orderId });
     let fresh = 0;
     let fills = ex.fills ?? [];
     const filled = Number(ex.filledAmount ?? 0);
@@ -177,6 +176,20 @@ export class LiveBroker implements Broker {
         await log('info', 'order_filled', `Live ${o.side} ${amount} ${o.market} filled at ${price}${f.fee ? ` (fee ${f.fee} ${f.feeCurrency})` : ''}`, { orderId: o.id, tradeId: f.id, taker: f.taker });
       }
     }
+    await updateOrder(
+      o.id,
+      {
+        status: ex.status,
+        exchangeOrderId: ex.orderId,
+        filledAmount: Number(ex.filledAmount ?? 0),
+        filledQuote: Number(ex.filledAmountQuote ?? 0),
+        feePaid: Number(ex.feePaid ?? 0),
+        feeCurrency: ex.feeCurrency ?? null,
+        amount: ex.amount ?? (o.amount || ex.filledAmount),
+        price: ex.price ?? o.price,
+      },
+      { exchange: { status: ex.status, updated: ex.updated, amountRemaining: ex.amountRemaining } },
+    );
     if (prev !== ex.status && !isOpenStatus(ex.status))
       await log('info', 'order_closed', `Live order ${o.id} (${o.side} ${o.market}) is ${ex.status}`, { orderId: o.id, filledAmount: ex.filledAmount });
     return fresh;
