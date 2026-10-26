@@ -11,6 +11,8 @@ then; this family buys back into that pain for a fixed time.
   ``rankLen`` bars with ui <= ui_t (trailing, inclusive of today).
 - pain trigger: rank_t >= ``rankMin`` -> hold for ``holdBars`` bars (re-triggers extend it).
 - hold while close > SMA(``coreSma``) OR inside a pain window. ``coreSma`` 0 = pain buys only (cash base).
+- ``dayHour`` (only on 1h candles): daily candles closing at that UTC hour, one decision a day (close-hour check,
+  finding #505); ignored on other intervals.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from .. import indicators as ind
+from .osc_core_a09 import daily_candles
 from ._base import bars_text, frame, market_names, max_weight, risk_steps, single_market
 
 NAME = "ulcer_core_a09"
@@ -28,7 +31,7 @@ MULTI_MARKET = False
 
 
 def default_params() -> dict:
-    return {"look": 60, "rankLen": 365, "rankMin": 0.8, "holdBars": 30, "coreSma": 130}
+    return {"look": 60, "rankLen": 365, "rankMin": 0.8, "holdBars": 30, "coreSma": 130, "dayHour": 0}
 
 
 def param_space() -> dict:
@@ -43,6 +46,8 @@ def param_space() -> dict:
                      "description": "candles a pain buy is held"},
         "coreSma": {"type": "int", "min": 0, "max": 250, "zero": True,
                     "description": "SMA trend core (0 = no core, pain buys only)"},
+        "dayHour": {"type": "int", "min": 0, "max": 23,
+                    "description": "on 1h candles only: UTC hour at which the daily candles close (decision hour)"},
     }
 
 
@@ -67,7 +72,20 @@ def trailing_rank(x: np.ndarray, n: int) -> np.ndarray:
 def targets(candles, spec, start_time=None):
     p = spec["params"]
     m, df = single_market(candles, spec)
-    c = df["close"].to_numpy(np.float64)
+    mw = max_weight(spec)
+    if spec.get("interval") != "1h":
+        return frame(df.index, {m: weights(df["close"].to_numpy(np.float64), p) * mw})
+    idx = np.asarray(df.index, dtype=np.int64)
+    d, last = daily_candles(df, int(p.get("dayHour", 0)) % 24)
+    w = weights(d["close"].to_numpy(np.float64), p) if len(d) else np.zeros(0)
+    out = np.full(len(idx), np.nan)
+    pos = np.searchsorted(idx, last, side="left")
+    ok = (pos < len(idx)) & np.isfinite(w)
+    out[pos[ok]] = w[ok] * mw
+    return frame(idx, {m: out})
+
+
+def weights(c: np.ndarray, p: dict) -> np.ndarray:
     ui = ulcer(c, int(p["look"]))
     rk = trailing_rank(ui, int(p["rankLen"]))
     hold = int(p["holdBars"])
@@ -91,7 +109,7 @@ def targets(candles, spec, start_time=None):
         w[~np.isfinite(core) | ~np.isfinite(pain)] = np.nan
     else:
         w = pain
-    return frame(df.index, {m: w * max_weight(spec)})
+    return w
 
 
 def explain(spec) -> dict:

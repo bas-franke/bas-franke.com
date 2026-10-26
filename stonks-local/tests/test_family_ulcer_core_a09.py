@@ -61,3 +61,13 @@ def test_no_lookahead():
             part = FAM.targets({"BTC-EUR": df.iloc[:cut]}, s)["BTC-EUR"]
             a, b = full.loc[part.index].to_numpy(), part.to_numpy()
             assert np.array_equal(np.isnan(a), np.isnan(b)) and np.allclose(a[~np.isnan(a)], b[~np.isnan(b)])
+
+
+def test_day_hour_matches_native_daily_at_hour_zero():
+    H = 3_600_000
+    h = synth(24 * 400, 12, step=H, vol=0.004)
+    s1 = normalize_spec({"family": "ulcer_core_a09", "markets": ["BTC-EUR"], "interval": "1h",
+                         "params": {"look": 10, "rankLen": 90, "rankMin": 0.8, "holdBars": 5, "coreSma": 20,
+                                    "dayHour": 5}}, FAM)
+    w = FAM.targets({"BTC-EUR": h}, s1)["BTC-EUR"].dropna()
+    assert len(w) > 200 and (((w.index.to_numpy() // H) % 24) == 4).all()
