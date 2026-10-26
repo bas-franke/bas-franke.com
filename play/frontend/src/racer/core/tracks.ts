@@ -158,12 +158,12 @@ function course(
 /** Dusk in the red canyon, after the concept art: a magenta-violet sky over a hot orange horizon, the sun low behind
  * the spires, deep red rock with violet shade, rusty sand and thick orange dust. */
 const dusk: Theme = {
-  skyTop: '#7242a2',
+  skyTop: '#7a44a2',
   skyHorizon: '#ffa860',
   sunColor: '#ffc27a',
   sunAzimuth: 0.6,
   sunElevation: 0.3,
-  haze: '#f48e5a',
+  haze: '#f08a66',
   hazeDistance: 620,
   clouds: 0.8,
   rockLit: '#dc532a',

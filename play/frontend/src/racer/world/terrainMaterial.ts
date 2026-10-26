@@ -220,7 +220,7 @@ const MAIN_FRAGMENT = /* glsl */ `
   diffuseColor.rgb = albedo * vShade;
   // Cool blue-violet fill in the joints, on undersides and on shaded faces (the sky bounce in the concept art).
   float under = smoothstep(-0.1, -0.6, wN.y);
-  totalEmissiveRadiance += uCool * r * vShade * (cr * 0.035 + under * 0.06 + (1.0 - lit) * 0.035 + foot * 0.02);
+  totalEmissiveRadiance += uCool * r * vShade * (cr * 0.035 + under * 0.06 + (1.0 - lit) * 0.06 + foot * 0.03);
   #ifndef TERRAIN_LOW
   // Bump from the procedural height (three's perturbNormalArb, in view space): rock facets at full strength, the
   // sand's ripples gently.
