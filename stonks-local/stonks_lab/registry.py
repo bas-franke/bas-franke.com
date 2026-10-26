@@ -165,7 +165,8 @@ def markets_key(markets: Iterable[str]) -> str:
 def _flat_numeric(spec: dict) -> tuple[dict, dict]:
     """(numeric knobs, other knobs) of a canonical spec, used for near-duplicate distance."""
     c = canonical(spec)
-    num, other = {}, {"universe": json.dumps(c.get("universe"))}   # top10 vs top10_pit are different strategies
+    num, other = {}, {"universe": json.dumps(c.get("universe")),   # top10 vs top10_pit are different strategies
+                      "familyVersion": json.dumps(c.get("familyVersion"))}   # a bumped family is new code (#346)
     for section in ("params", "risk", "execution"):
         for k, v in (c.get(section) or {}).items():
             key = f"{section}.{k}"
@@ -177,8 +178,8 @@ def _flat_numeric(spec: dict) -> tuple[dict, dict]:
 
 
 def param_distance(a: dict, b: dict) -> float:
-    """Largest relative difference between two specs' numeric knobs; inf if a non-numeric knob (or the universe)
-    differs."""
+    """Largest relative difference between two specs' numeric knobs; inf if a non-numeric knob (or the universe, or
+    the family version) differs."""
     na, oa = _flat_numeric(a)
     nb, ob = _flat_numeric(b)
     if oa != ob or set(na) != set(nb):
@@ -447,8 +448,9 @@ class Registry:
         return out
 
     def near_duplicates(self, spec: dict, tolerance: float = 0.05, limit: int = 20) -> list[dict]:
-        """Done/running experiments of the same family, interval and markets (and same non-numeric knobs) whose
-        numeric params/risk/execution are all within ``tolerance`` relative distance. The exact spec counts too."""
+        """Done/running experiments of the same family, family version, interval and markets (and same non-numeric
+        knobs) whose numeric params/risk/execution are all within ``tolerance`` relative distance. The exact spec
+        counts too."""
         c_spec = canonical(spec)
         with self._conn() as c:
             rows = c.execute(

@@ -111,6 +111,9 @@ def test_near_duplicates(r):
     pit = dict(spec(fast=12, slow=48), universe="top10_pit")
     assert reg.spec_hash(pit) != reg.spec_hash(base)
     assert r.near_duplicates(pit, tolerance=0.5) == []                              # other universe
+    bumped = dict(spec(fast=12, slow=48), familyVersion=2)
+    assert reg.spec_hash(bumped) != reg.spec_hash(base)
+    assert r.near_duplicates(bumped, tolerance=0.5) == []                           # new family version (#346)
 
 
 def test_findings_lanes_coverage(r):
