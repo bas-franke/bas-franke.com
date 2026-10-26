@@ -93,7 +93,9 @@ def test_today_top10_spec_needs_a_winning_pit_twin(tmp_path):
     r2.record(biased, _result(20.0, {"meanExcessLogPct": 25.0}))
     r2.record(twin, _result(2.0, {"meanExcessLogPct": 4.0}))
     top = leaderboard.rank(r2)
-    assert [e["score"] for e in top] == [20.0, 2.0] and top[0]["pitCheck"]["passed"]
+    # ranked by the honest (point-in-time) score; the twin is not listed separately
+    assert [e["score"] for e in top] == [2.0] and top[0]["rawScore"] == 20.0 and top[0]["pitCheck"]["passed"]
+    assert top[0]["spec_hash"] == reg.spec_hash(biased)
     p = leaderboard.build_payload(r2)
     assert "today's top-10" in p["top"][0]["explanation"]["vsBuyHold"]
     assert "top 10 at each moment" in p["summary"]["notes"]

@@ -89,7 +89,7 @@ def _curve_returns(e: dict):
 def same_outcome(a: dict, b: dict, min_corr: float = 0.995) -> bool:
     """True when two experiments trade (nearly) identically even if their params differ, e.g. a knob that never
     binds: same interval and markets, same number of trades in the test folds and the holdout, and the same fold
-    returns (within 0.05 points), about the same holdout return, and holdout equity curves whose bar returns correlate
+    returns (within 0.5 points or 2 %, same trades per fold), about the same holdout return, and holdout equity curves whose bar returns correlate
     above ``min_corr``."""
     if a["interval"] != b["interval"] or a["markets"] != b["markets"]:
         return False
@@ -100,7 +100,8 @@ def same_outcome(a: dict, b: dict, min_corr: float = 0.995) -> bool:
         return False
     fa, fb = _fold_returns(a), _fold_returns(b)
     if fa is not None and fb is not None:
-        if len(fa) != len(fb) or any(x[0] != y[0] or x[2] != y[2] or abs(x[1] - y[1]) > 0.05 for x, y in zip(fa, fb)):
+        if len(fa) != len(fb) or any(x[0] != y[0] or x[2] != y[2] or abs(x[1] - y[1]) > max(0.5, 0.02 * max(abs(x[1]), abs(y[1])))
+                                    for x, y in zip(fa, fb)):
             return False
     ta, ra = _curve_returns(a)
     tb, rb = _curve_returns(b)
@@ -130,14 +131,16 @@ def pit_twin_spec(spec: dict) -> dict:
     return twin
 
 
-def pit_check(registry: reg.Registry, e: dict) -> dict | None:
+def pit_check(registry: reg.Registry, e: dict, twin: dict | None = None, looked_up: bool = False) -> dict | None:
     """For a survivorship-biased experiment: its point-in-time twin's verdict, or None when the twin has not been
     evaluated (with the current method) yet. ``passed`` = the twin is eligible and beat buy and hold of the
     point-in-time members (mean fold excess > 0)."""
-    try:
-        t = registry.get(reg.spec_hash(pit_twin_spec(e["spec"])))
-    except Exception:  # noqa: BLE001 - missing universe module/data
-        return None
+    t = twin
+    if not looked_up:
+        try:
+            t = registry.get_exact(reg.spec_hash(pit_twin_spec(e["spec"])))
+        except Exception:  # noqa: BLE001 - missing universe module/data
+            return None
     if not t or t.get("status") != "done" or t.get("eval_version") != reg.EVAL_VERSION:
         return None
     parts = (t.get("metrics") or {}).get("scoreParts") or {}
@@ -152,18 +155,34 @@ def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance
     specs (:func:`ineligible_reason`), more than ``per_family`` per family, parameter near-duplicates of a chosen
     one, and specs that trade the same as a chosen one (:func:`same_outcome`), so only the best-scoring copy stays.
     A survivorship-biased spec (today's top-10 list) is ranked only when its point-in-time twin (``lab.py
-    pit-twins``) also beat buy and hold; the payload then says so."""
-    chosen: list[dict] = []
-    per: dict[str, int] = {}
-    for e in registry.top(pool, bot_ready_only=bot_ready_only):
-        fam = e["family"]
-        if ineligible_reason(e, min_test_trades):
-            continue
-        if survivorship_biased(e):             # ranked only when it also wins on the point-in-time universe
-            chk = pit_check(registry, e)
+    pit-twins``) also beat buy and hold, by min(own score, twin score) (``rawScore`` keeps its own), and the twin is
+    not listed separately; the payload says so."""
+    cands: list[dict] = []
+    twins: set[str] = set()
+    rows = [e for e in registry.top(pool, bot_ready_only=bot_ready_only) if not ineligible_reason(e, min_test_trades)]
+    twin_of: dict[str, str] = {}
+    for e in rows:
+        if survivorship_biased(e):
+            try:
+                twin_of[e["spec_hash"]] = reg.spec_hash(pit_twin_spec(e["spec"]))
+            except Exception:  # noqa: BLE001
+                pass
+    found = registry.get_many(list(set(twin_of.values())))
+    for e in rows:
+        if survivorship_biased(e):             # ranked only when it also wins on the point-in-time universe,
+            th = twin_of.get(e["spec_hash"])   # and then by the honest (point-in-time) score
+            chk = pit_check(registry, e, found.get(th), looked_up=True) if th else None
             if not chk or not chk["passed"]:
                 continue
-            e = dict(e, pitCheck=chk)
+            twins.add(chk["hash"])
+            e = dict(e, pitCheck=chk, rawScore=e["score"], score=min(e["score"], chk["score"]))
+        cands.append(e)
+    cands = [e for e in cands if e["spec_hash"] not in twins]      # represented by the spec they verify
+    cands.sort(key=lambda e: e["score"], reverse=True)
+    chosen: list[dict] = []
+    per: dict[str, int] = {}
+    for e in cands:
+        fam = e["family"]
         if per.get(fam, 0) >= per_family:
             continue
         if any(c["family"] == fam and c["interval"] == e["interval"] and c["markets"] == e["markets"]

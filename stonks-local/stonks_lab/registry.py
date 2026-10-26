@@ -429,6 +429,23 @@ class Registry:
             row = c.execute("SELECT * FROM experiments WHERE spec_hash=? OR spec_hash LIKE ?", (h, h + "%")).fetchone()
         return _exp(row) if row else None
 
+    def get_exact(self, h: str) -> dict | None:
+        """One experiment by its full hash (an index lookup, unlike the prefix match of :meth:`get`)."""
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM experiments WHERE spec_hash=?", (h,)).fetchone()
+        return _exp(row) if row else None
+
+    def get_many(self, hashes: list[str]) -> dict[str, dict]:
+        """{hash: experiment} for the full hashes that exist (batched index lookups)."""
+        out: dict[str, dict] = {}
+        with self._conn() as c:
+            for i in range(0, len(hashes), 500):
+                part = hashes[i:i + 500]
+                q = f"SELECT * FROM experiments WHERE spec_hash IN ({','.join('?' * len(part))})"
+                for row in c.execute(q, part).fetchall():
+                    out[row["spec_hash"]] = _exp(row)
+        return out
+
     def near_duplicates(self, spec: dict, tolerance: float = 0.05, limit: int = 20) -> list[dict]:
         """Done/running experiments of the same family, interval and markets (and same non-numeric knobs) whose
         numeric params/risk/execution are all within ``tolerance`` relative distance. The exact spec counts too."""
