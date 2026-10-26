@@ -10,7 +10,9 @@
 // -> once all humans are ready (or DR.loadTimeoutMs passed) the server sends `go` with the server time the lights go
 // green (DR.leadInMs ahead: the intro fly-over plus the countdown) -> `state` from clients, `snap` to everyone ->
 // `finish` per pod -> `finished` broadcasts -> when every human is in (or DR.finishGraceMs after the first human
-// finisher, or DR.maxRaceMs) `end`, and the room goes back to waiting.
+// finisher, or DR.maxRaceMs) `end` with the results and the next track. The results stay up for DR.resultsMs, then
+// the room starts the next race on that track (a fresh match: a new `init`); the host can start it sooner (room
+// message `start`) or take everyone back to the lobby (`stop`).
 
 export const DR = {
   /** Snapshots the clients send and the server relays, per second. */
@@ -22,7 +24,9 @@ export const DR = {
   /** After the first human crosses the line, how long the rest have before the race is called. */
   finishGraceMs: 30_000,
   /** Hard cap on one race from green. */
-  maxRaceMs: 12 * 60_000,
+  maxRaceMs: 30 * 60_000,
+  /** How long the results stay up before the next race starts on its own. */
+  resultsMs: 60_000,
   /** Points by finishing place (1st..8th); unfinished pods score 0. */
   points: [10, 8, 6, 5, 4, 3, 2, 1],
   /** A pod whose owner sent no state for this long is relayed as a ghost (bit 3: not solid). */
@@ -130,5 +134,11 @@ export type DustrunnersServerMsg =
   | { k: 'snap'; t: number; pods: PodSnap[] }
   /** A pod crossed the line. */
   | { k: 'finished'; id: string; time: number; place: number }
-  /** The race is over. `scores` sorted by place (unfinished at the end, by distance). */
-  | { k: 'end'; scores: { id: string; points: number; place: number | null; time: number | null }[]; winner: string | null };
+  /**
+   * The race is over. `scores` sorted by place (unfinished at the end, by distance). The next race starts on track
+   * `next` at server time `nextAt` (ms) unless the host starts it sooner or goes back to the lobby.
+   */
+  | {
+      k: 'end'; scores: { id: string; points: number; place: number | null; time: number | null }[]; winner: string | null;
+      next: string; nextAt: number;
+    };

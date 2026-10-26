@@ -88,7 +88,8 @@ class DustrunnersGame implements GameServer {
   private readonly podOffset = Math.floor(Math.random() * DR_PODS.length);
 
   constructor(private readonly host: GameHost) {
-    const map = host.settings.map;
+    // The next race of a series comes with its track; else the room's pick, or a random one.
+    const map = host.seriesMap ?? host.settings.map;
     this.track = drTrackById(map)?.id ?? DR_TRACKS[Math.floor(Math.random() * DR_TRACKS.length)].id;
   }
 
@@ -317,9 +318,18 @@ class DustrunnersGame implements GameServer {
       ...done.map((e, i) => ({ id: e.id, points: DR.points[i] ?? 0, place: i + 1, time: this.finishes.get(e.id)!.time })),
       ...rest.map((e) => ({ id: e.id, points: 0, place: null, time: null })),
     ];
-    this.endMsg = { k: 'end', scores, winner: done[0]?.id ?? null };
+    const next = this.nextTrack();
+    this.endMsg = { k: 'end', scores, winner: done[0]?.id ?? null, next, nextAt: Date.now() + DR.resultsMs };
     this.host.broadcast(this.endMsg);
-    this.host.matchEnded();
+    this.host.matchEnded({ inMs: DR.resultsMs, map: next });
+  }
+
+  /** The track after this one: the next course in the list when the host picked one, else a different random one. */
+  private nextTrack(): string {
+    const i = DR_TRACKS.findIndex((t) => t.id === this.track);
+    if (drTrackById(this.host.settings.map)) return DR_TRACKS[(i + 1) % DR_TRACKS.length].id;
+    const others = DR_TRACKS.filter((t) => t.id !== this.track);
+    return others.length ? others[Math.floor(Math.random() * others.length)].id : this.track;
   }
 
   // ---- sending --------------------------------------------------------------------------------------------------

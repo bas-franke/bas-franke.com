@@ -43,7 +43,8 @@ export interface DustrunnersHudState {
   view: RaceView | null;
   /** Set when loading the race failed. */
   error: string;
-  ended: { scores: DrScore[]; winner: string | null } | null;
+  /** The race is over: the results, and the track and server time (ms) of the next race. */
+  ended: { scores: DrScore[]; winner: string | null; next: string; nextAt: number } | null;
 }
 
 /** Points for a finishing place (1-based); unfinished pods score nothing. */
@@ -126,7 +127,7 @@ export class DustrunnersClient implements GameClient {
         break;
       }
       case 'end':
-        this.hud.set({ phase: 'done', ended: { scores: msg.scores, winner: msg.winner } });
+        this.hud.set({ phase: 'done', ended: { scores: msg.scores, winner: msg.winner, next: msg.next, nextAt: msg.nextAt } });
         if (msg.winner === this.ctx.you) sfx.play('win');
         break;
       case 'snap':

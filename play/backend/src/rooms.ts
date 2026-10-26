@@ -81,6 +81,10 @@ export class Room implements GameHost {
   private readonly matchIds = new Set<string>();
   /** play_id of the host who left the running match; they get the host back when they reconnect. */
   private leftHostPlayId?: string;
+  /** The match is over and the next one of the series starts on this map (GameHost.matchEnded with `next`). */
+  private nextUp?: { map: string };
+  /** See GameHost.seriesMap: set only while startGame builds the next match of a series. */
+  seriesMap?: string;
   closed = false;
 
   constructor(
@@ -409,17 +413,7 @@ export class Room implements GameHost {
   }
 
   stopGame(reason: string) {
-    clearTimeout(this.endTimer);
-    this.endTimer = undefined;
-    clearTimeout(this.abandonTimer);
-    this.abandonTimer = undefined;
-    if (!this.game) return;
-    const game = this.game;
-    this.game = undefined;
-    game.stop();
-    this.state = 'waiting';
-    this.matchIds.clear();
-    this.leftHostPlayId = undefined;
+    if (!this.endMatch()) return;
     this.systemChat(reason);
     // Back in the lobby everyone is in: seat the waiting members and trim bots (also Garden versus rejoiners seated
     // over the limit) until the room fits again.
@@ -427,9 +421,50 @@ export class Room implements GameHost {
     this.broadcastRoom();
   }
 
-  matchEnded() {
+  /** Tears the running match down (no broadcast). Returns false when there was none. */
+  private endMatch(): boolean {
+    clearTimeout(this.endTimer);
+    this.endTimer = undefined;
+    clearTimeout(this.abandonTimer);
+    this.abandonTimer = undefined;
+    this.nextUp = undefined;
+    if (!this.game) return false;
+    const game = this.game;
+    this.game = undefined;
+    game.stop();
+    this.state = 'waiting';
+    this.matchIds.clear();
+    this.leftHostPlayId = undefined;
+    return true;
+  }
+
+  matchEnded(next?: { inMs: number; map: string }) {
     if (this.endTimer) return;
+    if (next) {
+      this.nextUp = { map: next.map };
+      this.endTimer = setTimeout(() => this.nextMatch(), next.inMs);
+      return;
+    }
     this.endTimer = setTimeout(() => this.stopGame('Match over. Ready for another?'), RESULTS_LINGER_MS);
+  }
+
+  /**
+   * Starts the next match of a series right away, without a trip through the lobby: waiting members are seated and
+   * everyone gets the new match's messages. Falls back to the lobby when it cannot start.
+   */
+  private nextMatch() {
+    const next = this.nextUp;
+    if (!next || !this.endMatch()) return;
+    this.seriesMap = next.map;
+    try {
+      this.startGame();
+    } catch (e) {
+      this.systemChat(e instanceof RoomError ? e.message : 'The next match could not start.');
+      this.seatWaiting();
+      this.broadcastRoom();
+    } finally {
+      this.seriesMap = undefined;
+    }
   }
 
   // ---- messages -------------------------------------------------------------------------------------------------
@@ -477,6 +512,12 @@ export class Room implements GameHost {
         return;
       case 'start':
         this.requireHost(member);
+        // Between the matches of a series: start the next one now.
+        if (this.state === 'playing' && this.nextUp) {
+          this.nextMatch();
+          this.systemChat(`${member.name} started the next race`);
+          return;
+        }
         if (this.settings.game === 'garden' && this.settings.mode === 'vs' && this.members.size < 2) {
           throw new RoomError('Versus needs at least two gardens: invite someone or add a bot.');
         }
@@ -485,7 +526,7 @@ export class Room implements GameHost {
         return;
       case 'stop':
         this.requireHost(member);
-        if (this.state === 'playing') this.stopGame(`${member.name} ended the match`);
+        if (this.state === 'playing') this.stopGame(this.nextUp ? `${member.name} took everyone back to the lobby` : `${member.name} ended the match`);
         return;
       case 'g':
         if (!member.waiting) this.game?.onMessage(id, msg.m);

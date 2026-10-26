@@ -6,6 +6,7 @@
 import { memo, useEffect, useState } from 'react';
 import { colorHex } from '@shared/protocol';
 import type { DrEntrant } from '@shared/dustrunners/protocol';
+import { drTrackById } from '@shared/dustrunners/tracks';
 import type { RaceView } from '../../racer/RaceView';
 import { Hud as RaceHud } from '../../racer/ui/Hud';
 import { fmtTime, ordinal, useHud, wantsTouch } from '../../racer/ui/hudStore';
@@ -74,7 +75,7 @@ export function DustrunnersHud({ client, ctx }: { client: DustrunnersClient; ctx
         {s.ready && s.phase === 'loading' && !s.spectator && <WaitingForPilots s={s} ctx={ctx} />}
         {s.spectator && !s.ended && <SpectatorBanner client={client} s={s} />}
         {s.results.length > 0 && !s.ended && <Classification s={s} ctx={ctx} />}
-        {(board || s.ended) && !menu && <Board s={s} ctx={ctx} />}
+        {(board || s.ended) && !menu && <Board s={s} ctx={ctx} isHost={isHost} />}
         {!s.ended && (
           <>
             <button className="hud-pause-btn drn-menu-btn" aria-label="Menu" onClick={() => setMenu(true)}>
@@ -152,7 +153,7 @@ function Loading({ s }: { s: DustrunnersHudState }) {
       <div className="drn-card">
         <div className="hud-pause-sub">{s.trackName || 'Dustrunners'}</div>
         <div className="drn-title">{s.error ? 'Something broke' : done ? 'Race just ended' : 'Loading the canyon'}</div>
-        <p className="drn-sub">{s.error || (done ? 'Back to the room in a moment.' : 'Building the track and warming up the turbines…')}</p>
+        <p className="drn-sub">{s.error || (done ? 'The next race starts shortly.' : 'Building the track and warming up the turbines…')}</p>
         {!s.error && !done && <div className="drn-spinner" aria-hidden />}
       </div>
     </div>
@@ -235,7 +236,7 @@ const LiveOrder = memo(function LiveOrder({ view, s, ctx }: { view: RaceView; s:
   return <BoardTable rows={rows} ctx={ctx} ping={s.ping} live />;
 });
 
-function Board({ s, ctx }: { s: DustrunnersHudState; ctx: ClientContext }) {
+function Board({ s, ctx, isHost }: { s: DustrunnersHudState; ctx: ClientContext; isHost: boolean }) {
   const byId = new Map(s.entrants.map((e) => [e.id, e]));
   const winner = s.ended?.winner ? byId.get(s.ended.winner) : undefined;
   return (
@@ -250,16 +251,37 @@ function Board({ s, ctx }: { s: DustrunnersHudState; ctx: ClientContext }) {
         ) : (
           <BoardTable rows={s.entrants.filter((e) => !e.spectator).map((e) => ({ id: e.id, entrant: e, place: null, time: null, points: null }))} ctx={ctx} ping={s.ping} live />
         )}
-        {s.ended && (
-          <>
-            <p className="drn-sub">Back to the room in a moment.</p>
-            <button className="hud-pause-item" onClick={ctx.leave}>
-              <span>Back to main page</span>
-            </button>
-          </>
-        )}
+        {s.ended && <NextRace ended={s.ended} ctx={ctx} isHost={isHost} />}
       </div>
     </div>
+  );
+}
+
+/** Under the results: the countdown to the next race, and for the host the buttons to start it now or go back to the lobby. */
+function NextRace({ ended, ctx, isHost }: { ended: NonNullable<DustrunnersHudState['ended']>; ctx: ClientContext; isHost: boolean }) {
+  useNow(250);
+  const left = Math.max(0, Math.ceil((ended.nextAt - ctx.socket.serverNow()) / 1000));
+  const name = drTrackById(ended.next)?.name ?? 'the next track';
+  return (
+    <>
+      <p className="drn-sub drn-next">
+        Next race: <b>{name}</b> {left > 0 ? `in ${left} s` : 'starting…'}
+        {!isHost && ' · the host can start it sooner'}
+      </p>
+      {isHost && (
+        <button className="hud-pause-item primary" autoFocus onClick={() => ctx.socket.send({ t: 'start' })}>
+          <span>Start next race now</span>
+        </button>
+      )}
+      {isHost && (
+        <button className="hud-pause-item" onClick={() => ctx.socket.send({ t: 'stop' })}>
+          <span>Back to lobby</span>
+        </button>
+      )}
+      <button className="hud-pause-item" onClick={ctx.leave}>
+        <span>Back to main page</span>
+      </button>
+    </>
   );
 }
 

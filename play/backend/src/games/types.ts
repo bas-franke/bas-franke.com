@@ -18,14 +18,20 @@ export interface GamePlayer {
 export interface GameHost {
   readonly code: string;
   readonly settings: RoomSettings;
+  /** Set while the room starts the next match of a series (see matchEnded): the map to play instead of settings.map. */
+  readonly seriesMap?: string;
   botDifficulty(): BotDifficulty;
   /** Everyone in the room, humans and bots. */
   players(): GamePlayer[];
   send(id: string, m: GameServerMsg): void;
   broadcast(m: GameServerMsg): void;
   systemChat(text: string): void;
-  /** The game calls this once when the match is over; the room goes back to the waiting state shortly after. */
-  matchEnded(): void;
+  /**
+   * The game calls this once when the match is over; the room goes back to the waiting state shortly after. With
+   * `next` the room stays in the game instead and starts a new match on `next.map` after `next.inMs` (the host can
+   * start it sooner with `start` or go back to the lobby with `stop`).
+   */
+  matchEnded(next?: { inMs: number; map: string }): void;
 }
 
 export interface GameServer {
