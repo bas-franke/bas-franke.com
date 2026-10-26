@@ -222,6 +222,9 @@ void main() {
   float belly = smoothstep(0.2, 0.5, vY + n.y * 0.1);
   lit *= mix(0.15, 1.0, belly);
   vec3 col = mix(uShade, uLit, lit);
+  // Gold rim: thin, sun-facing edges catch the light like a brushed highlight.
+  float rim = (1.0 - t.b) * smoothstep(0.2, 0.8, ndl) * belly;
+  col += uSun * rim * rim * 0.45;
   // Silver lining: thin edges glow when the cloud is between us and the sun.
   float back = pow(max(vMu, 0.0), 5.0);
   col += uSun * back * (1.0 - t.b) * 1.4;
@@ -261,8 +264,8 @@ export function createClouds(opts: {
     const az = r() * Math.PI * 2;
     // Mostly low banks along the horizon, some higher, smaller ones.
     const high = r();
-    const el = 0.005 + Math.pow(high, 2.2) * 0.55;
-    const size = (0.3 + r() * 0.35) * (1 - high * 0.5);
+    const el = 0.005 + Math.pow(high, 1.7) * 0.55;
+    const size = (0.36 + r() * 0.42) * (1 - high * 0.45);
     const parts = 1 + Math.floor(r() * (quality === 'low' ? 2 : 3.5));
     for (let k = 0; k < parts; k++) {
       list.push({

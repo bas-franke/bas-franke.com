@@ -41,21 +41,22 @@ void main() {
   float y = d.y;
   float mu = dot(d, uSunDir);
 
-  // Zenith-to-horizon gradient: pale only in the lowest ~15 degrees, deep blue overhead.
-  float t = pow(clamp(y, 0.0, 1.0), 0.36);
-  // Mixed in a gamma-ish space so blue-to-peach skies pass through clean light blues, not grey-lavender.
-  vec3 col = mix(sqrt(uHorizon), sqrt(uTop), t);
-  col *= col;
-
-  // The half of the sky facing the sun is paler and warmer.
+  // The half of the sky facing the sun is warmer, and its horizon glow reaches higher.
   vec2 hd = normalize(d.xz + 1e-5);
   vec2 hs = normalize(uSunDir.xz + 1e-5);
   float side = 0.5 + 0.5 * dot(hd, hs);
-  col = mix(col, uHorizon * 1.05, side * side * 0.3 * (1.0 - t) * (1.0 - t));
+
+  // Zenith-to-horizon gradient: the horizon colour holds through the lowest ~20 degrees (more on the sun side), then
+  // turns to the zenith colour. Mixed in a gamma-ish space so violet-to-orange dusk skies pass through a saturated
+  // pink-magenta (and blue-to-peach day skies through clean light blues), not grey.
+  float t = pow(clamp(y, 0.0, 1.0), mix(0.62, 0.9, side * side));
+  vec3 col = mix(sqrt(uHorizon), sqrt(uTop), t);
+  col *= col;
+  col = mix(col, uHorizon * 1.08, side * side * 0.35 * (1.0 - t) * (1.0 - t));
 
   // Haze band hugging the horizon, in the fog colour.
-  float band = exp(-max(y, 0.0) * 22.0);
-  col = mix(col, uHaze, band * 0.8);
+  float band = exp(-max(y, 0.0) * 14.0);
+  col = mix(col, uHaze, band * 0.85);
 
   // Below the horizon: haze for the visible sky, warm sand for reflections.
   float below = smoothstep(0.0, -0.08, y);
@@ -63,7 +64,7 @@ void main() {
 
   // Sun glow: a wide warm halo plus a tight hot core, then the disc itself (HDR, for bloom).
   float m = max(mu, 0.0);
-  col += uSun * (0.1 * pow(m, 6.0) + 0.35 * pow(m, 48.0) + 1.4 * pow(m, 1200.0)) * (1.0 - below * 0.8);
+  col += uSun * (0.16 * pow(m, 5.0) + 0.4 * pow(m, 40.0) + 1.4 * pow(m, 1200.0)) * (1.0 - below * 0.8);
   float disc = smoothstep(uDiscCos - 0.00006, uDiscCos + 0.00003, mu);
   col += uSun * disc * uDisc;
 

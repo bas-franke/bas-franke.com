@@ -55,9 +55,10 @@ export const buildSky: WorldBuilder = (ctx) => {
   const dome = createSkyDome(domeMat, 1000);
   group.add(dome);
 
-  // Clouds: lit tops in sunlight, undersides a blue-grey mixed from the sky and the haze.
-  const cloudLit = onScreen(C('#fffaf2').lerp(sunCol, 0.45 + 0.45 * (1 - day)), renderer, 2.4);
-  const cloudShade = onScreen(C(theme.skyTop).lerp(C(theme.skyHorizon), 0.5).lerp(C('#a99cc4'), 0.3).multiplyScalar(0.85), renderer);
+  // Clouds: lit tops in sunlight (gold at dusk), undersides a lavender mixed from the sky (pink-lavender under a
+  // violet dusk sky, blue-grey under a blue one).
+  const cloudLit = onScreen(C('#fffaf2').lerp(sunCol, 0.45 + 0.5 * (1 - day)), renderer, 2.6);
+  const cloudShade = onScreen(C(theme.skyTop).lerp(C(theme.skyHorizon), 0.55).lerp(C('#c7a6cf'), 0.4).multiplyScalar(0.92), renderer);
   const clouds = createClouds({
     coverage: theme.clouds,
     quality,
@@ -79,7 +80,8 @@ export const buildSky: WorldBuilder = (ctx) => {
   // Sun.
   // The theme's sun colour times warm rock and sand compounds into blood red at sunset; the light itself is kept
   // closer to white and the warmth comes from the albedos.
-  const sun = new THREE.DirectionalLight(sunCol.clone().lerp(C('#ffffff'), 0.35), 2.3 + 1.0 * day);
+  // A low sun keeps more of its colour and a little more strength (it rakes the ground at a shallow angle).
+  const sun = new THREE.DirectionalLight(sunCol.clone().lerp(C('#ffffff'), 0.15 + 0.2 * day), 2.9 + 0.4 * day);
   sun.name = 'sun';
   const sh = SHADOW[quality];
   if (sh.size > 0) {
@@ -100,11 +102,11 @@ export const buildSky: WorldBuilder = (ctx) => {
   group.add(sun, sun.target);
 
   // Sky fill above, warm sand bounce below.
-  // Skylight: a soft lavender-blue whatever the hour, so shade on red rock goes red-brown/violet (never black, and
-  // not the blood red a warm skylight times warm rock gives).
-  const hemiSky = C(theme.skyTop).lerp(C(theme.skyHorizon), 0.3).lerp(C('#b9b4d0'), 0.55);
-  const hemiGround = C(theme.sand).lerp(C(theme.rockLit), 0.35).lerp(C('#c8b8a8'), 0.25);
-  const hemi = new THREE.HemisphereLight(hemiSky, hemiGround, 1.7);
+  // Skylight: a cool lavender-violet whatever the hour, so shade on red rock goes red-violet (never black, and not
+  // the blood red a warm skylight times warm rock gives); bluer under a day sky, more violet under a dusk one.
+  const hemiSky = C(theme.skyTop).lerp(C(theme.skyHorizon), 0.25).lerp(C('#b8b0d8'), 0.6);
+  const hemiGround = C(theme.sand).lerp(C(theme.rockLit), 0.35).lerp(C('#d0b0a0'), 0.25);
+  const hemi = new THREE.HemisphereLight(hemiSky, hemiGround, 1.45);
   group.add(hemi);
 
   // Light reflected off sunlit canyon walls, coming from the side opposite the sun, low.
