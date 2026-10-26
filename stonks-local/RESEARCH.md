@@ -95,24 +95,43 @@ not walls: if your finding points into another lane, write it down and pick that
 
 ## Score (how experiments are ranked)
 
-`stonks_lab/evaluate.py` scores every spec out of sample (copied from its docstring):
+`stonks_lab/evaluate.py` scores every spec out of sample (eval version 2, since 2026-10-26; its docstring has the
+details):
 
 - **Holdout** = the last 365 days of data (last 25 % if there are less than two years). Reported on the dashboard,
   **never** part of the score.
-- The history before the holdout is cut into K+2 equal segments (K = 6 folds); fold k tests segment k+2 from a fresh
-  EUR 1000 start. Buy and hold of the same markets (equal split, one taker buy) is run on every window.
+- **Fold boundaries depend on the data, never on the spec.** The history from the first bar of the data (D0) to the
+  holdout is cut into K+2 equal segments (K = 6 folds); fold k tests segment k+2 from a fresh EUR 1000 start. Every
+  spec on the same markets + interval is tested on exactly the same windows (on 1d: 2020-11, 2021-09, 2022-07, ...).
+  D0 is the first bar of the union of the spec's markets, so BTC, ETH and top-10 specs all start in 2019-03; coins
+  listed later (SOL/BNB/DOGE/AVAX, 2021-08) don't shift it, they join the strategy and buy and hold when they list.
+- **Warm-up** comes from the data before each fold (indicators run over the whole history; the first two segments,
+  ~1.6 years on 1d, are the fixed allowance). A fold where the spec has no decision yet at its start is *unusable*
+  (`scoreParts.skippedFolds`), not moved later. Fewer than 3 usable folds gives no score.
+- Buy and hold of the same markets (equal split, one taker buy) is run on every window.
 
 ```
 x_f   = ln(final_f / 1000) - ln(buyHoldFinal_f / 1000)    log excess return over buy and hold, test fold f
 dd_f  = max drawdown of the strategy in test fold f        (fraction, 0.3 = 30 %)
+X     = mean of x_f after dropping the single best fold
 N     = fills summed over all test folds
-score = 100 * ( median_f(x_f) - 0.5 * median_f(dd_f) ) - 10 * max(0, 1 - N / 20)
+score = 100 * ( X - 0.5 * median_f(dd_f) ) - 10 * max(0, 1 - N / 20)
 ```
 
 Roughly "percentage points of typical out-of-sample excess return over buy and hold, minus half the typical
-drawdown, minus up to 10 points for fewer than 20 trades". Medians make one lucky fold count for little; fewer than
-3 usable folds gives no score. Positive = it beat holding the same coins after fees and drawdown; most ideas
-score below 0, which is a useful finding too. `lab.py show <hash>` has `scoreParts`, every fold and the holdout.
+drawdown, minus up to 10 points for fewer than 20 trades". The **mean** (not the median) means a bull fold lost to
+buy and hold always counts: sitting in cash through the bulls and "winning" the bear folds no longer scores well.
+Dropping the best fold means one lucky fold counts for little. Positive = it beat holding the same coins after fees
+and drawdown; most ideas score below 0, which is a useful finding too.
+
+**Eligibility** (`scoreParts.eligible`): the median over the folds of the time-average exposure must be at least
+10 %. A spec that sits in cash most of the time is not a strategy: it keeps its score for the record but is never
+ranked or published. Buy and hold is the benchmark of every fold, never a candidate.
+
+**Versions**: every result carries `evalVersion`. The leaderboard, `top`, `publish` and the coverage "best" only
+compare results of the current version; `lab.py rescore` re-evaluates older rows in place (the old score stays in
+`metrics.history`). Version 1 started each spec's folds after its own warm-up and used the median of x_f
+(findings #21/#22). `lab.py show <hash>` has `scoreParts`, every fold and the holdout.
 
 ## Adding a family
 
@@ -144,8 +163,9 @@ sells when it should); the generic no-look-ahead test in `tests/test_families.py
 ## How results reach the dashboard
 
 `$PY lab.py publish` ranks all done experiments by score, keeps at most 2 per family and drops near-identical
-variants and specs with fewer than 5 trades in the test folds (sitting in cash is not a
-strategy), takes the top 5, adds the holdout metrics, equity curves (400 points), buy-and-hold curves, benchmarks
+variants (by params, and specs that trade the same as a better one: same trades, same fold returns and holdout
+curve), ineligible specs (median fold exposure under 10 %) and specs with fewer than 5 trades in the test folds
+(sitting in cash is not a strategy), takes the top 5, adds the holdout metrics, equity curves (400 points), buy-and-hold curves, benchmarks
 (buy and hold BTC, ETH, equal-weight top 10), the family's plain-language explanation plus an honest
 "vs buy and hold" sentence, and posts it to `https://stonks.bas-franke.com/api/research`. `--dry-run` only writes
 `out/research.json`. Families that the bot implements are marked bot-ready; others show as "not yet runnable".

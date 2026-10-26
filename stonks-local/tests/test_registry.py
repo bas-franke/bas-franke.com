@@ -28,6 +28,7 @@ def result(score, ret=10.0, bh=20.0, n=600):
                         "sharpe": 1.1, "trades": 40, "winRatePct": 50.0, "feesEur": 9.0, "exposurePct": 45.0,
                         "vsBuyHoldPct": ret - bh, "testPeriod": ["2024-07-01", "2026-10-25"]},
             "equity": eq, "buyHoldEquity": bheq, "spec_hash": "x", "fingerprint": "fp1",
+            "evalVersion": reg.EVAL_VERSION,
             "benchmarks": {"BTC-EUR": {"name": "Buy and hold BTC", "returnPct": 50.0, "maxDrawdownPct": 30.0,
                                        "equity": bheq},
                            "ETH-EUR": {"returnPct": 40.0, "equity": bheq},
@@ -201,3 +202,53 @@ def test_no_trade_sentence():
     m = {"returnPct": 0.0, "maxDrawdownPct": 0.0, "trades": 0, "testPeriod": ["2025-01-01", "2026-01-01"]}
     s = leaderboard.vs_buy_hold_sentence(m, -30.0, 50.0, ["BTC-EUR"])
     assert "no trades" in s and "avoided" in s
+
+
+def test_rank_skips_near_cash_and_old_eval_versions(r):
+    _fill(r)
+    s1 = spec("rsi_dip", period=40, buyBelow=5)
+    res = result(99.0)
+    res["scoreParts"] = {"testTrades": 30, "eligible": False, "ineligibleReason": "median fold exposure 0.0 %"}
+    r.record(s1, res)
+    s2 = spec("macd_trend", fast=3, slow=90, signal=4)
+    old = result(98.0)
+    old.pop("evalVersion")                                   # recorded by the old method (NULL = version 1)
+    r.record(s2, old)
+    top = leaderboard.rank(r, n=5)
+    assert all(e["score"] < 90 for e in top)
+    assert leaderboard.ineligible_reason(r.get(reg.spec_hash(s1))).startswith("median fold exposure")
+    assert 98.0 not in [e["score"] for e in r.top(20)]           # old version: not compared
+    assert 98.0 in [e["score"] for e in r.top(20, version=None)]
+    assert r.stats()["staleEval"] == 1 and r.stats()["bestScore"] == 99.0
+
+
+def test_rescore_in_place_is_idempotent(r):
+    s = spec()
+    r.claim(s, agent="a1", round=2, hypothesis="h")
+    old = result(4.0)
+    old.pop("evalVersion")
+    old["scoreParts"] = {"testTrades": 30}
+    r.record(s, old, agent="a1", round=2)
+    stale = r.stale_versions()
+    assert [x["spec_hash"] for x in stale] == [reg.spec_hash(s)] and stale[0]["spec"]["family"] == "ema_cross"
+    new = result(-1.5)
+    assert r.rescore(reg.spec_hash(s), new)
+    assert not r.rescore(reg.spec_hash(s), new)              # second run: nothing to do
+    assert r.stale_versions() == []
+    e = r.get(reg.spec_hash(s))
+    assert e["score"] == -1.5 and e["eval_version"] == reg.EVAL_VERSION and e["agent"] == "a1" and e["round"] == 2
+    assert e["metrics"]["history"] == [{"evalVersion": 1, "score": 4.0, "scoreParts": {"testTrades": 30},
+                                        "rescoredAt": e["metrics"]["history"][0]["rescoredAt"]}]
+
+
+def test_rank_drops_specs_that_trade_identically(r):
+    _fill(r)
+    s1, s2 = spec("rsi_dip", period=14, buyBelow=30, extra=0), spec("rsi_dip", period=14, buyBelow=30, extra=9)
+    for s, sc in ((s1, 5.0), (s2, 4.9)):
+        res = result(sc, ret=25.0)
+        res["folds"] = [{"fold": i, "test": {"returnPct": 3.0 * i, "trades": 4}} for i in range(1, 7)]
+        r.record(s, res)
+    top = leaderboard.rank(r, n=5)
+    assert [e["score"] for e in top][:2] == [5.0, 3.0] and 4.9 not in [e["score"] for e in top]
+    assert leaderboard.same_outcome(r.get(reg.spec_hash(s1)), r.get(reg.spec_hash(s2)))
+    assert not leaderboard.same_outcome(r.get(reg.spec_hash(s1)), r.get(reg.spec_hash(spec())))

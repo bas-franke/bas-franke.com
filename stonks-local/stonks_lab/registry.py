@@ -38,6 +38,10 @@ DEFAULT_EXECUTION = {"orderType": "limit", "limitOffsetBps": 5, "postOnly": True
 RUNNING_STALE_S = 6 * 3600
 LANE_STALE_S = 3 * 3600
 
+# Version of the evaluation method (fold boundaries + score formula, see stonks_lab/evaluate.py). Rows of older
+# versions (NULL = 1) are not compared with current ones; `lab.py rescore` re-evaluates them in place.
+EVAL_VERSION = 2
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS experiments (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,6 +240,7 @@ class Registry:
         with self._conn() as c:
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript(SCHEMA)
+            _migrate(c)
 
     @contextmanager
     def _conn(self):
@@ -314,23 +319,11 @@ class Registry:
         now = time.time()
         c_spec = canonical(spec)
         status = "failed" if (error or result is None) else "done"
-        score = holdout = metrics = curves = fingerprint = None
+        score = metrics = holdout = curves = fingerprint = eval_version = None
         if result is not None:
-            s = result.get("score")
-            score = None if s is None else float(s)
-            if score is not None and not math.isfinite(score):
-                score = None
-            holdout = result.get("holdout")
+            eval_version = result.get("evalVersion")
             fingerprint = result.get("fingerprint")
-            curves = {
-                "equity": downsample(result.get("equity")),
-                "buyHoldEquity": downsample(result.get("buyHoldEquity")),
-                "benchmarks": _bench_curves(result.get("benchmarks")),
-            }
-            metrics = {k: v for k, v in result.items()
-                       if k not in ("equity", "buyHoldEquity", "benchmarks", "holdout", "fingerprint", "spec")}
-            if isinstance(holdout, dict):
-                holdout = {k: v for k, v in holdout.items() if k not in ("equity", "buyHoldEquity")}
+            score, metrics, holdout, curves = _result_columns(result)
         with self._tx() as c:
             row = c.execute("SELECT started_at, agent, round, parent, hypothesis FROM experiments WHERE spec_hash=?",
                             (h,)).fetchone()
@@ -347,18 +340,53 @@ class Registry:
                 prev = dict(row)
             c.execute(
                 """UPDATE experiments SET status=?, score=?, metrics=?, holdout=?, curves=?, fingerprint=?, error=?,
-                   bot_ready=?, agent=?, round=?, parent=?, hypothesis=?, finished_at=?, heartbeat_at=?, duration_s=?
-                   WHERE spec_hash=?""",
+                   bot_ready=?, agent=?, round=?, parent=?, hypothesis=?, finished_at=?, heartbeat_at=?, duration_s=?,
+                   eval_version=? WHERE spec_hash=?""",
                 (status, score, _j(metrics), _j(holdout), _j(curves), fingerprint, error,
                  None if bot_ready is None else int(bool(bot_ready)),
                  agent or prev.get("agent"), round if round is not None else prev.get("round"),
                  parent or prev.get("parent"), hypothesis or prev.get("hypothesis"),
-                 now, now, now - started, h))
+                 now, now, now - started, eval_version, h))
             a = agent or prev.get("agent")
             r = round if round is not None else prev.get("round")
             if a is not None and r is not None:
                 _bump_round(c, r, a, "experiments")
         return h
+
+    def stale_versions(self, limit: int | None = None, version: int = EVAL_VERSION) -> list[dict]:
+        """Done experiments evaluated with an older method (eval_version NULL or < ``version``), cheapest
+        intervals first: [{spec_hash, spec, interval, eval_version}]."""
+        q = ("SELECT spec_hash, spec, interval, eval_version FROM experiments WHERE status='done' "
+             "AND (eval_version IS NULL OR eval_version < ?) ORDER BY id")
+        with self._conn() as c:
+            rows = [dict(r) for r in c.execute(q, (version,)).fetchall()]
+        order = {iv: i for i, iv in enumerate(reversed(INTERVALS))}
+        rows.sort(key=lambda r: order.get(r["interval"], 99))
+        for r in rows:
+            r["spec"] = _lj(r["spec"])
+        return rows[:limit] if limit else rows
+
+    def rescore(self, h: str, result: dict) -> bool:
+        """Replace a done experiment's evaluation with a newer-version ``result`` in place. The previous score,
+        scoreParts and eval version are appended to ``metrics.history``. Agent, round, lineage and timings stay.
+        Idempotent: a row that is already at the result's version (or no longer done) is left alone (False)."""
+        new_v = int(result.get("evalVersion") or EVAL_VERSION)
+        score, metrics, holdout, curves = _result_columns(result)
+        with self._tx() as c:
+            row = c.execute("SELECT status, score, metrics, eval_version FROM experiments WHERE spec_hash=?",
+                            (h,)).fetchone()
+            if row is None or row["status"] != "done" or (row["eval_version"] or 1) >= new_v:
+                return False
+            old = _lj(row["metrics"]) or {}
+            history = list(old.get("history") or [])
+            history.append({"evalVersion": row["eval_version"] or 1, "score": row["score"],
+                            "scoreParts": old.get("scoreParts"), "rescoredAt": time.time()})
+            metrics = dict(metrics or {})
+            metrics["history"] = history
+            c.execute("""UPDATE experiments SET score=?, metrics=?, holdout=?, curves=?, fingerprint=?, eval_version=?
+                         WHERE spec_hash=?""",
+                      (score, _j(metrics), _j(holdout), _j(curves), result.get("fingerprint"), new_v, h))
+            return True
 
     def seen(self, spec: dict, include_failed: bool = True) -> bool:
         """True if this exact spec is done, running, or (by default) failed."""
@@ -405,9 +433,14 @@ class Registry:
         with self._conn() as c:
             return [_exp(r) for r in c.execute(q, args).fetchall()]
 
-    def top(self, n: int = 10, bot_ready_only: bool = False, family: str | None = None) -> list[dict]:
+    def top(self, n: int = 10, bot_ready_only: bool = False, family: str | None = None,
+            version: int | None = EVAL_VERSION) -> list[dict]:
+        """Best done experiments by score, only those evaluated with the current method (``version=None``: all)."""
         q = "SELECT * FROM experiments WHERE status='done' AND score IS NOT NULL"
         args: list = []
+        if version is not None:
+            q += " AND eval_version=?"
+            args.append(version)
         if bot_ready_only:
             q += " AND bot_ready=1"
         if family:
@@ -507,8 +540,8 @@ class Registry:
             rows = c.execute(
                 """SELECT family, interval, markets,
                           SUM(status='done') AS done, SUM(status='failed') AS failed, SUM(status='running') AS running,
-                          MAX(CASE WHEN status='done' THEN score END) AS best
-                   FROM experiments GROUP BY family, interval, markets""").fetchall()
+                          MAX(CASE WHEN status='done' AND eval_version=? THEN score END) AS best
+                   FROM experiments GROUP BY family, interval, markets""", (EVAL_VERSION,)).fetchall()
         cells = [dict(r) for r in rows]
         order = {iv: i for i, iv in enumerate(INTERVALS)}
         cells.sort(key=lambda r: (r["family"], order.get(r["interval"], 99), r["markets"]))
@@ -530,7 +563,9 @@ class Registry:
         with self._conn() as c:
             e = c.execute("""SELECT COUNT(*) n, SUM(status='done') done, SUM(status='failed') failed,
                              SUM(status='running') running, COUNT(DISTINCT family) families,
-                             MAX(score) best, SUM(duration_s) cpu_s FROM experiments""").fetchone()
+                             MAX(CASE WHEN eval_version=? THEN score END) best,
+                             SUM(status='done' AND (eval_version IS NULL OR eval_version<?)) stale,
+                             SUM(duration_s) cpu_s FROM experiments""", (EVAL_VERSION, EVAL_VERSION)).fetchone()
             f = c.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
             r = c.execute("""SELECT COUNT(DISTINCT round) FROM (SELECT round FROM experiments WHERE round IS NOT NULL
                              UNION SELECT round FROM findings WHERE round IS NOT NULL
@@ -540,9 +575,40 @@ class Registry:
             agents = c.execute("SELECT COUNT(DISTINCT agent) FROM experiments WHERE agent IS NOT NULL").fetchone()[0]
             last = c.execute("SELECT MAX(finished_at) FROM experiments").fetchone()[0]
         return {"experiments": e["n"] or 0, "done": e["done"] or 0, "failed": e["failed"] or 0,
-                "running": e["running"] or 0, "families": e["families"] or 0, "bestScore": e["best"],
+                "running": e["running"] or 0, "staleEval": e["stale"] or 0, "families": e["families"] or 0, "bestScore": e["best"],
                 "cpuHours": round((e["cpu_s"] or 0) / 3600, 2), "findings": f, "rounds": r, "maxRound": maxr,
                 "agents": agents, "lastFinishedAt": last}
+
+
+def _result_columns(result: dict) -> tuple:
+    """(score, metrics, holdout, curves) of an ``evaluate.evaluate`` result as stored in the registry."""
+    s = result.get("score")
+    score = None if s is None else float(s)
+    if score is not None and not math.isfinite(score):
+        score = None
+    holdout = result.get("holdout")
+    curves = {
+        "equity": downsample(result.get("equity")),
+        "buyHoldEquity": downsample(result.get("buyHoldEquity")),
+        "benchmarks": _bench_curves(result.get("benchmarks")),
+    }
+    metrics = {k: v for k, v in result.items()
+               if k not in ("equity", "buyHoldEquity", "benchmarks", "holdout", "fingerprint", "spec")}
+    if isinstance(holdout, dict):
+        holdout = {k: v for k, v in holdout.items() if k not in ("equity", "buyHoldEquity")}
+    return score, metrics, holdout, curves
+
+
+def _migrate(c: sqlite3.Connection) -> None:
+    """Additive, idempotent schema changes. Safe with concurrent openers: a lost race ("duplicate column") is fine."""
+    cols = {r[1] for r in c.execute("PRAGMA table_info(experiments)").fetchall()}
+    if "eval_version" not in cols:
+        try:
+            c.execute("ALTER TABLE experiments ADD COLUMN eval_version INTEGER")  # NULL = version 1
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e):
+                raise
+    c.execute("CREATE INDEX IF NOT EXISTS ix_exp_ver ON experiments(status, eval_version)")
 
 
 def _bump_round(c: sqlite3.Connection, round: int, agent: str, col: str) -> None:

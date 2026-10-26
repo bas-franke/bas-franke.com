@@ -3,7 +3,10 @@
 Ranking is by the out-of-sample ``score`` computed by ``stonks_lab.evaluate`` (walk-forward folds; the holdout is
 reported, never tuned on). The top list is diversified: at most ``per_family`` (2) entries per family, and a
 candidate within ``near_tolerance`` relative parameter distance of an already chosen one (same family, interval,
-markets) is skipped, so the top 5 isn't five variants of one idea. Buy and hold is a benchmark, never a candidate.
+markets) is skipped, and so is one that trades the same as a chosen one (same trades, same fold returns / holdout
+curve), so the top 5 isn't five variants of one idea. Only results of the current evaluation version
+(registry.EVAL_VERSION) are compared, and specs that sit in cash (median fold exposure < 10 %, evaluate's
+``eligible``) or barely trade are never ranked. Buy and hold is a benchmark, never a candidate.
 """
 from __future__ import annotations
 
@@ -44,23 +47,89 @@ def test_trades(e: dict) -> int | None:
     return int(v) if isinstance(v, (int, float)) else None
 
 
+def ineligible_reason(e: dict, min_test_trades: int = 5) -> str | None:
+    """Why an experiment may not be ranked (None = it may). Sitting in cash is not a strategy: evaluate marks a
+    spec ineligible when its median fold exposure is under 10 %; fewer than ``min_test_trades`` fills in the test
+    folds is the same thing in disguise. Buy and hold is the benchmark, never a candidate."""
+    if e["family"] in EXCLUDED_FAMILIES:
+        return "benchmark family"
+    if e.get("score") is None or not math.isfinite(e["score"]):
+        return "no score"
+    parts = (e.get("metrics") or {}).get("scoreParts") or {}
+    if parts.get("eligible") is False:
+        return parts.get("ineligibleReason") or "not eligible"
+    tt = test_trades(e)
+    if tt is not None and tt < min_test_trades:
+        return f"only {tt} test-fold trades"
+    return None
+
+
+def _fold_returns(e: dict) -> list | None:
+    folds = (e.get("metrics") or {}).get("folds")
+    if not isinstance(folds, list) or not folds:
+        return None
+    out = []
+    for f in folds:
+        t = f.get("test") if isinstance(f, dict) else None
+        if not isinstance(t, dict) or t.get("returnPct") is None:
+            return None
+        out.append((f.get("fold"), round(float(t["returnPct"]), 2), t.get("trades")))
+    return out
+
+
+def _curve_returns(e: dict):
+    eq = (e.get("curves") or {}).get("equity") or []
+    if len(eq) < 3:
+        return None, None
+    ts = [p[0] for p in eq]
+    v = [float(p[1]) for p in eq]
+    return ts, [(v[i + 1] / v[i] - 1.0) if v[i] else 0.0 for i in range(len(v) - 1)]
+
+
+def same_outcome(a: dict, b: dict, min_corr: float = 0.995) -> bool:
+    """True when two experiments trade (nearly) identically even if their params differ, e.g. a knob that never
+    binds: same interval and markets, same number of trades in the test folds and the holdout, and the same fold
+    returns (within 0.05 points), about the same holdout return, and holdout equity curves whose bar returns correlate
+    above ``min_corr``."""
+    if a["interval"] != b["interval"] or a["markets"] != b["markets"]:
+        return False
+    if test_trades(a) != test_trades(b) or (a.get("holdout") or {}).get("trades") != (b.get("holdout") or {}).get("trades"):
+        return False
+    ha, hb = (a.get("holdout") or {}).get("returnPct"), (b.get("holdout") or {}).get("returnPct")
+    if ha is not None and hb is not None and abs(ha - hb) > max(0.5, 0.02 * max(abs(ha), abs(hb))):
+        return False
+    fa, fb = _fold_returns(a), _fold_returns(b)
+    if fa is not None and fb is not None:
+        if len(fa) != len(fb) or any(x[0] != y[0] or x[2] != y[2] or abs(x[1] - y[1]) > 0.05 for x, y in zip(fa, fb)):
+            return False
+    ta, ra = _curve_returns(a)
+    tb, rb = _curve_returns(b)
+    if ra is None or rb is None or ta != tb:
+        return fa is not None and fb is not None       # folds identical, no comparable curve: same
+    sa, sb = max(ra) - min(ra), max(rb) - min(rb)
+    if sa == 0 or sb == 0:
+        return sa == sb and (fa is not None and fb is not None)
+    import numpy as np
+    return float(np.corrcoef(ra, rb)[0, 1]) > min_corr
+
+
 def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance: float = 0.25,
-         bot_ready_only: bool = False, pool: int = 500, min_test_trades: int = 5) -> list[dict]:
-    """The best ``n`` diverse done experiments, best first. Specs that (almost) never trade in the test folds
-    (fewer than ``min_test_trades`` fills) are "sit in cash" in disguise and are left out."""
+         bot_ready_only: bool = False, pool: int = 3000, min_test_trades: int = 5) -> list[dict]:
+    """The best ``n`` diverse done experiments of the current evaluation version, best first. Skips ineligible
+    specs (:func:`ineligible_reason`), more than ``per_family`` per family, parameter near-duplicates of a chosen
+    one, and specs that trade the same as a chosen one (:func:`same_outcome`), so only the best-scoring copy stays."""
     chosen: list[dict] = []
     per: dict[str, int] = {}
     for e in registry.top(pool, bot_ready_only=bot_ready_only):
         fam = e["family"]
-        if fam in EXCLUDED_FAMILIES or e.get("score") is None or not math.isfinite(e["score"]):
-            continue
-        tt = test_trades(e)
-        if tt is not None and tt < min_test_trades:
+        if ineligible_reason(e, min_test_trades):
             continue
         if per.get(fam, 0) >= per_family:
             continue
         if any(c["family"] == fam and c["interval"] == e["interval"] and c["markets"] == e["markets"]
                and reg.param_distance(c["spec"], e["spec"]) <= near_tolerance for c in chosen):
+            continue
+        if any(same_outcome(c, e) for c in chosen):
             continue
         chosen.append(e)
         per[fam] = per.get(fam, 0) + 1

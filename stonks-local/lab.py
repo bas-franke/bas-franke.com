@@ -3,7 +3,8 @@
 
     stonks-local/.venv/Scripts/python stonks-local/lab.py <command> [...]
 
-Commands: status, coverage, findings, top, show, check, families, lanes, lane, run, sweep, finding, publish, digest.
+Commands: status, coverage, findings, top, show, check, families, lanes, lane, run, sweep, finding, publish, digest,
+rescore.
 See RESEARCH.md for the protocol the research agents follow.
 """
 from __future__ import annotations
@@ -97,6 +98,42 @@ def resolve_markets(tokens: list[str] | None, fam=None) -> list[str]:
                 p = p.upper()
                 out.append(p if "-" in p else f"{p}-EUR")
     return sorted(dict.fromkeys(out))
+
+
+def normalize_markets(v) -> list[str]:
+    """A spec's markets as given by a person or agent ("top10", "BTC,ETH", ["top10"], ["btc"]) -> sorted list."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        v = [v]
+    return resolve_markets([str(x) for x in v]) if v else []
+
+
+def market_error(fam, family: str, interval: str, markets: list[str], params: dict | None = None) -> str | None:
+    """Why this family can't run on these markets (None = fine): single-market families take exactly one market,
+    and every market the spec needs must have candles of this interval. Checked before anything is claimed."""
+    if not markets:
+        return "no markets given"
+    if not is_multi_market(fam) and len(markets) != 1:
+        return (f"{family} trades exactly one market, got {', '.join(markets)}: run one sweep per market "
+                f"(only multi-market families take several)")
+    needed = list(markets)
+    fn = fam_attr(fam, "markets_needed")
+    if callable(fn):
+        try:
+            needed = fn({"markets": markets, "interval": interval, "params": params or {}})
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        from stonks_lab import data  # type: ignore
+        have = {(x[0], x[1]) for x in data.available() if x[4]}
+    except Exception:  # noqa: BLE001
+        return None
+    missing = [m for m in needed if (m, interval) not in have]
+    if missing:
+        return (f"no {interval} candles for {', '.join(missing)}: tools/download.py --markets {' '.join(missing)} "
+                f"--intervals {interval} first")
+    return None
 
 
 def markets_label(markets: list[str]) -> str:
@@ -299,7 +336,8 @@ def cmd_status(a, r: reg.Registry):
     if a.json:
         return out({"stats": st, "stop": STOP_FILE.exists(), "lanes": lanes, "cells": len(cov["cells"]),
                     "untried": len(cov["untried"]), "top": [exp_row(e) for e in top]}, True)
-    print(f"experiments {st['experiments']} (done {st['done']}, failed {st['failed']}, running {st['running']}), "
+    print(f"experiments {st['experiments']} (done {st['done']}, failed {st['failed']}, running {st['running']}, "
+          f"{st['staleEval']} done with an older eval version: lab.py rescore), "
           f"families {st['families']}, findings {st['findings']}, rounds {st['rounds']} (max {st['maxRound']}), "
           f"agents {st['agents']}, cpu {st['cpuHours']} h")
     print(f"coverage: {len(cov['cells'])} family x interval x markets cells tried, {len(cov['untried'])} untried")
@@ -366,7 +404,10 @@ def cmd_show(a, r):
 
 def load_spec_arg(src: str) -> dict:
     text = sys.stdin.read() if src == "-" else (Path(src).read_text(encoding="utf-8") if Path(src).exists() else src)
-    return complete_spec(json.loads(text))
+    spec = json.loads(text)
+    if "markets" in spec:
+        spec["markets"] = normalize_markets(spec["markets"])
+    return complete_spec(spec)
 
 
 def cmd_check(a, r):
@@ -437,6 +478,9 @@ def cmd_run(a, r):
     err = param_error(fam, spec["params"])
     if err:
         sys.exit(f"invalid params: {err}")
+    err = market_error(fam, spec["family"], spec["interval"], spec["markets"], spec["params"])
+    if err:
+        sys.exit(f"refused (nothing recorded): {err}")
     near = [n for n in r.near_duplicates(spec, a.tolerance) if n["spec_hash"] != reg.spec_hash(spec)]
     if near and not a.allow_near:
         print(f"refused: near-duplicate of {', '.join(n['spec_hash'][:10] for n in near[:5])} "
@@ -483,6 +527,9 @@ def cmd_sweep(a, r):
     fam = fams[a.family]
     markets = resolve_markets(a.markets, fam)
     fixed = json.loads(a.params) if a.params else {}
+    err = market_error(fam, a.family, a.interval, markets, {**(fam_call(fam, "default_params") or {}), **fixed})
+    if err:
+        sys.exit(f"refused (nothing recorded): {err}")
     risk = json.loads(a.risk) if a.risk else {}
     execution = json.loads(a.execution) if a.execution else {}
     workers = max(1, min(a.workers, 6))
@@ -536,6 +583,75 @@ def cmd_sweep(a, r):
     for res, spec in ok[:5]:
         print(f"  {res['hash'][:10]} score {fnum(res['score'], 3)} {json.dumps(spec['params'], separators=(',', ':'))} "
               f"holdout {json.dumps(res['holdout'])}")
+
+
+def _low_priority() -> None:
+    """Run this process below normal priority so the research sweeps keep the CPU."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
+        else:
+            os.nice(10)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def rescore_one(h: str, spec: dict, db: str) -> dict:
+    """Runs in a worker process: re-evaluate one done experiment with the current method, update it in place."""
+    t0 = time.time()
+    r = reg.Registry(db)
+    try:
+        from stonks_lab.evaluate import evaluate  # type: ignore
+        result = evaluate(spec)
+        changed = r.rescore(h, result)
+        return {"hash": h, "ok": True, "changed": changed, "score": result.get("score"),
+                "eligible": (result.get("scoreParts") or {}).get("eligible"), "seconds": round(time.time() - t0, 1)}
+    except BaseException as e:  # noqa: BLE001 - leave the row as it is; a later rescore retries it
+        return {"hash": h, "ok": False, "error": f"{e.__class__.__name__}: {e}", "seconds": round(time.time() - t0, 1)}
+
+
+def cmd_rescore(a, r):
+    """Re-evaluate done experiments of older evaluation versions in place (old score kept in metrics.history).
+    Resumable (it only picks rows still below the current version), idempotent, low priority."""
+    _low_priority()
+    todo = r.stale_versions(limit=a.limit)
+    workers = max(1, min(a.workers, 6))
+    print(f"rescore: {len(todo)} done experiments below eval version {reg.EVAL_VERSION}, {workers} workers "
+          f"(low priority)", flush=True)
+    db = str(r.path)
+    n_ok = n_fail = n_same = 0
+    t_start = time.time()
+    it = iter(todo)
+    inflight: dict = {}
+    with ProcessPoolExecutor(max_workers=workers, initializer=_low_priority) as pool:
+        while True:
+            while len(inflight) < workers * 2 and not STOP_FILE.exists():
+                row = next(it, None)
+                if row is None:
+                    break
+                inflight[pool.submit(rescore_one, row["spec_hash"], row["spec"], db)] = row
+            if not inflight:
+                break
+            done, _ = wait(list(inflight), return_when=FIRST_COMPLETED)
+            for fut in done:
+                row = inflight.pop(fut)
+                try:
+                    res = fut.result()
+                except Exception as e:  # noqa: BLE001 - worker crashed hard
+                    res = {"hash": row["spec_hash"], "ok": False, "error": f"worker crashed: {e}"}
+                if res["ok"]:
+                    n_ok += 1
+                    n_same += 0 if res["changed"] else 1
+                else:
+                    n_fail += 1
+                    print(f"FAILED {row['spec_hash'][:10]} {row['interval']}: {res['error']}", flush=True)
+                k = n_ok + n_fail
+                if not a.quiet and (k % 100 == 0 or k == len(todo)):
+                    print(f"  {k}/{len(todo)} ({n_fail} failed) {time.time() - t_start:.0f} s", flush=True)
+    print(f"rescore finished: {n_ok} re-evaluated ({n_same} were already current), {n_fail} failed and left at "
+          f"their old version{', STOP file present' if STOP_FILE.exists() else ''}; "
+          f"{r.stats()['staleEval']} still below version {reg.EVAL_VERSION}", flush=True)
 
 
 def cmd_finding(a, r):
@@ -710,6 +826,10 @@ def main(argv=None):
     sp = add("publish", cmd_publish, "upload the top 5 to the dashboard")
     sp.add_argument("--dry-run", action="store_true", help="only write out/research.json")
     add("digest", cmd_digest, "regenerate FINDINGS.md")
+    sp = add("rescore", cmd_rescore, "re-evaluate done experiments of an older eval version in place (resumable)")
+    sp.add_argument("--workers", type=int, default=3, help="parallel low-priority processes (max 6)")
+    sp.add_argument("--limit", type=int, help="at most this many experiments")
+    sp.add_argument("--quiet", action="store_true")
 
     a = p.parse_args(argv)
     r = reg.Registry(a.db) if a.db else reg.Registry()

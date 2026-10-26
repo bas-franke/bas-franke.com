@@ -1,33 +1,55 @@
 """Out-of-sample evaluation of one strategy spec: walk-forward folds plus an untouched holdout.
 
-Splits (by time, on the spec's own candles):
+Splits (by time, on the spec's own candles; eval version 2):
 
-    |-- warm-up --|-- seg 1 --|-- seg 2 --|-- seg 3 --| ... |-- seg K+2 --|========= holdout =========|
-                  T0                                                      H                          end
-                  (first bar with a decision)                             (last HOLDOUT_DAYS = 365 days)
+    |-- seg 1 --|-- seg 2 --|-- seg 3 --| ... |-- seg K+2 --|========= holdout =========|
+    D0                                                      H                          end
+    (first bar of the data: union of the spec's markets)    (last HOLDOUT_DAYS = 365 days)
 
 - Holdout = the last 365 days of data (or the last 25 % when there is less than two years). It is reported but
   NEVER used for the score, so the 20 search agents cannot overfit it.
-- The history between T0 and H is cut into K+2 equal time segments (K = 6 folds). Fold k (1..K) tests segment k+2
-  from a fresh EUR 1000 start; its "train" part is everything from T0 up to that segment (expanding window, taken from
-  one continuous in-sample run). Params are not fitted here: "train" is the in-sample record the search agents saw
-  implicitly; the score only looks at the test segments.
-- Indicators are computed once over the whole history; decisions at bar t only use bars <= t (tested), so starting a
-  fold in the middle of the data just means the indicators are already warm. Anchored families (dca_dip) restart their
-  schedule at every window start.
+- Fold boundaries depend on the DATA only, never on the spec: the history [D0, H) is cut into K+2 equal time
+  segments (K = 6 folds) and fold k (1..K) tests segment k+2 from a fresh EUR 1000 start. So every spec on the same
+  markets + interval (+ the same start/end limits) is tested on exactly the same windows, whatever its warm-up.
+  D0 is the first bar of the union of the spec's markets: for BTC, ETH and the top-10 basket that is the start of
+  the BTC/ETH history (2019-03); coins listed later (SOL/BNB/DOGE/AVAX, 2021-08) do NOT shift it. They join the
+  strategy and buy-and-hold at their first candle inside a window (buy-and-hold keeps their share in cash until
+  then).
+- Warm-up comes from the data before each fold start: indicators are computed once over the whole history and
+  decisions at bar t only use bars <= t (tested). The two leading segments (25 % of the history, ~1.6 years on 1d)
+  are the fixed warm-up allowance. A fold is usable only when the strategy has a decision at the bar before the
+  fold starts; a spec whose warm-up is longer than that loses its early folds instead of having them moved.
+  Anchored families (dca_dip) restart their schedule at every window start.
+- "train" of fold k is everything from the first warm bar up to that fold (expanding window, taken from one
+  continuous in-sample run). Params are not fitted here; the score only looks at the test segments.
 - Buy-and-hold for each window: the same markets, equal split, one taker market buy (+5 bps) at the window's first
   open, same fees.
 
-Score (higher is better, roughly "percentage points"):
+Score (higher is better, roughly "percentage points"), over the usable test folds f:
 
-    x_f    = ln(final_f / 1000) - ln(buyHoldFinal_f / 1000)       log excess return over buy-and-hold, test fold f
+    x_f    = ln(final_f / 1000) - ln(buyHoldFinal_f / 1000)       log excess return over buy-and-hold, fold f
     dd_f   = max drawdown of the strategy in test fold f (fraction, 0.3 = 30 %)
+    X      = mean of x_f after dropping the single best fold        ("all folds chained, minus the luckiest one")
     N      = number of fills summed over all test folds
-    score  = 100 * ( median_f(x_f) - 0.5 * median_f(dd_f) ) - 10 * max(0, 1 - N / 20)
+    score  = 100 * ( X - 0.5 * median_f(dd_f) ) - 10 * max(0, 1 - N / 20)
 
 i.e. the typical out-of-sample excess (log) return over buy-and-hold, minus half the typical drawdown, minus up to
-10 points when there are fewer than 20 trades in all test folds together (too few decisions to trust). Medians make
-one lucky fold count for little. Fewer than 3 usable folds gives score None.
+10 points when there are fewer than 20 trades in all test folds together (too few decisions to trust). The mean
+(not the median) means a fold lost badly to buy and hold always counts, so sitting in cash through the bull folds
+and "winning" the bear folds no longer scores well; dropping the best fold means one lucky fold counts for little.
+Fewer than 3 usable folds gives score None.
+
+Eligibility (scoreParts.eligible, used by the leaderboard; the score itself is still reported):
+
+    participation = median over the usable folds of the time-average exposure (coin value / equity)
+    eligible      = participation >= 10 %
+
+A spec that sits in cash in most folds is not a strategy, whatever its score: it is never ranked or published.
+Buy and hold is the benchmark of every fold, never a candidate.
+
+EVAL_VERSION (= registry.EVAL_VERSION) is stored with every result; the leaderboard only compares results of the current
+version, and ``lab.py rescore`` re-evaluates older rows in place. Version 1 (until 2026-10-26) started the folds after
+each spec's own warm-up and used the median of x_f (findings #21/#22).
 """
 from __future__ import annotations
 
@@ -50,6 +72,10 @@ MIN_FOLD_BARS = 20
 DD_WEIGHT = 0.5
 MIN_TRADES = 20
 TRADE_PENALTY = 10.0
+# Kept literal (not imported from registry) so a worker process that already holds an older registry module
+# still imports this one; tests assert it equals registry.EVAL_VERSION.
+EVAL_VERSION = 2
+MIN_PARTICIPATION_PCT = 10.0   # median fold exposure needed to be ranked (eligible)
 DAY_MS = 86_400_000
 START_EUR = 1000.0
 
@@ -148,22 +174,34 @@ def _agg(fold_metrics: list[dict]) -> dict:
 
 
 def compute_score(fold_results: list[tuple[bt.BacktestResult, bt.BacktestResult]]) -> tuple[float | None, dict]:
-    """The score formula from the module docstring. Returns (score, parts)."""
+    """The score formula from the module docstring (eval version 2). Returns (score, parts)."""
     if len(fold_results) < MIN_FOLDS:
-        return None, {"reason": f"only {len(fold_results)} usable folds (need {MIN_FOLDS})"}
-    xs, dds, n = [], [], 0
+        return None, {"reason": f"only {len(fold_results)} usable folds (need {MIN_FOLDS})",
+                      "folds": len(fold_results), "eligible": False, "evalVersion": EVAL_VERSION}
+    xs, dds, expos, n = [], [], [], 0
     for res, bh in fold_results:
         f = max(float(res.equity[-1]), 1e-6) / res.start_eur
         b = max(float(bh.equity[-1]), 1e-6) / bh.start_eur
         xs.append(math.log(f) - math.log(b))
         dds.append(mt.max_drawdown(res.equity, res.start_eur))
+        ex = np.asarray(res.exposure, dtype=np.float64)
+        expos.append(float(np.mean(ex)) if len(ex) else 0.0)
         n += len(res.trades)
-    mx, mdd = float(np.median(xs)), float(np.median(dds))
+    kept = sorted(xs)[:-1]                       # drop the single best fold
+    mx, mdd = float(np.mean(kept)), float(np.median(dds))
     penalty = TRADE_PENALTY * max(0.0, 1.0 - n / MIN_TRADES)
     score = 100.0 * (mx - DD_WEIGHT * mdd) - penalty
-    parts = {"medianExcessLogPct": round(100 * mx, 3), "worstExcessLogPct": round(100 * min(xs), 3),
+    part = 100.0 * float(np.median(expos))
+    eligible = part >= MIN_PARTICIPATION_PCT
+    parts = {"meanExcessLogPct": round(100 * mx, 3), "medianExcessLogPct": round(100 * float(np.median(xs)), 3),
+             "bestExcessLogPct": round(100 * max(xs), 3), "worstExcessLogPct": round(100 * min(xs), 3),
              "medianDrawdownPct": round(100 * mdd, 3), "testTrades": n, "tradePenalty": round(penalty, 3),
-             "foldsBeatBuyHold": int(sum(1 for x in xs if x > 0)), "folds": len(xs)}
+             "foldsBeatBuyHold": int(sum(1 for x in xs if x > 0)), "folds": len(xs),
+             "medianExposurePct": round(part, 2), "foldsInMarket": int(sum(1 for e in expos if e >= 0.01)),
+             "eligible": bool(eligible), "evalVersion": EVAL_VERSION}
+    if not eligible:
+        parts["ineligibleReason"] = (f"median fold exposure {part:.1f} % < {MIN_PARTICIPATION_PCT:.0f} %: "
+                                     "sits in cash most of the time")
     return round(score, 4), parts
 
 
@@ -244,34 +282,42 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
     if not valid.any():
         raise ValueError("strategy never produces a decision on this data (warm-up longer than the history?)")
     first_valid = int(np.argmax(valid))
-    # The first trading bar is the one after the first decision.
-    t0_i = min(first_valid + 1, len(index) - 1)
-    t0 = int(index[t0_i])
+    first_decision = int(index[first_valid])     # a window starting after this bar is warm
+    # The first bar the strategy can trade (after its first decision); only used for the in-sample run.
+    t0 = int(index[min(first_valid + 1, len(index) - 1)])
+    d0 = int(index[0])                           # data start: fold boundaries depend on the data only
     t_end = int(index[-1]) + ims
-    span = t_end - int(index[0])
+    span = t_end - d0
     hold = holdout_days * DAY_MS
-    h = t_end - hold if span >= 2 * hold else int(index[0]) + int(0.75 * span)
+    h = t_end - hold if span >= 2 * hold else d0 + int(0.75 * span)
     h = int(index[int(np.searchsorted(index, h, side="left"))]) if h <= int(index[-1]) else t_end
     fp = data_fingerprint(candles, fam.markets_needed(spec), interval, h)
 
-    # Walk-forward folds over [t0, h)
-    folds_out, fold_results = [], []
+    # Walk-forward folds over [d0, h), identical for every spec on these markets + interval
+    folds_out, fold_results, skipped = [], [], []
     k = n_folds
     while k >= MIN_FOLDS:
-        seg = (h - t0) / (k + 2)
+        seg = (h - d0) / (k + 2)
         if seg >= MIN_FOLD_BARS * ims:
             break
         k -= 1
-    if h > t0 and k >= MIN_FOLDS:
-        seg = (h - t0) / (k + 2)
+    insample = None
+    train = {"inSample": None, "period": None}
+    if h > d0 and k >= MIN_FOLDS:
+        seg = (h - d0) / (k + 2)
 
         def snap(x):  # fold boundaries sit on bar open times
             return int(index[min(int(np.searchsorted(index, int(x), side="left")), len(index) - 1)])
 
-        insample, insample_bh = _run_window(fam, spec, candles, full_targets, index, t0, h, fees, start_eur)
+        if h > t0:
+            insample, insample_bh = _run_window(fam, spec, candles, full_targets, index, t0, h, fees, start_eur)
         for f in range(k):
-            a = snap(t0 + seg * (f + 2))
-            b = snap(t0 + seg * (f + 3)) if f < k - 1 else h
+            a = snap(d0 + seg * (f + 2))
+            b = snap(d0 + seg * (f + 3)) if f < k - 1 else h
+            if first_decision >= a:              # not warm by the fold start: unusable, never moved later
+                skipped.append({"fold": f + 1, "testPeriod": [mt.iso_day(a), mt.iso_day(b - 1)],
+                                "reason": "warm-up not finished at the fold start"})
+                continue
             res, bh = _run_window(fam, spec, candles, full_targets, index, a, b, fees, start_eur)
             if len(res.ts) < 2:
                 continue
@@ -279,11 +325,9 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
             folds_out.append({"fold": f + 1, "testPeriod": [mt.iso_day(a), mt.iso_day(b - 1)],
                               "trainPeriod": [mt.iso_day(t0), mt.iso_day(a - 1)],
                               "test": res.metrics, "train": _slice_metrics(insample, insample_bh, a, interval)})
-        train = {"inSample": insample.metrics, "period": [mt.iso_day(t0), mt.iso_day(h - 1)],
-                 "foldTrainAggregate": _agg([f["train"] for f in folds_out])}
-    else:
-        insample = None
-        train = {"inSample": None, "period": None}
+        if insample is not None:
+            train = {"inSample": insample.metrics, "period": [mt.iso_day(t0), mt.iso_day(h - 1)],
+                     "foldTrainAggregate": _agg([f["train"] for f in folds_out])}
     score, parts = compute_score(fold_results)
     validation = _agg([f["test"] for f in folds_out])
 
@@ -308,9 +352,12 @@ def evaluate(spec: dict, *, candles: dict | None = None, holdout_days: int = HOL
     explanation = dict(fam.explain(spec))
     vs = _vs_sentence(holdout or {}, markets)
     explanation["vsBuyHold"] = vs
+    if skipped:
+        parts["skippedFolds"] = skipped
     return {
         "score": score,
         "scoreParts": parts,
+        "evalVersion": EVAL_VERSION,
         "spec_hash": spec_hash(spec),
         "fingerprint": fp,
         "spec": spec,
