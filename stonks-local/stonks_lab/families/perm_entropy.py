@@ -12,7 +12,8 @@ entropy quintile was followed by +13.3 % vs -1.7 % for the highest; inside the t
 days gave +16.3 % and high-PE days -5.6 % (ETH order 3/120 d: +15.7 vs -6.5). Year-by-year the sign held in about
 5 of 7 years on BTC, less on ETH.
 
-State "orderly" with hysteresis: on when PE <= peIn, off when PE > peOut (peOut >= peIn).
+Knobs use orderliness = 1 - PE (0 = random, larger = more orderly; v2, so thresholds are not packed into 0.95-0.99).
+State "orderly" with hysteresis: on when 1 - PE >= ordIn, off when 1 - PE < ordOut (ordOut <= ordIn).
 - ``and_sma``: hold while the close is above SMA(smaLen) AND the path is orderly.
 - ``or_sma``: hold while the close is above SMA(smaLen), or while the path is orderly AND the close is above its
   close smaLen bars ago (an orderly rise that has not reached the average yet).
@@ -32,14 +33,14 @@ from .. import indicators as ind
 from ._base import bars_text, frame, market_names, max_weight, risk_steps, union_index
 
 NAME = "perm_entropy"
-VERSION = 1
+VERSION = 2
 TITLE = "Permutation-entropy trend quality"
 BOT_READY = False
 MULTI_MARKET = True
 
 
 def default_params() -> dict:
-    return {"order": 3, "peLen": 60, "peIn": 0.97, "peOut": 0.985, "smaLen": 100, "mode": "and_sma", "minHold": 0}
+    return {"order": 3, "peLen": 60, "ordIn": 0.03, "ordOut": 0.015, "smaLen": 100, "mode": "and_sma", "minHold": 0}
 
 
 def param_space() -> dict:
@@ -48,10 +49,10 @@ def param_space() -> dict:
                   "description": "closes per ordinal pattern (3 = 6 patterns, 4 = 24 patterns)"},
         "peLen": {"type": "int", "min": 20, "max": 400, "log": True,
                   "description": "candles over which pattern frequencies are counted"},
-        "peIn": {"type": "float", "min": 0.85, "max": 1.0,
-                 "description": "path counts as orderly once the normalised entropy is at or below this"},
-        "peOut": {"type": "float", "min": 0.85, "max": 1.0,
-                  "description": "orderly state ends once the entropy rises above this (>= peIn)"},
+        "ordIn": {"type": "float", "min": 0.005, "max": 0.15, "log": True, "zero": True,
+                  "description": "path counts as orderly once 1 - entropy is at least this (0 = always orderly)"},
+        "ordOut": {"type": "float", "min": 0.003, "max": 0.12, "log": True, "zero": True,
+                   "description": "orderly state ends once 1 - entropy drops below this (<= ordIn)"},
         "smaLen": {"type": "int", "min": 10, "max": 400, "log": True,
                    "description": "SMA trend core length"},
         "mode": {"type": "choice", "values": ["and_sma", "or_sma", "exit"],
@@ -62,8 +63,8 @@ def param_space() -> dict:
 
 
 def valid_params(p: dict) -> str | None:
-    if float(p["peOut"]) < float(p["peIn"]):
-        return "peOut must not be below peIn"
+    if float(p["ordOut"]) > float(p["ordIn"]):
+        return "ordOut must not exceed ordIn"
     if int(p["peLen"]) < 4 * math.factorial(int(p["order"])):
         return "peLen too short for the number of patterns"
     return None
@@ -103,7 +104,7 @@ def _held(close: np.ndarray, p: dict) -> np.ndarray:
     sma_len = int(p["smaLen"])
     pe = perm_entropy(close, int(p["order"]), int(p["peLen"]))
     sma = ind.sma(close, sma_len)
-    p_in, p_out = float(p["peIn"]), float(p["peOut"])
+    o_in, o_out = float(p["ordIn"]), float(p["ordOut"])
     mode = p.get("mode", "and_sma")
     min_hold = int(p.get("minHold") or 0)
     orderly = False
@@ -113,9 +114,9 @@ def _held(close: np.ndarray, p: dict) -> np.ndarray:
         if np.isnan(pe[t]) or np.isnan(sma[t]):
             continue
         if orderly:
-            if pe[t] > p_out:
+            if 1.0 - pe[t] < o_out:
                 orderly = False
-        elif pe[t] <= p_in:
+        elif 1.0 - pe[t] >= o_in:
             orderly = True
         above = close[t] > sma[t]
         if mode == "and_sma":
@@ -165,8 +166,8 @@ def explain(spec) -> dict:
     mode = p.get("mode", "and_sma")
     look = bars_text(p["peLen"], iv)
     orderly = (f"the up/down pattern of the last {look} is orderly (the order of every {int(p['order'])} closes in a "
-               f"row repeats a few shapes instead of looking random; entropy {float(p['peIn']):.3f} or less to "
-               f"start, above {float(p['peOut']):.3f} ends it)")
+               f"row repeats a few shapes instead of looking random; orderliness {float(p['ordIn']):.3f} or more "
+               f"to start, under {float(p['ordOut']):.3f} ends it)")
     avg = f"its average of the last {bars_text(p['smaLen'], iv)}"
     if mode == "and_sma":
         rule = f"It holds {mk} while the price is above {avg} and {orderly}."

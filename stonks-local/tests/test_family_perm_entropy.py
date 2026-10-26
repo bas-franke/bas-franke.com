@@ -25,7 +25,7 @@ def noise(n, seed=1, drift=0.0):
 
 def test_contract():
     assert FAM.validate({"params": FAM.default_params()}) is None
-    assert FAM.validate({"params": {**FAM.default_params(), "peIn": 0.99, "peOut": 0.95}}) is not None
+    assert FAM.validate({"params": {**FAM.default_params(), "ordIn": 0.01, "ordOut": 0.05}}) is not None
     assert FAM.validate({"params": {**FAM.default_params(), "order": 4, "peLen": 40}}) is not None
     rng = random.Random(3)
     assert sum(FAM.validate({"params": FAM.sample(rng)}) is None for _ in range(80)) > 10
@@ -53,13 +53,13 @@ def test_entropy_values():
 
 def test_and_sma_needs_orderly_trend():
     steady = [100 * 1.01 ** i for i in range(120)]           # orderly rise
-    w = FAM.targets(closes(steady), spec(peLen=30, smaLen=20, peIn=0.9, peOut=0.95))["BTC-EUR"].to_numpy()
+    w = FAM.targets(closes(steady), spec(peLen=30, smaLen=20, ordIn=0.1, ordOut=0.05))["BTC-EUR"].to_numpy()
     assert np.isnan(w[:31]).all()
     assert w[-1] == 1.0
     rough = noise(400, 5, drift=0.004)                       # rising but random order
-    w2 = FAM.targets(closes(rough), spec(peLen=200, smaLen=20, peIn=0.5, peOut=0.6))["BTC-EUR"].to_numpy()
+    w2 = FAM.targets(closes(rough), spec(peLen=200, smaLen=20, ordIn=0.5, ordOut=0.4))["BTC-EUR"].to_numpy()
     assert np.nanmax(w2) == 0.0
-    w3 = FAM.targets(closes(rough), spec(peLen=200, smaLen=20, peIn=1.0, peOut=1.0))["BTC-EUR"].to_numpy()
+    w3 = FAM.targets(closes(rough), spec(peLen=200, smaLen=20, ordIn=0.0, ordOut=0.0))["BTC-EUR"].to_numpy()
     assert np.nanmax(w3) == 1.0
 
 
@@ -67,7 +67,7 @@ def test_exit_mode_keeps_position_and_split():
     steady = [100 * 1.01 ** i for i in range(80)]
     rough = [steady[-1] * x / 100 for x in noise(80, 9, drift=-0.004)]
     xs = steady + rough
-    s = spec(markets=("BTC-EUR", "ETH-EUR"), peLen=30, smaLen=20, peIn=0.5, peOut=0.6, mode="exit")
+    s = spec(markets=("BTC-EUR", "ETH-EUR"), peLen=30, smaLen=20, ordIn=0.5, ordOut=0.4, mode="exit")
     w = FAM.targets({**closes(xs), **closes(xs, "ETH-EUR")}, s)
     a = w["BTC-EUR"].to_numpy()
     assert a[79] == 0.5
