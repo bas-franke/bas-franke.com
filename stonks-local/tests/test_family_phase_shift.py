@@ -67,3 +67,26 @@ def test_hour_changes_the_decision_time():
     w = FAM.targets({"BTC-EUR": df}, spec(hour=9))["BTC-EUR"].to_numpy()
     ts = np.asarray(df.index)
     assert ((ts[np.isfinite(w)] // H) % 24 == 8).all()
+
+
+def test_12h_presets_build_12h_candles_and_decide_twice_a_day():
+    from stonks_lab.families.phase_shift import PRESETS_12H, period_hours, required_markets
+    df = hourly(24 * 3 + 5)
+    d, last = daily_candles(df, 5, 12)
+    assert ((np.asarray(d.index) // H) % 12 == 5).all()
+    assert (last - np.asarray(d.index) == 11 * H).all()
+    for preset in PRESETS_12H:
+        assert period_hours(preset) == 12
+        s = normalize_spec({"family": "phase_shift", "markets": ["BTC-EUR"], "interval": "1h",
+                            "params": {"preset": preset, "hour": 3}}, FAM)
+        mk = required_markets(s)
+        candles = {m: hourly(24 * 500, seed=10 + i) for i, m in enumerate(mk)}
+        if "ETH-EUR" in mk and preset == "vote_blend12":
+            s = normalize_spec({**s, "markets": ["ETH-EUR"]}, FAM)
+        w = FAM.targets(candles, s)[s["markets"][0]].to_numpy()
+        ts = np.asarray(candles[s["markets"][0]].index)
+        dec = np.isfinite(w)
+        assert dec.any(), preset
+        assert ((ts[dec] // H) % 12 == 2).all(), preset           # close of the 02:00 / 14:00 candles
+        ex = FAM.explain(s)
+        assert "03:00 and 15:00" in " ".join(ex["howItWorks"])

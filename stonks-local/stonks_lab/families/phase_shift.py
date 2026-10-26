@@ -55,8 +55,35 @@ PRESETS = {
     # dmi_core ETH 1d peak 9a155f9d0d
     "dmi": ("dmi_core", {"diBand": 0, "dmiLen": 13, "entryAdx": 25, "exitAdx": 25}),
 }
-# froth_dip, vote_blend and alt_froth need 1h candles of the 2019 alt pool (LTC, BCH, XLM, XTZ, MIOTA), which the
-# lab does not have yet: those presets are refused at 1h until the coordinator downloads them.
+# froth family (wave 7): 1h candles of the 2019 alt pool are now in the lab.
+PRESETS.update({
+    # flow_froth BTC+ETH 1d 40e5de771a
+    "flow_froth": ("flow_froth", {"baseLen": 365, "lookback": 180, "minOut": 0, "mode": "and", "threshold": 0.1,
+                                  "turnLen": 30, "zMin": 0.1}),
+})
+# Presets of 12h leaders: candles of PERIOD_H hours that open at ``hour`` and ``hour + 12`` UTC (so hours h and
+# h + 12 are the same spec; 0-11 cover every phase).
+PRESETS_12H = {
+    # froth_dip BTC 12h leader b488d9dfab
+    "froth_dip12": ("froth_dip", {"breadthMin": 0.85, "coreSma": 264, "frothBand": 0.05, "frothLook": 240,
+                                  "frothThr": 0.1, "maxHold": 194, "rsiBelow": 36.5, "rsiPeriod": 16,
+                                  "sellAbove": 85}),
+    # froth_bag BTC 12h 4d5f46d25c
+    "froth_bag12": ("froth_bag", {"breadthMin": 0.85, "coreSma": 264, "frothBand": 0.05, "frothLook": 240,
+                                  "frothThr": 0.1, "maxHold": 194, "members": 16, "rsiBelow": 36.5, "rsiPeriod": 16,
+                                  "sellAbove": 85, "spread": 0.2, "step": 0.25}),
+    # vote_blend ETH 12h 1c9e929a89
+    "vote_blend12": ("vote_blend", {"breadthMin": 0.85, "coreSma": 264, "frothBand": 0.05, "frothLook": 240,
+                                    "frothThr": 0.1, "macdFast": 24, "macdSignal": 60, "macdSlow": 364, "maxHold": 90,
+                                    "mode": "avg", "panic": "off", "rsiBelow": 37, "rsiPeriod": 25, "sellAbove": 85,
+                                    "useCore": False, "useFroth": True, "useMacd": True}),
+}
+PRESETS.update(PRESETS_12H)
+
+
+def period_hours(preset: str) -> int:
+    """Candle length of a preset in hours (24 = daily, 12 for the 12h leaders)."""
+    return 12 if preset in PRESETS_12H else 24
 
 
 def default_params() -> dict:
@@ -75,7 +102,8 @@ def param_space() -> dict:
 def _inner(spec: dict) -> tuple:
     name, params = PRESETS[spec["params"]["preset"]]
     fam = get_family(name)
-    inner = normalize_spec({"family": name, "markets": list(spec.get("markets") or []), "interval": "1d",
+    iv = "12h" if period_hours(spec["params"]["preset"]) == 12 else "1d"
+    inner = normalize_spec({"family": name, "markets": list(spec.get("markets") or []), "interval": iv,
                             "params": dict(params), "risk": {"maxWeight": max_weight(spec)}}, fam)
     return fam, inner
 
@@ -83,7 +111,7 @@ def _inner(spec: dict) -> tuple:
 def warmup(p: dict) -> int:
     name, params = PRESETS[p["preset"]]
     fam = get_family(name)
-    return 24 * (int(fam.warmup({**fam.default_params(), **params})) + 2)
+    return period_hours(p["preset"]) * (int(fam.warmup({**fam.default_params(), **params})) + 2)
 
 
 def required_markets(spec: dict) -> list[str]:
@@ -91,28 +119,32 @@ def required_markets(spec: dict) -> list[str]:
     return fam.markets_needed(inner)
 
 
-def daily_candles(df: pd.DataFrame, hour: int) -> tuple[pd.DataFrame, np.ndarray]:
-    """Daily candles opening at ``hour`` UTC from 1h candles; plus each day's last-hour timestamp (decision time).
+def daily_candles(df: pd.DataFrame, hour: int, period: int = 24) -> tuple[pd.DataFrame, np.ndarray]:
+    """Daily (or ``period``-hour) candles opening at ``hour`` UTC from 1h candles; plus each candle's last-hour
+    timestamp (decision time).
 
-    A day is kept only when the data reaches its last hour (so an unfinished day is never used)."""
+    A candle is kept only when the data reaches its last hour (so an unfinished one is never used)."""
     ts = np.asarray(df.index, dtype=np.int64)
     if len(ts) == 0:
         return df.iloc[:0], np.zeros(0, dtype=np.int64)
-    key = (ts - hour * H_MS) // D_MS
+    P_MS = period * H_MS
+    hour = hour % period
+    key = (ts - hour * H_MS) // P_MS
     g = df.groupby(key, sort=True)
     out = pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
                         "close": g["close"].last(), "volume": g["volume"].sum()})
     k = out.index.to_numpy(np.int64)
-    last_hour = k * D_MS + hour * H_MS + 23 * H_MS
+    last_hour = k * P_MS + hour * H_MS + (period - 1) * H_MS
     keep = last_hour <= ts[-1]
     out = out[keep]
-    out.index = pd.Index(k[keep] * D_MS + hour * H_MS, name="ts")
+    out.index = pd.Index(k[keep] * P_MS + hour * H_MS, name="ts")
     return out, last_hour[keep]
 
 
 def targets(candles, spec, start_time=None):
     p = spec["params"]
     hour = int(p["hour"])
+    period = period_hours(p["preset"])
     markets = list(spec["markets"])
     idx = union_index(candles, markets)
     fam, inner = _inner(spec)
@@ -120,7 +152,7 @@ def targets(candles, spec, start_time=None):
     for m in fam.markets_needed(inner):
         if m not in candles:
             continue
-        d, last = daily_candles(candles[m], hour)
+        d, last = daily_candles(candles[m], hour, period)
         daily[m] = d
         if m == markets[0]:
             decide_at = pd.Series(last, index=d.index)
@@ -128,8 +160,8 @@ def targets(candles, spec, start_time=None):
     out = {m: np.full(len(idx), np.nan) for m in markets}
     if decide_at is None or len(w) == 0:
         return frame(idx, out)
-    # decision of the day opening at ts D is known at D + 23h (close of its last hourly candle)
-    dts = np.asarray(w.index, dtype=np.int64) + 23 * H_MS
+    # decision of the candle opening at ts D is known at D + (period-1)h (close of its last hourly candle)
+    dts = np.asarray(w.index, dtype=np.int64) + (period - 1) * H_MS
     pos = np.searchsorted(idx, dts, side="left")
     ok = pos < len(idx)
     for m in markets:
@@ -151,8 +183,10 @@ def explain(spec) -> dict:
         inner_steps, wins, loses = [], "", ""
     mk = market_names(spec)
     steps = [f"It runs the fleet strategy '{name}' on {mk} with fixed settings, on daily candles.",
-             f"Its days start and end at {int(p['hour']):02d}:00 UTC instead of midnight, so it decides once a day "
-             "at that hour.", *inner_steps]
+             (f"Its days start and end at {int(p['hour']):02d}:00 UTC instead of midnight, so it decides once a day "
+              "at that hour." if period_hours(p["preset"]) == 24 else
+              f"Its 12-hour candles start at {int(p['hour']) % 12:02d}:00 and {int(p['hour']) % 12 + 12:02d}:00 UTC "
+              "instead of 00:00 and 12:00, so it decides twice a day at those hours."), *inner_steps]
     return {
         "summary": f"The daily strategy '{name}' on {mk}, deciding at {int(p['hour']):02d}:00 UTC each day.",
         "howItWorks": steps + risk_steps(spec),
