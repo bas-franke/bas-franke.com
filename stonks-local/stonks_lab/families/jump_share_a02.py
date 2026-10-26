@@ -16,6 +16,7 @@ Rule (one decision per day at the close of the hour ending at decideHour UTC):
   (expanding until rankLen days exist, at least 60).
 - in while rank_t > exitRank; after leaving, back in once rank_t > enterRank (enterRank >= exitRank: hysteresis).
 - out = offWeight of maxWeight stays held (0 = all euros).
+- lagDays > 0 (placebo): the rank from lagDays decisions earlier, same on/off structure but stale timing.
 - optional daily SMA core (trendSma days on the decision closes): "or" = the core also keeps it in; "and" = needs
   both. mode "hold" ablation: no jump gate at all (core or plain hold) for paired comparisons.
 Made for 1h candles (works on 15m-4h). Decisions at bar t use candles up to and including bar t.
@@ -40,7 +41,7 @@ HOUR_MS = 3_600_000
 
 def default_params() -> dict:
     return {"mode": "jump", "jumpLen": 30, "rankLen": 365, "exitRank": 0.33, "enterRank": 0.4, "offWeight": 0.0,
-            "trendSma": 0, "combine": "or", "decideHour": 0}
+            "trendSma": 0, "combine": "or", "decideHour": 0, "lagDays": 0}
 
 
 def param_space() -> dict:
@@ -63,6 +64,9 @@ def param_space() -> dict:
                     "description": "or = the SMA core also keeps it in; and = needs both gate and close > SMA"},
         "decideHour": {"type": "int", "min": 0, "max": 23,
                        "description": "UTC hour (candle close) at which the daily decision is made"},
+        "lagDays": {"type": "int", "min": 0, "max": 400, "zero": True,
+                    "description": "placebo: use the jump-share rank from this many days earlier (0 = real signal; "
+                                   "60-400 = a stale signal with the same on/off structure, for luck checks)"},
     }
 
 
@@ -73,7 +77,7 @@ def valid_params(p: dict) -> str | None:
 
 
 def warmup(p: dict) -> int:
-    return 24 * (max(int(p["jumpLen"]) + 60, int(p["trendSma"] or 0)) + 2)
+    return 24 * (max(int(p["jumpLen"]) + 60 + int(p.get("lagDays", 0) or 0), int(p["trendSma"] or 0)) + 2)
 
 
 def _bar_ms(index: np.ndarray, interval: str | None) -> int:
@@ -140,7 +144,7 @@ def targets(candles, spec, start_time=None):
         s = pd.Series(daily_jump_share(ts, c, bar_ms, di))
         L, R = int(p["jumpLen"]), int(p["rankLen"])
         J = s.rolling(L, min_periods=max(2, int(0.8 * L))).mean()
-        rk = J.rolling(R, min_periods=min(R, 60)).rank(pct=True).to_numpy()
+        rk = J.rolling(R, min_periods=min(R, 60)).rank(pct=True).shift(int(p.get("lagDays", 0) or 0)).to_numpy()
     else:
         rk = np.ones(len(di))
     t = int(p["trendSma"] or 0)
