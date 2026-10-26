@@ -97,7 +97,10 @@ def daily_signal(df, p: dict, interval: str | None) -> tuple[np.ndarray, np.ndar
     cs_rv = np.concatenate([[0.0], np.cumsum(r * r)])
     cs_bp = np.concatenate([[0.0], np.cumsum(bp)])
     span = int(p["lookback"]) * DAY_MS
-    dec = ((ts + bar_ms) % DAY_MS) == (int(p["decideHour"]) % 24) * HOUR_MS
+    if bar_ms >= DAY_MS:                     # daily or slower candles: every candle is a decision
+        dec = np.ones(n, dtype=bool)
+    else:
+        dec = ((ts + bar_ms) % DAY_MS) == (int(p["decideHour"]) % 24) * HOUR_MS
     idx = np.nonzero(dec)[0]
     j = np.searchsorted(ts, ts[idx] + bar_ms - span, side="left")
     full = ts[idx] + bar_ms - span >= ts[0]
