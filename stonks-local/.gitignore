@@ -1,0 +1,10 @@
+# Local only: secrets, the Python environment, downloaded market data and the experiment database.
+.env
+.venv/
+data/
+*.sqlite
+*.sqlite-*
+__pycache__/
+.pytest_cache/
+out/
+STOP
