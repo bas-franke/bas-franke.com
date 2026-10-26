@@ -1,11 +1,19 @@
 import random
 
 import numpy as np
+import pytest
 
 from _engine_util import bars, synth
 from stonks_lab.families import FAMILIES, normalize_spec
 
+from stonks_lab import universe as uni
+
 FAM = FAMILIES["pit_breadth_dip"]
+
+
+@pytest.fixture(autouse=True)
+def _all_eligible(monkeypatch):
+    monkeypatch.setattr(uni, "_TEST_ALL_ELIGIBLE", True)
 FLAT = [10.0] * 8
 DIP = FLAT + [10, 11, 12, 11, 10, 9, 10, 11, 12, 13]
 
@@ -80,3 +88,13 @@ def test_pit14_pool_for_intraday_bars():
           "XRP-EUR": closes([10.0] * len(DIP), 100), "BCH-EUR": closes([10.0] * len(DIP), 100)}
     assert np.nansum(FAM.targets(cd, spec(pool="pit14"))["BTC-EUR"].to_numpy()) == 0
     assert np.nansum(FAM.targets(cd, spec(pool="pit14", universe=5))["BTC-EUR"].to_numpy()) > 0
+
+
+def test_snapshot_eligibility_masks_coins(monkeypatch):
+    monkeypatch.setattr(uni, "_TEST_ALL_ELIGIBLE", False)
+    monkeypatch.setattr(uni, "pit_eligible", lambda days, markets: np.array(
+        [[m != "XRP-EUR" and m != "BCH-EUR" for m in markets]] * len(days), dtype=bool))
+    cd = {"BTC-EUR": closes(DIP, 100), "ETH-EUR": closes(DIP, 1), "LTC-EUR": closes(DIP, 1),
+          "XRP-EUR": closes([10.0] * len(DIP), 100), "BCH-EUR": closes([10.0] * len(DIP), 100)}
+    # the flat high-turnover coins are not eligible, so the three dipping coins are the members
+    assert np.nansum(FAM.targets(cd, spec(pool="pit14"))["BTC-EUR"].to_numpy()) > 0

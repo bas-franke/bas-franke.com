@@ -1,9 +1,11 @@
-"""pit_breadth_dip v1 (agent-12): breadth_dip with a point-in-time breadth list (no hindsight in the signal).
+"""pit_breadth_dip v2 (agent-12): breadth_dip with a point-in-time breadth list (no hindsight in the signal).
 
 breadth_dip measures "the whole market is oversold" over TODAY's top 10 (SOL/AVAX/DOGE/BNB picked with hindsight).
-This family measures it over the coins that were big AT THAT TIME: the point-in-time pool of ``universe.PIT_POOL``
-(every coin that was a CoinMarketCap top-15 coin at a year start 2019-2026 and has Bitvavo EUR candles), of which at
-every bar only the ``universe`` coins with the largest trailing EUR turnover count.
+This family measures it over the coins that were big AT THAT TIME: the point-in-time pool (a frozen copy of ``universe.PIT_POOL``, 28 coins)
+(every coin that was in a CoinMarketCap top-15 snapshot 2019-2026 and has Bitvavo EUR candles), of which at every bar
+only the coins ELIGIBLE then (``universe.pit_eligible``: in the top 15 of the latest CMC snapshot before that day) and,
+among those, the ``universe`` coins with the largest trailing EUR turnover count.
+(v1 used the 22-coin pool of universe PIT_VERSION 1 without the snapshot eligibility.)
 
 - Turnover of a pool market at bar t = sum of close*volume over the ``volLook`` bars BEFORE t (strictly), needing
   ``volLook`` bars of its own history. The ``universe`` largest are the members at t (ties by name).
@@ -26,15 +28,18 @@ import numpy as np
 import pandas as pd
 
 from .. import indicators as ind
-from ..universe import PIT_POOL
+from .. import universe as uni
 from ._base import bars_text, frame, market_names, max_weight, pct, risk_steps, union_index
 
 NAME = "pit_breadth_dip"
-VERSION = 1
+VERSION = 2
 TITLE = "Market-wide dip buying (point-in-time breadth)"
 BOT_READY = False
 MULTI_MARKET = True
-POOL = sorted(f"{b}-EUR" for b in PIT_POOL)
+POOL = ["ADA-EUR", "ALGO-EUR", "ATOM-EUR", "AVAX-EUR", "BCH-EUR", "BNB-EUR", "BTC-EUR", "CRO-EUR", "DOGE-EUR",
+        "DOT-EUR", "ETC-EUR", "ETH-EUR", "HYPE-EUR", "ICP-EUR", "LINK-EUR", "LTC-EUR", "LUNA-EUR", "MIOTA-EUR",
+        "NEO-EUR", "POL-EUR", "SHIB-EUR", "SOL-EUR", "SUI-EUR", "TRX-EUR", "UNI-EUR", "XLM-EUR", "XRP-EUR", "XTZ-EUR"]
+_DAY = 86_400_000
 # the PIT pool coins that also have 6h/12h candles (the others only have 1d/1W): pool "pit14" for intraday bars
 POOL14 = ["ADA-EUR", "AVAX-EUR", "BCH-EUR", "BNB-EUR", "BTC-EUR", "DOGE-EUR", "DOT-EUR", "ETH-EUR", "LINK-EUR",
           "LTC-EUR", "SOL-EUR", "TRX-EUR", "XLM-EUR", "XRP-EUR"]
@@ -64,7 +69,7 @@ def param_space() -> dict:
         "pool": {"type": "choice", "values": ["pit", "pit14", "top10"],
                  "description": "breadth list: point-in-time top coins by turnover from the 22-coin pool (pit, 1d/1W "
                                 "only) or from its 14 coins with intraday candles (pit14), or today's top 10 (top10)"},
-        "universe": {"type": "int", "min": 3, "max": 22,
+        "universe": {"type": "int", "min": 3, "max": 28,
                      "description": "pit: how many of the largest-turnover pool coins count for the breadth"},
         "volLook": {"type": "int", "min": 5, "max": 400, "log": True,
                     "description": "pit: candles over which the turnover (close x volume) is summed"},
@@ -118,6 +123,7 @@ def _members(candles, markets: list[str], idx: np.ndarray, p: dict) -> np.ndarra
     look, n_univ = int(p["volLook"]), int(p["universe"])
     vol = pd.DataFrame({m: _turnover_on(candles[m], idx) for m in markets})
     trailing = vol.rolling(look, min_periods=look).sum().shift(1)
+    trailing = trailing.where(uni.pit_eligible((idx // _DAY) * _DAY, markets))
     rank = trailing.rank(axis=1, ascending=False, method="first")
     return ((rank <= n_univ) & trailing.notna()).to_numpy(bool)
 
