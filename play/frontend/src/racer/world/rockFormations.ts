@@ -3,16 +3,19 @@
 //   now and then a hoodoo or a spire, bigger and more crowded in the narrow passes, low in front of the grandstands;
 // - the formations on the course (track.obstacles, the same circles physics and the AI use): blocky ridges that grow
 //   out of the walls, boulder heaps, hoodoo pillars with cap rocks, and buttes topped with a spire;
-// - the caves: a rock hill the course runs through, with a rough mouth at each end and a dim inside, and the same over
-//   each tunnel shortcut's lane only;
+// - the caves: a rock hill the course runs through, a hall of blocky rock inside with jagged skylights (god rays,
+//   pools of light and the bright mouths in caveLight.ts), and over each tunnel shortcut's lane a tight lumpy tube
+//   with cool light in its crevices, embers and a glowing exit;
 // - the shortcut ridges and the slot walls, laid square to the course so their gaps look as narrow as they are.
-// Rocks are a handful of instanced shapes (one draw call each); each cave is one mesh.
+// Rocks are a handful of instanced shapes (one draw call each); each cave is two meshes plus its light effects.
 
 import * as THREE from 'three';
 import { ROOF_CLEAR, TUNNEL_DEPTH, rng, type Shortcut, type Track } from '../core/track';
 import type { TerrainField } from './terrainField';
+import { buildCaveFx, CaveRockBuilder, createCaveRockMaterial, type EmberSpot, type Mouth, type Shaft } from './caveLight';
+import { sunDirection } from './sky';
 import { GeoBuilder } from './terrainGeo';
-import { noise1, noise2 } from './terrainNoise';
+import { hash2, noise1, noise2 } from './terrainNoise';
 import { onBridge } from './trackBarriers';
 import type { Quality } from './types';
 import { zonesFor } from './zones';
@@ -140,6 +143,10 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
     return out.set(px, y - 0.3, pz);
   };
 
+  const tunnels = track.shortcuts.filter((c) => c.kind === 'tunnel');
+  /** The tunnel shortcut whose roofed stretch s is in (with a margin), on that side. */
+  const roofed = (s: number, side: number, margin: number) => tunnels.some((c) => c.side === side && s > c.roof0 - margin && s < c.roof1 + margin);
+
   // Boulder walls along the edges.
   const density = quality === 'low' ? 0.6 : 1;
   for (const side of [-1, 1] as const) {
@@ -148,7 +155,8 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
       const f = track.frameAt(s);
       const hw = f.width / 2;
       const stand = zones.stands.some((st) => st.side === side && s > st.s0 - 10 && s < st.s1 + 10);
-      if (onBridge(track, zones, s, 6) || track.inCave(s, -6)) {
+      // Not inside the caves, nor beside a tunnel's tube (the tube is the wall there).
+      if (onBridge(track, zones, s, 6) || track.inCave(s, -6) || roofed(s, side, 6)) {
         s += 4;
         continue;
       }
@@ -199,6 +207,8 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
       const drop = track.lift(o.s, o.x) - low;
       pos.y -= drop;
       if (o.kind === 'ridge') {
+        // Under a tunnel's roof the tube's own wall is the ridge.
+        if (roofed(o.s, Math.sign(o.x), -3)) continue;
         square(pos, o.s, o.r * 1.05, 3.4 + r() * 0.8, o.h + drop + r() * 3);
         if (r() < 0.3) place('boulder', pos.clone().setY(pos.y + o.h + drop - 0.5), o.r * 0.5, o.r * 0.45, 0.5);
       } else {
@@ -219,31 +229,26 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
     }
   }
 
-  const meshes: THREE.Mesh[] = [];
+  const meshes: THREE.Object3D[] = [];
   const geos: THREE.BufferGeometry[] = [];
+  const fx: { dispose(): void }[] = [];
   cls = 'edge';
-  const lamps: THREE.Matrix4[] = [];
-  const tunnels = track.shortcuts.filter((c) => c.kind === 'tunnel');
+  const caveMat = createCaveRockMaterial();
   const roofs: [number, number, Shortcut | undefined][] = [...track.caves.map((c): [number, number, undefined] => [c.s0, c.s1, undefined]), ...tunnels.map((c): [number, number, Shortcut] => [c.roof0, c.roof1, c])];
   for (const [s0, s1, lane] of roofs) {
-    const g = caveGeometry(track, field, s0, s1, (p, rad) => place('block', p, rad, rad * (0.8 + r() * 1.4), 0.3), (p) => lamps.push(m.compose(p, q.identity(), sc.set(1, 1, 1)).clone()), lane);
-    geos.push(g);
-    const mesh = new THREE.Mesh(g, mat);
-    mesh.name = 'cave';
-    mesh.castShadow = mesh.receiveShadow = true;
-    meshes.push(mesh);
-  }
-  // Lanterns along the cave walls: warm points that stream past in the dark (bright enough to bloom).
-  const lampGeo = new THREE.OctahedronGeometry(0.8, 0);
-  const lampMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.0, 0.28) });
-  geos.push(lampGeo);
-  if (lamps.length) {
-    const im = new THREE.InstancedMesh(lampGeo, lampMat, lamps.length);
-    lamps.forEach((mm, i) => im.setMatrixAt(i, mm));
-    im.instanceMatrix.needsUpdate = true;
-    im.computeBoundingSphere();
-    im.name = 'cave-lamps';
-    meshes.push(im);
+    const cave = caveGeometry(track, field, s0, s1, (p, rad) => place('block', p, rad, rad * (0.8 + r() * 1.4), 0.3), lane);
+    const outer = new THREE.Mesh(cave.outer, mat);
+    const inner = new THREE.Mesh(cave.inner, caveMat);
+    outer.name = lane ? 'tunnel-hill' : 'cave-hill';
+    inner.name = lane ? 'tunnel-rock' : 'cave-rock';
+    for (const mesh of [outer, inner]) {
+      mesh.castShadow = mesh.receiveShadow = true;
+      geos.push(mesh.geometry);
+      meshes.push(mesh);
+    }
+    const lights = buildCaveFx(track, quality, cave.shafts, cave.mouths, cave.embers);
+    meshes.push(...lights.meshes);
+    fx.push(lights);
   }
 
   const detail = quality === 'low' ? 0 : 1;
@@ -272,16 +277,40 @@ export function buildFormations(track: Track, field: TerrainField, quality: Qual
     meshes,
     dispose() {
       for (const g of geos) g.dispose();
-      lampMat.dispose();
+      for (const f of fx) f.dispose();
+      caveMat.dispose();
     },
   };
 }
 
+/** God rays come down this steeply (radians above the horizon), from the sun's side: the real dusk sun is too low. */
+const SHAFT_SLANT = 1.08;
+
+/** -0.5..0.5 per block: the rock is broken into blocks `size` m along the course in `bands` bands round the arch,
+ * each band's joints offset from its neighbours', so the surface steps in and out in chunky fracture blocks. */
+function blockStep(s: number, th: number, size: number, bands: number, seed: number) {
+  const band = Math.floor((th / Math.PI) * bands);
+  const cell = Math.floor((s + hash2(band, seed) * size) / size);
+  return hash2(band * 7.31 + seed, cell * 1.37) - 0.5;
+}
+
+const C = (hex: string) => new THREE.Color(hex);
+const ROCK_DARK = C('#6a1d17');
+const ROCK_RED = C('#9a3220');
+const ROCK_DUST = C('#a4482a');
+const ROCK_LIT = C('#c8642c');
+const WARM = new THREE.Color(1.0, 0.42, 0.13);
+const VIOLET = new THREE.Color(0.42, 0.16, 0.85);
+const BLUE = new THREE.Color(0.22, 0.32, 1.0);
+const EXIT = new THREE.Color(1.0, 0.36, 0.08);
+
 /**
- * A cave from s0 to s1: an arched rock tube over the corridor inside, a hill of rock over it outside, and at each end
- * a rough mouth face joining the two. Cross sections use the frame's flat right and world up, so banking does not tilt
- * them. With `lane` it is a tunnel shortcut's roof instead: a lower arch over just the sunken lane, from its ridge to
- * past the corridor wall.
+ * A cave from s0 to s1: a hall of blocky rock over the corridor inside (an inner shell in the cave rock material,
+ * lit by baked glow) with jagged skylights in its roof, a hill of rock over it outside (in the terrain material, cut
+ * through at the skylights, the cuts joined by short chimney walls), and at each end a rough mouth face joining the
+ * two. Cross sections use the frame's flat right and world up, so banking does not tilt them. With `lane` it is a
+ * tunnel shortcut's roof instead: a tight, lumpy tube over just the sunken lane (no skylights, embers and cool crevice
+ * light instead), from the ridge to past the corridor wall.
  */
 function caveGeometry(
   track: Track,
@@ -289,80 +318,264 @@ function caveGeometry(
   s0: number,
   s1: number,
   onTop: (p: THREE.Vector3, rad: number) => void,
-  onLamp: (p: THREE.Vector3) => void,
   lane?: Shortcut,
-): THREE.BufferGeometry {
+): { outer: THREE.BufferGeometry; inner: THREE.BufferGeometry; shafts: Shaft[]; mouths: Mouth[]; embers: EmberSpot[] } {
   const b = new GeoBuilder();
-  const ROWS = 23;
-  const cols = Math.max(2, Math.round((s1 - s0) / 3) + 1);
+  const rock = new CaveRockBuilder();
+  const ROWS = lane ? 25 : 33;
+  const cols = Math.max(2, Math.round((s1 - s0) / 2.5) + 1);
   const inner = new Float32Array(cols * ROWS * 3);
   const outer = new Float32Array(cols * ROWS * 3);
-  const innerShade = new Float32Array(cols * ROWS);
+  const crev = new Float32Array(cols * ROWS);
   const step = track.length / (field.n - 1);
-  // Profile at column c, angle index j (0 = right foot, ROWS - 1 = left foot), inner or outer surface.
-  const at = (c: number, j: number, outside: boolean, out: Float32Array, o: number) => {
-    const s = s0 + ((s1 - s0) * c) / (cols - 1);
-    const i = Math.max(0, Math.min(field.n - 1, Math.round(s / step)));
+  const sAt = (c: number) => s0 + ((s1 - s0) * c) / (cols - 1);
+  const uc = lane ? (lane.xIn + lane.xOut) / 2 : 0;
+  const floor = lane ? -TUNNEL_DEPTH : 0;
+  const hallH = (s: number) => 25 + noise1(s * 0.02, 2) * 7;
+  // Profile at column c, angle index j (0 = right foot, ROWS - 1 = left foot): lateral offset and height over the
+  // centre line; for the inner shell also how far the rock is recessed there (0..1, crevices).
+  const prof = (c: number, j: number, outside: boolean): [number, number, number] => {
+    const s = sAt(c);
     const hw = track.frameAt(s).width / 2;
     const th = (j / (ROWS - 1)) * Math.PI;
-    let a = outside ? hw + 30 + noise1(s * 0.02, 5) * 8 : hw + 3;
-    let h = outside ? 46 + noise1(s * 0.015, 9) * 16 : 17 + noise1(s * 0.03, 2) * 5;
-    let mid = 0;
-    let floor = 0;
+    const ct = Math.cos(th);
+    const st = Math.sin(th);
     if (lane) {
-      // Inner arch from the ridge's face to the wall, its crown a metre over the field; the hill over it is low.
-      const u0 = outside ? lane.xIn - 5 : lane.xIn + 2;
-      const u1 = outside ? lane.xOut + 14 : lane.xOut + 3;
-      mid = (lane.side * (u0 + u1)) / 2;
-      a = (u1 - u0) / 2;
-      floor = -TUNNEL_DEPTH;
-      h = outside ? TUNNEL_DEPTH + ROOF_CLEAR + 6 + noise1(s * 0.02, 9) * 3 : TUNNEL_DEPTH + ROOF_CLEAR + 1 + noise1(s * 0.03, 2) * 0.8;
+      // Lane space u = side * x: th = 0 is the corridor wall, th = PI the ridge. The tube hugs the physics walls (the
+      // ridge's face, the corridor's edge) and its crown keeps the roof clearance; the rock only bulges outwards.
+      const out = ct * lane.side > 0;
+      const a = outside ? (out ? lane.xOut + 14 - uc : uc - (lane.xIn - 5)) : out ? lane.xOut + 1.5 - uc : uc - (lane.xIn + 3.3);
+      const h = outside ? TUNNEL_DEPTH + ROOF_CLEAR + 6 + noise1(s * 0.02, 9) * 3 : TUNNEL_DEPTH + ROOF_CLEAR + 0.6;
+      let disp = 0;
+      if (!outside) disp = Math.max(-0.3, blockStep(s, th, 4.5, 9, 3) * 2.4 + (noise2(s * 0.09, th * 3.1) - 0.5) * 2.2 + (noise2(s * 0.4, th * 12) - 0.5) * 0.6);
+      else disp = (noise2(s * 0.03, th * 2.7 + 11) - 0.5) * 3;
+      const ex = Math.sign(ct) * Math.abs(ct) ** 0.85;
+      const ey = st ** 0.8;
+      const u = uc + lane.side * (ex * a + ct * disp);
+      return [lane.side * u, floor + ey * h + st * disp - 1.2 * (1 - st), THREE.MathUtils.clamp(disp / 2 + 0.3, 0, 1)];
     }
-    // Lumpy rock: broad bulges plus finer ribs and pockets.
-    const k = outside
-      ? 1 + (noise2(s * 0.03, th * 2.7 + 11) - 0.5) * 0.3 + (noise2(s * 0.11, th * 8 + 3) - 0.5) * 0.12
-      : 1 + (noise2(s * 0.07, th * 2.7) - 0.5) * 0.24 + (noise2(s * 0.3, th * 11) - 0.5) * 0.1;
-    // Feet a little under the sand so the rock grows out of it.
-    const x = mid + Math.cos(th) * a * k;
-    const y = floor + Math.sin(th) * h * (lane && !outside ? Math.min(1, k) : k) - 1.2;
+    // The hall: boxy (sheer walls, a high flat-ish roof) and broken into blocks.
+    const ex = Math.sign(ct) * Math.abs(ct) ** 0.7;
+    const ey = st ** 0.6;
+    if (outside) {
+      const a = hw + 30 + noise1(s * 0.02, 5) * 8;
+      const h = hallH(s) + 11 + noise1(s * 0.015, 9) * 6;
+      const k = 1 + (noise2(s * 0.03, th * 2.7 + 11) - 0.5) * 0.24 + (noise2(s * 0.11, th * 8 + 3) - 0.5) * 0.1;
+      return [ex * a * k, ey * h * k - 1.2, 0];
+    }
+    const disp = blockStep(s, th, 8, 11, 1) * 5 + (noise2(s * 0.05, th * 2.7) - 0.5) * 4 + (noise2(s * 0.25, th * 9) - 0.5) * 1.2;
+    const a = hw + 7 + Math.abs(ct) * Math.max(-1.5, disp);
+    const h = hallH(s) + st * disp;
+    return [ex * a, ey * h - 1.2, THREE.MathUtils.clamp(disp / 6 + 0.5, 0, 1)];
+  };
+  const put = (c: number, x: number, y: number, out: Float32Array, o: number) => {
+    const i = Math.max(0, Math.min(field.n - 1, Math.round(sAt(c) / step)));
     out[o] = field.posX[i] + field.rx[i] * x;
-    out[o + 1] = field.posY[i] + y;
+    // Sheared with the road's bank, so the tube's feet stay on a banked floor (the section itself stays upright).
+    out[o + 1] = field.posY[i] + y + field.slope[i] * x;
     out[o + 2] = field.posZ[i] + field.rz[i] * x;
   };
   for (let c = 0; c < cols; c++) {
     for (let j = 0; j < ROWS; j++) {
       const o = (c * ROWS + j) * 3;
-      at(c, j, false, inner, o);
-      at(c, j, true, outer, o);
-      // Dim inside, a little lighter near the mouths.
-      const edge = Math.min(c, cols - 1 - c) * 4;
-      innerShade[c * ROWS + j] = 0.85 - 0.4 * Math.min(1, edge / 30);
-    }
-  }
-  b.addGrid(inner, cols, ROWS, -1, 1, innerShade);
-  b.addGrid(outer, cols, ROWS, 1, 1, 1);
-  // Blocks broken loose on the hill, so its outline is not a smooth dome; lanterns low on both walls inside.
-  const v = new THREE.Vector3();
-  for (let c = 0; c < cols; c += 4) {
-    for (const j of [3, 7, 11, 15, 19]) {
-      const o = (c * ROWS + j) * 3;
-      if (noise2(c * 0.7, j * 0.9) > 0.55) onTop(v.set(outer[o], outer[o + 1] - 2, outer[o + 2]), 5 + noise2(c, j) * 7);
-    }
-    if (c % 8 === 4) {
-      for (const j of [2, ROWS - 3]) {
-        const o = (c * ROWS + j) * 3;
-        // A little in from the wall, towards the corridor's centre line.
-        const cx = (inner[o] + inner[(c * ROWS + (ROWS - 1 - j)) * 3]) / 2;
-        const cz = (inner[o + 2] + inner[(c * ROWS + (ROWS - 1 - j)) * 3 + 2]) / 2;
-        onLamp(v.set(inner[o] + (cx - inner[o]) * 0.04, inner[o + 1], inner[o + 2] + (cz - inner[o + 2]) * 0.04));
+      const [xi, yi, cv] = prof(c, j, false);
+      let [xo, yo] = prof(c, j, true);
+      // The hill always at least a few metres outside the hall.
+      const ri = Math.hypot(xi - (lane ? lane.side * uc : 0), yi - floor);
+      const ro = Math.hypot(xo - (lane ? lane.side * uc : 0), yo - floor);
+      const min = ri + (lane ? 3.5 : 6);
+      if (ro < min) {
+        const k = min / Math.max(ro, 1e-3);
+        xo = (lane ? lane.side * uc : 0) + (xo - (lane ? lane.side * uc : 0)) * k;
+        yo = floor + (yo - floor) * k;
       }
+      put(c, xi, yi, inner, o);
+      put(c, xo, yo, outer, o);
+      crev[c * ROWS + j] = cv;
     }
   }
 
-  // Mouths: rings from the inner arch out to the hill's outline.
+  // Skylights (halls only): pick where each shaft should land, follow it up towards the sun to the roof, and cut the
+  // cells round that point out of both shells.
+  const shafts: Shaft[] = [];
+  const holes: { cc: number; jc: number; rc: number; rj: number; land: THREE.Vector3; s: number; x: number }[] = [];
+  if (!lane) {
+    const sun = sunDirection(track.def.theme);
+    const hl = Math.hypot(sun.x, sun.z) || 1;
+    const dir = new THREE.Vector3((sun.x / hl) * Math.cos(SHAFT_SLANT), Math.sin(SHAFT_SLANT), (sun.z / hl) * Math.cos(SHAFT_SLANT));
+    const len = s1 - s0;
+    const n = Math.max(2, Math.floor((len - 70) / 36));
+    for (let k = 0; k < n; k++) {
+      const sp = s0 + 38 + ((len - 76) * (k + 0.5)) / n + (hash2(s0, k) - 0.5) * 12;
+      const f = track.frameAt(sp);
+      const hw = f.width / 2;
+      const xp = (hash2(k, s0 * 0.1) - 0.5) * hw * 1.2;
+      const land = track.toWorld(sp, xp, 0);
+      const up = hallH(sp) / dir.y;
+      const tl = Math.hypot(f.tangent.x, f.tangent.z) || 1;
+      const rl = Math.hypot(f.right.x, f.right.z) || 1;
+      const sh = sp + (up * (dir.x * f.tangent.x + dir.z * f.tangent.z)) / tl;
+      const xh = xp + (up * (dir.x * f.right.x + dir.z * f.right.z)) / rl;
+      if (sh < s0 + 22 || sh > s1 - 22) continue;
+      const q = THREE.MathUtils.clamp(Math.abs(xh) / (hw + 7), 0, 0.92) ** (1 / 0.7);
+      const th = THREE.MathUtils.clamp(Math.acos(Math.sign(xh) * q), Math.PI * 0.27, Math.PI * 0.73);
+      holes.push({ cc: ((sh - s0) / len) * (cols - 1), jc: (th / Math.PI) * (ROWS - 1), rc: 1.8 + hash2(k, 3.3) * 1.6, rj: 1.5 + hash2(k, 5.1) * 1.3, land, s: sp, x: xp });
+    }
+  }
+  const holeAt = (i: number, j: number) =>
+    holes.findIndex((h) => ((i + 0.5 - h.cc) / h.rc) ** 2 + ((j + 0.5 - h.jc) / h.rj) ** 2 < 1 + (hash2(i * 1.7, j * 2.3) - 0.5) * 0.9);
+  const cut = new Int16Array((cols - 1) * (ROWS - 1)).fill(-1);
+  if (holes.length) for (let i = 0; i < cols - 1; i++) for (let j = 0; j < ROWS - 1; j++) cut[i * (ROWS - 1) + j] = holeAt(i, j);
+  const isCut = (i: number, j: number) => i >= 0 && j >= 0 && i < cols - 1 && j < ROWS - 1 && cut[i * (ROWS - 1) + j] >= 0;
+  const v = new THREE.Vector3();
+  for (let hi = 0; hi < holes.length; hi++) {
+    // The shaft starts at the middle of the cut in the inner roof and lands on the floor along the sun's slant.
+    const top = new THREE.Vector3();
+    let n = 0;
+    for (let i = 0; i < cols - 1; i++) {
+      for (let j = 0; j < ROWS - 1; j++) {
+        if (cut[i * (ROWS - 1) + j] !== hi) continue;
+        const o = (i * ROWS + j) * 3;
+        top.x += inner[o];
+        top.y += inner[o + 1];
+        top.z += inner[o + 2];
+        n++;
+      }
+    }
+    if (!n) continue;
+    top.multiplyScalar(1 / n);
+    const h = holes[hi];
+    const cell = (s1 - s0) / (cols - 1);
+    shafts.push({ top, bottom: h.land.clone(), radius: Math.max(2.5, Math.sqrt((n * cell * 2.6) / Math.PI) * 0.75), s: h.s, x: h.x });
+  }
+
+  // Bake the inner shell's albedo and light: the warm key's radiance and where it comes from, and the cool fill.
+  const N3 = cols * ROWS * 3;
+  const ci = new Float32Array(N3);
+  const wi = new Float32Array(N3);
+  const coi = new Float32Array(N3);
+  const ki = new Float32Array(N3);
+  const col = new THREE.Color();
+  const warmC = new THREE.Color();
+  const coolC = new THREE.Color();
+  const key = new THREE.Vector3();
+  const seg = new THREE.Line3();
+  const near = new THREE.Vector3();
+  const xm = lane ? lane.side * uc : 0;
+  const mouthAt = (s: number) => track.toWorld(s, xm, lane ? 3 : hallH(s) * 0.35);
+  const exitP = mouthAt(s1 + 6);
+  const entryP = mouthAt(s0 - 6);
+  const addKey = (from: THREE.Vector3, to: THREE.Vector3, w: number) => {
+    near.subVectors(to, from);
+    const l = near.length();
+    if (l > 1e-3) key.addScaledVector(near, w / l);
+  };
+  for (let c = 0; c < cols; c++) {
+    const s = sAt(c);
+    const iy = Math.max(0, Math.min(field.n - 1, Math.round(s / step)));
+    for (let j = 0; j < ROWS; j++) {
+      const k = c * ROWS + j;
+      const o = k * 3;
+      const th = (j / (ROWS - 1)) * Math.PI;
+      const cv = crev[k];
+      const blk = blockStep(s, th, lane ? 4.5 : 8, lane ? 9 : 11, 7) + 0.5;
+      v.set(inner[o], inner[o + 1], inner[o + 2]);
+      const hgt = v.y - field.posY[iy] - field.slope[iy] * (field.rx[iy] * (v.x - field.posX[iy]) + field.rz[iy] * (v.z - field.posZ[iy])) - floor;
+      col.copy(ROCK_DARK).lerp(ROCK_RED, 0.3 + 0.6 * blk * (1 - 0.6 * cv));
+      if (hgt < 4) col.lerp(ROCK_DUST, 0.5 * (1 - hgt / 4));
+      key.set(0, 0, 0);
+      const dExit = Math.max(0, s1 - s);
+      const dEntry = Math.max(0, s - s0);
+      let warm: number;
+      if (lane) {
+        // Lit red from the glowing exit (and a little from the way in), cool blue in the crevices and low on the walls.
+        const low = 1 - THREE.MathUtils.smoothstep(hgt, 1, 5);
+        const ex = 0.25 + 2.6 * Math.max(0, 1 - dExit / 70) ** 2;
+        const en = 0.12 + 1.0 * Math.max(0, 1 - dEntry / 40) ** 2;
+        addKey(v, exitP, ex);
+        addKey(v, entryP, en);
+        warm = (ex + en) * (1 - 0.5 * cv);
+        warmC.copy(col).multiply(EXIT).multiplyScalar(warm * 0.55);
+        coolC.copy(BLUE).multiplyScalar(0.05 + 0.16 * cv ** 1.5 + 0.06 * low);
+      } else {
+        // Warm from the shafts (towards the nearest point of each) and the mouths, violet fill in the recesses.
+        warm = 0;
+        for (const sh of shafts) {
+          seg.set(sh.top, sh.bottom);
+          seg.closestPointToPoint(v, true, near.set(0, 0, 0));
+          const lp = near.clone();
+          const w = Math.exp(-((lp.distanceTo(v) / (sh.radius * 3.2)) ** 2)) * 1.0 + Math.exp(-((v.distanceTo(sh.bottom) / 18) ** 2)) * 0.5;
+          addKey(v, lp, w);
+          warm += w;
+        }
+        const ex = 0.05 + 1.3 * Math.max(0, 1 - dExit / 45) ** 2;
+        const en = 0.03 + 0.9 * Math.max(0, 1 - dEntry / 35) ** 2;
+        addKey(v, exitP, ex);
+        addKey(v, entryP, en);
+        warm = Math.min(1.8, warm) + ex + en;
+        warmC.copy(col).multiply(WARM).multiplyScalar(warm * 1.3);
+        coolC.copy(VIOLET).multiplyScalar(0.04 + 0.12 * cv);
+      }
+      col.toArray(ci, o);
+      warmC.toArray(wi, o);
+      coolC.toArray(coi, o);
+      key.toArray(ki, o);
+    }
+  }
+  rock.grid(inner, cols, ROWS, ci, wi, coi, ki, isCut);
+
+  // Outer shell in the terrain material, with the skylight cells left out.
+  const i0 = b.idx.length;
+  b.addGrid(outer, cols, ROWS, 1, 1, 1);
+  if (holes.length) {
+    const keep: number[] = b.idx.slice(0, i0);
+    for (let i = 0; i < cols - 1; i++) for (let j = 0; j < ROWS - 1; j++) if (!isCut(i, j)) keep.push(...b.idx.slice(i0 + (i * (ROWS - 1) + j) * 6, i0 + (i * (ROWS - 1) + j) * 6 + 6));
+    b.idx = keep;
+    // Chimney walls round each cut, from the inner shell's edge to the hill's, sunlit warm rock.
+    const cIn = new THREE.Color();
+    const gIn = new THREE.Color();
+    const cool = new THREE.Color(0.02, 0.01, 0.04);
+    const kIn = new THREE.Vector3();
+    for (let i = 0; i < cols - 1; i++) {
+      for (let j = 0; j < ROWS - 1; j++) {
+        if (!isCut(i, j)) continue;
+        const edges: [number, number, number, number][] = [];
+        if (!isCut(i - 1, j)) edges.push([i, j, i, j + 1]);
+        if (!isCut(i + 1, j)) edges.push([i + 1, j, i + 1, j + 1]);
+        if (!isCut(i, j - 1)) edges.push([i, j, i + 1, j]);
+        if (!isCut(i, j + 1)) edges.push([i, j + 1, i + 1, j + 1]);
+        for (const [a1, b1, a2, b2] of edges) {
+          const p = (a1 * ROWS + b1) * 3;
+          const q = (a2 * ROWS + b2) * 3;
+          const jag = (hash2(a1 + a2 * 0.3, b1 + b2 * 0.7) - 0.5) * 1.6;
+          cIn.copy(ROCK_LIT).lerp(ROCK_RED, hash2(a1, b2));
+          // Sunlit from above: the key straight down the chimney.
+          gIn.copy(cIn).multiply(WARM).multiplyScalar(1.1);
+          kIn.set(0, 1, 0);
+          const A = rock.vertex(inner[p], inner[p + 1] + jag, inner[p + 2], cIn, gIn, cool, kIn);
+          const B = rock.vertex(inner[q], inner[q + 1] + jag, inner[q + 2], cIn, gIn, cool, kIn);
+          gIn.multiplyScalar(1.8);
+          const Bo = rock.vertex(outer[q], outer[q + 1], outer[q + 2], cIn, gIn, cool, kIn);
+          const Ao = rock.vertex(outer[p], outer[p + 1], outer[p + 2], cIn, gIn, cool, kIn);
+          rock.quad(A, B, Bo, Ao);
+        }
+      }
+    }
+  }
+  // Blocks broken loose on the hill, so its outline is not a smooth dome (not over the skylights).
+  for (let c = 0; c < cols; c += 3) {
+    for (const j of lane ? [4, 9, 14, 19] : [4, 9, 14, 19, 24, 28]) {
+      if (isCut(c, j) || isCut(c - 2, j) || isCut(c + 2, j) || isCut(c, j - 2) || isCut(c, j + 2)) continue;
+      const o = (c * ROWS + j) * 3;
+      if (noise2(c * 0.7, j * 0.9) > 0.55) onTop(v.set(outer[o], outer[o + 1] - 2, outer[o + 2]), 5 + noise2(c, j) * 7);
+    }
+  }
+
+  // Mouths: rings from the inner arch out to the hill's outline, and a glow just outside each one, facing in.
   const RINGS = 5;
+  const mouths: Mouth[] = [];
   for (const [c, dir] of [[0, -1], [cols - 1, 1]] as const) {
-    const s = s0 + ((s1 - s0) * c) / (cols - 1);
+    const s = sAt(c);
     const f = track.frameAt(s);
     const tx = f.tangent.x;
     const tz = f.tangent.z;
@@ -385,6 +598,31 @@ function caveGeometry(
       }
     }
     b.addGrid(p, ROWS, RINGS, dir > 0 ? 1 : -1, 1, sh);
+    const exit = dir > 0;
+    const hw = f.width / 2;
+    const ms = s + dir * 4;
+    const x = lane ? lane.side * uc : 0;
+    const h = lane ? TUNNEL_DEPTH + ROOF_CLEAR : hallH(s);
+    mouths.push({
+      center: track.toWorld(ms, x, lane ? 3 : h * 0.42),
+      normal: new THREE.Vector3(-tx * dir, 0, -tz * dir).normalize(),
+      across: new THREE.Vector3(f.right.x, 0, f.right.z).normalize(),
+      width: lane ? (lane.xOut - lane.xIn) / 2 + 5 : (hw + 7) * 1.15,
+      height: lane ? h * 0.85 : h * 0.62,
+      color: lane ? (exit ? new THREE.Color(3.4, 1.15, 0.3) : new THREE.Color(1.3, 0.5, 0.16)) : exit ? new THREE.Color(1.2, 0.68, 0.32) : new THREE.Color(0.7, 0.4, 0.2),
+    });
   }
-  return b.toGeometry() ?? new THREE.BufferGeometry();
+
+  // Embers drifting down a tunnel.
+  const embers: EmberSpot[] = [];
+  if (lane) {
+    for (let s = s0 - 10; s < s1 + 10; s += 1.2) {
+      const f = track.frameAt(s);
+      const u = lane.xIn + 4 + hash2(s, 1.3) * (lane.xOut - lane.xIn - 6);
+      const pos = track.toWorld(s, lane.side * u, 0.4 + hash2(s, 2.9) * 6.5);
+      embers.push({ pos, dir: f.tangent.clone().negate() });
+    }
+  }
+
+  return { outer: b.toGeometry() ?? new THREE.BufferGeometry(), inner: rock.toGeometry(), shafts, mouths, embers };
 }
