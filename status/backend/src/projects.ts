@@ -8,4 +8,5 @@ export const projects: Project[] = [
   { name: 'inck', domains: ['inck.ai', 'www.inck.ai'], port: 3003, database: true, registrar: 'name.com' },
   { name: 'play', domains: ['play.bas-franke.com'], port: 3004, database: true, websocket: '/api/ws' },
   { name: 'wordward', domains: ['wordward.bas-franke.com'], port: 3005, database: true },
+  { name: 'stonks', domains: ['stonks.bas-franke.com'], port: 3006, database: true },
 ];

@@ -1,0 +1,138 @@
+name: Deploy stonks
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'stonks/**'
+      - '.github/workflows/deploy-stonks.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-stonks
+  cancel-in-progress: false
+
+env:
+  PROJECT: stonks
+  DOMAIN: stonks.bas-franke.com
+  BACKEND_PORT: 3006
+  NODE_VERSION: '24'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    # Secrets may live in the "main" environment; repository secrets work too.
+    environment: main
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            ${{ env.PROJECT }}/frontend/package-lock.json
+            ${{ env.PROJECT }}/backend/package-lock.json
+
+      - name: Build frontend
+        working-directory: ${{ env.PROJECT }}/frontend
+        run: npm ci && npm run build
+
+      # The tests include the strategy parity fixtures from the research lab (SPEC.md §6): a bot that would trade
+      # differently from its backtest never deploys.
+      - name: Build and test backend
+        working-directory: ${{ env.PROJECT }}/backend
+        run: npm ci && npm run build && npm test
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          missing=""
+          [ -n "$EC2_HOST" ] || missing="$missing EC2_HOST"
+          [ -n "$EC2_USER" ] || missing="$missing EC2_USER"
+          [ -n "$SSH_KEY" ] || missing="$missing EC2_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing. Add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          install -m 700 -d ~/.ssh
+          # Strip Windows line endings in case the key was pasted from a CRLF file.
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null; then
+            echo "::error::EC2_SSH_KEY is not a valid private key. Paste the full contents of gh-deploy, including the BEGIN/END lines."
+            exit 1
+          fi
+          if ! ssh-keyscan -T 15 -H "$EC2_HOST" >> ~/.ssh/known_hosts || [ ! -s ~/.ssh/known_hosts ]; then
+            echo "::error::Cannot reach $EC2_HOST on port 22. Check EC2_HOST and that the security group allows SSH."
+            exit 1
+          fi
+          printf 'Host server\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n' "$EC2_HOST" "$EC2_USER" > ~/.ssh/config
+
+      - name: Upload files
+        run: |
+          ssh server "mkdir -p /var/www/$PROJECT/frontend /srv/apps/$PROJECT/backend"
+          rsync -az --delete "$PROJECT/frontend/dist/" "server:/var/www/$PROJECT/frontend/"
+          rsync -az --delete --exclude node_modules \
+            "$PROJECT/backend/dist" \
+            "$PROJECT/backend/package.json" \
+            "$PROJECT/backend/package-lock.json" \
+            "$PROJECT/deploy/ecosystem.config.cjs" \
+            "server:/srv/apps/$PROJECT/backend/"
+          rsync -az "$PROJECT/deploy/nginx.conf" "server:/srv/apps/$PROJECT/nginx.conf"
+
+      # The first deploy sets the site up on the server by itself: the certificate (the wildcard DNS record already
+      # points here and the shared 00-default site answers the ACME challenge), then the Nginx site from
+      # deploy/nginx.conf. Later deploys only touch Nginx when nginx.conf changed, and roll back if nginx -t fails.
+      - name: Ensure certificate and Nginx site
+        run: |
+          ssh server "set -e
+            touch /srv/apps/$PROJECT/.env && chmod 600 /srv/apps/$PROJECT/.env
+            if ! sudo test -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem; then
+              sudo certbot certonly --webroot -w /var/www/letsencrypt -d $DOMAIN \
+                --deploy-hook 'systemctl reload nginx' --agree-tos --register-unsafely-without-email -n
+            fi
+            site=/etc/nginx/sites-available/$PROJECT
+            if ! sudo cmp -s /srv/apps/$PROJECT/nginx.conf \$site; then
+              if sudo test -f \$site; then sudo cp \$site \$site.previous; fi
+              sudo cp /srv/apps/$PROJECT/nginx.conf \$site
+              sudo ln -sf \$site /etc/nginx/sites-enabled/$PROJECT
+              if ! sudo nginx -t; then
+                if sudo test -f \$site.previous; then sudo mv \$site.previous \$site; else sudo rm -f \$site /etc/nginx/sites-enabled/$PROJECT; fi
+                echo '::error::nginx -t failed with the new site config; the previous config was restored.'
+                exit 1
+              fi
+              sudo systemctl reload nginx
+            fi"
+
+      # Runtime secrets come from repository secrets and are written into /srv/apps/stonks/.env (never into git).
+      # Values go over stdin so they never show up in a command line; umask keeps the files private.
+      - name: Sync secrets
+        env:
+          STONKS_ADMIN_PASSWORD: ${{ secrets.STONKS_ADMIN_PASSWORD }}
+          BITVAVO_API_KEY: ${{ secrets.BITVAVO_API_KEY }}
+          BITVAVO_API_SECRET: ${{ secrets.BITVAVO_API_SECRET }}
+        run: |
+          [ -n "$STONKS_ADMIN_PASSWORD" ] || echo "::warning::STONKS_ADMIN_PASSWORD is not set; nobody can log in to the dashboard."
+          [ -n "$BITVAVO_API_KEY" ] || echo "::warning::BITVAVO_API_KEY is not set; the bot can only paper trade."
+          for name in STONKS_ADMIN_PASSWORD BITVAVO_API_KEY BITVAVO_API_SECRET; do
+            value=${!name}
+            [ -n "$value" ] || continue
+            printf '%s\n' "$value" | ssh server "umask 077 && read -r v && f=/srv/apps/$PROJECT/.env && touch \$f \
+              && { grep -v '^$name=' \$f || true; printf '%s=%s\n' '$name' \"\$v\"; } > \$f.new && mv \$f.new \$f"
+          done
+
+      - name: Install and restart backend
+        run: |
+          ssh server "cd /srv/apps/$PROJECT/backend \
+            && npm ci --omit=dev --no-audit --no-fund \
+            && pm2 startOrReload ecosystem.config.cjs --update-env \
+            && pm2 save"
+
+      - name: Health check
+        run: |
+          ssh server "for i in \$(seq 1 15); do curl -fsS http://127.0.0.1:$BACKEND_PORT/api/health && exit 0; sleep 2; done; pm2 logs $PROJECT --lines 50 --nostream; exit 1"

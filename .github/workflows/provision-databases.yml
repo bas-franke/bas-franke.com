@@ -12,7 +12,7 @@ on:
     inputs:
       projects:
         description: 'Space-separated projects that need a database'
-        default: 'status inck wordward play'
+        default: 'status inck wordward play stonks'
 
 concurrency:
   group: provision-databases
@@ -51,7 +51,7 @@ jobs:
       - name: Create databases
         env:
           RDS_MASTER_PASSWORD: ${{ secrets.RDS_MASTER_PASSWORD }}
-          PROJECTS: ${{ inputs.projects || 'status inck wordward play' }}
+          PROJECTS: ${{ inputs.projects || 'status inck wordward play stonks' }}
         run: |
           scp infra/provision-db.sh server:/tmp/provision-db.sh
           printf '%s\n' "$RDS_MASTER_PASSWORD" | ssh server "bash /tmp/provision-db.sh $PROJECTS; rc=\$?; rm -f /tmp/provision-db.sh; exit \$rc"
