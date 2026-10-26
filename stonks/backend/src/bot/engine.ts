@@ -15,6 +15,10 @@ import { amsterdamDay, barOpen, lastClosedBar } from './time.js';
 export const TICK_MS = 15_000;
 const SNAPSHOT_MS = 5 * 60_000;
 const IDLE_REFRESH_MS = 5 * 60_000;
+/** How often the bot retries cancelling its own orders that are still open in a mode that is not running. */
+const STRAY_RETRY_MS = 60_000;
+/** dca_dip replays from the strategy's start; past this many bars the history cannot be loaded and it stops trading. */
+export const DCA_MAX_BARS = 50_000;
 
 /** Per-mode engine memory, stored in `settings.bot_state` so restarts pick up where they left off. */
 interface ModeState {
@@ -162,6 +166,8 @@ export async function cancelAll(mode: Mode, reason: string): Promise<number> {
 
 /** Switches the bot off (used by the loss guard and the API): cancels open orders first. */
 export async function switchOff(reason: string, level: 'info' | 'warn' | 'error' = 'info'): Promise<BotSettings> {
+  // A running tick holds the lock; this makes it stop placing orders now instead of finishing its plan first.
+  status.settingsVersion++;
   return withLock(async () => {
     const s = await getBotSettings();
     const cancelled = (await cancelAll('paper', reason)) + (await cancelAll('live', reason));
@@ -230,6 +236,7 @@ async function tickBody() {
     await startup(s);
     status.startupDone = true;
   }
+  await cancelStray(s, now);
 
   if (!s.enabled) {
     if (now - status.lastIdleRefresh > IDLE_REFRESH_MS) {
@@ -298,10 +305,14 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
   const bar = lastClosedBar(now, s.strategy.interval);
   if (stillValid() && (ms.lastDecidedBar === undefined || bar > ms.lastDecidedBar)) {
     // Remember the bar BEFORE placing anything: a crash mid-way skips the rest of this bar rather than doubling it.
-    ms.lastDecidedBar = bar;
-    await saveState(st);
+    // Marked right before the first order goes out (not before loading candles, so a failed fetch retries on the
+    // next tick instead of skipping the whole bar).
+    const markDecided = async () => {
+      ms.lastDecidedBar = bar;
+      await saveState(st);
+    };
     if (fills) pf = await portfolio(s);
-    await decide(s, broker, ms, bar, pf, stillValid);
+    await decide(s, broker, ms, bar, pf, stillValid, markDecided);
     fills += await broker.sync(s.fees);
   }
 
@@ -311,6 +322,26 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
     ms.lastSnapshotAt = now;
   }
   await saveState(st);
+}
+
+let lastStrayAttempt = 0;
+/**
+ * Cancels the bot's own orders that are still open in a mode that is not running: all of them while the bot is off,
+ * the other mode's while it is on. Covers cancels that failed at switch-off or mode change and orders whose
+ * outcome was unknown then (they may have reached the book after all). Retried at most once a minute.
+ */
+async function cancelStray(s: BotSettings, now: number) {
+  if (now - lastStrayAttempt < STRAY_RETRY_MS) return;
+  const modes: Mode[] = s.enabled ? [s.mode === 'live' ? 'paper' : 'live'] : ['paper', 'live'];
+  for (const mode of modes) {
+    if (mode === 'live' && !bitvavo.hasKeys) continue;
+    const open = await openOrders(mode);
+    if (!open.length) continue;
+    lastStrayAttempt = now;
+    const why = s.enabled ? `the bot runs in ${s.mode} mode` : 'the bot is off';
+    const n = await cancelAll(mode, why);
+    await log('warn', 'stray_orders', `${open.length} ${mode} order(s) were still working although ${why}; ${n} cancelled`, { orderIds: open.map((o) => o.id) });
+  }
 }
 
 async function startup(s: BotSettings) {
@@ -413,15 +444,30 @@ async function loadCandles(spec: StrategySpec, ms: ModeState, bar: number): Prom
   const bars = warmupBars(spec);
   const from = spec.family === 'dca_dip' && ms.strategyStart ? barOpen(ms.strategyStart, spec.interval) - Number(spec.params.lookback) * ms_ : undefined;
   const out: Record<string, Candle[]> = {};
-  for (const m of dataMarkets(spec)) out[m] = await closedCandles(m, spec.interval, bar, { bars, from });
+  for (const m of dataMarkets(spec)) out[m] = await closedCandles(m, spec.interval, bar, { bars, from, maxBars: from === undefined ? undefined : DCA_MAX_BARS });
   return out;
 }
 
-async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, stillValid: () => boolean) {
+/** Bars dca_dip must replay at `bar` (from the lookback before its start), or 0 for other families. */
+export function dcaBarsNeeded(spec: StrategySpec, strategyStart: number | undefined, bar: number): number {
+  if (spec.family !== 'dca_dip' || !strategyStart) return 0;
+  const ms = INTERVAL_MS[spec.interval];
+  const from = barOpen(strategyStart, spec.interval) - Number(spec.params.lookback) * ms;
+  return Math.ceil((bar - from) / ms) + 1;
+}
+
+async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, stillValid: () => boolean, markDecided: () => Promise<void>) {
   const spec = s.strategy;
+  if (dcaBarsNeeded(spec, ms.strategyStart, bar) > DCA_MAX_BARS) {
+    // Replaying from a later bar would restart the virtual DCA portfolio at zero and sell the position.
+    await markDecided();
+    await log('error', 'dca_history_too_long', `${spec.name} has run for more than ${DCA_MAX_BARS} ${spec.interval} bars; its history can no longer be replayed, so it places no orders. Restart the strategy (save it again) to start a new DCA cycle.`);
+    return;
+  }
   const candles = await loadCandles(spec, ms, bar);
   const missing = spec.markets.filter((m) => !candles[m]?.length);
   if (missing.length === spec.markets.length) {
+    await markDecided();
     await log('warn', 'no_candles', `No candles for ${missing.join(', ')}; skipping this bar`);
     return;
   }
@@ -460,6 +506,7 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
   await log('info', 'decision', `Bar ${new Date(bar).toISOString()}: targets ${fmtWeights(w)}; ${plan.orders.length ? plan.orders.map((o) => `${o.side} ${o.market} €${o.valueEur.toFixed(2)}`).join(', ') : 'no orders'}`, {
     bar, targets: raw, locked: Object.keys(ms.locks), equityEur: pf.equityEur, cashEur: pf.cashAvailableEur, notes: plan.notes, orders: plan.orders,
   });
+  await markDecided();
   if (!stillValid()) {
     await log('info', 'decision_aborted', 'Settings changed during the decision; no orders placed');
     return;

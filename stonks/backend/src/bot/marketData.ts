@@ -78,7 +78,8 @@ export async function closedCandles(market: string, interval: Interval, lastBar:
   const out = new Map<number, Candle>();
   // Bitvavo's `end` returns candles whose close (open + interval) is <= end.
   let end = lastBar + ms;
-  for (let page = 0; page < 10 && out.size < want; page++) {
+  const maxPages = Math.ceil(want / 1440) + 2;
+  for (let page = 0; page < maxPages && out.size < want; page++) {
     const limit = Math.min(1440, want - out.size + 2);
     const raw = await bitvavo.candles(market, interval, { limit, end });
     if (!raw.length) break;

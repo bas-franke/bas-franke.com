@@ -146,11 +146,17 @@ export function dataMarkets(spec: StrategySpec): string[] {
   return [...set];
 }
 
-/** How many closed bars the bot should load so indicators and stateful families have settled. */
+/**
+ * How many closed bars the bot should load so indicators and stateful families have settled. EMAs are seeded at
+ * the start of what is loaded and the seed still weighs (1-2/(n+1))^k after k more bars, so 10x the longest period
+ * leaves ~1e-8 of it (6x capped at 1440 left 41 % for a 1000-bar EMA: the bot would trade other signals than the
+ * backtest). Rotation only looks back `lookback`/`regimeSma` bars and needs no more than that.
+ */
 export function warmupBars(spec: StrategySpec): number {
   const numbers = Object.values(spec.params).filter((v): v is number => typeof v === 'number');
   const longest = Math.max(1, ...numbers.filter((v) => Number.isInteger(v)));
-  return Math.min(1440, Math.max(300, longest * 6));
+  if (spec.family === 'rotation_momentum') return Math.min(10_000, Math.max(300, longest + 2));
+  return Math.min(10_000, Math.max(300, longest * 10));
 }
 
 /** Target weights for every bar of the input (SPEC §2 decision model). */

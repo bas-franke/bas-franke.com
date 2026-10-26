@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ema, macd, priorMax, priorMin, rsi, sma, stdPop } from '../src/strategies/indicators.js';
-import { explainStrategy, families, targets, targetSeries, validateSpec, type Candle, type StrategySpec } from '../src/strategies/index.js';
+import { explainStrategy, families, targets, targetSeries, validateSpec, warmupBars, type Candle, type StrategySpec } from '../src/strategies/index.js';
 
 const close = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 const H = 3_600_000;
@@ -184,4 +184,20 @@ test('every family has info, valid defaults and an explanation', () => {
       assert.ok(sum >= 0 && sum <= 1 + 1e-12);
     }
   }
+});
+
+test('the bot loads enough warmup that a long EMA matches the full-history value the backtest sees', () => {
+  // A random-ish walk of 20000 closes; the bot only sees the last warmupBars of them.
+  const closes: number[] = [];
+  let x = 100;
+  for (let i = 0; i < 20_000; i++) closes.push((x *= 1 + 0.01 * Math.sin(i * 12.9898) * Math.cos(i * 0.37)));
+  for (const slow of [48, 200, 1000]) {
+    const spec = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 12, slow } });
+    const n = warmupBars(spec);
+    const full = ema(closes, slow).at(-1)!;
+    const tail = ema(closes.slice(-n), slow).at(-1)!;
+    assert.ok(Math.abs(full - tail) / full < 1e-6, `slow ${slow}: ${n} bars give ${tail} instead of ${full}`);
+  }
+  const rot = validateSpec({ family: 'rotation_momentum', markets: ['BTC-EUR', 'ETH-EUR'], interval: '1d', params: { lookback: 30, top: 1, regimeSma: 200 } });
+  assert.ok(warmupBars(rot) >= 202 && warmupBars(rot) <= 1440, 'rotation only needs its lookback');
 });
