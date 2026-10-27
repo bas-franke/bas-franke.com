@@ -450,6 +450,8 @@ export default function SettingsPage() {
         </Section>
       </div>
 
+      <ClearHistory mode={saved.mode} />
+
       {(dirty || errors._) && (
         <div className="save-bar">
           <span className={`small ${errors._ || Object.keys(errors).length ? 'loss' : 'soft'}`} style={{ minWidth: 0 }}>
@@ -659,6 +661,72 @@ function OrderActivity() {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Settings > "Clear portfolio history": wipes the chart history of the current mode after typing CLEAR. */
+function ClearHistory({ mode }: { mode: string }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.clearPortfolioHistory();
+      toast(`Portfolio history cleared (${r.removed} points). The charts start again from now.`);
+      setOpen(false);
+      setText('');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card" style={{ paddingTop: 4, paddingBottom: 4, marginTop: 18 }}>
+      <Section title="Portfolio history" intro="What the Overview charts draw your portfolio from.">
+        <div className="stack" style={{ gap: 10 }}>
+          <p className="small soft" style={{ margin: 0 }}>
+            Clearing removes the recorded values of your {mode} portfolio, so “All” and “How it’s going” start again from now. Trades, orders, logs and
+            the bot’s settings stay as they are, and the bot keeps trading exactly the same.
+          </p>
+          <div>
+            <button className="btn danger small" onClick={() => setOpen(true)}>
+              Clear portfolio history
+            </button>
+          </div>
+        </div>
+      </Section>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Clear the portfolio history?"
+        actions={
+          <>
+            <button className="btn ghost" onClick={() => setOpen(false)}>
+              Keep it
+            </button>
+            <button className="btn danger" disabled={text.trim() !== 'CLEAR' || busy} onClick={() => void run()}>
+              {busy ? 'Clearing…' : 'Clear history'}
+            </button>
+          </>
+        }
+      >
+        <div className="callout loss">
+          This deletes the recorded values of your <b>{mode}</b> portfolio for good. It can’t be undone.
+        </div>
+        {error && <div className="callout loss">{error}</div>}
+        <div className="field">
+          <label htmlFor="clear-confirm">
+            Type <b>CLEAR</b> to confirm
+          </label>
+          <input id="clear-confirm" className="input" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
+        </div>
+      </Modal>
     </div>
   );
 }

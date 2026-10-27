@@ -64,6 +64,18 @@ export interface HallEntry {
   entry: ResearchEntry;
 }
 
+/** GET /api/compare: portfolio vs buy and hold, [ms, eur] points (SPEC §5a). */
+export type CompareRange = 'day' | 'week' | 'month' | 'year' | 'all';
+export interface CompareData {
+  mode: string;
+  range: CompareRange;
+  from: string;
+  to: string;
+  portfolio: [number, number][];
+  btc: [number, number][];
+  eth: [number, number][];
+}
+
 export type ManualTarget = 'BTC' | 'ETH' | 'EUR';
 export interface ManualAllocation {
   target: ManualTarget;

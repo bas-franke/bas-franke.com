@@ -2019,3 +2019,35 @@ dialog.modal[open] {
     flex-wrap: wrap;
   }
 }
+
+/* Overview: portfolio vs just holding */
+.compare-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 20px;
+  align-items: start;
+}
+.compare-side {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+.compare-side li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.compare-side .swatch {
+  margin-top: 7px;
+}
+@media (max-width: 720px) {
+  .compare-grid {
+    grid-template-columns: 1fr;
+  }
+  .compare-side {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+}

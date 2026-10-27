@@ -4,9 +4,9 @@ import { HeroBanner, SleepingCatArt } from '../components/art';
 import { DailyBars, LineChart, type LineSeries } from '../components/charts';
 import { WatchingCat } from '../components/icons';
 import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { ago, amount, dateOnly, eur, familyLabel, humanize, num, signedEur, toDate } from '../format';
+import { ago, amount, dateOnly, eur, familyLabel, humanize, num, pct, signedEur, toDate } from '../format';
 import { navigate } from '../router';
-import type { EquityPoint, Overview } from '../types';
+import type { CompareRange, EquityPoint, Overview } from '../types';
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -46,6 +46,8 @@ export default function OverviewPage() {
       </HeroBanner>
 
       {ov.error && !o && <ErrorBox error={ov.error} onRetry={ov.reload} />}
+
+      {o && <CompareCard mode={o.bot.mode} />}
 
       {o && (
         <div className="grid overview-grid">
@@ -238,6 +240,110 @@ function dailyPnl(points: EquityPoint[]) {
   const out: { day: string; value: number }[] = [];
   for (let i = 1; i < days.length; i++) out.push({ day: days[i][0], value: days[i][1] - days[i - 1][1] });
   return out;
+}
+
+const COMPARE_RANGES: { value: CompareRange; label: string }[] = [
+  { value: 'day', label: 'Day' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'year', label: 'Year' },
+  { value: 'all', label: 'All' },
+];
+
+/** Portfolio vs just holding BTC or ETH, every line indexed to 100 at the start of the range (SPEC §5a). Informative. */
+function CompareCard({ mode }: { mode: string }) {
+  const [range, setRange] = useState<CompareRange>(() => {
+    try {
+      const v = localStorage.getItem('stonks-compare-range');
+      return COMPARE_RANGES.some((r) => r.value === v) ? (v as CompareRange) : 'month';
+    } catch {
+      return 'month';
+    }
+  });
+  const pick = (r: CompareRange) => {
+    setRange(r);
+    try {
+      localStorage.setItem('stonks-compare-range', r);
+    } catch {
+      /* the choice just isn't remembered */
+    }
+  };
+  const cmp = useAsync(() => api.compare(range), [range, mode]);
+  useVisibleInterval(() => cmp.reload(), 60_000, true);
+  const lines = useMemo(() => {
+    const d = cmp.data;
+    if (!d) return [];
+    const defs = [
+      { key: 'portfolio', name: `Your portfolio (${d.mode})`, color: 'var(--ink)', pts: d.portfolio, area: true, unit: 'value' },
+      { key: 'btc', name: 'Just holding BTC', color: 'var(--brass)', pts: d.btc, dash: '6 4', unit: 'BTC price' },
+      { key: 'eth', name: 'Just holding ETH', color: 'var(--s2)', pts: d.eth, dash: '2 4', unit: 'ETH price' },
+    ];
+    return defs
+      .filter((x) => x.pts.length > 1)
+      .map((x) => {
+        const base = x.pts[0][1];
+        const last = x.pts[x.pts.length - 1][1];
+        const series: LineSeries = {
+          name: x.name,
+          color: x.color,
+          dash: x.dash,
+          area: x.area,
+          width: x.key === 'portfolio' ? 2.4 : 1.8,
+          points: x.pts.map(([t, v]) => [t, (v / base) * 100] as [number, number]),
+          tip: ([, i]) => `${i.toFixed(1)} · ${eur((i * base) / 100)}`,
+        };
+        return { ...x, base, last, change: (last / base - 1) * 100, series };
+      });
+  }, [cmp.data]);
+  const label = COMPARE_RANGES.find((r) => r.value === range)!.label.toLowerCase();
+
+  return (
+    <section className="card">
+      <div className="card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <h2 style={{ marginRight: 'auto' }}>You vs just holding</h2>
+        <Segmented label="Range" value={range} onChange={pick} options={COMPARE_RANGES} />
+      </div>
+      {cmp.error && <ErrorBox error={cmp.error} onRetry={cmp.reload} />}
+      {!cmp.data && !cmp.error && <Skeleton h={260} />}
+      {cmp.data && lines.length === 0 && (
+        <p className="soft small" style={{ padding: '30px 0' }}>
+          Nothing to compare yet. Prices and your portfolio are recorded every minute; the lines appear shortly.
+        </p>
+      )}
+      {lines.length > 0 && (
+        <div className="compare-grid">
+          <LineChart
+            series={lines.map((l) => l.series)}
+            height={260}
+            legend={false}
+            baseline={100}
+            ariaLabel={`Your portfolio and buy and hold BTC and ETH over the last ${label}, indexed to 100`}
+            yFormat={(v) => v.toFixed(0)}
+          />
+          <ul className="compare-side" aria-label="Change over the range">
+            {lines.map((l) => (
+              <li key={l.key}>
+                <span className={`swatch${l.dash ? ' dashed' : ''}`} style={{ color: l.color }} />
+                <div style={{ minWidth: 0 }}>
+                  <div className="small">{l.name}</div>
+                  <div className={`mid-num ${l.change >= 0 ? 'gain' : 'loss'}`}>{pct(l.change, 1, true)}</div>
+                  <div className="tiny soft">
+                    {l.unit} {eur(l.base)} → {eur(l.last)}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {lines.length > 0 && (
+        <p className="tiny soft" style={{ marginTop: 10 }}>
+          All lines start at 100 at the beginning of the {range === 'all' ? 'portfolio history' : label}. Informative only: it does not change what the bot
+          does. Deposits and withdrawals show up as jumps in your line.
+        </p>
+      )}
+    </section>
+  );
 }
 
 function EquityCard({ mode }: { mode: string }) {

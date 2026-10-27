@@ -115,6 +115,25 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     bot = { ...bot, strategy: entry.spec, activeResearch, enabled: bot.enabled || b.start === true };
     return json({ ok: true, bot, activeResearch, started: b.start === true });
   }
+  if (p === '/compare' && method === 'GET') {
+    const span = { day: 1, week: 7, month: 30, year: 365, all: 45 }[(q.get('range') ?? 'month') as 'day'] ?? 30;
+    const to = Date.now();
+    const from = to - span * 86_400_000;
+    const walk = (start: number, vol: number, drift: number, seed: number) => {
+      let v = start;
+      let s = seed;
+      return Array.from({ length: 300 }, (_, i) => {
+        s = (s * 9301 + 49297) % 233280;
+        v *= 1 + drift + vol * (s / 233280 - 0.5);
+        return [from + ((to - from) * i) / 299, v] as [number, number];
+      });
+    };
+    return json({
+      mode: bot.mode, range: q.get('range') ?? 'month', from: new Date(from).toISOString(), to: new Date(to).toISOString(),
+      portfolio: walk(1000, 0.02, 0.0004, 7), btc: walk(72000, 0.03, -0.0002, 3), eth: walk(2100, 0.04, -0.0006, 11),
+    });
+  }
+  if (p === '/portfolio-history/clear' && method === 'POST') return json({ ok: true, removed: 1234 });
   if (p === '/hall-of-fame' && method === 'GET') return json({ entries: hall });
   if (p === '/hall-of-fame' && method === 'POST') {
     const b = body as { researchId: number; bucket: string; rank: number };

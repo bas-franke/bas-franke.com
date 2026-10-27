@@ -1,6 +1,8 @@
 import type {
   ActivateResult,
   AllocateResult,
+  CompareData,
+  CompareRange,
   BotSettings,
   EquityPoint,
   FamilyInfo,
@@ -102,6 +104,8 @@ export const api = {
   research: () => request<ResearchResponse>('GET', '/research'),
   activate: (body: ({ researchId: number; bucket: string; rank: number } | { hallOfFameId: number }) & { start: boolean; confirmLive?: boolean }) =>
     request<ActivateResult>('POST', '/bot/activate', body),
+  compare: (range: CompareRange) => request<CompareData>('GET', `/compare${qs({ range })}`),
+  clearPortfolioHistory: () => request<{ ok: true; removed: number }>('POST', '/portfolio-history/clear', { confirm: 'CLEAR' }),
   hallOfFame: () => request<{ entries: HallEntry[] }>('GET', '/hall-of-fame'),
   addToHall: (body: { researchId: number; bucket: string; rank: number }) => request<{ ok: true; id: number }>('POST', '/hall-of-fame', body),
   removeFromHall: (id: number) => request<{ ok: true }>('DELETE', `/hall-of-fame/${id}`, {}),

@@ -8,6 +8,8 @@ export interface LineSeries {
   dash?: string;
   width?: number;
   area?: boolean;
+  /** Tooltip text for a point (default: the chart's tipFormat of its value). */
+  tip?: (p: [number, number]) => string;
 }
 
 function useWidth<T extends HTMLElement>() {
@@ -160,7 +162,7 @@ export function LineChart({
               <div className="t-row" key={s.name}>
                 <span className={`swatch${s.dash ? ' dashed' : ''}`} style={{ color: s.color }} />
                 <span>{s.name}</span>
-                <b>{fmtTip(p[1])}</b>
+                <b>{s.tip ? s.tip(p) : fmtTip(p[1])}</b>
               </div>
             ))}
           </div>
