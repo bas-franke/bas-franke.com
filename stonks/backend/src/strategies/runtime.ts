@@ -32,6 +32,9 @@ function python(family: string, version?: unknown): PyFamily | undefined {
   return f && (version === undefined || version === null || version === f.version) ? f : undefined;
 }
 
+/** The only markets the bot may buy or sell (owner's rule, 2026-10-27): everything is held in EUR, BTC or ETH. */
+export const TRADED_MARKETS: readonly unknown[] = ['BTC-EUR', 'ETH-EUR'];
+
 /** True when the spec runs as the lab's Python code. */
 export const runsInPython = (spec: { family: string; familyVersion?: unknown }) =>
   !native(spec.family, spec.familyVersion) && !!python(spec.family, spec.familyVersion);
@@ -77,6 +80,9 @@ function hashParams(s: string): string {
  */
 export function validateAnySpec(input: unknown): AnySpec {
   if (!isObj(input)) fail('expected a JSON object');
+  if (Array.isArray(input.markets))
+    for (const m of input.markets)
+      if (!TRADED_MARKETS.includes(m)) fail(`market "${String(m)}" is not allowed: the bot only trades ${TRADED_MARKETS.join(' and ')}`);
   const family = input.family;
   if (typeof family !== 'string') fail('"family" is missing');
   if (native(family, input.familyVersion) || !python(family, input.familyVersion)) {

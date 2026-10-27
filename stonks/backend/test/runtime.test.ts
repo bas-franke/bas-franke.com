@@ -52,6 +52,15 @@ test('lab families validate against their published params and keep the lab-only
     assert.throws(() => rt.validateAnySpec({ family: 'moon_core', markets: ['BTC-EUR'], interval: '1d', ...input }), msg);
 });
 
+test('the bot only trades BTC-EUR and ETH-EUR, whichever engine runs the family', () => {
+  setPyCatalog(fakeCatalog);
+  assert.ok(rt.validateAnySpec({ family: 'moon_core', markets: ['BTC-EUR', 'ETH-EUR'], interval: '4h' }));
+  for (const markets of [['SOL-EUR'], ['BTC-EUR', 'SOL-EUR']]) {
+    assert.throws(() => rt.validateAnySpec({ family: 'moon_core', markets, interval: '4h' }), /SOL-EUR" is not allowed/);
+    assert.throws(() => rt.validateAnySpec({ family: 'rotation_momentum', markets, interval: '1d' }), /SOL-EUR" is not allowed/);
+  }
+});
+
 test('a TypeScript port wins at its version; another version of the same family runs in the lab', () => {
   setPyCatalog(fakeCatalog);
   const ts = rt.validateAnySpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 5, slow: 20 } });
