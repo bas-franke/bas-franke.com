@@ -6,7 +6,7 @@ import { ConflictError, fail, num, ValidationError } from './util.js';
 // Bot control: overview, settings, start/stop, strategy families and markets (SPEC.md §7).
 
 /** Keys of settings.bot the dashboard may change. `enabled` only moves through start/stop. */
-const EDITABLE = ['mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur'] as const;
+const EDITABLE = ['mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur', 'chase'] as const;
 const MARKETS_TTL_MS = 60 * 60 * 1000;
 
 export function botRoutes(deps: ApiDeps) {

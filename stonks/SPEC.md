@@ -79,7 +79,13 @@ orders; differences smaller than €5 or 2 % of equity are ignored (no churn).
   the plain average fill price. After a stop the market is locked until the strategy's target for it returns to 0.
 - Limit buys reserve their cash while open (as on Bitvavo). Buys at one close are scaled together to the free cash; market
   buys leave room for fee + slippage. Cash from sells placed at the same close is only spent once it has arrived, so a
-  rotation takes one extra bar. The live bot sizes every buy (limit ones too) to leave the **taker** fee plus 0.1 % of the
+  rotation takes one extra bar.
+- **Order-book chase (live bot and paper, `settings.bot.chase`, default on: 30 s / 10 min):** a limit order still
+  unfilled `repriceSec` after it was placed is cancelled and placed again for its unfilled rest at the best bid (buy) or
+  best ask (sell), post-only, unless it already sits there; once the first order of the chain is `marketAfterMin` old the
+  rest goes out as a market order. Chased orders ignore `timeoutBars`/`fallback`. Backtests do not model the chase
+  (they keep the limit-at-close + `timeoutBars` rule), so live fills are more certain and sometimes taker-priced.
+- The live bot sizes every buy (limit ones too) to leave the **taker** fee plus 0.1 % of the
   cash free, because Bitvavo reserves the taker fee on open buy orders and refuses one that does not fit (code 216);
   backtests keep the maker-fee sizing, a difference of ~0.2 % of one buy.
 
@@ -138,6 +144,7 @@ Family details both sides implement (the docstrings in `stonks_lab/families/*.py
   "fees": { "maker": 0.0015, "taker": 0.0025 },
   "paperStartEur": 1000,
   "activeResearch": null,        // set by POST /api/bot/activate (§8); reset to null when the strategy is changed by hand
+  "chase": { "enabled": true, "repriceSec": 30, "marketAfterMin": 10 },  // order-book chase (§2)
   "manual": null                 // { target: "BTC"|"ETH"|"EUR", setAt } from POST /api/bot/allocate: while set the bot holds
                                  // everything there (BTC-EUR/ETH-EUR, 1m decisions, post-only limit at the best price,
                                  // re-placed each minute) instead of the strategy; a strategy change clears it

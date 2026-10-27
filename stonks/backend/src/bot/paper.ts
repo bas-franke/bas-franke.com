@@ -3,7 +3,7 @@ import { roundAmount } from '../bitvavo/precision.js';
 import { db } from '../db.js';
 import { errText, log } from '../log.js';
 import { getSetting, setSetting } from '../settings.js';
-import type { Balance, Broker, PlaceContext } from './broker.js';
+import { chaseMeta, type Balance, type Broker, type PlaceContext } from './broker.js';
 import { cashDelta, paperLimitFills, paperMarketPrice, postOnlyPrice, type OrderIntent } from './logic.js';
 import { bestBidAsk, minuteCandlesSince, ruleFor } from './marketData.js';
 import { getOrderRow, insertOrder, openOrders, recordFill, updateOrder, type OrderRow } from './store.js';
@@ -112,7 +112,7 @@ export class PaperBroker implements Broker {
       const row = await insertOrder({
         mode: 'paper', clientOrderId: `stonks-${uuid}`, exchangeOrderId: `paper-${uuid}`, market: intent.market, side: intent.side,
         orderType: 'limit', price, amount: amountStr, status: 'new', strategyId: ctx.strategyId, reason: intent.reason,
-        meta: { uuid, activeFrom: now, expiresAt: ctx.expiresAt, fallback: ctx.fallback, postOnly: intent.postOnly, barTime: ctx.barTime, feeRate, checkedFrom: ceilMinute(now) },
+        meta: { uuid, activeFrom: now, expiresAt: ctx.expiresAt, fallback: ctx.fallback, postOnly: intent.postOnly, barTime: ctx.barTime, feeRate, checkedFrom: ceilMinute(now), ...chaseMeta(ctx) },
       });
       await log('info', 'order_placed', `Paper limit ${intent.side} ${amountStr} ${intent.market} at ${price} (${intent.reason})`, { orderId: row.id, postOnly: intent.postOnly });
       if (crosses) {

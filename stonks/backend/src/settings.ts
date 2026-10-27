@@ -17,7 +17,17 @@ export interface BotSettings {
   /** "Move everything" from Settings: while set, the bot holds all of it in this coin (or euros) instead of following
    * the strategy, with post-only limit orders re-placed every minute until filled. null = follow the strategy. */
   manual: ManualAllocation | null;
+  /** Limit orders follow the order book: re-placed at the best bid/ask every `repriceSec` while unfilled, and the
+   * unfilled rest goes out as a market order after `marketAfterMin` (instead of waiting a whole bar). */
+  chase: ChaseSettings;
 }
+
+export interface ChaseSettings {
+  enabled: boolean;
+  repriceSec: number;
+  marketAfterMin: number;
+}
+export const DEFAULT_CHASE: ChaseSettings = { enabled: true, repriceSec: 30, marketAfterMin: 10 };
 
 export const MANUAL_TARGETS = ['BTC', 'ETH', 'EUR'] as const;
 export interface ManualAllocation {
@@ -60,7 +70,20 @@ export function defaultBotSettings(): BotSettings {
     paperStartEur: 1000,
     activeResearch: null,
     manual: null,
+    chase: { ...DEFAULT_CHASE },
   };
+}
+
+function checkChase(v: unknown): ChaseSettings {
+  if (v === undefined || v === null) return { ...DEFAULT_CHASE };
+  if (!isObj(v)) throw new SettingsError('chase must be { enabled, repriceSec, marketAfterMin }');
+  const c = { ...DEFAULT_CHASE, ...v };
+  if (typeof c.enabled !== 'boolean') throw new SettingsError('chase.enabled must be true or false');
+  if (typeof c.repriceSec !== 'number' || !Number.isInteger(c.repriceSec) || c.repriceSec < 15 || c.repriceSec > 3600)
+    throw new SettingsError('chase.repriceSec must be a whole number of seconds from 15 to 3600');
+  if (typeof c.marketAfterMin !== 'number' || !Number.isFinite(c.marketAfterMin) || c.marketAfterMin < 1 || c.marketAfterMin > 1440)
+    throw new SettingsError('chase.marketAfterMin must be 1 to 1440 minutes');
+  return { enabled: c.enabled, repriceSec: c.repriceSec, marketAfterMin: c.marketAfterMin };
 }
 
 function checkManual(v: unknown): ManualAllocation | null {
@@ -119,6 +142,7 @@ export function checkSettings(s: Record<string, unknown>): BotSettings {
     paperStartEur,
     activeResearch: checkActiveResearch(s.activeResearch),
     manual: checkManual(s.manual),
+    chase: checkChase(s.chase),
   };
 }
 
@@ -160,7 +184,7 @@ async function safeParse(stored: Record<string, unknown>, defaults: BotSettings)
   }
 }
 
-const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur', 'activeResearch', 'manual']);
+const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur', 'activeResearch', 'manual', 'chase']);
 
 let chain: Promise<unknown> = Promise.resolve();
 /** Serializes settings writes inside this process. */
@@ -183,6 +207,7 @@ export function updateBotSettings(patch: Record<string, unknown>, opts: { confir
     const merged: Record<string, unknown> = { ...before };
     for (const k of keys) merged[k] = patch[k];
     if (isObj(patch.fees)) merged.fees = { ...before.fees, ...patch.fees };
+    if (isObj(patch.chase)) merged.chase = { ...before.chase, ...patch.chase };
     const confirm = opts.confirmLive === true || patch.confirmLive === true;
     if (merged.mode === 'live' && before.mode !== 'live' && !confirm)
       throw new SettingsError('Switching to live trading needs confirmLive: true');

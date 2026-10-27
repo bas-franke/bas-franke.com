@@ -29,6 +29,10 @@ export interface OrderMeta {
   error?: string;
   /** Set once the fallback market order for this order has been placed (never twice). */
   fallbackDone?: boolean;
+  /** Order-book chase: when the first order of this chain was placed (ms); re-placed orders keep it. */
+  chaseSince?: number;
+  /** Order-book chase: id of the first order of this chain. */
+  chaseRoot?: number;
 }
 
 export interface OrderRow {

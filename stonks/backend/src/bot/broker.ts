@@ -14,7 +14,13 @@ export interface PlaceContext {
   fallback: 'cancel' | 'market';
   barTime?: number;
   fees: { maker: number; taker: number };
+  /** Limit orders that follow the order book (settings.chase): start of the chain and its first order's id. */
+  chase?: { since: number; root: number | null };
 }
+
+/** Order meta fields for a chased limit order. */
+export const chaseMeta = (ctx: PlaceContext) =>
+  ctx.chase ? { chaseSince: ctx.chase.since, ...(ctx.chase.root !== null ? { chaseRoot: ctx.chase.root } : {}) } : {};
 
 /** Paper and live trading behind one interface; every method logs its own problems and never double-places. */
 export interface Broker {

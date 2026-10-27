@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { bitvavo, BitvavoError, RateLimitedError, type BitvavoOrder, type PlaceOrderParams } from '../bitvavo/index.js';
 import { query } from '../db.js';
 import { errText, log } from '../log.js';
-import type { Balance, Broker, PlaceContext } from './broker.js';
+import { chaseMeta, type Balance, type Broker, type PlaceContext } from './broker.js';
 import { postOnlyPrice, type OrderIntent } from './logic.js';
 import { bestBidAsk, ruleFor } from './marketData.js';
 import { fillsForOrder, insertOrder, isOpenStatus, openOrders, recordFill, updateOrder, type OrderRow } from './store.js';
@@ -44,7 +44,7 @@ export class LiveBroker implements Broker {
       row = await insertOrder({
         mode: 'live', clientOrderId: `stonks-${uuid}`, market: intent.market, side: intent.side, orderType: intent.orderType,
         price: price ?? null, amount: intent.amount ?? '0', status: 'pending', strategyId: ctx.strategyId, reason: intent.reason,
-        meta: { uuid, activeFrom: Date.now(), expiresAt: intent.orderType === 'limit' ? ctx.expiresAt : null, fallback: ctx.fallback, postOnly: intent.postOnly, amountQuote: intent.amountQuote, barTime: ctx.barTime },
+        meta: { uuid, activeFrom: Date.now(), expiresAt: intent.orderType === 'limit' ? ctx.expiresAt : null, fallback: ctx.fallback, postOnly: intent.postOnly, amountQuote: intent.amountQuote, barTime: ctx.barTime, ...(intent.orderType === 'limit' ? chaseMeta(ctx) : {}) },
       });
       const params: PlaceOrderParams = { market: intent.market, side: intent.side, orderType: intent.orderType, clientOrderId: uuid };
       if (intent.orderType === 'limit') {

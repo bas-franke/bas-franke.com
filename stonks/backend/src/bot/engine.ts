@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { bitvavo, roundAmount, roundQuote, sizeProblem, type MarketRules } from '../bitvavo/index.js';
+import { bitvavo, roundAmount, roundPrice, roundQuote, sizeProblem, type MarketRules } from '../bitvavo/index.js';
 import { query } from '../db.js';
 import { errText, log } from '../log.js';
 import { getBotSettings, getSetting, onSettingsChange, setSetting, updateBotSettings, type BotSettings, type ManualAllocation } from '../settings.js';
@@ -7,8 +7,8 @@ import { INTERVAL_MS, validateSpec, type Candle, type StrategySpec } from '../st
 import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython } from '../strategies/runtime.js';
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
-import { checkDay, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
-import { allPrices, closedCandles, eurPrice, marketRules } from './marketData.js';
+import { BUY_CASH_MARGIN, checkDay, MARKET_SLIPPAGE, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
+import { allPrices, bestBidAsk, closedCandles, eurPrice, marketRules } from './marketData.js';
 import { getWallet, PaperBroker, resetPaperWallet } from './paper.js';
 import { fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
 import { amsterdamDay, barOpen, lastClosedBar } from './time.js';
@@ -327,6 +327,7 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
   const stillValid = () => status.settingsVersion === version;
 
   fills += await handleTimeouts(s, broker, now, stillValid);
+  fills += await handleChase(s, broker, now, stillValid);
   fills += await handleStops(s, broker, ms, pf, stillValid);
 
   const bar = lastClosedBar(now, s.strategy.interval);
@@ -428,6 +429,70 @@ async function handleTimeouts(s: BotSettings, broker: Broker, now: number, still
     if (placed) fills++;
   }
   return fills;
+}
+
+const CHASE_SUFFIX = / \((repriced|rest at market)\)$/;
+
+/**
+ * Order-book chase (settings.chase): a limit order still unfilled `repriceSec` after it was placed is cancelled and
+ * placed again for the unfilled rest at the best bid (buy) or best ask (sell), post-only as before, unless it is already
+ * there. Once the first order of the chain is `marketAfterMin` old, the rest goes out as a market order. Buys are
+ * capped to the free cash (taker fee and margin kept free, as in planOrders).
+ */
+async function handleChase(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean): Promise<number> {
+  const c = s.chase;
+  if (!c?.enabled) return 0;
+  let placed = 0;
+  for (const o of await openOrders(s.mode)) {
+    if (o.orderType !== 'limit' || o.meta.chaseSince === undefined || o.status === 'pending' || !stillValid()) continue;
+    const toMarket = now - o.meta.chaseSince >= c.marketAfterMin * 60_000;
+    if (!toMarket && now - o.meta.activeFrom < c.repriceSec * 1000) continue;
+    const rules = (await marketRules()).get(o.market);
+    if (!rules) continue;
+    const book = await bestBidAsk(o.market);
+    const target = o.side === 'buy' ? roundPrice(book.bid, rules, 'down') : roundPrice(book.ask, rules, 'up');
+    if (!toMarket && Number(target) === o.price) continue; // still at the best price: keep its place in the queue
+    const why = toMarket ? `not filled within ${c.marketAfterMin} min: the rest goes at market` : `repricing to the order book (${target})`;
+    if (!(await broker.cancel(o, why))) continue;
+    const { rows } = await query('SELECT amount, filled_amount FROM orders WHERE id = $1', [o.id]);
+    let rest = Number(rows[0]?.amount ?? o.amount) - Number(rows[0]?.filled_amount ?? o.filledAmount ?? 0);
+    if (!(rest > 0) || !stillValid()) continue;
+    const price = toMarket ? (o.side === 'buy' ? book.ask : book.bid) : Number(target);
+    if (o.side === 'buy') {
+      const cash = (await broker.balances()).find((b) => b.symbol === 'EUR')?.available ?? 0;
+      rest = Math.min(rest, cash / (price * (1 + s.fees.taker + BUY_CASH_MARGIN + (toMarket ? MARKET_SLIPPAGE : 0))));
+    }
+    const base = (o.reason ?? 'order').replace(CHASE_SUFFIX, '');
+    let intent: OrderIntent;
+    if (toMarket && o.side === 'buy') {
+      const quote = roundQuote(rest * price, rules.notionalDecimals);
+      if (Number(quote) < rules.minOrderInQuoteAsset) {
+        await log('info', 'chase_done', `${o.market}: the unfilled rest (€${quote}) is under the minimum order; not sent at market`, { orderId: o.id });
+        continue;
+      }
+      intent = { market: o.market, side: 'buy', orderType: 'market', amountQuote: quote, postOnly: false, reason: `${base} (rest at market)`, valueEur: Number(quote) };
+    } else {
+      const amount = roundAmount(rest, rules.quantityDecimals);
+      const problem = sizeProblem(rules, Number(amount), price);
+      if (problem) {
+        await log('info', 'chase_done', `${o.market}: the unfilled rest is too small to place again (${problem})`, { orderId: o.id });
+        continue;
+      }
+      intent = toMarket
+        ? { market: o.market, side: 'sell', orderType: 'market', amount, postOnly: false, reason: `${base} (rest at market)`, valueEur: Number(amount) * price }
+        : { market: o.market, side: o.side, orderType: 'limit', amount, price: target, postOnly: o.meta.postOnly, reason: `${base} (repriced)`, valueEur: Number(amount) * price };
+    }
+    await log('info', toMarket ? 'chase_market' : 'chase_reprice', toMarket
+      ? `${o.market}: ${o.side} not filled within ${c.marketAfterMin} min; sending the rest (${intent.amount ?? `€${intent.amountQuote}`}) at market`
+      : `${o.market}: ${o.side} ${intent.amount} moved from ${o.price} to ${target} (best ${o.side === 'buy' ? 'bid' : 'ask'})`,
+      { orderId: o.id, root: o.meta.chaseRoot ?? o.id, book });
+    const row = await broker.place(intent, {
+      strategyId: o.strategyId, expiresAt: null, fallback: 'cancel', barTime: o.meta.barTime, fees: s.fees,
+      ...(toMarket ? {} : { chase: { since: o.meta.chaseSince, root: o.meta.chaseRoot ?? o.id } }),
+    });
+    if (row) placed++;
+  }
+  return placed;
 }
 
 async function handleStops(s: BotSettings, broker: Broker, ms: ModeState, pf: PortfolioView, stillValid: () => boolean): Promise<number> {
@@ -583,7 +648,12 @@ async function placeTargets(
   const expiresAt = bar + INTERVAL_MS[spec.interval] * (1 + spec.execution.timeoutBars);
   for (const intent of plan.orders) {
     if (!stillValid()) break;
-    await broker.place(intent, { strategyId: spec.id, expiresAt, fallback: spec.execution.fallback, barTime: bar, fees: s.fees });
+    // With the order-book chase on, limit orders are re-priced and finally sent at market by handleChase instead of
+    // waiting `timeoutBars` bars.
+    const chase = s.chase?.enabled && intent.orderType === 'limit';
+    await broker.place(intent, chase
+      ? { strategyId: spec.id, expiresAt: null, fallback: 'cancel', barTime: bar, fees: s.fees, chase: { since: Date.now(), root: null } }
+      : { strategyId: spec.id, expiresAt, fallback: spec.execution.fallback, barTime: bar, fees: s.fees });
   }
 }
 

@@ -4,7 +4,7 @@ import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToas
 import { eur, familyLabel, humanize, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
 import { navigate, takeHandoff } from '../router';
-import { INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
+import { DEFAULT_CHASE, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
 
 type Draft = Omit<BotSettings, 'enabled'>;
 
@@ -86,6 +86,8 @@ export default function SettingsPage() {
   const setRisk = (k: keyof StrategySpec['risk'], v: number | null) => setStrategy({ risk: { ...s.risk, [k]: v } });
   const setExec = <K extends keyof StrategySpec['execution']>(k: K, v: StrategySpec['execution'][K]) =>
     setStrategy({ execution: { ...s.execution, [k]: v } });
+  const chase = draft.chase ?? DEFAULT_CHASE;
+  const setChase = (patch: Partial<typeof chase>) => setDraft({ ...draft, chase: { ...chase, ...patch } });
 
   const pickFamily = (name: string) => {
     const f = families.find((x) => x.family === name);
@@ -111,6 +113,7 @@ export default function SettingsPage() {
         maxExposureEur: draft.maxExposureEur,
         dailyLossLimitEur: draft.dailyLossLimitEur,
         paperStartEur: draft.paperStartEur,
+        ...(draft.chase ? { chase: draft.chase } : {}),
       };
       if (draft.mode === 'live' && saved.mode !== 'live') patch.confirmLive = confirmLive;
       const res = await api.updateBot(patch);
@@ -286,6 +289,7 @@ export default function SettingsPage() {
                     />
                   </Affix>
                 </Field>
+                {!chase.enabled && (<>
                 <Field label="Give up after" error={err('strategy.execution.timeoutBars')} hint="Candles an unfilled order may wait.">
                   <Affix suffix="bars">
                     <input
@@ -304,9 +308,33 @@ export default function SettingsPage() {
                     <option value="market">Fill at market</option>
                   </select>
                 </Field>
+                </>)}
               </>
             )}
           </div>
+          {s.execution.orderType === 'limit' && (
+            <div className="stack" style={{ gap: 12, marginTop: 16 }}>
+              <label className="check">
+                <input type="checkbox" checked={chase.enabled} onChange={(e) => setChase({ enabled: e.target.checked })} />
+                Follow the order book: move an unfilled order to the best price, then finish at market
+              </label>
+              {chase.enabled && (
+                <div className="form-grid">
+                  <Field label="Re-price every" error={err('chase.repriceSec')} hint="An unfilled order moves to the best bid (buy) or ask (sell).">
+                    <Affix suffix="s">
+                      <input className="input" type="number" min={15} max={3600} step={5} value={chase.repriceSec} onChange={(e) => setChase({ repriceSec: Number(e.target.value) })} />
+                    </Affix>
+                  </Field>
+                  <Field label="Market order after" error={err('chase.marketAfterMin')} hint="Whatever is still unfilled then goes at market (taker fee).">
+                    <Affix suffix="min">
+                      <input className="input" type="number" min={1} max={1440} step={1} value={chase.marketAfterMin} onChange={(e) => setChase({ marketAfterMin: Number(e.target.value) })} />
+                    </Affix>
+                  </Field>
+                </div>
+              )}
+              {chase.enabled && <p className="small soft" style={{ margin: 0 }}>Applies to every strategy and to Move everything; “give up after” is not used while this is on.</p>}
+            </div>
+          )}
           {s.execution.orderType === 'limit' && (
             <label className="check" style={{ marginTop: 16 }}>
               <input type="checkbox" checked={s.execution.postOnly} onChange={(e) => setExec('postOnly', e.target.checked)} />
@@ -553,8 +581,10 @@ function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSe
             )}
           </div>
           <p className="small soft" style={{ margin: 0 }}>
-            Uses limit orders only (maker fee 0.15 %): one at the best price every minute until it fills, selling first and buying with the euros that
-            frees up. Switches the bot on if it is off. {live ? <b>The bot is in live mode: this trades real money.</b> : 'The bot is in paper mode: practice money only.'}
+            {bot.chase?.enabled === false
+              ? 'Uses limit orders only (maker fee 0.15 %): one at the best price every minute until it fills,'
+              : `Uses limit orders at the best price (maker fee 0.15 %), re-priced every ${bot.chase?.repriceSec ?? 30} s; whatever is still unfilled after ${bot.chase?.marketAfterMin ?? 10} min goes at market,`}{' '}
+            selling first and buying with the euros that frees up. Switches the bot on if it is off. {live ? <b>The bot is in live mode: this trades real money.</b> : 'The bot is in paper mode: practice money only.'}
           </p>
           {error && <div className="callout loss">{error}</div>}
           <OrderActivity />

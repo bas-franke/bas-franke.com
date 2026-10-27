@@ -20,7 +20,8 @@ let settings: Record<string, unknown> = {};
 let botSettings: any;
 const listeners: Array<(b: any, a: any) => unknown> = [];
 let orders: OrderRow[] = [];
-const placed: Array<{ mode: string; intent: OrderIntent }> = [];
+const placed: Array<{ mode: string; intent: OrderIntent; ctx?: any }> = [];
+let book = { bid: 400, ask: 401 };
 const cancelled: Array<{ mode: string; id: number }> = [];
 let candleFailures = 0;
 let candleCalls = 0;
@@ -40,8 +41,8 @@ class FakeBroker {
   async balances() {
     return [{ symbol: 'EUR', available: 1000, inOrder: 0 }];
   }
-  async place(intent: OrderIntent) {
-    placed.push({ mode: this.mode, intent });
+  async place(intent: OrderIntent, ctx?: unknown) {
+    placed.push({ mode: this.mode, intent, ctx });
     onPlace?.();
     return null;
   }
@@ -94,6 +95,7 @@ const ethRules = { ...btcRules, market: 'ETH-EUR', base: 'ETH' };
 mock.module('../src/bot/marketData.js', {
   exports: {
     allPrices: async () => new Map([['BTC-EUR', 400], ['ETH-EUR', 400]]),
+    bestBidAsk: async () => book,
     eurPrice: (s: string, p: Map<string, number>) => (s === 'EUR' ? 1 : p.get(`${s}-EUR`) ?? 0),
     marketRules: async () => new Map([['BTC-EUR', btcRules], ['ETH-EUR', ethRules]]),
     closedCandles: async (_m: string, _i: string, lastBar: number, opts: { bars: number }) => {
@@ -225,4 +227,80 @@ test('a manual "move everything to ETH" places one post-only limit buy for the w
   assert.ok(o.valueEur > 990 && o.valueEur <= 1000, `whole cash minus room for the fee, got ${o.valueEur}`);
   assert.equal(engine.manualSpec(botSettings.manual).interval, '1m');
   assert.deepEqual(engine.manualWeights({ target: 'EUR', setAt: '' }), { 'BTC-EUR': 0, 'ETH-EUR': 0 });
+});
+
+// ---- order-book chase (settings.chase) ----
+function chased(id: number, over: Partial<OrderRow> & { since: number; active: number }): OrderRow {
+  const o = order(id, 'paper');
+  return { ...o, price: 399, amount: 1, ...over, meta: { ...o.meta, activeFrom: over.active, chaseSince: over.since } } as OrderRow;
+}
+const CHASE = { enabled: true, repriceSec: 30, marketAfterMin: 10 };
+
+test('chase: a limit buy left behind by the book is re-placed at the best bid after 30 s, keeping the chain', async (t) => {
+  reset(ema, false);
+  botSettings.enabled = true;
+  botSettings.chase = CHASE;
+  const now = Date.parse('2026-10-27T12:00:40Z') + stray * 120_000;
+  t.mock.timers.enable({ apis: ['Date'], now });
+  // decide nothing new this tick: the bar was already decided
+  settings.bot_state = { paper: { locks: {}, trail: {}, lastDecidedBar: now, strategyKey: JSON.stringify(ema), strategyStart: now - 3600_000 }, live: { locks: {}, trail: {} } };
+  book = { bid: 400.5, ask: 401 };
+  orders = [chased(41, { since: now - 40_000, active: now - 40_000, market: 'BTC-EUR' })];
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.deepEqual(cancelled.map((c) => c.id), [41]);
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].intent.orderType, 'limit');
+  assert.equal(placed[0].intent.price, '400.50');
+  assert.equal(placed[0].intent.amount, '1.00000000');
+  assert.match(placed[0].intent.reason, /\(repriced\)$/);
+  assert.deepEqual(placed[0].ctx.chase, { since: now - 40_000, root: 41 });
+  assert.equal(placed[0].ctx.expiresAt, null);
+});
+
+test('chase: an order already at the best price keeps its place; younger than 30 s is left alone', async (t) => {
+  reset(ema, false);
+  botSettings.enabled = true;
+  botSettings.chase = CHASE;
+  const now = Date.parse('2026-10-27T13:00:40Z') + stray * 120_000;
+  t.mock.timers.enable({ apis: ['Date'], now });
+  settings.bot_state = { paper: { locks: {}, trail: {}, lastDecidedBar: now, strategyKey: JSON.stringify(ema), strategyStart: now - 3600_000 }, live: { locks: {}, trail: {} } };
+  book = { bid: 399, ask: 400 };
+  orders = [chased(42, { since: now - 60_000, active: now - 60_000 }), chased(43, { since: now - 10_000, active: now - 10_000, price: 380 })];
+  await tick();
+  assert.equal(cancelled.length, 0);
+  assert.equal(placed.length, 0);
+});
+
+test('chase: after 10 minutes the unfilled rest of a buy goes out at market, sized to the free cash', async (t) => {
+  reset(ema, false);
+  botSettings.enabled = true;
+  botSettings.chase = CHASE;
+  const now = Date.parse('2026-10-27T14:00:40Z') + stray * 120_000;
+  t.mock.timers.enable({ apis: ['Date'], now });
+  settings.bot_state = { paper: { locks: {}, trail: {}, lastDecidedBar: now, strategyKey: JSON.stringify(ema), strategyStart: now - 3600_000 }, live: { locks: {}, trail: {} } };
+  book = { bid: 400, ask: 401 };
+  orders = [chased(44, { since: now - 10 * 60_000 - 1, active: now - 20_000, amount: 3, filledAmount: 0.5 })];
+  await tick();
+  assert.deepEqual(cancelled.map((c) => c.id), [44]);
+  const o = placed[0].intent;
+  assert.equal(o.orderType, 'market');
+  assert.equal(o.side, 'buy');
+  // 2.5 BTC wanted at 401 = 1002.5, but 1000 EUR cash keeps taker fee + slippage + margin free
+  assert.ok(Number(o.amountQuote) <= 1000 / (1 + 0.0025 + 0.0005 + 0.001) + 0.01 && Number(o.amountQuote) > 990, String(o.amountQuote));
+  assert.equal(placed[0].ctx.chase, undefined);
+});
+
+test('chase on: new limit orders from a decision carry the chase start instead of a bar timeout', async (t) => {
+  reset(ema);
+  botSettings.chase = CHASE;
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-27T15:30:00Z') + stray * 120_000 });
+  const lim = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 } });
+  botSettings.strategy = lim;
+  await tick();
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].intent.orderType, 'limit');
+  assert.equal(placed[0].ctx.expiresAt, null);
+  assert.equal(placed[0].ctx.chase.root, null);
+  assert.ok(placed[0].ctx.chase.since > 0);
 });

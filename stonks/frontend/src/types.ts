@@ -43,7 +43,16 @@ export interface BotSettings {
   activeResearch?: ActiveResearch | null;
   /** "Move everything" from Settings: the bot holds all of it in this coin (or euros) instead of following the strategy. */
   manual?: ManualAllocation | null;
+  /** Limit orders follow the order book: re-priced every `repriceSec`, the rest at market after `marketAfterMin`. */
+  chase?: ChaseSettings;
 }
+
+export interface ChaseSettings {
+  enabled: boolean;
+  repriceSec: number;
+  marketAfterMin: number;
+}
+export const DEFAULT_CHASE: ChaseSettings = { enabled: true, repriceSec: 30, marketAfterMin: 10 };
 
 export type ManualTarget = 'BTC' | 'ETH' | 'EUR';
 export interface ManualAllocation {
