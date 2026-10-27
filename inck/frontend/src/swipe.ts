@@ -13,6 +13,9 @@ const PULL = 0.25; // a pull of this fraction of the screen past the edge change
 const FLICK_PULL = 90; // ...or a flick that pulled at least this far (px)...
 const FLICK_SPEED = 0.7; // ...at this speed (px/ms)
 const SLOP = 8; // px before a touch counts as a drag
+const FRICTION = 0.997; // momentum keeps this share of its speed per ms (iOS-like; glides ~330ms worth of speed)
+const MIN_SPEED = 0.02; // px/ms below which momentum stops
+const HOLD = 60; // ms without movement before lift-off that cancels momentum
 
 type Item = { top: number; end: number }; // `end` is the furthest scrollTop that still shows only this item
 
@@ -50,6 +53,26 @@ export function useSwipePager(ref: RefObject<HTMLElement | null>, enabled: boole
         const p = Math.min(1, (now - start) / duration);
         root.scrollTop = from + (to - from) * (1 - (1 - p) ** 3);
         anim = p < 1 ? requestAnimationFrame(step) : 0;
+      };
+      anim = requestAnimationFrame(step);
+    };
+
+    // Native-feeling momentum: start at the finger's speed and decay smoothly, stopping at the story's edges.
+    const glide = (velocity: number, min: number, max: number) => {
+      stop();
+      let v = velocity;
+      let pos = root.scrollTop;
+      let last = performance.now();
+      const step = (now: number) => {
+        const dt = Math.min(40, now - last);
+        last = now;
+        const decay = FRICTION ** dt;
+        // Exact integral of v·FRICTION^t over this frame, so the distance doesn't depend on the frame rate.
+        pos += (v * (decay - 1)) / Math.log(FRICTION);
+        v *= decay;
+        const clamped = Math.max(min, Math.min(max, pos));
+        root.scrollTop = clamped;
+        anim = clamped === pos && Math.abs(v) > MIN_SPEED ? requestAnimationFrame(step) : 0;
       };
       anim = requestAnimationFrame(step);
     };
@@ -108,7 +131,7 @@ export function useSwipePager(ref: RefObject<HTMLElement | null>, enabled: boole
       while (gesture.samples.length > 2 && e.timeStamp - gesture.samples[0].t > 100) gesture.samples.shift();
     };
 
-    const onEnd = () => {
+    const onEnd = (e: TouchEvent) => {
       const g = gesture;
       gesture = null;
       if (!g || g.axis !== 'y') return;
@@ -116,8 +139,8 @@ export function useSwipePager(ref: RefObject<HTMLElement | null>, enabled: boole
       const first = g.samples[0];
       const last = g.samples[g.samples.length - 1];
       const dt = last.t - first.t;
-      // Positive = finger moving up = reading further down.
-      const velocity = dt > 0 ? (first.y - last.y) / dt : 0;
+      // Positive = finger moving up = reading further down. A finger that came to rest before lifting doesn't fling.
+      const velocity = dt > 0 && e.timeStamp - last.t < HOLD ? (first.y - last.y) / dt : 0;
 
       const view = root.clientHeight;
       const { top, end } = g.items[g.index] ?? { top: 0, end: 0 };
@@ -133,9 +156,9 @@ export function useSwipePager(ref: RefObject<HTMLElement | null>, enabled: boole
         const prevItem = g.items[g.index - 1];
         if (prevItem && (pulled > view * PULL || (pulled > FLICK_PULL && -velocity > FLICK_SPEED))) animateTo(prevItem.top, 380);
         else animateTo(top, 260);
-      } else if (Math.abs(velocity) > 0.1) {
+      } else if (Math.abs(velocity) > MIN_SPEED) {
         // Inside a long story: glide on, but never past its edges.
-        animateTo(Math.max(top, Math.min(end, scroll + velocity * 320)), 600);
+        glide(velocity, top, end);
       }
     };
 
