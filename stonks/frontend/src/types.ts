@@ -134,8 +134,8 @@ export interface AllocateResult {
   startError?: string;
 }
 
-export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed';
-export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed'];
+export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed' | 'custom';
+export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom'];
 
 export interface ActiveResearch {
   researchId: number;

@@ -657,7 +657,33 @@ BUCKETS = {
     "daily": ("Daily trading", ["6h", "8h", "12h", "1d"]),
     "weekly": ("Weekly trading", ["1W"]),
     "mixed": ("Mixed timeframes", ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1W"]),
+    # Hand-made variants (registry agent "custom"), shown on their own and judged on the last month (CUSTOM_DAYS).
+    "custom": ("Custom algorithms", ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1W"]),
 }
+CUSTOM_AGENT = "custom"
+# Families custom variants are built on (the registry query is per family); add one when a new variant uses it.
+CUSTOM_FAMILIES: list[str] = ["mtf_guard_a24"]
+CUSTOM_DAYS = 30
+
+
+def month_view(e: dict, days: int = CUSTOM_DAYS) -> dict | None:
+    """Metrics and curves of ``e`` backtested on the last ``days`` days of its own candles (custom bucket)."""
+    from . import backtest as bt, data
+    try:
+        spec = e["spec"]
+        markets = list(spec["markets"])
+        candles = {m: data.load_candles(m, spec["interval"]) for m in markets}
+        end = max(int(c.index[-1]) for c in candles.values()) + 1
+        start = end - days * 86_400_000
+        bh = bt.buy_and_hold(markets, candles, start=start, end=end)
+        r = bt.run(spec, candles, start=start, end=end, bh_equity=bh.equity)
+    except Exception:  # noqa: BLE001 - the entry keeps its normal (holdout) view
+        return None
+    m = {k: r.metrics.get(k) for k in METRIC_KEYS if r.metrics.get(k) is not None}
+    m["testPeriod"] = [dt.datetime.fromtimestamp(start / 1000, dt.timezone.utc).strftime("%Y-%m-%d"),
+                       dt.datetime.fromtimestamp(end / 1000, dt.timezone.utc).strftime("%Y-%m-%d")]
+    m["buyHoldReturnPct"] = bh.metrics.get("returnPct")
+    return {"metrics": m, "equity": bt.downsample(r.ts, r.equity), "buyHoldEquity": bt.downsample(bh.ts, bh.equity)}
 
 
 def mixed_timeframes(e: dict) -> bool:
@@ -674,17 +700,23 @@ def mixed_timeframes(e: dict) -> bool:
         return False
 
 
-def bucket_entries(registry: reg.Registry, intervals: list[str], n: int = 5, mixed: bool = False) -> list[dict]:
+def bucket_entries(registry: reg.Registry, intervals: list[str], n: int = 5, mixed: bool = False,
+                   custom: bool = False) -> list[dict]:
     """The bucket's top ``n``: chosen by score among BTC/ETH-vs-EUR strategies, ordered by last-year (holdout)
     profit. ``mixed`` picks only multi-timeframe specs; the other buckets leave them out."""
-    if not mixed:
+    if custom:
+        # every hand-made variant is shown (no eligibility or near-duplicate filtering), best score first
+        rows = [e for f in CUSTOM_FAMILIES for e in registry.top(5000, family=f, market_sets=TRADED_MARKET_SETS)
+                if e.get("agent") == CUSTOM_AGENT and not superseded_reason(e)]
+        return sorted(rows, key=lambda e: -(e.get("score") or -1e9))[:n]
+    elif not mixed:
         entries = rank(registry, n=n, intervals=intervals, market_sets=TRADED_MARKET_SETS,
-                       keep=lambda e: not mixed_timeframes(e))
+                       keep=lambda e: not mixed_timeframes(e) and e.get("agent") != CUSTOM_AGENT)
     else:
         # few families mix timeframes, and they wrap other leads: one entry per family + wrapped lead + market
         entries, seen = [], set()
         for e in rank(registry, n=n * 6, intervals=intervals, market_sets=TRADED_MARKET_SETS, per_family=n * 6,
-                      keep=mixed_timeframes):
+                      keep=lambda e: mixed_timeframes(e) and e.get("agent") != CUSTOM_AGENT):
             inner = ((e["spec"].get("params") or {}).get("inner") or {}).get("family")
             key = (e["family"], inner, tuple(e["spec"].get("markets") or []))
             if key not in seen:
@@ -703,20 +735,44 @@ def bucket_notes(entries: list[dict]) -> str:
             f"Ordered by that year's result; picked by how they did in the six earlier test periods.")
 
 
+def custom_month(bucket: dict) -> None:
+    """Custom bucket: every card shows its last-month backtest (metrics and curves); notes compare them."""
+    rows = []
+    for t in bucket["top"]:
+        e = {"spec": t["spec"]}
+        v = month_view(e)
+        if not v:
+            continue
+        t["metrics"] = {**t["metrics"], **v["metrics"], "holdoutReturnPct": t["metrics"].get("returnPct")}
+        t["equity"], t["buyHoldEquity"] = v["equity"], v["buyHoldEquity"]
+        t["explanation"] = {**t["explanation"], "vsBuyHold": (
+            f"Last {CUSTOM_DAYS} days on its own candles: {v['metrics'].get('returnPct', 0):+.1f} % vs holding "
+            f"{v['metrics'].get('buyHoldReturnPct', 0):+.1f} %. " + (t["explanation"].get("vsBuyHold") or ""))}
+        rows.append(f"{t['spec'].get('name', t['spec']['family'])}: {v['metrics'].get('returnPct', 0):+.1f} %")
+    if bucket["top"]:
+        bh = bucket["top"][0]["metrics"].get("buyHoldReturnPct")
+        bucket["notes"] = (f"Hand-made variants of other strategies. The charts and numbers on these cards are the last "
+                           f"{CUSTOM_DAYS} days{f' (holding: {bh:+.1f} %)' if bh is not None else ''}; the score is the "
+                           f"usual multi-year out-of-sample one. " + "; ".join(rows))
+
+
 def build_payload(registry: reg.Registry | None = None, n: int = 5) -> dict:
     registry = registry or reg.default()
-    per = {name: bucket_entries(registry, ivs, n, mixed=name == "mixed") for name, (_, ivs) in BUCKETS.items()}
+    per = {name: bucket_entries(registry, ivs, n, mixed=name == "mixed", custom=name == "custom")
+           for name, (_, ivs) in BUCKETS.items()}
     entries = per["daily"]                     # v1 fields (top, benchmark, notes) = the daily bucket
     st = registry.stats()
     btc, others = benchmarks_for(entries or [e for es in per.values() for e in es])
     buckets = {}
     for name, (label, ivs) in BUCKETS.items():
         b_btc, _ = benchmarks_for(per[name]) if per[name] else (btc, [])
-        if name == "mixed":                    # the trading intervals actually used, not all twelve
+        if name in ("mixed", "custom"):        # the trading intervals actually used, not all twelve
             ivs = [iv for iv in ivs if any(e["interval"] == iv for e in per[name])]
         buckets[name] = {"label": label, "intervals": ivs, "benchmark": b_btc if b_btc.get("equity") else btc,
                          "notes": bucket_notes(per[name]),
                          "top": [entry_payload(i + 1, e, registry) for i, e in enumerate(per[name])]}
+        if name == "custom":
+            custom_month(buckets[name])
     return {
         "generatedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "summary": {"experiments": st["experiments"], "families": st["families"], "rounds": st["rounds"],

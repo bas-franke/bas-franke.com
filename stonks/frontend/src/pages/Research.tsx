@@ -16,7 +16,7 @@ const BENCH_STYLE = [
 ];
 
 /** Tab titles for the timeframe buckets (SPEC §8). */
-export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed' };
+export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom' };
 const bucketTitle = (b: string) => BUCKET_TITLES[b as BucketName] ?? b;
 const TAB_KEY = 'stonks-research-bucket';
 
@@ -295,6 +295,12 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
           </span>
         ))}
       </div>
+      {name === 'custom' && (
+        <p>
+          Hand-made variants of strategies from the other tabs, each fixing one weakness. Their charts and numbers show the <b>last 30 days</b>
+          {' '}on their own candles; the score is still the usual multi-year one.
+        </p>
+      )}
       {name === 'mixed' && (
         <p>
           Each strategy here looks at two candle sizes at once: a slow one (daily or weekly) for the long-term decision, and a fast one that watches for
