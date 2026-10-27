@@ -77,7 +77,22 @@ def _result(score, parts):
             "holdout": {"returnPct": score, "trades": 30}, "equity": eq, "buyHoldEquity": eq}
 
 
-def test_today_top10_spec_needs_a_winning_pit_twin(tmp_path):
+def test_biased_spec_ranks_below_every_honest_spec(tmp_path, monkeypatch):
+    r = reg.Registry(tmp_path / "lab.sqlite")
+    biased = {"family": "rotation_momentum", "familyVersion": 1, "markets": [f"{b}-EUR" for b in u.DEFAULT_TOP10],
+              "interval": "1d", "params": {"lookback": 30}}
+    r.record(biased, _result(20.0, {"meanExcessLogPct": 25.0}))
+    r.record(leaderboard.pit_twin_spec(biased), _result(9.0, {"meanExcessLogPct": 4.0}))
+    honest = {"family": "ema_cross", "familyVersion": 1, "markets": ["BTC-EUR"], "interval": "1d", "params": {}}
+    r.record(honest, _result(1.0, {"meanExcessLogPct": 1.0}))
+    monkeypatch.setattr(leaderboard, "same_outcome", lambda a, b: False)      # the fake curves are all alike
+    top = leaderboard.rank(r)
+    # 9.0 (biased, capped by its twin) still comes after the honest 1.0
+    assert [leaderboard.survivorship_biased(e) for e in top] == [False, False, True]
+    assert top[-1]["score"] == 9.0 and top[1]["score"] == 1.0
+
+
+def test_today_top10_spec_needs_a_winning_pit_twin(tmp_path, monkeypatch):
     r = reg.Registry(tmp_path / "lab.sqlite")
     biased = {"family": "rotation_momentum", "familyVersion": 1, "markets": u.DEFAULT_TOP10 and
               [f"{b}-EUR" for b in u.DEFAULT_TOP10], "interval": "1d", "params": {"lookback": 30}}
@@ -92,12 +107,13 @@ def test_today_top10_spec_needs_a_winning_pit_twin(tmp_path):
     r2 = reg.Registry(tmp_path / "lab2.sqlite")
     r2.record(biased, _result(20.0, {"meanExcessLogPct": 25.0}))
     r2.record(twin, _result(2.0, {"meanExcessLogPct": 4.0}))
+    monkeypatch.setattr(leaderboard, "same_outcome", lambda a, b: False)      # the fake curves are all alike
     top = leaderboard.rank(r2)
-    # ranked by the honest (point-in-time) score; the twin is not listed separately
-    assert [e["score"] for e in top] == [2.0] and top[0]["rawScore"] == 20.0 and top[0]["pitCheck"]["passed"]
-    assert top[0]["spec_hash"] == reg.spec_hash(biased)
+    # the twin competes in its own right; the biased one comes after it, with the honest (point-in-time) score
+    assert [e["spec_hash"] for e in top] == [reg.spec_hash(twin), reg.spec_hash(biased)]
+    assert top[1]["score"] == 2.0 and top[1]["rawScore"] == 20.0 and top[1]["pitCheck"]["passed"]
     p = leaderboard.build_payload(r2)
-    assert "today's top-10" in p["top"][0]["explanation"]["vsBuyHold"]
+    assert "today's top-10" in p["top"][1]["explanation"]["vsBuyHold"]
     assert "top 10 at each moment" in p["summary"]["notes"]
 
 

@@ -192,10 +192,10 @@ def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance
     specs (:func:`ineligible_reason`), more than ``per_family`` per family, parameter near-duplicates of a chosen
     one, and specs that trade the same as a chosen one (:func:`same_outcome`), so only the best-scoring copy stays.
     A survivorship-biased spec (today's top-10 list) is ranked only when its point-in-time twin (``lab.py
-    pit-twins``) also beat buy and hold, by min(own score, twin score) (``rawScore`` keeps its own), and the twin is
-    not listed separately; the payload says so."""
+    pit-twins``) also beat buy and hold, with min(own score, twin score) (``rawScore`` keeps its own), and always
+    below every honest spec, so it only fills places no honest spec takes. The twin competes in its own right
+    (honest specs first, then the biased ones); the payload says so."""
     cands: list[dict] = []
-    twins: set[str] = set()
     rows = [e for e in registry.top(pool, bot_ready_only=bot_ready_only) if not ineligible_reason(e, min_test_trades)]
     twin_of: dict[str, str] = {}
     for e in rows:
@@ -211,11 +211,9 @@ def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance
             chk = pit_check(registry, e, found.get(th), looked_up=True) if th else None
             if not chk or not chk["passed"]:
                 continue
-            twins.add(chk["hash"])
             e = dict(e, pitCheck=chk, rawScore=e["score"], score=min(e["score"], chk["score"]))
         cands.append(e)
-    cands = [e for e in cands if e["spec_hash"] not in twins]      # represented by the spec they verify
-    cands.sort(key=lambda e: e["score"], reverse=True)
+    cands.sort(key=lambda e: (bool(e.get("pitCheck")), -e["score"]))     # honest first, then by score
     chosen: list[dict] = []
     per: dict[str, int] = {}
     for e in cands:
@@ -610,7 +608,8 @@ def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> 
         parts.append(lead + ".")
     parts.append("Cross-coin strategies are tested on the coins that were the top 10 at each moment (no "
                  "hindsight; coins Bitvavo has delisted, like EOS, are missing, so a little survivorship remains); "
-                 "ones built on today's top-10 list are only shown when they also win that way, with that score.")
+                 "ones built on today's top-10 list are only shown when they also win that way, and always below "
+                 "every strategy tested without hindsight.")
     ln = luck_note(registry)
     if ln:
         parts.append(ln)
