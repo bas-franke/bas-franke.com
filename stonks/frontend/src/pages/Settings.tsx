@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, ApiError, unwrapFamilies, unwrapMarkets } from '../api';
-import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast } from '../components/ui';
-import { eur, familyLabel, humanize } from '../format';
+import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
+import { eur, familyLabel, humanize, timeOnly } from '../format';
+import { isOrderEvent } from './Logs';
 import { navigate, takeHandoff } from '../router';
-import { INTERVALS, type BotSettings, type FamilyInfo, type Interval, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
+import { INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
 
 type Draft = Omit<BotSettings, 'enabled'>;
 
@@ -556,6 +557,7 @@ function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSe
             frees up. Switches the bot on if it is off. {live ? <b>The bot is in live mode: this trades real money.</b> : 'The bot is in paper mode: practice money only.'}
           </p>
           {error && <div className="callout loss">{error}</div>}
+          <OrderActivity />
         </div>
       </Section>
       <Modal
@@ -584,6 +586,49 @@ function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSe
           <input id="move-confirm" className="input" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/** The newest order-related log lines, refreshed every 4 s, so a click on the buttons above shows what follows. */
+function OrderActivity() {
+  const [rows, setRows] = useState<LogRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = async () => {
+    try {
+      const { logs } = await api.logs({ limit: 120 });
+      setRows(logs.filter((l) => isOrderEvent(l.event)).slice(0, 8));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  useVisibleInterval(load, 4000, true);
+  return (
+    <div className="order-activity">
+      <div className="row" style={{ gap: 8 }}>
+        <span className="eyebrow" style={{ marginRight: 'auto' }}>
+          Order activity
+        </span>
+        <a className="small" href="/logs?view=orders" onClick={(e) => (e.preventDefault(), navigate('/logs?view=orders'))}>
+          All order logs →
+        </a>
+      </div>
+      {error && <p className="small loss">{error}</p>}
+      {rows && rows.length === 0 && <p className="small soft">No orders yet. After a click, the first decision appears here within a minute.</p>}
+      {rows && rows.length > 0 && (
+        <ul className="activity-list">
+          {rows.map((l) => (
+            <li key={l.id} className={`lv-${l.level}`}>
+              <span className="ts">{timeOnly(l.ts)}</span>
+              <span>{l.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

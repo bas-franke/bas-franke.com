@@ -3,12 +3,25 @@ import { api } from '../api';
 import { IconPause, IconPlay } from '../components/icons';
 import { ErrorBox, Segmented, Skeleton, useVisibleInterval } from '../components/ui';
 import { dateOnly, timeOnly } from '../format';
+import { navigate, useLocation } from '../router';
 import type { LogRow } from '../types';
 
 const MAX_ROWS = 1000;
 type Level = '' | 'info' | 'warn' | 'error';
+type View = 'all' | 'orders';
+
+/** Log events about deciding, placing, filling and cancelling orders (and manual "move everything" switches). */
+export const isOrderEvent = (event: string) =>
+  event === 'decision' || event.startsWith('order_') || event.startsWith('manual_') || event === 'strategy_started' ||
+  event === 'stop_triggered' || event.startsWith('fallback_') || event === 'stray_orders' || event === 'daily_loss_limit';
 
 export default function LogsPage() {
+  const { query } = useLocation();
+  const [view, setViewState] = useState<View>(query.get('view') === 'orders' ? 'orders' : 'all');
+  const setView = (v: View) => {
+    setViewState(v);
+    navigate(v === 'orders' ? '/logs?view=orders' : '/logs', { replace: true });
+  };
   const [level, setLevel] = useState<Level>('');
   const [paused, setPaused] = useState(false);
   const [rows, setRows] = useState<LogRow[]>([]);
@@ -66,6 +79,7 @@ export default function LogsPage() {
     !paused,
   );
 
+  const shown = view === 'orders' ? rows.filter((l) => isOrderEvent(l.event)) : rows;
   let lastDay = '';
   return (
     <div className="stack">
@@ -73,10 +87,19 @@ export default function LogsPage() {
         <div>
           <span className="eyebrow">Logs</span>
           <h1>The bot’s diary</h1>
-          <p className="lede">Everything it notices and does, as it happens. New lines appear every few seconds while this page is open.</p>
+          <p className="lede">Everything it notices and does, as it happens. New lines appear every few seconds while this page is open. “Orders only” shows each decision and what happened to every order it placed.</p>
         </div>
       </div>
-      <div className="row">
+      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <Segmented<View>
+          label="Show"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'all', label: 'All activity' },
+            { value: 'orders', label: 'Orders only' },
+          ]}
+        />
         <Segmented<Level>
           label="Level"
           value={level}
@@ -107,9 +130,13 @@ export default function LogsPage() {
             ))}
           </div>
         )}
-        {loaded && rows.length === 0 && <p className="soft small" style={{ padding: '30px 24px' }}>Nothing logged yet{level ? ' at this level' : ''}.</p>}
+        {loaded && shown.length === 0 && (
+          <p className="soft small" style={{ padding: '30px 24px' }}>
+            {view === 'orders' ? 'No order activity in the latest lines yet.' : `Nothing logged yet${level ? ' at this level' : ''}.`}
+          </p>
+        )}
         <div className="log-list">
-          {rows.map((l) => {
+          {shown.map((l) => {
             const day = dateOnly(l.ts);
             const header = day !== lastDay;
             lastDay = day;
