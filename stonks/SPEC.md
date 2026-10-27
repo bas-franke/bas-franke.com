@@ -140,7 +140,8 @@ Family details both sides implement (the docstrings in `stonks_lab/families/*.py
   "mode": "paper",               // "paper" (simulated orders on live prices) or "live" (real Bitvavo orders)
   "strategy": { /* strategy spec, §2 */ },
   "maxExposureEur": null,        // null = may use the whole portfolio
-  "dailyLossLimitEur": 100,      // loss since 00:00 Europe/Amsterdam (realized + unrealized) that switches the bot off
+  "dailyLossLimit": { "unit": "pct", "value": 10 },  // loss over the last 24 h (realized + unrealized) that switches the
+                                 // bot off: "pct" = % of the equity 24 h ago, "eur" = euros
   "fees": { "maker": 0.0015, "taker": 0.0025 },
   "paperStartEur": 1000,
   "activeResearch": null,        // set by POST /api/bot/activate (§8); reset to null when the strategy is changed by hand
@@ -151,11 +152,13 @@ Family details both sides implement (the docstrings in `stonks_lab/families/*.py
 }
 ```
 
-Daily loss guard: at 00:00 Europe/Amsterdam the bot records start-of-day equity. When `startOfDay - equityNow ≥
-dailyLossLimitEur` it cancels its open orders, sets `enabled: false`, logs an `error` event `daily_loss_limit` and stays
-off until the owner turns it on again. Deposits/withdrawals are not trades: equity changes not explained by fills
-(beyond max(€2, 0.5 % of equity)) shift the start-of-day baseline by their EUR value (logged as `warn`), so the day's
-real losses still count.
+Loss guard (rolling 24 h): every tick the bot compares equity with its equity 24 h earlier (samples every 5 minutes in
+`bot_state`; right after switching on, the window starts then). When `equity24hAgo - equityNow ≥ limit` (a `pct` limit
+is that % of `equity24hAgo`) it cancels its open orders, sets `enabled: false`, logs an `error` event `daily_loss_limit`
+and stays off until the owner turns it on again, which restarts the window. Deposits/withdrawals are not trades: equity
+changes not explained by fills (beyond max(€2, 0.5 % of equity)) shift the baseline by their EUR value (logged as
+`warn`), so real losses still count. Settings stored before this had `dailyLossLimitEur`: the old default €100 became
+10 %, any other amount stays a euro limit. The Overview's "today" figure still counts from 00:00 Europe/Amsterdam.
 
 In live mode the bot treats the whole Bitvavo account as its portfolio (owner's choice): coins the strategy doesn't want
 are sold. `maxExposureEur` caps how much EUR it puts into coins.
@@ -217,7 +220,7 @@ camelCase and numbers (not numeric strings).
 | `POST /api/auth/login` | `{ password }` | `{ ok:true }` + cookie; 401 wrong; 429 after 10 tries / 10 min per IP |
 | `POST /api/auth/logout` | | `{ ok:true }` |
 | `GET /api/auth/me` | | `{ loggedIn:true }` or 401 |
-| `GET /api/overview` | | `{ bot: settings.bot, running:bool, lastTickAt, bitvavo:{connected, error?}, balances:[{symbol, available, inOrder, eurValue}], equityEur, todayPnlEur, dailyLossLimitEur, openOrders:n, strategyExplanation, activeResearch }` |
+| `GET /api/overview` | | `{ bot: settings.bot, running:bool, lastTickAt, bitvavo:{connected, error?}, balances:[{symbol, available, inOrder, eurValue}], equityEur, todayPnlEur, last24hPnlEur, lossWindowSince, dailyLossLimit, dailyLossLimitEur (the limit in euros now), openOrders:n, strategyExplanation, activeResearch }` |
 | `PUT /api/bot` | partial `settings.bot` | updated `settings.bot`; switching `mode` to `live` needs `{ confirmLive:true }`; validated |
 | `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
 | `POST /api/bot/allocate` | `{ target: "BTC"\|"ETH"\|"EUR"\|null, confirmLive? }` | `{ ok, bot, started, startError? }`; moves everything to one coin or euros (switches the bot on), `null` = back to the strategy; 400 live without confirm |

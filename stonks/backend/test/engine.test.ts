@@ -129,7 +129,7 @@ function reset(spec: StrategySpec, enabled = true, mode: 'paper' | 'live' = 'pap
   candleFailures = 0;
   candleCalls = 0;
   onPlace = null;
-  botSettings = { enabled, mode, strategy: spec, maxExposureEur: null, dailyLossLimitEur: 100, fees: { maker: 0.0015, taker: 0.0025 }, paperStartEur: 1000 };
+  botSettings = { enabled, mode, strategy: spec, maxExposureEur: null, dailyLossLimit: { unit: 'eur', value: 100 }, fees: { maker: 0.0015, taker: 0.0025 }, paperStartEur: 1000 };
   status.startupDone = true;
   status.lastIdleRefresh = Date.now();
 }

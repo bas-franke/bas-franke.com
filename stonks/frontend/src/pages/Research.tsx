@@ -4,7 +4,7 @@ import { EmptyState } from '../components/art';
 import { LineChart, Spark, type LineSeries } from '../components/charts';
 import { IconCheck } from '../components/icons';
 import { ErrorBox, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
-import { ago, dateOnly, eur, familyLabel, pct, toDate } from '../format';
+import { ago, dateOnly, eur, familyLabel, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
 import { BUCKET_NAMES, type Benchmark, type BucketName, type HallEntry, type Overview, type ResearchBucket, type ResearchEntry, type ResearchPayload, type Series } from '../types';
 
@@ -466,7 +466,7 @@ function ActivateDialog({
         <>
           <div className="callout loss">
             <b>Live mode.</b> The bot will trade this strategy on your Bitvavo account with real euros. It can lose money, up to{' '}
-            {eur(overview!.dailyLossLimitEur, true)} a day before it stops itself.
+            {lossLimitText(overview!.dailyLossLimit, overview!.dailyLossLimitEur)} in 24 hours before it stops itself.
           </div>
           <div className="field">
             <label htmlFor="activate-live">

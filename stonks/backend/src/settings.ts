@@ -1,3 +1,4 @@
+import type { LossLimit } from './bot/logic.js';
 import { query } from './db.js';
 import { log } from './log.js';
 import { validateSpec, type StrategySpec } from './strategies/index.js';
@@ -9,7 +10,8 @@ export interface BotSettings {
   mode: 'paper' | 'live';
   strategy: StrategySpec;
   maxExposureEur: number | null;
-  dailyLossLimitEur: number;
+  /** Loss over the last 24 h that switches the bot off: a % of the equity 24 h ago, or euros. */
+  dailyLossLimit: LossLimit;
   fees: { maker: number; taker: number };
   paperStartEur: number;
   /** The research strategy the owner activated (SPEC §8); null once the strategy is changed any other way. */
@@ -21,6 +23,9 @@ export interface BotSettings {
    * unfilled rest goes out as a market order after `marketAfterMin` (instead of waiting a whole bar). */
   chase: ChaseSettings;
 }
+
+export type { LossLimit };
+export const DEFAULT_LOSS_LIMIT: LossLimit = { unit: 'pct', value: 10 };
 
 export interface ChaseSettings {
   enabled: boolean;
@@ -65,7 +70,7 @@ export function defaultBotSettings(): BotSettings {
       params: { fast: 12, slow: 48 },
     }),
     maxExposureEur: null,
-    dailyLossLimitEur: 100,
+    dailyLossLimit: { ...DEFAULT_LOSS_LIMIT },
     fees: { maker: 0.0015, taker: 0.0025 },
     paperStartEur: 1000,
     activeResearch: null,
@@ -84,6 +89,16 @@ function checkChase(v: unknown): ChaseSettings {
   if (typeof c.marketAfterMin !== 'number' || !Number.isFinite(c.marketAfterMin) || c.marketAfterMin < 1 || c.marketAfterMin > 1440)
     throw new SettingsError('chase.marketAfterMin must be 1 to 1440 minutes');
   return { enabled: c.enabled, repriceSec: c.repriceSec, marketAfterMin: c.marketAfterMin };
+}
+
+function checkLossLimit(v: unknown): LossLimit {
+  if (v === undefined || v === null) return { ...DEFAULT_LOSS_LIMIT };
+  if (!isObj(v) || (v.unit !== 'pct' && v.unit !== 'eur')) throw new SettingsError('dailyLossLimit must be { unit: "pct" | "eur", value }');
+  const value = v.value;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
+    throw new SettingsError('dailyLossLimit.value must be a positive number');
+  if (v.unit === 'pct' && value > 100) throw new SettingsError('dailyLossLimit.value must be at most 100 %');
+  return { unit: v.unit, value };
 }
 
 function checkManual(v: unknown): ManualAllocation | null {
@@ -121,9 +136,7 @@ export function checkSettings(s: Record<string, unknown>): BotSettings {
   const maxExposureEur = s.maxExposureEur ?? null;
   if (maxExposureEur !== null && (typeof maxExposureEur !== 'number' || !Number.isFinite(maxExposureEur) || maxExposureEur < 5))
     throw new SettingsError('maxExposureEur must be empty (whole portfolio) or at least 5 euros');
-  const limit = s.dailyLossLimitEur;
-  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0)
-    throw new SettingsError('dailyLossLimitEur must be a positive number of euros');
+  const limit = checkLossLimit(s.dailyLossLimit);
   if (!isObj(s.fees)) throw new SettingsError('fees must be { maker, taker }');
   const { maker, taker } = s.fees;
   for (const [name, v] of [['maker', maker], ['taker', taker]] as const)
@@ -137,7 +150,7 @@ export function checkSettings(s: Record<string, unknown>): BotSettings {
     mode: s.mode,
     strategy,
     maxExposureEur: maxExposureEur as number | null,
-    dailyLossLimitEur: limit,
+    dailyLossLimit: limit,
     fees: { maker: maker as number, taker: taker as number },
     paperStartEur,
     activeResearch: checkActiveResearch(s.activeResearch),
@@ -166,6 +179,12 @@ export async function getBotSettings(): Promise<BotSettings> {
 }
 
 async function safeParse(stored: Record<string, unknown>, defaults: BotSettings): Promise<BotSettings> {
+  // Before 2026-10-27 the limit was a fixed `dailyLossLimitEur` (default €100). The old default becomes the new
+  // default (10 %); an amount the owner picked stays in euros.
+  if (stored.dailyLossLimit === undefined && typeof stored.dailyLossLimitEur === 'number') {
+    const { dailyLossLimitEur: old, ...rest } = stored;
+    stored = old === 100 ? rest : { ...rest, dailyLossLimit: { unit: 'eur', value: old } };
+  }
   try {
     return checkSettings({ ...defaults, ...stored });
   } catch (err) {
@@ -184,7 +203,7 @@ async function safeParse(stored: Record<string, unknown>, defaults: BotSettings)
   }
 }
 
-const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur', 'activeResearch', 'manual', 'chase']);
+const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimit', 'fees', 'paperStartEur', 'activeResearch', 'manual', 'chase']);
 
 let chain: Promise<unknown> = Promise.resolve();
 /** Serializes settings writes inside this process. */
@@ -207,6 +226,7 @@ export function updateBotSettings(patch: Record<string, unknown>, opts: { confir
     const merged: Record<string, unknown> = { ...before };
     for (const k of keys) merged[k] = patch[k];
     if (isObj(patch.fees)) merged.fees = { ...before.fees, ...patch.fees };
+    if (isObj(patch.dailyLossLimit)) merged.dailyLossLimit = { ...before.dailyLossLimit, ...patch.dailyLossLimit };
     if (isObj(patch.chase)) merged.chase = { ...before.chase, ...patch.chase };
     const confirm = opts.confirmLive === true || patch.confirmLive === true;
     if (merged.mode === 'live' && before.mode !== 'live' && !confirm)

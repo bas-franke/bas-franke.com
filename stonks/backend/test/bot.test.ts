@@ -158,7 +158,9 @@ test('stops: stop loss, trailing stop and take profit', () => {
   assert.equal(stopHit({ ...risk, stopLossPct: null, trailingStopPct: null, takeProfitPct: null }, 100, 200, 1), null);
 });
 
-test('daily loss guard: Amsterdam midnight baseline, trips at the limit, deposits move the baseline', () => {
+const EUR100 = { unit: 'eur' as const, value: 100 };
+
+test('daily loss guard: trips at the limit, deposits move the baseline, today figure resets at Amsterdam midnight', () => {
   // 2026-10-26 22:59:59Z is 23:59:59 in Amsterdam (CET after the DST change on 25 Oct); one second later is a new day.
   const beforeMidnight = Date.parse('2026-10-26T22:59:59Z');
   assert.equal(amsterdamDay(beforeMidnight), '2026-10-26');
@@ -168,39 +170,88 @@ test('daily loss guard: Amsterdam midnight baseline, trips at the limit, deposit
 
   const price = (s: string) => (s === 'EUR' ? 1 : s === 'BTC' ? 50_000 : 0);
   const t0 = Date.parse('2026-10-26T08:00:00Z');
-  const first = checkDay(undefined, t0, 1000, { EUR: 500, BTC: 0.01 }, price, [], 100);
+  const first = checkDay(undefined, t0, 1000, { EUR: 500, BTC: 0.01 }, price, [], EUR100);
   assert.equal(first.newDay, true);
   assert.equal(first.state.startEquity, 1000);
   assert.equal(first.tripped, false);
 
   // BTC falls to 40k: equity 900 -> loss 100 >= limit.
   const p40 = (s: string) => (s === 'BTC' ? 40_000 : price(s));
-  const down = checkDay(first.state, t0 + 60_000, 900, { EUR: 500, BTC: 0.01 }, p40, [], 100);
+  const down = checkDay(first.state, t0 + 60_000, 900, { EUR: 500, BTC: 0.01 }, p40, [], EUR100);
   assert.equal(down.flowEur, 0);
   assert.ok(Math.abs(down.lossEur - 100) < 1e-9);
   assert.equal(down.tripped, true);
-  const almost = checkDay(first.state, t0 + 60_000, 900.01, { EUR: 500.01, BTC: 0.01 }, p40, [], 100);
+  const almost = checkDay(first.state, t0 + 60_000, 900.01, { EUR: 500.01, BTC: 0.01 }, p40, [], EUR100);
   assert.equal(almost.tripped, false);
 
   // A trade explains its own quantity changes: buy 0.002 BTC for 100 EUR + 0.15 fee.
   const fill = { id: 7, market: 'BTC-EUR', base: 'BTC', side: 'buy' as const, amount: 0.002, quote: 100, fee: 0.15, feeCurrency: 'EUR' };
-  const traded = checkDay(first.state, t0 + 120_000, 999.85, { EUR: 399.85, BTC: 0.012 }, price, [fill], 100);
+  const traded = checkDay(first.state, t0 + 120_000, 999.85, { EUR: 399.85, BTC: 0.012 }, price, [fill], EUR100);
   assert.equal(traded.flowEur, 0);
   assert.equal(traded.state.lastFillId, 7);
   assert.equal(traded.state.startEquity, 1000);
 
   // A €500 deposit is not profit; a withdrawal is not a loss.
-  const dep = checkDay(traded.state, t0 + 180_000, 1499.85, { EUR: 899.85, BTC: 0.012 }, price, [], 100);
+  const dep = checkDay(traded.state, t0 + 180_000, 1499.85, { EUR: 899.85, BTC: 0.012 }, price, [], EUR100);
   assert.ok(Math.abs(dep.flowEur - 500) < 1e-9);
   assert.ok(Math.abs(dep.state.startEquity - 1500) < 1e-9);
-  const wd = checkDay(dep.state, t0 + 240_000, 999.85, { EUR: 399.85, BTC: 0.012 }, price, [], 100);
+  const wd = checkDay(dep.state, t0 + 240_000, 999.85, { EUR: 399.85, BTC: 0.012 }, price, [], EUR100);
   assert.ok(Math.abs(wd.flowEur + 500) < 1e-9);
   assert.equal(wd.tripped, false);
 
   // Next Amsterdam day: fresh baseline.
-  const next = checkDay(wd.state, Date.parse('2026-10-26T23:00:01Z'), 950, { EUR: 350, BTC: 0.012 }, price, [], 100);
-  assert.equal(next.newDay, true);
+  const next = checkDay(wd.state, Date.parse('2026-10-26T23:00:01Z'), 950, { EUR: 350, BTC: 0.012 }, price, [], EUR100);
+  assert.equal(next.newCalendarDay, true);
+  assert.equal(next.newDay, false);
   assert.equal(next.state.startEquity, 950);
+  // ...but the guard still counts from the window start, not from midnight.
+  assert.ok(Math.abs(next.baselineEur - (1000 + next.flowEur)) < 1e-9);
+});
+
+test('daily loss guard: rolling 24 h window, % or euro limit', () => {
+  // One coin whose price is the whole equity, so equity moves are price moves, not deposits.
+  const at = (eq: number) => [eq, { BTC: 1 }, (s: string) => (s === 'BTC' ? eq : 1)] as const;
+  const pct10 = { unit: 'pct' as const, value: 10 };
+  const H = 3_600_000;
+  const t0 = Date.parse('2026-10-26T08:00:00Z');
+  let st = checkDay(undefined, t0, ...at(1000), [], pct10).state;
+  // Equity rises to 2000 over 12 h, sampled every 5 minutes.
+  for (let t = t0 + 5 * 60_000; t <= t0 + 12 * H; t += 5 * 60_000) {
+    const c = checkDay(st, t, ...at(1000 + ((t - t0) / (12 * H)) * 1000), [], pct10);
+    assert.equal(c.flowEur, 0);
+    st = c.state;
+  }
+  // 23 h in: still measured against the first 1000. Losing to 905 is under 10 % of 1000.
+  let c = checkDay(st, t0 + 23 * H, ...at(905), [], pct10);
+  assert.ok(Math.abs(c.baselineEur - 1000) < 1e-9);
+  assert.ok(Math.abs(c.limitEur - 100) < 1e-9);
+  assert.equal(c.tripped, false);
+  assert.equal(checkDay(st, t0 + 23 * H, ...at(900), [], pct10).tripped, true);
+  assert.equal(checkDay(st, t0 + 23 * H, ...at(905), [], { unit: 'eur', value: 90 }).tripped, true);
+  st = c.state;
+  // 36 h in: the baseline is the equity 24 h earlier (12 h in = 2000), so 1850 is a 7.5 % loss, 1790 trips.
+  c = checkDay(st, t0 + 36 * H, ...at(1850), [], pct10);
+  assert.ok(Math.abs(c.baselineEur - 2000) < 1e-6);
+  assert.ok(Math.abs(c.limitEur - 200) < 1e-6);
+  assert.equal(c.tripped, false);
+  assert.equal(checkDay(st, t0 + 36 * H, ...at(1790), [], pct10).tripped, true);
+  // Samples older than the window are dropped (one kept just before it).
+  assert.ok(c.state.samples[1].t > t0 + 12 * H);
+  assert.ok(c.state.samples.length <= 24 * 12 + 2);
+  // A withdrawal inside the window is not a loss: €400 worth of the coin leaves at 1850.
+  const wd = checkDay(c.state, t0 + 36 * H + 60_000, 1450, { BTC: 1450 / 1850 }, (s) => (s === 'BTC' ? 1850 : 1), [], pct10);
+  assert.ok(Math.abs(wd.flowEur + 400) < 1e-9);
+  assert.ok(Math.abs(wd.baselineEur - 1600) < 1e-6);
+  assert.equal(wd.tripped, false);
+});
+
+test('daily loss guard: state from before the rolling window keeps its start-of-day baseline', () => {
+  const price = (s: string) => (s === 'EUR' ? 1 : 0);
+  const old = { day: amsterdamDay(Date.parse('2026-10-27T08:00:00Z')), startEquity: 1000, lastHoldings: { EUR: 950 }, lastFillId: 0 };
+  const c = checkDay(old, Date.parse('2026-10-27T09:00:00Z'), 950, { EUR: 950 }, price, [], { unit: 'pct', value: 10 });
+  assert.equal(c.baselineEur, 1000);
+  assert.equal(c.lossEur, 50);
+  assert.equal(c.state.samples.length, 1);
 });
 
 test('bar timing: decide only on closed bars, weekly bars start on Monday', () => {

@@ -567,7 +567,7 @@ export const initialBot = (): BotSettings => ({
   mode: 'paper',
   strategy: research.top.find((t) => t.spec.family === 'ema_cross')!.spec,
   maxExposureEur: null,
-  dailyLossLimitEur: 100,
+  dailyLossLimit: { unit: 'pct', value: 10 },
   fees: { maker: 0.0015, taker: 0.0025 },
   paperStartEur: 1000,
 });

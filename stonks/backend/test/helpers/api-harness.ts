@@ -61,7 +61,7 @@ function fakeQuery(calls: Harness['calls'], tables: Record<string, any[]>): Quer
 export async function startHarness(overrides: Partial<ApiDeps> = {}, tables: Record<string, any[]> = {}): Promise<Harness> {
   const calls: Harness['calls'] = [];
   const logs: Harness['logs'] = [];
-  const settings: Record<string, unknown> = { enabled: false, mode: 'paper', dailyLossLimitEur: 100 };
+  const settings: Record<string, unknown> = { enabled: false, mode: 'paper', dailyLossLimit: { unit: 'pct', value: 10 } };
   const deps: ApiDeps = {
     query: fakeQuery(calls, tables),
     sessions: memorySessionStore(),
@@ -74,8 +74,9 @@ export async function startHarness(overrides: Partial<ApiDeps> = {}, tables: Rec
     listMarkets: async () => [{ market: 'BTC-EUR', base: 'BTC', quote: 'EUR', status: 'trading', minOrderInQuoteAsset: 5 }],
     getBotSettings: async () => settings as { mode: string },
     updateBotSettings: async (patch, opts) => {
-      if (patch.dailyLossLimitEur !== undefined && Number(patch.dailyLossLimitEur) < 0) {
-        throw new FakeSettingsError('dailyLossLimitEur must be ≥ 0');
+      const limit = patch.dailyLossLimit as { value?: unknown } | undefined;
+      if (limit !== undefined && Number(limit.value) < 0) {
+        throw new FakeSettingsError('dailyLossLimit.value must be ≥ 0');
       }
       if (patch.mode === 'live' && settings.mode !== 'live' && !opts.confirmLive) throw new FakeSettingsError('confirm live');
       return Object.assign(settings, patch);

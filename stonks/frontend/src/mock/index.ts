@@ -36,7 +36,8 @@ function page<T extends { id: number | string; mode: string; market: string }>(r
 function validate(patch: Partial<BotSettings> & { confirmLive?: boolean }) {
   const errors: Record<string, string> = {};
   if (patch.mode === 'live' && bot.mode !== 'live' && !patch.confirmLive) errors.mode = 'Switching to live needs confirmLive: true.';
-  if (patch.dailyLossLimitEur !== undefined && !(patch.dailyLossLimitEur > 0)) errors.dailyLossLimitEur = 'Must be more than €0.';
+  const l = patch.dailyLossLimit;
+  if (l !== undefined && !(l.value > 0 && (l.unit === 'eur' || l.value <= 100))) errors.dailyLossLimit = l.unit === 'pct' ? 'Between 0 and 100%.' : 'Must be more than €0.';
   if (patch.maxExposureEur !== undefined && patch.maxExposureEur !== null && !(patch.maxExposureEur >= 5))
     errors.maxExposureEur = 'Must be at least €5, or empty for the whole portfolio.';
   if (patch.paperStartEur !== undefined && !(patch.paperStartEur >= 10)) errors.paperStartEur = 'Must be at least €10.';
@@ -85,7 +86,10 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
       ],
       equityEur: equity,
       todayPnlEur: -38.4,
-      dailyLossLimitEur: bot.dailyLossLimitEur,
+      last24hPnlEur: -52.7,
+      lossWindowSince: Date.now() - 24 * 3_600_000,
+      dailyLossLimit: bot.dailyLossLimit,
+      dailyLossLimitEur: bot.dailyLossLimit.unit === 'pct' ? ((equity + 52.7) * bot.dailyLossLimit.value) / 100 : bot.dailyLossLimit.value,
       activeResearch: bot.activeResearch ?? null,
       openOrders: orders.filter((o) => o.status === 'new' && o.mode === bot.mode).length,
       strategyExplanation:

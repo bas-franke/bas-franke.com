@@ -37,3 +37,14 @@ test('settings that stop validating switch the bot off for good, not just until 
   assert.equal((await getBotSettings()).enabled, true);
   assert.equal(sqls.filter((q) => q.startsWith('UPDATE')).length, writes);
 });
+
+test('the 24 h loss limit defaults to 10 %; an old euro limit the owner picked stays in euros', async () => {
+  assert.deepEqual(defaultBotSettings().dailyLossLimit, { unit: 'pct', value: 10 });
+  const { dailyLossLimit: _, ...base } = defaultBotSettings();
+  stored = { ...base, dailyLossLimitEur: 100 };
+  assert.deepEqual((await getBotSettings()).dailyLossLimit, { unit: 'pct', value: 10 });
+  stored = { ...base, dailyLossLimitEur: 250 };
+  const s = await getBotSettings();
+  assert.deepEqual(s.dailyLossLimit, { unit: 'eur', value: 250 });
+  assert.equal('dailyLossLimitEur' in s, false);
+});

@@ -193,19 +193,19 @@ describe('bot routes', () => {
     assert.match(((await live.json()) as any).error, /confirmLive/);
     assert.equal(h.settings.mode, 'paper');
     assert.equal((await put({ strategy: { name: 'no family' } })).status, 400);
-    const settingsErr = await put({ dailyLossLimitEur: -5 });
+    const settingsErr = await put({ dailyLossLimit: { unit: 'pct', value: -5 } });
     assert.equal(settingsErr.status, 400);
-    assert.match(((await settingsErr.json()) as any).error, /dailyLossLimitEur/);
+    assert.match(((await settingsErr.json()) as any).error, /dailyLossLimit/);
 
-    const ok = await put({ dailyLossLimitEur: 50 });
+    const ok = await put({ dailyLossLimit: { unit: 'eur', value: 50 } });
     assert.equal(ok.status, 200);
-    assert.equal(((await ok.json()) as any).dailyLossLimitEur, 50);
+    assert.equal(((await ok.json()) as any).dailyLossLimit.value, 50);
     const goLive = await put({ mode: 'live', confirmLive: true });
     assert.equal(goLive.status, 200);
     assert.equal(h.settings.mode, 'live');
     assert.equal('confirmLive' in h.settings, false);
     // already live: re-saving the form with mode "live" needs no new confirmation
-    assert.equal((await put({ mode: 'live', dailyLossLimitEur: 60 })).status, 200);
+    assert.equal((await put({ mode: 'live', dailyLossLimit: { unit: 'eur', value: 60 } })).status, 200);
   });
 
   test('a bot crash is a 500, not a leak', async () => {
@@ -783,8 +783,8 @@ describe('security hardening', () => {
       assert.equal((await h.req('POST', '/API/Research', { json: big })).status, 401);
       const cookie = await h.login();
       assert.equal((await h.req('POST', '/api/research', { json: big, cookie })).status, 200);
-      assert.equal((await h.req('PUT', '/api/bot', { json: { dailyLossLimitEur: 50, padding }, cookie })).status, 413);
-      assert.equal((await h.req('PUT', '/api/bot', { json: '{"dailyLossLimitEur": ', cookie })).status, 400);
+      assert.equal((await h.req('PUT', '/api/bot', { json: { dailyLossLimit: { unit: 'eur', value: 50 }, padding }, cookie })).status, 413);
+      assert.equal((await h.req('PUT', '/api/bot', { json: '{"dailyLossLimit": ', cookie })).status, 400);
     } finally {
       await h.close();
     }

@@ -269,10 +269,24 @@ export function stopHit(risk: RiskSpec, avgEntry: number, peak: number, price: n
 
 // ---------- daily loss guard (SPEC §5) ----------
 
+/** The loss limit as set: a % of the equity 24 h ago, or a fixed number of euros. */
+export interface LossLimit {
+  unit: 'pct' | 'eur';
+  value: number;
+}
+
+export const WINDOW_MS = 24 * 3_600_000;
+/** How often the rolling window keeps an equity sample. */
+export const SAMPLE_MS = 5 * 60_000;
+
 export interface DayState {
-  /** Europe/Amsterdam calendar day the baseline belongs to. */
+  /** Europe/Amsterdam calendar day of startEquity (for the "today" figure only; the guard uses the 24 h window). */
   day: string;
   startEquity: number;
+  /** Equity samples of the last 24 h (plus the newest one before that), `flow` = cumulative deposits/withdrawals then. */
+  samples: Array<{ t: number; eq: number; flow: number }>;
+  /** Cumulative EUR of deposits (+) and withdrawals (-) since the window started. */
+  flow: number;
   /** Coin and EUR quantities at the last check, to tell trades from deposits and withdrawals. */
   lastHoldings: Record<string, number>;
   /** Highest fills.id already accounted for in lastHoldings. */
@@ -281,37 +295,58 @@ export interface DayState {
 
 export interface DayCheck {
   state: DayState;
+  /** The 24 h window started fresh (no earlier state). */
   newDay: boolean;
-  /** EUR value of deposits (+) / withdrawals (-) detected since the last check; the baseline moved by this much. */
+  /** The Amsterdam day rolled over: startEquity is a new baseline. */
+  newCalendarDay: boolean;
+  /** EUR value of deposits (+) / withdrawals (-) detected since the last check; the baselines moved by this much. */
   flowEur: number;
+  /** Equity 24 h ago (or when the window started), corrected for deposits and withdrawals since. */
+  baselineEur: number;
+  /** baselineEur - equity now. */
   lossEur: number;
+  /** The limit in euros for this check. */
+  limitEur: number;
   tripped: boolean;
 }
 
+/** The limit in euros against a baseline equity. */
+export const limitInEur = (limit: LossLimit, baselineEur: number) =>
+  limit.unit === 'pct' ? (Math.max(0, baselineEur) * limit.value) / 100 : limit.value;
+
+/** Equity 24 h before `now` per the samples, corrected for flows since then. */
+export function windowBaseline(state: Pick<DayState, 'samples' | 'flow'>, now: number): number | null {
+  const from = now - WINDOW_MS;
+  let base = state.samples[0];
+  if (!base) return null;
+  for (const s of state.samples) if (s.t <= from) base = s;
+  return base.eq + (state.flow - base.flow);
+}
+
 /**
- * Updates the start-of-day baseline and tells whether the loss limit is hit (startOfDay - equity >= limit).
+ * Updates the rolling 24 h baseline and tells whether the loss limit is hit (equity 24 h ago - equity >= limit).
  * Quantity changes not explained by the fills since the last check count as deposits/withdrawals: the baseline
  * moves by their EUR value (ignored under max(€2, 0.5 % of equity) so rounding and fee timing do not trigger it).
  */
 export function checkDay(
-  prev: DayState | undefined,
+  prev: Partial<DayState> | undefined,
   now: number,
   equityEur: number,
   holdings: Record<string, number>,
   priceOf: (symbol: string) => number,
   newFills: Array<FillLike & { base: string }>,
-  limitEur: number,
+  limit: LossLimit,
 ): DayCheck {
   const day = amsterdamDay(now);
   const maxFillId = newFills.reduce((m, f) => Math.max(m, f.id), prev?.lastFillId ?? 0);
-  if (!prev || prev.day !== day) {
-    const state: DayState = { day, startEquity: equityEur, lastHoldings: { ...holdings }, lastFillId: maxFillId };
-    return { state, newDay: true, flowEur: 0, lossEur: 0, tripped: false };
+  if (!prev || !prev.lastHoldings) {
+    const state: DayState = { day, startEquity: equityEur, samples: [{ t: now, eq: equityEur, flow: 0 }], flow: 0, lastHoldings: { ...holdings }, lastFillId: maxFillId };
+    return { state, newDay: true, newCalendarDay: true, flowEur: 0, baselineEur: equityEur, lossEur: 0, limitEur: limitInEur(limit, equityEur), tripped: false };
   }
   const expected: Record<string, number> = { ...prev.lastHoldings };
   const add = (s: string, v: number) => (expected[s] = (expected[s] ?? 0) + v);
   for (const f of newFills) {
-    if (f.id <= prev.lastFillId) continue;
+    if (f.id <= (prev.lastFillId ?? 0)) continue;
     const feeCur = f.feeCurrency ?? 'EUR';
     if (f.side === 'buy') {
       add(f.base, f.amount);
@@ -328,7 +363,17 @@ export function checkDay(
   }
   const tolerance = Math.max(2, 0.005 * equityEur);
   const flowEur = Math.abs(flow) > tolerance ? flow : 0;
-  const state: DayState = { day, startEquity: prev.startEquity + flowEur, lastHoldings: { ...holdings }, lastFillId: maxFillId };
-  const lossEur = state.startEquity - equityEur;
-  return { state, newDay: false, flowEur, lossEur, tripped: lossEur >= limitEur };
+
+  const newCalendarDay = prev.day !== day;
+  const startEquity = newCalendarDay ? equityEur : (prev.startEquity ?? equityEur) + flowEur;
+  const totalFlow = (prev.flow ?? 0) + flowEur;
+  // State from before the rolling window: its start-of-day equity is the best baseline there is.
+  const samples = prev.samples?.length ? [...prev.samples] : [{ t: now, eq: prev.startEquity ?? equityEur, flow: 0 }];
+  if (now - samples[samples.length - 1].t >= SAMPLE_MS) samples.push({ t: now, eq: equityEur, flow: totalFlow });
+  while (samples.length > 1 && samples[1].t <= now - WINDOW_MS) samples.shift();
+  const state: DayState = { day, startEquity, samples, flow: totalFlow, lastHoldings: { ...holdings }, lastFillId: maxFillId };
+  const baselineEur = windowBaseline(state, now)!;
+  const lossEur = baselineEur - equityEur;
+  const limitEur = limitInEur(limit, baselineEur);
+  return { state, newDay: false, newCalendarDay, flowEur, baselineEur, lossEur, limitEur, tripped: lossEur >= limitEur };
 }

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, ApiError, unwrapFamilies, unwrapMarkets } from '../api';
 import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { eur, familyLabel, humanize, timeOnly } from '../format';
+import { familyLabel, humanize, lossLimitText, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
 import { navigate, takeHandoff } from '../router';
-import { DEFAULT_CHASE, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
+import { DEFAULT_CHASE, DEFAULT_LOSS_LIMIT, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
 
 type Draft = Omit<BotSettings, 'enabled'>;
 
@@ -73,6 +73,7 @@ export default function SettingsPage() {
   const family = families.find((f) => f.family === s.family);
   const params = normParams(family);
   const multi = isMulti(s.family, family);
+  const lossLimit = draft.dailyLossLimit ?? DEFAULT_LOSS_LIMIT;
   const err = (k: string) => errors[k] ?? errors[k.split('.').pop()!];
 
   const setStrategy = (patch: Partial<StrategySpec>) =>
@@ -111,7 +112,7 @@ export default function SettingsPage() {
         mode: draft.mode,
         strategy: draft.strategy,
         maxExposureEur: draft.maxExposureEur,
-        dailyLossLimitEur: draft.dailyLossLimitEur,
+        dailyLossLimit: draft.dailyLossLimit,
         paperStartEur: draft.paperStartEur,
         ...(draft.chase ? { chase: draft.chase } : {}),
       };
@@ -363,18 +364,41 @@ export default function SettingsPage() {
                 />
               </Affix>
             </Field>
-            <Field label="Daily loss limit" error={err('dailyLossLimitEur')} hint="Lose this much in one day and the bot switches itself off.">
-              <Affix suffix="€">
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  step={10}
-                  value={draft.dailyLossLimitEur}
-                  onChange={(e) => setDraft({ ...draft, dailyLossLimitEur: Number(e.target.value) })}
-                  aria-invalid={!!err('dailyLossLimitEur')}
+            <Field
+              label="Max loss in 24 hours"
+              error={err('dailyLossLimit')}
+              hint={
+                lossLimit.unit === 'pct'
+                  ? 'Lose this share of what the portfolio was worth 24 hours earlier and the bot switches itself off.'
+                  : 'Lose this much over any 24 hours and the bot switches itself off.'
+              }
+            >
+              <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                <Segmented
+                  label="Max loss in"
+                  value={lossLimit.unit}
+                  options={[
+                    { value: 'pct', label: '%' },
+                    { value: 'eur', label: '€' },
+                  ]}
+                  onChange={(unit) =>
+                    unit !== lossLimit.unit && setDraft({ ...draft, dailyLossLimit: { unit, value: unit === 'pct' ? DEFAULT_LOSS_LIMIT.value : 100 } })
+                  }
                 />
-              </Affix>
+                <Affix suffix={lossLimit.unit === 'pct' ? '%' : '€'}>
+                  <input
+                    className="input"
+                    type="number"
+                    min={lossLimit.unit === 'pct' ? 0.5 : 1}
+                    max={lossLimit.unit === 'pct' ? 100 : undefined}
+                    step={lossLimit.unit === 'pct' ? 1 : 10}
+                    value={lossLimit.value}
+                    onChange={(e) => setDraft({ ...draft, dailyLossLimit: { unit: lossLimit.unit, value: Number(e.target.value) } })}
+                    aria-invalid={!!err('dailyLossLimit')}
+                    aria-label={lossLimit.unit === 'pct' ? 'Max loss in percent' : 'Max loss in euros'}
+                  />
+                </Affix>
+              </div>
             </Field>
             <Field label="Max weight" error={err('strategy.risk.maxWeight')} hint="Share of equity it may put in coins (100% = all).">
               <Affix suffix="%">
@@ -500,7 +524,7 @@ export default function SettingsPage() {
       >
         <div className="callout loss">
           In live mode the bot places <b>real orders</b> on your Bitvavo account with <b>real euros</b>. It can lose money, up to{' '}
-          {eur(draft.dailyLossLimitEur, true)} a day before it stops itself.
+          {lossLimitText(lossLimit)} in 24 hours before it stops itself.
         </div>
         <p className="small">Backtests are not promises. Consider starting with a small max-in-coins amount.</p>
         <div className="field">
@@ -519,7 +543,7 @@ function fieldFromMessage(msg: string): Record<string, string> {
   const short = msg.replace(/^Strategy is not valid:\s*(Invalid strategy:\s*)?/i, '');
   const strat = /(execution|risk|params)\.(\w+)/.exec(msg);
   if (strat) return { [`strategy.${strat[1]}.${strat[2]}`]: short };
-  const top = /(maxExposureEur|dailyLossLimitEur|paperStartEur|mode)/.exec(msg);
+  const top = /(maxExposureEur|dailyLossLimit|paperStartEur|mode)/.exec(msg);
   if (top) return { [top[1]]: short };
   const s = /(markets|interval|name|family)/.exec(short);
   if (s && /strategy/i.test(msg)) return { [`strategy.${s[1]}`]: short };

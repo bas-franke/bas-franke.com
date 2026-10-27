@@ -4,7 +4,7 @@ import { HeroBanner, SleepingCatArt } from '../components/art';
 import { DailyBars, LineChart, type LineSeries } from '../components/charts';
 import { WatchingCat } from '../components/icons';
 import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { ago, amount, dateOnly, eur, familyLabel, humanize, num, pct, signedEur, toDate } from '../format';
+import { ago, amount, dateOnly, eur, familyLabel, humanize, lossLimitText, num, pct, signedEur, toDate } from '../format';
 import { navigate } from '../router';
 import type { CompareRange, EquityPoint, Overview } from '../types';
 
@@ -180,7 +180,7 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
           It will run <b>{o.bot.strategy.name}</b> on {o.bot.strategy.markets.join(', ')}, checking every {o.bot.strategy.interval}.
         </p>
         <p className="small">
-          If the portfolio loses {eur(o.dailyLossLimitEur, true)} or more in one day, it switches itself off again.
+          If the portfolio loses {lossLimitText(o.dailyLossLimit, o.dailyLossLimitEur)} or more within 24 hours, it switches itself off again.
           {o.bot.maxExposureEur !== null ? ` It never holds more than ${eur(o.bot.maxExposureEur, true)} in coins.` : ' It may use the whole portfolio.'}
         </p>
         {live ? (
@@ -202,43 +202,52 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
 }
 
 function LossCard({ o }: { o: Overview }) {
-  const pnl = o.todayPnlEur;
+  const pnl = o.last24hPnlEur ?? null;
+  const limit = o.dailyLossLimitEur;
   const loss = Math.max(0, -(pnl ?? 0));
-  const frac = Math.min(1, loss / (o.dailyLossLimitEur || 1));
-  // Calm sage → brass → terracotta as the day's loss nears the limit.
+  const frac = Math.min(1, loss / (limit || 1));
+  const baseline = pnl === null ? 0 : o.equityEur - pnl;
+  const changePct = pnl !== null && baseline > 0 ? (pnl / baseline) * 100 : null;
+  const since = o.lossWindowSince ? new Date(o.lossWindowSince) : null;
+  // The window is shorter than 24 h right after the bot was switched on.
+  const partial = since !== null && Date.now() - since.getTime() < 23.9 * 3_600_000;
+  // Calm sage → brass → terracotta as the loss nears the limit.
   const color = frac < 0.4 ? 'var(--gain)' : frac < 0.75 ? 'var(--brass)' : 'var(--loss)';
   return (
     <section className="card">
       <div className="card-head">
-        <span className="eyebrow">Today</span>
+        <span className="eyebrow">Last 24 hours</span>
         <Tip>
-          Profit or loss since midnight (Amsterdam time), counting coins at today’s price. If the loss reaches the daily limit, the bot switches itself off.
+          Profit or loss over the last 24 hours, counting coins at today’s price. Deposits and withdrawals don’t count. If the loss reaches the
+          max loss from Settings, the bot switches itself off.
         </Tip>
       </div>
       <div className="row" style={{ alignItems: 'baseline' }}>
         <span className={`mid-num ${pnl === null ? 'muted' : pnl >= 0 ? 'gain' : 'loss'}`}>{pnl === null ? '€ 0,00' : signedEur(pnl)}</span>
+        {changePct !== null && <span className={`small ${changePct >= 0 ? 'gain' : 'loss'}`}>{pct(changePct, 1, true)}</span>}
         <span className="spacer" />
-        <span className="small muted">daily loss limit {eur(o.dailyLossLimitEur, true)}</span>
+        <span className="small muted">max loss {lossLimitText(o.dailyLossLimit, limit)}</span>
       </div>
       <div
         className="meter"
         style={{ marginTop: 12 }}
         role="meter"
         aria-valuemin={0}
-        aria-valuemax={o.dailyLossLimitEur}
+        aria-valuemax={limit}
         aria-valuenow={loss}
-        aria-label="Today's loss compared to the daily limit"
+        aria-label="Loss over the last 24 hours compared to the max loss"
       >
         <span style={{ width: `${Math.max(frac * 100, (pnl ?? 0) < 0 ? 2 : 0)}%`, background: color }} />
       </div>
       <p className="small soft" style={{ marginTop: 10 }}>
         {pnl === null
-          ? 'Today’s count starts once the bot has recorded its first value of the day.'
+          ? 'The 24-hour count starts once the bot is switched on and has recorded its first value.'
           : pnl >= 0
-          ? 'Up for the day. Nothing to worry about.'
+          ? 'Up over the last 24 hours. Nothing to worry about.'
           : frac < 0.75
-            ? `${Math.round(frac * 100)}% of today’s loss budget used. ${eur(o.dailyLossLimitEur - loss)} left before the bot pauses.`
-            : `Close to the limit: ${eur(o.dailyLossLimitEur - loss)} left before the bot switches itself off.`}
+            ? `${Math.round(frac * 100)}% of the loss budget used. ${eur(limit - loss)} left before the bot pauses.`
+            : `Close to the limit: ${eur(limit - loss)} left before the bot switches itself off.`}
+        {partial && since && ` Counting since ${since.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}, when the bot was switched on.`}
       </p>
     </section>
   );

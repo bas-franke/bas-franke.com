@@ -31,12 +31,19 @@ export interface StrategySpec {
   execution: StrategyExecution;
 }
 
+export interface LossLimit {
+  unit: 'pct' | 'eur';
+  value: number;
+}
+export const DEFAULT_LOSS_LIMIT: LossLimit = { unit: 'pct', value: 10 };
+
 export interface BotSettings {
   enabled: boolean;
   mode: Mode;
   strategy: StrategySpec;
   maxExposureEur: number | null;
-  dailyLossLimitEur: number;
+  /** Loss over the last 24 h that switches the bot off: a % of the equity 24 h ago, or euros. */
+  dailyLossLimit: LossLimit;
   fees: { maker: number; taker: number };
   paperStartEur: number;
   /** Set when the strategy was activated from the Research page (SPEC §8). */
@@ -154,6 +161,12 @@ export interface Overview {
   equityEur: number;
   /** null until the bot has recorded today's start-of-day equity. */
   todayPnlEur: number | null;
+  /** Equity now minus equity 24 h ago (deposits/withdrawals corrected); null before the bot has started the window. */
+  last24hPnlEur?: number | null;
+  /** Start of the loss window (ms): 24 h ago, or later when the bot was switched on less than 24 h ago. */
+  lossWindowSince?: number | null;
+  dailyLossLimit?: LossLimit;
+  /** The limit in euros right now (a % limit worked out against the equity 24 h ago). */
   dailyLossLimitEur: number;
   openOrders: number;
   strategyExplanation: string;

@@ -7,7 +7,7 @@ import { INTERVAL_MS, validateSpec, type Candle, type StrategySpec } from '../st
 import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython } from '../strategies/runtime.js';
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
-import { BUY_CASH_MARGIN, checkDay, MARKET_SLIPPAGE, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
+import { BUY_CASH_MARGIN, checkDay, limitInEur, MARKET_SLIPPAGE, WINDOW_MS, windowBaseline, type LossLimit, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
 import { allPrices, bestBidAsk, closedCandles, eurPrice, marketRules } from './marketData.js';
 import { getWallet, PaperBroker, resetPaperWallet } from './paper.js';
 import { fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
@@ -310,17 +310,18 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
     pf.quantities,
     (sym) => eurPrice(sym, pf.prices),
     newFills.map((f) => ({ ...f, base: f.market.split('-')[0] })),
-    s.dailyLossLimitEur,
+    s.dailyLossLimit,
   );
   if (!ms.day) check.state.lastFillId = afterId;
-  if (check.newDay) await log('info', 'day_start', `Start-of-day equity for ${check.state.day}: €${check.state.startEquity.toFixed(2)} (${s.mode})`);
+  if (check.newDay) await log('info', 'day_start', `Loss window starts at €${check.state.startEquity.toFixed(2)} equity (${s.mode}); the limit counts the last 24 h from here`);
   if (check.flowEur) await log('warn', 'balance_flow', `Balance changed by €${check.flowEur.toFixed(2)} without a trade (deposit or withdrawal?); the daily loss baseline moved with it`, { flowEur: check.flowEur });
   ms.day = check.state;
   lastDayState[s.mode] = check.state;
   await saveState(st);
   if (check.tripped) {
-    await log('error', 'daily_loss_limit', `Loss today is €${check.lossEur.toFixed(2)}, at or over the €${s.dailyLossLimitEur} limit: cancelling orders and switching the bot off`, { lossEur: check.lossEur, startEquity: check.state.startEquity, equity: pf.equityEur });
-    await switchOff(`daily loss limit of €${s.dailyLossLimitEur} reached`, 'error');
+    const limitText = `${fmtLimit(s.dailyLossLimit)}${s.dailyLossLimit.unit === 'pct' ? ` (€${check.limitEur.toFixed(2)})` : ''}`;
+    await log('error', 'daily_loss_limit', `Loss over the last 24 h is €${check.lossEur.toFixed(2)}, at or over the ${limitText} limit: cancelling orders and switching the bot off`, { lossEur: check.lossEur, limitEur: check.limitEur, limit: s.dailyLossLimit, baselineEur: check.baselineEur, equity: pf.equityEur });
+    await switchOff(`24 h loss limit of ${limitText} reached`, 'error');
     return;
   }
 
@@ -660,11 +661,25 @@ async function placeTargets(
 const fmtWeights = (w: Record<string, number>) =>
   Object.entries(w).map(([m, v]) => `${m} ${(v * 100).toFixed(1)} %`).join(', ') || 'none';
 
+const fmtLimit = (l: LossLimit) => (l.unit === 'pct' ? `${l.value} %` : `€${l.value}`);
+
+async function dayState(mode: Mode): Promise<DayState | undefined> {
+  return lastDayState[mode] ?? (await loadState())[mode].day;
+}
+
 export async function todayPnl(mode: Mode, equity: number): Promise<number | null> {
-  let day = lastDayState[mode];
-  if (!day) day = (await loadState())[mode].day;
+  const day = await dayState(mode);
   if (!day || day.day !== amsterdamDay(Date.now())) return null;
   return equity - day.startEquity;
+}
+
+/** For the Overview: change over the rolling 24 h window and the limit in euros right now. */
+export async function lossWindow(mode: Mode, equity: number, limit: LossLimit): Promise<{ pnlEur: number | null; baselineEur: number | null; limitEur: number; since: number | null }> {
+  const day = await dayState(mode);
+  const now = Date.now();
+  const baseline = day?.samples?.length ? windowBaseline(day, now) : null;
+  if (baseline === null) return { pnlEur: null, baselineEur: null, limitEur: limitInEur(limit, equity), since: null };
+  return { pnlEur: equity - baseline, baselineEur: baseline, limitEur: limitInEur(limit, baseline), since: Math.max(day!.samples[0].t, now - WINDOW_MS) };
 }
 
 export async function paperWalletSnapshot(startEur: number) {

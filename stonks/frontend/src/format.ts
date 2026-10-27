@@ -19,6 +19,14 @@ export const signedEur = (v: unknown) => {
   return (n > 0 ? '+' : n < 0 ? '−' : '') + eurFmt.format(Math.abs(n));
 };
 
+/** "10%" or "€ 100"; a % limit with its euro amount: "10% (€ 118)". */
+export const lossLimitText = (limit: { unit: 'pct' | 'eur'; value: number } | undefined, eurNow?: number) => {
+  if (!limit) return eurNow === undefined ? '–' : eur(eurNow, true);
+  if (limit.unit === 'eur') return eur(limit.value, true);
+  const p = `${limit.value.toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+  return eurNow === undefined ? p : `${p} (${eur(eurNow, true)})`;
+};
+
 export const pct = (v: unknown, digits = 1, signed = false) => {
   const n = num(v);
   if (!Number.isFinite(n)) return '–';

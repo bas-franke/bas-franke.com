@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import { log } from '../log.js';
 import { getBotSettings, SettingsError, updateBotSettings, type BotSettings } from '../settings.js';
 import { explainAny } from '../strategies/runtime.js';
-import { cachedPortfolio, kick, portfolio, start, status, stop, switchOff, todayPnl, withLock } from './engine.js';
+import { cachedPortfolio, kick, portfolio, start, status, stop, switchOff, lossWindow, todayPnl, withLock } from './engine.js';
 import { startTracking, stopTracking } from './track.js';
 import { marketRules } from './marketData.js';
 import { resetPaperWallet as resetWallet } from './paper.js';
@@ -27,6 +27,12 @@ export interface Overview {
   equityEur: number;
   /** Equity now minus start-of-day equity (Europe/Amsterdam); null before the first check of the day. */
   todayPnlEur: number | null;
+  /** Equity now minus equity 24 h ago (corrected for deposits/withdrawals); null before the window has started. */
+  last24hPnlEur: number | null;
+  /** When the 24 h window starts (ms): 24 h ago, or later when the bot was switched on less than 24 h ago. */
+  lossWindowSince: number | null;
+  /** The loss limit as set, and in euros right now. */
+  dailyLossLimit: BotSettings['dailyLossLimit'];
   dailyLossLimitEur: number;
   openOrders: number;
   strategyExplanation: string;
@@ -81,6 +87,7 @@ export async function getOverview(): Promise<Overview> {
   else bv = { connected: false, error: bitvavo.lastPrivateError ?? (s.mode === 'live' ? pfError : undefined) ?? 'No successful Bitvavo call in the last 10 minutes.' };
   const equityEur = pf?.equityEur ?? 0;
   const lastTick = status.lastTickAt;
+  const loss = await lossWindow(s.mode, equityEur, s.dailyLossLimit);
   return {
     bot: s,
     running: status.started && s.enabled && lastTick !== null && Date.now() - lastTick < 120_000,
@@ -89,7 +96,10 @@ export async function getOverview(): Promise<Overview> {
     balances: (pf?.balances ?? []).map((b) => ({ symbol: b.symbol, available: b.available, inOrder: b.inOrder, eurValue: b.eurValue })),
     equityEur,
     todayPnlEur: pf ? await todayPnl(s.mode, equityEur) : null,
-    dailyLossLimitEur: s.dailyLossLimitEur,
+    last24hPnlEur: pf ? loss.pnlEur : null,
+    lossWindowSince: loss.since,
+    dailyLossLimit: s.dailyLossLimit,
+    dailyLossLimitEur: loss.limitEur,
     openOrders: (await openOrders(s.mode)).length,
     strategyExplanation: explainAny(s.strategy),
     activeResearch: s.activeResearch ?? null,
