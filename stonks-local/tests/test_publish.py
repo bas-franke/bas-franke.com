@@ -74,8 +74,8 @@ def test_publish_posts_payload(server, r, tmp_path):
     assert res["ok"], res
     assert res["response"] == {"ok": True, "id": 1}
     p = Backend.received[0]
-    assert len(p["top"]) == 5 and p["top"][0]["rank"] == 1
-    assert json.loads((tmp_path / "out" / "research.json").read_text())["top"][0]["spec"] == p["top"][0]["spec"]
+    assert len(p["buckets"]["hourly"]["top"]) == 5 and p["buckets"]["hourly"]["top"][0]["rank"] == 1
+    assert json.loads((tmp_path / "out" / "research.json").read_text())["buckets"]["hourly"]["top"][0]["spec"] == p["buckets"]["hourly"]["top"][0]["spec"]
 
 
 def test_publish_dry_run_writes_file_only(server, r, tmp_path):

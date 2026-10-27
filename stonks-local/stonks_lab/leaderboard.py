@@ -187,7 +187,8 @@ def pit_check(registry: reg.Registry, e: dict, twin: dict | None = None, looked_
 
 
 def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance: float = 0.25,
-         bot_ready_only: bool = False, pool: int = 3000, min_test_trades: int = 5) -> list[dict]:
+         bot_ready_only: bool = False, pool: int = 3000, min_test_trades: int = 5,
+         intervals: list[str] | None = None, market_sets: list[list[str]] | None = None) -> list[dict]:
     """The best ``n`` diverse done experiments of the current evaluation version, best first. Skips ineligible
     specs (:func:`ineligible_reason`), more than ``per_family`` per family, parameter near-duplicates of a chosen
     one, and specs that trade the same as a chosen one (:func:`same_outcome`), so only the best-scoring copy stays.
@@ -196,7 +197,8 @@ def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance
     below every honest spec, so it only fills places no honest spec takes. The twin competes in its own right
     (honest specs first, then the biased ones); the payload says so."""
     cands: list[dict] = []
-    rows = [e for e in registry.top(pool, bot_ready_only=bot_ready_only) if not ineligible_reason(e, min_test_trades)]
+    rows = [e for e in registry.top(pool, bot_ready_only=bot_ready_only, intervals=intervals, market_sets=market_sets)
+            if not ineligible_reason(e, min_test_trades)]
     twin_of: dict[str, str] = {}
     for e in rows:
         if survivorship_biased(e):
@@ -606,10 +608,8 @@ def notes(registry: reg.Registry, entries: list[dict], max_chars: int = 600) -> 
         if vb is not None:
             lead += f" ({vb:+.1f} points vs buy and hold)"
         parts.append(lead + ".")
-    parts.append("Cross-coin strategies are tested on the coins that were the top 10 at each moment (no "
-                 "hindsight; coins Bitvavo has delisted, like EOS, are missing, so a little survivorship remains); "
-                 "ones built on today's top-10 list are only shown when they also win that way, and always below "
-                 "every strategy tested without hindsight.")
+    parts.append("Only strategies that trade BTC and/or ETH against euros are shown, ranked separately per "
+                 "timeframe and ordered by their result in the last test year.")
     ln = luck_note(registry)
     if ln:
         parts.append(ln)
@@ -645,20 +645,55 @@ def _holdout_return(e: dict) -> float:
     return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else -math.inf
 
 
+# The dashboard only shows strategies that trade BTC and/or ETH against EUR (user decision 2026-10-27).
+TRADED_MARKET_SETS = [["BTC-EUR"], ["ETH-EUR"], ["BTC-EUR", "ETH-EUR"]]
+
+# SPEC section 8: a strategy belongs to the bucket of its decision interval.
+BUCKETS = {
+    "minute": ("Minute trading", ["1m", "5m", "15m"]),
+    "hourly": ("Hourly trading", ["30m", "1h", "2h", "4h"]),
+    "daily": ("Daily trading", ["6h", "8h", "12h", "1d"]),
+    "weekly": ("Weekly trading", ["1W"]),
+}
+
+
+def bucket_entries(registry: reg.Registry, intervals: list[str], n: int = 5) -> list[dict]:
+    """The bucket's top ``n``: chosen by score among BTC/ETH-vs-EUR strategies, ordered by last-year (holdout)
+    profit."""
+    entries = rank(registry, n=n, intervals=intervals, market_sets=TRADED_MARKET_SETS)
+    entries.sort(key=lambda e: (bool(e.get("pitCheck")), -_holdout_return(e)))
+    return entries
+
+
+def bucket_notes(entries: list[dict]) -> str:
+    if not entries:
+        return "No BTC or ETH strategy on these timeframes has qualified yet (enough trades, in the market often enough)."
+    beat = sum(1 for e in entries if (metrics_for(e).get("vsBuyHoldPct") or 0) > 0)
+    return (f"{beat} of these {len(entries)} beat buying and holding the same coin(s) in the last test year. "
+            f"Ordered by that year's result; picked by how they did in the six earlier test periods.")
+
+
 def build_payload(registry: reg.Registry | None = None, n: int = 5) -> dict:
     registry = registry or reg.default()
-    entries = rank(registry, n=n)
-    # Chosen by score, shown by last-year (holdout) profit; survivorship-biased ones stay below the honest ones.
-    entries.sort(key=lambda e: (bool(e.get("pitCheck")), -_holdout_return(e)))
+    per = {name: bucket_entries(registry, ivs, n) for name, (_, ivs) in BUCKETS.items()}
+    entries = per["daily"]                     # v1 fields (top, benchmark, notes) = the daily bucket
     st = registry.stats()
-    btc, others = benchmarks_for(entries)
+    btc, others = benchmarks_for(entries or [e for es in per.values() for e in es])
+    buckets = {}
+    for name, (label, ivs) in BUCKETS.items():
+        b_btc, _ = benchmarks_for(per[name]) if per[name] else (btc, [])
+        buckets[name] = {"label": label, "intervals": ivs, "benchmark": b_btc if b_btc.get("equity") else btc,
+                         "notes": bucket_notes(per[name]),
+                         "top": [entry_payload(i + 1, e, registry) for i, e in enumerate(per[name])]}
     return {
         "generatedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "summary": {"experiments": st["experiments"], "families": st["families"], "rounds": st["rounds"],
-                    "dataRange": data_range(entries), "notes": notes(registry, entries)},
+                    "dataRange": data_range([e for es in per.values() for e in es]),
+                    "notes": notes(registry, entries)},
         "benchmark": btc,
         "benchmarks": others,
-        "top": [entry_payload(i + 1, e, registry) for i, e in enumerate(entries)],
+        "top": buckets["daily"]["top"],
+        "buckets": buckets,
     }
 
 

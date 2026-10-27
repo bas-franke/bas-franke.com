@@ -497,10 +497,17 @@ class Registry:
             return [_exp(r) for r in c.execute(q, args).fetchall()]
 
     def top(self, n: int = 10, bot_ready_only: bool = False, family: str | None = None,
-            version: int | None = EVAL_VERSION) -> list[dict]:
-        """Best done experiments by score, only those evaluated with the current method (``version=None``: all)."""
+            version: int | None = EVAL_VERSION, intervals: Iterable[str] | None = None,
+            market_sets: Iterable[Iterable[str]] | None = None) -> list[dict]:
+        """Best done experiments by score, only those evaluated with the current method (``version=None``: all),
+        optionally only on these ``intervals`` and exactly these ``market_sets`` (e.g. [["BTC-EUR"], ["ETH-EUR"]])."""
         q = "SELECT * FROM experiments WHERE status='done' AND score IS NOT NULL"
         args: list = []
+        for col, vals in (("interval", intervals), ("markets", [markets_key(m) for m in market_sets or []] or None)):
+            if vals:
+                vals = list(vals)
+                q += f" AND {col} IN ({','.join('?' * len(vals))})"
+                args.extend(vals)
         if version is not None:
             q += " AND eval_version=?"
             args.append(version)

@@ -164,8 +164,8 @@ def test_payload_matches_spec_shape(r):
     _fill(r)
     p = leaderboard.build_payload(r)
     assert leaderboard.validate_payload(p) == []
-    assert len(p["top"]) == 5 and [t["rank"] for t in p["top"]] == [1, 2, 3, 4, 5]
-    t = p["top"][0]
+    assert len(p["buckets"]["hourly"]["top"]) == 5 and [t["rank"] for t in p["buckets"]["hourly"]["top"]] == [1, 2, 3, 4, 5]
+    t = p["buckets"]["hourly"]["top"][0]
     assert t["metrics"]["returnPct"] == 30.0 and t["metrics"]["vsBuyHoldPct"] == 10.0
     assert t["metrics"]["trainReturnPct"] == 20.0
     assert len(t["equity"]) <= 400 and len(t["equity"]) == len(t["buyHoldEquity"])
@@ -175,7 +175,7 @@ def test_payload_matches_spec_shape(r):
     assert p["summary"]["experiments"] == 9
     assert t["lineage"]["experimentId"] and t["lineage"]["agent"] == "agent-00"
     # 10 % vs 20 % buy and hold on the last one -> the sentence must say it lost
-    last = p["top"][-1]
+    last = p["buckets"]["hourly"]["top"][-1]
     assert last["explanation"]["vsBuyHold"].startswith("It lost to buy and hold")
     assert "better" in t["explanation"]["vsBuyHold"]
     json.dumps(p)
@@ -191,10 +191,10 @@ def test_placebo_is_a_luck_line_not_a_candidate(r):
     assert "placebo_timing" not in [e["family"] for e in top]
     p = leaderboard.build_payload(r)
     assert "Luck line" in p["summary"]["notes"] and "best of 3 = 3.0" in p["summary"]["notes"]
-    t = p["top"][0]                                          # ema 3.0 on BTC 4h beats the best placebo (2.95)
+    t = p["buckets"]["hourly"]["top"][0]                                          # ema 3.0 on BTC 4h beats the best placebo (2.95)
     assert t["luck"]["n"] == 3 and t["luck"]["bestScore"] == 2.95 and t["luck"]["sameCell"] and t["luck"]["beatsLuck"]
     assert "Luck check: the best of 3" in t["explanation"]["vsLuck"] and "beats luck" in t["explanation"]["vsBuyHold"]
-    assert not p["top"][1]["luck"]["beatsLuck"]              # 2.8 < 2.95
+    assert not p["buckets"]["hourly"]["top"][1]["luck"]["beatsLuck"]              # 2.8 < 2.95
     assert leaderboard.validate_payload(p) == []
 
 

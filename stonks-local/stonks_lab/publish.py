@@ -94,7 +94,8 @@ def publish(registry: reg.Registry | None = None, dry_run: bool = False, url: st
     payload = leaderboard.build_payload(registry)
     problems = leaderboard.validate_payload(payload)
     leaderboard.write_json(payload, out)
-    result: dict[str, Any] = {"ok": True, "file": str(out), "top": len(payload["top"]), "problems": problems,
+    ranked = sum(len(b["top"]) for b in (payload.get("buckets") or {}).values()) or len(payload["top"])
+    result: dict[str, Any] = {"ok": True, "file": str(out), "top": ranked, "problems": problems,
                               "bytes": out.stat().st_size}
     if problems:
         result.update(ok=False, error="payload does not match SPEC section 7: " + "; ".join(problems[:5]))
@@ -102,7 +103,7 @@ def publish(registry: reg.Registry | None = None, dry_run: bool = False, url: st
     if dry_run:
         result["dryRun"] = True
         return result
-    if not payload["top"]:
+    if not ranked:
         result.update(ok=False, error="nothing to publish yet: no finished experiments")
         return result
     env = load_env()

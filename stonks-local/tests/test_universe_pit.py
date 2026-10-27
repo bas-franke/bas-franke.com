@@ -113,8 +113,9 @@ def test_today_top10_spec_needs_a_winning_pit_twin(tmp_path, monkeypatch):
     assert [e["spec_hash"] for e in top] == [reg.spec_hash(twin), reg.spec_hash(biased)]
     assert top[1]["score"] == 2.0 and top[1]["rawScore"] == 20.0 and top[1]["pitCheck"]["passed"]
     p = leaderboard.build_payload(r2)
-    assert "today's top-10" in p["top"][1]["explanation"]["vsBuyHold"]
-    assert "top 10 at each moment" in p["summary"]["notes"]
+    # both trade other coins than BTC/ETH, so the dashboard never shows them
+    assert all(not b["top"] for b in p["buckets"].values()) and p["top"] == []
+    assert "BTC and/or ETH" in p["summary"]["notes"]
 
 
 def test_eligibility_follows_the_snapshots(monkeypatch):
