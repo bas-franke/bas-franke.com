@@ -4,6 +4,7 @@ import { log } from '../log.js';
 import { getBotSettings, SettingsError, updateBotSettings, type BotSettings } from '../settings.js';
 import { explainAny } from '../strategies/runtime.js';
 import { cachedPortfolio, kick, portfolio, start, status, stop, switchOff, todayPnl, withLock } from './engine.js';
+import { startTracking, stopTracking } from './track.js';
 import { marketRules } from './marketData.js';
 import { resetPaperWallet as resetWallet } from './paper.js';
 import { openOrders } from './store.js';
@@ -34,6 +35,8 @@ export interface Overview {
 }
 
 export function startBot(): void {
+  // Informative BTC/ETH/portfolio tracking for the Overview chart: separate from the trading loop.
+  startTracking();
   try {
     start();
   } catch (err) {
@@ -42,6 +45,7 @@ export function startBot(): void {
 }
 
 export function stopBot(): void {
+  stopTracking();
   stop();
 }
 

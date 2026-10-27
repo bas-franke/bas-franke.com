@@ -1,5 +1,6 @@
 import { pgSessionStore } from '../auth.js';
 import { disableTrading, enableTrading, getOverview, listMarkets } from '../bot/index.js';
+import { priceHistory } from '../bot/track.js';
 import { config } from '../config.js';
 import { query } from '../db.js';
 import { log } from '../log.js';
@@ -27,5 +28,6 @@ export const api = createApi({
   families: () => allFamilies(),
   validateSpec: async (spec) => void (await checkSpec(spec)),
   isRunnable,
+  priceHistory,
   maxLoginAttempts: config.loginAttempts,
 });

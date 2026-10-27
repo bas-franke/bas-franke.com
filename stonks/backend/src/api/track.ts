@@ -1,0 +1,96 @@
+import { Router } from 'express';
+import type { ApiDeps } from './deps.js';
+import { enumParam, fail, MODES } from './util.js';
+
+// Portfolio vs buy and hold BTC / ETH for the Overview (SPEC.md §5a). Purely informative: reads equity_snapshots
+// and track_points (one row a minute), and fills BTC/ETH from Bitvavo candles where no track points exist yet.
+
+export const RANGES = ['day', 'week', 'month', 'year', 'all'] as const;
+const SPAN_MS: Record<Exclude<(typeof RANGES)[number], 'all'>, number> = {
+  day: 86_400_000, week: 7 * 86_400_000, month: 30 * 86_400_000, year: 365 * 86_400_000,
+};
+const MAX_POINTS = 500;
+/** Candles fill the price lines before the first track point when it starts later than this after `from`. */
+const GAP_MS = 10 * 60_000;
+
+type Pt = [number, number];
+const ms = (v: unknown) => (v instanceof Date ? v.getTime() : Date.parse(String(v)));
+
+/** At most `max` points, evenly thinned, last one kept. */
+export function thin(points: Pt[], max = MAX_POINTS): Pt[] {
+  if (points.length <= max) return points;
+  const step = Math.ceil(points.length / max);
+  return points.filter((_, i) => i % step === 0 || i === points.length - 1);
+}
+
+export function trackRoutes(deps: ApiDeps) {
+  const r = Router();
+  const now = deps.now ?? Date.now;
+
+  r.get('/compare', async (req, res) => {
+    const range = enumParam(req, 'range', RANGES) ?? 'month';
+    const mode = enumParam(req, 'mode', MODES) ?? (await deps.getBotSettings()).mode;
+    const to = now();
+    let from: number;
+    if (range === 'all') {
+      // "All" = the start of this mode's portfolio history (cleared from Settings resets it).
+      const { rows } = await deps.query(
+        `SELECT min(ts) AS first FROM (
+           SELECT ts FROM equity_snapshots WHERE mode = $1
+           UNION ALL SELECT ts FROM track_points WHERE mode = $1 AND portfolio_eur IS NOT NULL) x`,
+        [mode],
+      );
+      const first = rows[0]?.first ? ms(rows[0].first) : NaN;
+      from = Number.isFinite(first) ? Math.min(first, to - 3_600_000) : to - SPAN_MS.day;
+    } else from = to - SPAN_MS[range];
+
+    const pf = await deps.query(
+      `SELECT ts, total_eur AS v FROM equity_snapshots WHERE mode = $1 AND ts >= to_timestamp($2 / 1000.0)
+       UNION ALL
+       SELECT ts, portfolio_eur AS v FROM track_points WHERE mode = $1 AND portfolio_eur IS NOT NULL AND ts >= to_timestamp($2 / 1000.0)
+       ORDER BY ts`,
+      [mode, from],
+    );
+    const tp = await deps.query(
+      'SELECT ts, btc_eur, eth_eur FROM track_points WHERE ts >= to_timestamp($1 / 1000.0) ORDER BY ts',
+      [from],
+    );
+    const portfolio: Pt[] = pf.rows.map((x) => [ms(x.ts), Number(x.v)] as Pt).filter((p) => Number.isFinite(p[0]) && p[1] > 0);
+    const track = (col: 'btc_eur' | 'eth_eur'): Pt[] =>
+      tp.rows.filter((x) => x[col] !== null).map((x) => [ms(x.ts), Number(x[col])] as Pt).filter((p) => p[1] > 0);
+    const prices = async (market: string, tracked: Pt[]): Promise<Pt[]> => {
+      const start = tracked.length ? tracked[0][0] : to;
+      if (start - from <= GAP_MS || !deps.priceHistory) return tracked;
+      try {
+        const hist = (await deps.priceHistory(market, from, start)).filter((p) => p[0] >= from && p[0] < start);
+        return [...hist, ...tracked];
+      } catch {
+        return tracked; // the chart still shows what was tracked
+      }
+    };
+    const [btc, eth] = await Promise.all([prices('BTC-EUR', track('btc_eur')), prices('ETH-EUR', track('eth_eur'))]);
+    res.json({
+      mode,
+      range,
+      from: new Date(from).toISOString(),
+      to: new Date(to).toISOString(),
+      portfolio: thin(portfolio),
+      btc: thin(btc),
+      eth: thin(eth),
+    });
+  });
+
+  // Settings > "Clear portfolio history": the portfolio line (and "All") starts again from now. Trading never reads it.
+  r.post('/portfolio-history/clear', async (req, res) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    if (body?.confirm !== 'CLEAR') fail('Type CLEAR to confirm (confirm: "CLEAR").');
+    const mode = (await deps.getBotSettings()).mode;
+    const a = await deps.query('DELETE FROM equity_snapshots WHERE mode = $1', [mode]);
+    const b = await deps.query('DELETE FROM track_points WHERE mode = $1', [mode]);
+    const removed = (a.rowCount ?? 0) + (b.rowCount ?? 0);
+    await deps.log('warn', 'portfolio_history_cleared', `Portfolio history of the ${mode} account cleared (${removed} points); charts start again from now`, { mode, removed });
+    res.json({ ok: true, mode, removed });
+  });
+
+  return r;
+}

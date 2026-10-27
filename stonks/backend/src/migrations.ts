@@ -104,4 +104,18 @@ export const migrations: { name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // Informative comparison tracking (SPEC §5a): every minute BTC-EUR, ETH-EUR and the portfolio of the current mode.
+    name: '003_track_points',
+    sql: `
+      CREATE TABLE track_points (
+        ts             timestamptz NOT NULL,
+        mode           text NOT NULL,
+        portfolio_eur  numeric,
+        btc_eur        numeric,
+        eth_eur        numeric
+      );
+      CREATE INDEX track_points_ts ON track_points (mode, ts);
+    `,
+  },
 ];

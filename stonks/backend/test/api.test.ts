@@ -652,6 +652,63 @@ describe('hall of fame', () => {
   });
 });
 
+describe('portfolio vs buy and hold', () => {
+  const T0 = Date.parse('2026-10-27T12:00:00Z');
+  let h: Harness;
+  let cookie: string;
+  const asked: Array<{ market: string; from: number; to: number }> = [];
+  const tables = {
+    // min(ts) for "all", then the portfolio rows, then the track rows (the fake answers by table name)
+    equity_snapshots: [{ first: new Date(T0 - 3 * 86_400_000), ts: new Date(T0 - 3 * 86_400_000), v: '400' }, { ts: new Date(T0 - 60_000), v: '440' }],
+    track_points: [{ ts: new Date(T0 - 120_000), btc_eur: '72000', eth_eur: '2100' }, { ts: new Date(T0 - 60_000), btc_eur: '72100', eth_eur: null }],
+  };
+  before(async () => {
+    h = await startHarness(
+      {
+        now: () => T0,
+        priceHistory: async (market, from, to) => {
+          asked.push({ market, from, to });
+          return [[from + 1000, market === 'BTC-EUR' ? 70000 : 2000], [to - 1000, market === 'BTC-EUR' ? 71000 : 2050]];
+        },
+      },
+      tables,
+    );
+    cookie = await h.login();
+  });
+  after(() => h.close());
+
+  test('fills BTC and ETH from candles before the first minute point, for the chosen range', async () => {
+    const res = await h.req('GET', '/api/compare?range=week', { cookie });
+    assert.equal(res.status, 200);
+    const b = (await res.json()) as any;
+    assert.equal(b.range, 'week');
+    assert.equal(Date.parse(b.from), T0 - 7 * 86_400_000);
+    assert.deepEqual(b.btc.map((p: number[]) => p[1]), [70000, 71000, 72000, 72100]);
+    assert.deepEqual(b.eth.map((p: number[]) => p[1]), [2000, 2050, 2100], 'a missing price is skipped, not zero');
+    assert.deepEqual(asked.map((a) => [a.market, a.from, a.to]), [['BTC-EUR', T0 - 7 * 86_400_000, T0 - 120_000], ['ETH-EUR', T0 - 7 * 86_400_000, T0 - 120_000]]);
+    assert.ok(b.portfolio.length >= 2);
+    const sql = h.calls.map((c) => c.sql).join(' ; ');
+    assert.ok(!/INSERT|UPDATE|DELETE/.test(sql), 'reading the chart writes nothing');
+  });
+
+  test('"all" starts at the first portfolio point; bad ranges are refused', async () => {
+    const b = (await (await h.req('GET', '/api/compare?range=all', { cookie })).json()) as any;
+    assert.equal(Date.parse(b.from), T0 - 3 * 86_400_000);
+    assert.equal((await h.req('GET', '/api/compare?range=decade', { cookie })).status, 400);
+  });
+
+  test('clearing the portfolio history needs CLEAR and deletes only the chart history of that mode', async () => {
+    assert.equal((await h.req('POST', '/api/portfolio-history/clear', { json: { confirm: 'clear' }, cookie })).status, 400);
+    const n = h.calls.length;
+    const res = await h.req('POST', '/api/portfolio-history/clear', { json: { confirm: 'CLEAR' }, cookie });
+    assert.equal(res.status, 200);
+    const sql = h.calls.slice(n).map((c) => c.sql);
+    assert.deepEqual(sql.filter((q) => q.startsWith('DELETE')), ['DELETE FROM equity_snapshots WHERE mode = $1', 'DELETE FROM track_points WHERE mode = $1']);
+    assert.deepEqual(h.calls.slice(n).filter((c) => c.sql.startsWith('DELETE')).map((c) => c.params), [['paper'], ['paper']]);
+    assert.ok(h.logs.some((l) => l.event === 'portfolio_history_cleared'));
+  });
+});
+
 describe('security hardening', () => {
   test('rateKey groups an IPv6 /64 and unwraps IPv4-mapped addresses', () => {
     assert.equal(rateKey('203.0.113.7'), '203.0.113.7');

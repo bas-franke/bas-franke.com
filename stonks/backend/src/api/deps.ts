@@ -34,6 +34,8 @@ export interface ApiDeps {
    * entries get their `botReady` from it; without it the lab's own `botReady` flag is used.
    */
   isRunnable?: (family: string, version: unknown) => boolean;
+  /** Closes [ms, price] of a market between two times (Bitvavo candles), to fill the comparison chart. */
+  priceHistory?: (market: string, from: number, to: number) => Promise<[number, number][]>;
   maxLoginAttempts?: number;
   now?: () => number;
 }

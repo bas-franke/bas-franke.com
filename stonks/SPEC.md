@@ -162,6 +162,16 @@ are sold. `maxExposureEur` caps how much EUR it puts into coins.
 
 The bot only ever touches orders it created (its `clientOrderId`s start with the prefix `stonks-`) and never withdraws.
 
+## 5a. Portfolio vs buy and hold (informative)
+
+Once a minute the backend stores `track_points (ts, mode, portfolio_eur, btc_eur, eth_eur)`: BTC-EUR and ETH-EUR last
+prices and the portfolio value of the bot's current mode (from the engine's last portfolio view; NULL when that is older
+than 6 minutes). It runs beside the trading loop and never places orders or changes settings. `GET /api/compare?range=
+day|week|month|year|all` returns the portfolio (equity_snapshots + track_points), BTC and ETH as `[ms, eur]` (at most 500
+points each); where no track points exist yet, BTC/ETH come from Bitvavo candles. `all` starts at the first portfolio
+point of the mode. The Overview indexes every line to 100 at the range start. `POST /api/portfolio-history/clear
+{ confirm: "CLEAR" }` deletes that mode's equity_snapshots and track_points (charts only; trading never reads them).
+
 ## 6. Parity between Python and TypeScript
 
 `stonks-local` exports, for each bot-ready family, a fixture `stonks/backend/test/fixtures/parity/<family>.json`:
