@@ -41,7 +41,8 @@ def load(db, where="", args=()):
         folds = m.get("folds") or []
         dds = [fd["test"]["maxDrawdownPct"] for fd in folds if fd.get("test")]
         ho = json.loads(holdout or "{}")
-        out.append({"hash": h[:10], "family": fam, "iv": iv, "mk": mk, "p": json.loads(params), "score": score,
+        bhdd = [fd["test"]["buyHoldMaxDrawdownPct"] for fd in folds if fd.get("test")]
+        out.append({"bhDD": st.median(bhdd) if bhdd else None, "period": m.get("dataRange"), "hash": h[:10], "family": fam, "iv": iv, "mk": mk, "p": json.loads(params), "score": score,
                     "eligible": bool(sp.get("eligible")), "trades": sp.get("testTrades") or 0,
                     "medDD": sp.get("medianDrawdownPct"), "worstDD": max(dds) if dds else None,
                     "expo": sp.get("medianExposurePct"), "beat": sp.get("foldsBeatBuyHold"),
@@ -87,6 +88,15 @@ def group_stats(rows, key):
     return g
 
 
+HOLD: dict = {}
+
+
+def hold_score(iv, mk):
+    """Score buy and hold gets on the same folds: excess 0, minus half its median fold drawdown, minus the trade
+    penalty (the fleet compares against this, e.g. BTC 1d ~-17)."""
+    return HOLD.get((iv, mk))
+
+
 def lead_score(db, fam, params, iv, mk):
     for r in load(db, "and family=? and interval=? and markets=?", (fam, iv, mk)):
         if r["p"] == params:
@@ -107,22 +117,35 @@ def main():
          "the median fold drawdown (RESEARCH.md); buy and hold itself scores about -17 (BTC) / -25 (ETH), so a "
          "score above that beats holding. **worst DD** = deepest drawdown in any test fold (%), the 'big drop' "
          "number. Holdout (last 365 days) is reported, never used for picking.\n"]
+    L.append("\n**Verdict (findings #838-#842, 2026-10-27):** no single TAAPI indicator beats holding as a plateau "
+             "(the best cells are isolated peaks); slices of 5-10 % and SMA/drawdown guards roughly halve the worst "
+             "drop but cost return; slicing the existing leaders or adding a fast crash guard to them lowers their "
+             "score for a few points less drawdown. 1m results use only ~1 year of data.\n\n")
     L.append("| family | experiments | eligible |\n|---|---|---|\n" + "".join(
         f"| {f} | {len(rs)} | {sum(r['eligible'] for r in rs)} |\n" for f, rs in rows.items()))
 
     allr = [r for rs in rows.values() for r in rs]
+    for r in allr:
+        if r["bhDD"] is not None:
+            HOLD.setdefault((r["iv"], r["mk"]), -0.5 * r["bhDD"])
+            r["period"] = r["period"] or ["", ""]
+    for r in allr:
+        h = HOLD.get((r["iv"], r["mk"]))
+        r["vsHold"] = None if h is None else r["score"] - h
+    BASE_COLS.insert(5, ("vs hold score", lambda r: f1(r.get("vsHold"))))
     L.append("\n## Best 20 of the campaign\n\n" + table(ranked(allr)[:20], BASE_COLS + [
         ("params", lambda r: f"`{short(r['p'])}`" + (f" inner `{r['p']['inner']['family']}`" if "inner" in r["p"] else ""))]))
 
-    calm = [r for r in ranked(allr) if r["worstDD"] is not None and r["worstDD"] <= 25]
-    L.append("\n## Small drops only (worst test-fold drawdown <= 25 %)\n\n" + table(calm[:15], BASE_COLS + [
+    calm = [r for r in ranked(allr) if r["worstDD"] is not None and r["worstDD"] <= 25 and (r.get("vsHold") or -1) > 0]
+    L.append("\n## Small drops only (worst test-fold drawdown <= 25 % and beating hold)\n\n" + table(calm[:15], BASE_COLS + [
         ("params", lambda r: f"`{short(r['p'])}`" + (f" inner `{r['p']['inner']['family']}`" if "inner" in r["p"] else ""))]))
 
     lad = rows["ind_ladder_a24"]
     if lad:
         L.append("\n## Indicator ladder per interval\n\nBest eligible score per interval and market (n = specs "
                  "tried), and the median of all specs.\n\n| interval | BTC best | BTC median | BTC n | ETH best | "
-                 "ETH median | ETH n | best BTC spec |\n|---|---|---|---|---|---|---|---|\n")
+                 "ETH median | ETH n | BTC hold | ETH hold | data from | best BTC spec |\n"
+                 "|---|---|---|---|---|---|---|---|---|---|---|\n")
         for iv in INTERVALS:
             cells = []
             best_spec = ""
@@ -133,7 +156,9 @@ def main():
                 if mk == "BTC-EUR" and rk:
                     best_spec = f"`{rk[0]['hash']}` {rk[0]['p']['indicator']}/{rk[0]['p']['mode']}"
             if any(cells[i] for i in (2, 5)):
-                L.append(f"| {iv} | " + " | ".join(map(str, cells)) + f" | {best_spec} |\n")
+                frm = next((r["period"][0] for r in lad if r["iv"] == iv and r.get("period")), "")
+                L.append(f"| {iv} | " + " | ".join(map(str, cells)) + f" | {f1(HOLD.get((iv, 'BTC-EUR')))} | "
+                         f"{f1(HOLD.get((iv, 'ETH-EUR')))} | {frm} | {best_spec} |\n")
 
         L.append("\n## Indicators compared\n\nOver every interval and both markets: best eligible score, the median "
                  "of each indicator's best-per-cell score (cell = interval x market), and its best mode.\n\n"
@@ -145,7 +170,7 @@ def main():
             for r in ranked(rs):
                 cell_best.setdefault((r["iv"], r["mk"]), r)
             cb = list(cell_best.values())
-            beat = sum(1 for r in cb if r["score"] > (-17 if r["mk"] == "BTC-EUR" else -25))
+            beat = sum(1 for r in cb if (r.get("vsHold") or -1) > 0)
             modes = group_stats(ranked(rs)[:30], lambda r: r["p"]["mode"])
             bm = max(modes, key=lambda k: len(modes[k])) if modes else ""
             best = ranked(rs)[0]["score"] if ranked(rs) else None
