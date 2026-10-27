@@ -109,9 +109,17 @@ export function validateAnySpec(input: unknown): AnySpec {
 
   const rawParams = input.params ?? {};
   if (!isObj(rawParams)) fail('"params" must be an object');
-  const known = new Set(info.params.map((p) => p.name));
+  const objects = info.objectParams ?? [];
+  const known = new Set([...info.params.map((p) => p.name), ...objects.map((p) => p.name)]);
   for (const k of Object.keys(rawParams)) if (!known.has(k)) fail(`${family} has no parameter "${k}"`);
   const params: Record<string, number | boolean | string> = {};
+  for (const p of objects) {
+    // e.g. the lead a wrapper family runs: stored as given, the lab's `describe` checks it (checkSpec)
+    const v = rawParams[p.name] ?? p.default;
+    if (!isObj(v)) fail(`${p.name} must be an object`);
+    if (JSON.stringify(v).length > 20_000) fail(`${p.name} is too large`);
+    params[p.name] = v as unknown as string;
+  }
   for (const p of info.params) {
     let v = rawParams[p.name] ?? p.default;
     if (p.type === 'boolean') {

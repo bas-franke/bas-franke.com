@@ -29,6 +29,8 @@ export interface PyFamily {
   /** Targets depend on where trading started: the bot passes the strategy's start time. */
   anchored: boolean;
   params: PyParam[];
+  /** Params that hold a JSON object, e.g. the lead a wrapper family runs (`inner`); `describe` validates them. */
+  objectParams?: Array<{ name: string; default: Record<string, unknown> }>;
 }
 
 export interface PyDescription {

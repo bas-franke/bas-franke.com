@@ -79,6 +79,24 @@ test('a TypeScript port wins at its version; another version of the same family 
   assert.match(rt.explainAny(lab), /lab's own code/);
 });
 
+test('wrapper families keep their lead (an object param) and reject non-objects', () => {
+  const lead = { family: 'wick_pressure', params: { lookback: 63 } };
+  setPyCatalog([
+    ...fakeCatalog,
+    {
+      family: 'mtf_guard_a24', title: 'Long-term lead with a fast crash guard', summary: '', version: 1, multiMarket: false, anchored: false,
+      params: [{ name: 'leadTf', type: 'choice' as const, default: '1d', options: ['same', '1d'], description: 'lead time frame' }],
+      objectParams: [{ name: 'inner', default: { family: 'ema_cross', params: {} } }],
+    },
+  ]);
+  const s = rt.validateAnySpec({ family: 'mtf_guard_a24', markets: ['ETH-EUR'], interval: '1h', params: { inner: lead } });
+  assert.deepEqual(s.params, { inner: lead, leadTf: '1d' });
+  const d = rt.validateAnySpec({ family: 'mtf_guard_a24', markets: ['ETH-EUR'], interval: '1h' });
+  assert.deepEqual((d.params as Record<string, unknown>).inner, { family: 'ema_cross', params: {} });
+  assert.throws(() => rt.validateAnySpec({ family: 'mtf_guard_a24', markets: ['ETH-EUR'], interval: '1h', params: { inner: 'x' } }), /inner must be an object/);
+  setPyCatalog(fakeCatalog);
+});
+
 const haveLab = existsSync(path.join(config.labDir, 'stonks_lab', 'live.py'));
 
 test('the real lab runs a family the bot has no port of', { skip: !haveLab && 'no lab checkout next to this project' }, async () => {

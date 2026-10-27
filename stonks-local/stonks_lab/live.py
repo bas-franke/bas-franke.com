@@ -86,9 +86,14 @@ def catalog() -> dict:
                                        "params": defaults}).get("summary", ""))
         except Exception:  # noqa: BLE001 - an explanation is optional
             summary = ""
+        space = fam.param_space()
         out.append({"family": fam.name, "title": fam.title, "summary": summary, "version": fam.version,
                     "multiMarket": fam.multi_market, "anchored": fam.anchored,
-                    "params": [param_info(k, d, defaults.get(k)) for k, d in fam.param_space().items()]})
+                    "params": [param_info(k, d, defaults.get(k)) for k, d in space.items()],
+                    # knobs outside the search space that hold a JSON object, e.g. the lead a wrapper runs
+                    # ("inner" of mtf_guard_a24/step_wrap_a24/floor_wrap_a07); the lab checks them in describe
+                    "objectParams": [{"name": k, "default": v} for k, v in defaults.items()
+                                     if k not in space and isinstance(v, dict)]})
     return {"families": out, "errors": dict(DISCOVERY_ERRORS)}
 
 

@@ -51,12 +51,14 @@ def test_catalog_lists_every_family_in_the_bot_shape():
     names = {f["family"] for f in cat["families"]}
     assert names == set(FAMILIES)
     for f in cat["families"]:
-        assert {"family", "title", "version", "multiMarket", "anchored", "params"} <= set(f)
+        assert {"family", "title", "version", "multiMarket", "anchored", "params", "objectParams"} <= set(f)
         for p in f["params"]:
             assert p["type"] in ("int", "number", "boolean", "choice")
             if p["type"] == "choice":
                 assert p["default"] in p["options"]
     json.dumps(cat, allow_nan=False)
+    wrappers = {f["family"]: f["objectParams"] for f in cat["families"] if f["objectParams"]}
+    assert [p["name"] for p in wrappers["mtf_guard_a24"]] == ["inner"]   # the bot must accept the wrapped lead
 
 
 def test_describe_reports_markets_and_param_errors():
