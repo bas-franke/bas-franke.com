@@ -41,6 +41,8 @@ Download candles (idempotent, only missing ranges are fetched):
 | `stonks_lab/registry.py` | shared experiment memory: `data/lab.sqlite` (WAL, safe for 20 processes) |
 | `stonks_lab/leaderboard.py` | diverse top 5 and the dashboard payload (SPEC section 7) |
 | `stonks_lab/publish.py` | login + `POST /api/research` |
+| `stonks_lab/tradechart.py`, `tools/trade_chart.py` | HTML chart of one backtest: every buy and sell on the price (sized by EUR, sells labelled with P&L), equity vs buy and hold, exposure, full trade table, round trips, CSV |
+| `tools/theories/` | theory scripts: one hypothesis + variants + verdict each, with a trade chart per variant; `run_all.py` writes [THEORIES.md](THEORIES.md) |
 | `lab.py` | the CLI below |
 | `RESEARCH.md` | protocol for research agents |
 | `FINDINGS.md` | generated digest (`lab.py digest`), committed |
