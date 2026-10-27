@@ -34,7 +34,7 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
   };
 }
 
-test('executor: full buy is a post-only limit 5 bps under the close, sized to cash after the fee', () => {
+test('executor: full buy is a post-only limit 5 bps under the close, sized to cash after the taker fee Bitvavo reserves', () => {
   const p = planOrders(input());
   assert.equal(p.orders.length, 1);
   const o = p.orders[0];
@@ -42,9 +42,10 @@ test('executor: full buy is a post-only limit 5 bps under the close, sized to ca
   assert.equal(o.orderType, 'limit');
   assert.equal(o.postOnly, true);
   assert.equal(o.price, '49975.00'); // 50000 * (1 - 0.0005), rounded down to the 1.00 tick
-  const spend = 1000 / 1.0015;
+  // Bitvavo holds back the taker fee (0.25 %) even on a post-only limit buy, plus a 0.1 % margin for rounding (code 216 otherwise)
+  const spend = 1000 / 1.0035;
   assert.equal(o.amount, (Math.floor((spend / 49975) * 1e8) / 1e8).toFixed(8));
-  assert.ok(Number(o.amount) * 49975 * 1.0015 <= 1000);
+  assert.ok(Number(o.amount) * 49975 * 1.0025 <= 1000);
 });
 
 test('executor: churn threshold of max(€5, 2 % of equity), but target 0 always exits the whole free position', () => {
@@ -102,7 +103,13 @@ test('executor: market orders buy with amountQuote and keep room for taker fee +
   const p = planOrders(input({ spec: m }));
   assert.equal(p.orders[0].orderType, 'market');
   assert.equal(p.orders[0].amount, undefined);
-  assert.equal(p.orders[0].amountQuote, (Math.floor((1000 / 1.003) * 100) / 100).toFixed(2));
+  assert.equal(p.orders[0].amountQuote, (Math.floor((1000 / 1.004) * 100) / 100).toFixed(2));
+});
+
+test('executor: a full buy of a 439.86 EUR account leaves the taker fee free (Bitvavo code 216 on 2026-10-27)', () => {
+  const p = planOrders(input({ cashAvailableEur: 439.86, equityEur: 439.86, prices: { 'BTC-EUR': 72379 } }));
+  const o = p.orders[0];
+  assert.ok(Number(o.amount) * Number(o.price) * 1.0025 <= 439.86, `${o.amount} x ${o.price} plus the taker fee must fit`);
 });
 
 test('post-only repricing joins the best maker price', () => {

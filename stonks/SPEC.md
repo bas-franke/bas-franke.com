@@ -79,7 +79,9 @@ orders; differences smaller than €5 or 2 % of equity are ignored (no churn).
   the plain average fill price. After a stop the market is locked until the strategy's target for it returns to 0.
 - Limit buys reserve their cash while open (as on Bitvavo). Buys at one close are scaled together to the free cash; market
   buys leave room for fee + slippage. Cash from sells placed at the same close is only spent once it has arrived, so a
-  rotation takes one extra bar.
+  rotation takes one extra bar. The live bot sizes every buy (limit ones too) to leave the **taker** fee plus 0.1 % of the
+  cash free, because Bitvavo reserves the taker fee on open buy orders and refuses one that does not fit (code 216);
+  backtests keep the maker-fee sizing, a difference of ~0.2 % of one buy.
 
 ## 3. Families the bot implements (v1)
 

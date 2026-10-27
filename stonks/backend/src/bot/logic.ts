@@ -8,6 +8,8 @@ import { amsterdamDay } from './time.js';
 
 export const MARKET_SLIPPAGE = 0.0005; // 5 bps, SPEC §2
 export const CHURN_MIN_EUR = 5;
+/** Cash a buy leaves unspent on top of the reserved fee (0.1 %), so rounding never makes Bitvavo refuse it. */
+export const BUY_CASH_MARGIN = 0.001;
 export const CHURN_MIN_FRACTION = 0.02;
 
 export interface Holding {
@@ -133,8 +135,9 @@ export function planOrders(input: PlanInput): PlanResult {
     });
   }
 
-  const fee = limit && spec.execution.postOnly ? input.fees.maker : input.fees.taker;
-  const spendable = Math.max(0, input.cashAvailableEur / (1 + fee + (limit ? 0 : MARKET_SLIPPAGE)));
+  // Bitvavo reserves the taker fee on every buy, limit orders included, and refuses the order (code 216,
+  // "insufficient balance") when the cash does not cover it; keep a little more for rounding and repricing.
+  const spendable = Math.max(0, input.cashAvailableEur / (1 + input.fees.taker + BUY_CASH_MARGIN + (limit ? 0 : MARKET_SLIPPAGE)));
   const wanted = buys.reduce((s, b) => s + b.eur, 0);
   const scale = wanted > spendable ? spendable / wanted : 1;
   if (scale < 1 && buys.length) result.notes.push({ market: '*', note: `cash covers ${(scale * 100).toFixed(0)} % of the wanted buys` });
