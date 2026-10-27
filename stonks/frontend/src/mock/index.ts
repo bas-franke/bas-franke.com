@@ -129,7 +129,7 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
       });
     };
     return json({
-      mode: bot.mode, range: q.get('range') ?? 'month', from: new Date(from).toISOString(), to: new Date(to).toISOString(),
+      mode: bot.mode, range: q.get('range') ?? 'month', from: new Date(from).toISOString(), start: new Date(from).toISOString(), to: new Date(to).toISOString(),
       portfolio: walk(1000, 0.02, 0.0004, 7), btc: walk(72000, 0.03, -0.0002, 3), eth: walk(2100, 0.04, -0.0006, 11),
     });
   }

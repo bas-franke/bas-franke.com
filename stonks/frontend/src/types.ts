@@ -70,10 +70,48 @@ export interface CompareData {
   mode: string;
   range: CompareRange;
   from: string;
+  /** Where all three lines start (100): the range start, or the portfolio's first point if that is later. */
+  start: string;
   to: string;
   portfolio: [number, number][];
   btc: [number, number][];
   eth: [number, number][];
+}
+
+/** A strategy write-up (GET /api/writeups/:specId, SPEC §8b). */
+export interface WriteupChart {
+  title: string;
+  yFormat?: 'eur' | 'num3' | 'pct';
+  height?: number;
+  series: { name: string; color?: string; dash?: string; points: [number, number][] }[];
+  /** Position in ETH (%) as change points, drawn as a step line under the chart. */
+  band?: { name: string; points: [number, number][] };
+}
+export interface WriteupSection {
+  type: 'text' | 'heading' | 'candles' | 'rules' | 'callout' | 'example' | 'table';
+  title?: string;
+  body?: string;
+  tone?: 'gain' | 'warn';
+  items?: [string, string][];
+  head?: string[];
+  rows?: string[][];
+  candles?: { label: string; o: number; h: number; l: number; c: number; note: string }[];
+  key?: string;
+  eli5?: string;
+  story?: string;
+  trades?: boolean;
+  verdict?: string;
+  startPosition?: number;
+  charts?: WriteupChart[];
+  events?: { ts: number; text: string }[];
+  result?: { strategy: number; hold: number };
+}
+export interface Writeup {
+  specId: string;
+  title: string;
+  subtitle?: string;
+  updatedAt?: string;
+  sections: WriteupSection[];
 }
 
 export type ManualTarget = 'BTC' | 'ETH' | 'EUR';

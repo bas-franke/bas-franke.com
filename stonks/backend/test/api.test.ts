@@ -677,18 +677,33 @@ describe('portfolio vs buy and hold', () => {
   });
   after(() => h.close());
 
-  test('fills BTC and ETH from candles before the first minute point, for the chosen range', async () => {
+  test('BTC and ETH start where the portfolio starts, filled from candles before the first minute point', async () => {
     const res = await h.req('GET', '/api/compare?range=week', { cookie });
     assert.equal(res.status, 200);
     const b = (await res.json()) as any;
     assert.equal(b.range, 'week');
     assert.equal(Date.parse(b.from), T0 - 7 * 86_400_000);
+    assert.equal(Date.parse(b.start), T0 - 3 * 86_400_000, 'the portfolio began 3 days ago, so the race starts there');
+    assert.ok(b.btc[0][0] >= T0 - 3 * 86_400_000 && b.eth[0][0] >= T0 - 3 * 86_400_000);
     assert.deepEqual(b.btc.map((p: number[]) => p[1]), [70000, 71000, 72000, 72100]);
     assert.deepEqual(b.eth.map((p: number[]) => p[1]), [2000, 2050, 2100], 'a missing price is skipped, not zero');
-    assert.deepEqual(asked.map((a) => [a.market, a.from, a.to]), [['BTC-EUR', T0 - 7 * 86_400_000, T0 - 120_000], ['ETH-EUR', T0 - 7 * 86_400_000, T0 - 120_000]]);
+    assert.deepEqual(asked.map((a) => [a.market, a.from, a.to]), [['BTC-EUR', T0 - 3 * 86_400_000, T0 - 120_000], ['ETH-EUR', T0 - 3 * 86_400_000, T0 - 120_000]]);
     assert.ok(b.portfolio.length >= 2);
     const sql = h.calls.map((c) => c.sql).join(' ; ');
     assert.ok(!/INSERT|UPDATE|DELETE/.test(sql), 'reading the chart writes nothing');
+  });
+
+  test('with no portfolio points (just cleared) BTC and ETH start again from scratch too', async () => {
+    const empty = await startHarness(
+      { now: () => T0, priceHistory: async (_m, from, to) => [[from + 1000, 1], [to - 1000, 2]] },
+      { equity_snapshots: [], track_points: [{ ts: new Date(T0 - 2 * 86_400_000), btc_eur: '70000', eth_eur: '2000' }] },
+    );
+    try {
+      const b = (await (await empty.req('GET', '/api/compare?range=week', { cookie: await empty.login() })).json()) as any;
+      assert.deepEqual([b.portfolio, b.btc, b.eth], [[], [], []]);
+    } finally {
+      await empty.close();
+    }
   });
 
   test('"all" starts at the first portfolio point; bad ranges are refused', async () => {

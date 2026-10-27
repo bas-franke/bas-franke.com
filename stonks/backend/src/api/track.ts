@@ -51,18 +51,27 @@ export function trackRoutes(deps: ApiDeps) {
        ORDER BY ts`,
       [mode, from],
     );
+    const portfolio: Pt[] = pf.rows.map((x) => [ms(x.ts), Number(x.v)] as Pt).filter((p) => Number.isFinite(p[0]) && p[1] > 0);
+    // The race starts where the portfolio does: BTC/ETH never go back further than its first point, so all three are
+    // indexed to 100 at the same moment, and after a clear (no portfolio points yet) they start again from scratch.
+    const start = portfolio.length ? Math.max(from, portfolio[0][0]) : to;
     const tp = await deps.query(
       'SELECT ts, btc_eur, eth_eur FROM track_points WHERE ts >= to_timestamp($1 / 1000.0) ORDER BY ts',
-      [from],
+      [start - GAP_MS],
     );
-    const portfolio: Pt[] = pf.rows.map((x) => [ms(x.ts), Number(x.v)] as Pt).filter((p) => Number.isFinite(p[0]) && p[1] > 0);
-    const track = (col: 'btc_eur' | 'eth_eur'): Pt[] =>
-      tp.rows.filter((x) => x[col] !== null).map((x) => [ms(x.ts), Number(x[col])] as Pt).filter((p) => p[1] > 0);
+    const track = (col: 'btc_eur' | 'eth_eur'): Pt[] => {
+      if (start >= to) return [];
+      const pts = tp.rows.filter((x) => x[col] !== null).map((x) => [ms(x.ts), Number(x[col])] as Pt).filter((p) => p[1] > 0);
+      // the last price at or just before the start becomes the point at the start
+      const before = pts.filter((p) => p[0] <= start).pop();
+      const after = pts.filter((p) => p[0] > start && p[0] <= to);
+      return before ? [[start, before[1]], ...after] : after;
+    };
     const prices = async (market: string, tracked: Pt[]): Promise<Pt[]> => {
-      const start = tracked.length ? tracked[0][0] : to;
-      if (start - from <= GAP_MS || !deps.priceHistory) return tracked;
+      const first = tracked.length ? tracked[0][0] : to;
+      if (start >= to || first - start <= GAP_MS || !deps.priceHistory) return tracked;
       try {
-        const hist = (await deps.priceHistory(market, from, start)).filter((p) => p[0] >= from && p[0] < start);
+        const hist = (await deps.priceHistory(market, start, first)).filter((p) => p[0] >= start && p[0] < first);
         return [...hist, ...tracked];
       } catch {
         return tracked; // the chart still shows what was tracked
@@ -73,6 +82,7 @@ export function trackRoutes(deps: ApiDeps) {
       mode,
       range,
       from: new Date(from).toISOString(),
+      start: new Date(start).toISOString(),
       to: new Date(to).toISOString(),
       portfolio: thin(portfolio),
       btc: thin(btc),

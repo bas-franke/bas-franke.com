@@ -17,6 +17,9 @@ export default function OverviewPage() {
   const ov = useAsync(() => api.overview(), []);
   useVisibleInterval(() => ov.reload(), 15_000);
   const o = ov.data;
+  const day = useAsync(() => api.compare('day'), [o?.bot.mode]);
+  useVisibleInterval(() => day.reload(), 60_000);
+  const todayPct = o && o.todayPnlEur !== null && o.equityEur - o.todayPnlEur > 0 ? (o.todayPnlEur / (o.equityEur - o.todayPnlEur)) * 100 : null;
 
   return (
     <div className="stack">
@@ -31,8 +34,20 @@ export default function OverviewPage() {
             </div>
             <div className="row">
               {o.todayPnlEur !== null && (
-                <span className={`chip ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>{signedEur(o.todayPnlEur)} today</span>
+                <span className={`chip ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>
+                  {signedEur(o.todayPnlEur)}
+                  {todayPct !== null && ` · ${pct(todayPct, 1, true)}`} today
+                </span>
               )}
+              {day.data &&
+                (['btc', 'eth'] as const).map((k) => {
+                  const c = sinceMidnight(day.data![k]);
+                  return c === null ? null : (
+                    <span key={k} className={`chip ${c >= 0 ? 'gain' : 'loss'}`} title={`${k.toUpperCase()}-EUR price change today`}>
+                      {k.toUpperCase()} {pct(c, 1, true)} today
+                    </span>
+                  );
+                })}
               <ModeBadge mode={o.bot.mode} />
               <span className="chip">{o.running ? 'Bot is awake' : o.bot.enabled ? 'Bot is waking up' : 'Bot is resting'}</span>
             </div>
@@ -242,6 +257,14 @@ function dailyPnl(points: EquityPoint[]) {
   return out;
 }
 
+/** % change of a price line since local midnight (or since the line starts, if later). */
+function sinceMidnight(pts: [number, number][]): number | null {
+  const midnight = new Date().setHours(0, 0, 0, 0);
+  const first = pts.find((p) => p[0] >= midnight);
+  const last = pts[pts.length - 1];
+  return first && last && first !== last ? (last[1] / first[1] - 1) * 100 : null;
+}
+
 const COMPARE_RANGES: { value: CompareRange; label: string }[] = [
   { value: 'day', label: 'Day' },
   { value: 'week', label: 'Week' },
@@ -338,8 +361,11 @@ function CompareCard({ mode }: { mode: string }) {
       )}
       {lines.length > 0 && (
         <p className="tiny soft" style={{ marginTop: 10 }}>
-          All lines start at 100 at the beginning of the {range === 'all' ? 'portfolio history' : label}. Informative only: it does not change what the bot
-          does. Deposits and withdrawals show up as jumps in your line.
+          All lines start at 100{' '}
+          {range !== 'all' && Date.parse(cmp.data!.start) - Date.parse(cmp.data!.from) < 3_600_000
+            ? `at the beginning of the ${label}`
+            : `when your portfolio tracking began (${dateOnly(cmp.data!.start)})`}
+          . Informative only: it does not change what the bot does. Deposits and withdrawals show up as jumps in your line.
         </p>
       )}
     </section>
