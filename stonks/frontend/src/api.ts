@@ -1,4 +1,5 @@
 import type {
+  ActivateResult,
   BotSettings,
   EquityPoint,
   FamilyInfo,
@@ -96,6 +97,8 @@ export const api = {
   families: () => request<FamilyInfo[] | { families: FamilyInfo[] }>('GET', '/strategies/families'),
   markets: () => request<MarketInfo[] | { markets: MarketInfo[] } | string[]>('GET', '/markets'),
   research: () => request<ResearchResponse>('GET', '/research'),
+  activate: (body: { researchId: number; bucket: string; rank: number; start: boolean; confirmLive?: boolean }) =>
+    request<ActivateResult>('POST', '/bot/activate', body),
 };
 
 export const unwrapFamilies = (r: FamilyInfo[] | { families: FamilyInfo[] }) => (Array.isArray(r) ? r : (r.families ?? []));

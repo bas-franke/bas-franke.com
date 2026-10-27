@@ -1,12 +1,12 @@
-import { useMemo } from 'react';
-import { api } from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import { api, ApiError } from '../api';
 import { EmptyState } from '../components/art';
 import { LineChart, Spark, type LineSeries } from '../components/charts';
 import { IconCheck } from '../components/icons';
-import { ErrorBox, Skeleton, Tip, useAsync } from '../components/ui';
+import { ErrorBox, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, pct, toDate } from '../format';
-import { navigate, setHandoff } from '../router';
-import type { Benchmark, ResearchEntry, ResearchPayload, Series } from '../types';
+import { navigate, setHandoff, useLocation } from '../router';
+import { BUCKET_NAMES, type Benchmark, type BucketName, type Overview, type ResearchBucket, type ResearchEntry, type ResearchPayload, type Series } from '../types';
 
 const RANK_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
 const BENCH_STYLE = [
@@ -15,13 +15,40 @@ const BENCH_STYLE = [
   { color: 'var(--ink-3)', dash: '12 4 2 4' },
 ];
 
+/** Tab titles for the timeframe buckets (SPEC §8). */
+export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly' };
+const bucketTitle = (b: string) => BUCKET_TITLES[b as BucketName] ?? b;
+const TAB_KEY = 'stonks-research-bucket';
+
+const isBucket = (v: unknown): v is BucketName => BUCKET_NAMES.includes(v as BucketName);
+const savedTab = (): BucketName | null => {
+  try {
+    const v = localStorage.getItem(TAB_KEY);
+    return isBucket(v) ? v : null;
+  } catch {
+    return null;
+  }
+};
+const saveTab = (b: BucketName) => {
+  try {
+    localStorage.setItem(TAB_KEY, b);
+  } catch {
+    /* private window: just don't remember */
+  }
+};
+
 const toPts = (s: Series | undefined): [number, number][] =>
   (s ?? []).map(([t, v]) => [toDate(t)?.getTime() ?? 0, Number(v)] as [number, number]).filter(([t]) => t > 0);
 
 const euroAxis = (v: number) => `€${Math.round(v).toLocaleString('en-US')}`;
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** Formats a number that may be missing from an older or partial payload. */
+const fx = (v: unknown, f: (n: number) => string) => (isNum(v) ? f(v) : '–');
+const score = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1));
 
 export default function ResearchPage() {
   const r = useAsync(() => api.research(), []);
+  const ov = useAsync(() => api.overview(), []);
   if (r.error) return <ErrorBox error={r.error} onRetry={r.reload} />;
   if (!r.data)
     return (
@@ -41,14 +68,14 @@ export default function ResearchPage() {
         <Head />
         <section className="card">
           <EmptyState title="No research yet">
-            The research lab on the home PC hasn’t uploaded its findings. Once it has run a few rounds of backtests, the five best strategies show up
-            here with plain explanations of how they work.
+            The research lab on the home PC hasn’t uploaded its findings. Once it has run a few rounds of backtests, the best strategies for each
+            timeframe show up here with plain explanations of how they work.
           </EmptyState>
         </section>
       </div>
     );
   }
-  return <Research data={r.data as ResearchPayload} />;
+  return <Research data={r.data as ResearchPayload} overview={ov.data} onActivated={ov.reload} onReload={r.reload} />;
 }
 
 const Head = ({ data }: { data?: ResearchPayload }) => (
@@ -57,18 +84,63 @@ const Head = ({ data }: { data?: ResearchPayload }) => (
       <span className="eyebrow">Research</span>
       <h1>What the lab found</h1>
       <p className="lede">
-        Thousands of strategies were tested on years of past prices, each starting with €1,000. These are the five that held up best on data they
-        had never seen, explained in plain words.
+        Thousands of strategies were tested on years of past prices, each starting with €1,000. These are the ones that held up best on data they had
+        never seen, ranked separately for minute, hourly, daily and weekly trading, and explained in plain words.
       </p>
     </div>
     {data && <span className="chip outline">updated {ago(data.generatedAt)}</span>}
   </div>
 );
 
-function Research({ data }: { data: ResearchPayload }) {
-  const top = [...data.top].sort((a, b) => a.rank - b.rank).slice(0, 5);
-  const benches = [data.benchmark, ...(data.benchmarks ?? [])].filter(Boolean);
+/** v1 payloads have no buckets: their `top` is the daily list. */
+function bucketsOf(data: ResearchPayload): Partial<Record<BucketName, ResearchBucket>> {
+  if (data.buckets && Object.keys(data.buckets).length) return data.buckets;
+  return { daily: { label: 'Daily trading', intervals: [], benchmark: data.benchmark, notes: '', top: data.top } };
+}
+
+function Research({
+  data,
+  overview,
+  onActivated,
+  onReload,
+}: {
+  data: ResearchPayload;
+  overview?: Overview;
+  onActivated: () => void;
+  onReload: () => void;
+}) {
+  const { query } = useLocation();
+  const buckets = bucketsOf(data);
+  const names = BUCKET_NAMES.filter((b) => buckets[b]);
+  const [tab, setTab] = useState<BucketName>(() => {
+    const q = query.get('bucket');
+    const pick = isBucket(q) ? q : savedTab();
+    if (pick && buckets[pick]) return pick;
+    return names.find((b) => buckets[b]!.top.length) ?? names[0] ?? 'daily';
+  });
+  const [pick, setPick] = useState<{ e: ResearchEntry; bucket: BucketName } | null>(null);
+  const bucket = buckets[tab] ?? buckets[names[0]]!;
+  const top = [...bucket.top].sort((a, b) => a.rank - b.rank).slice(0, 5);
+  const benches = [bucket.benchmark ?? (data.buckets ? null : data.benchmark), ...(tab === 'daily' || !data.buckets ? (data.benchmarks ?? []) : [])].filter(
+    (b): b is Benchmark => !!b,
+  );
+  const active = overview ? (overview.activeResearch ?? overview.bot.activeResearch ?? null) : null;
   const s = data.summary;
+
+  // Deep link from the Overview: /research?bucket=hourly&rank=2 scrolls to that card.
+  useEffect(() => {
+    const rank = query.get('rank');
+    if (!rank) return;
+    const t = setTimeout(() => document.getElementById(`card-${tab}-${rank}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const choose = (b: BucketName) => {
+    setTab(b);
+    saveTab(b);
+  };
+
   return (
     <div className="stack" style={{ gap: 26 }}>
       <Head data={data} />
@@ -76,7 +148,7 @@ function Research({ data }: { data: ResearchPayload }) {
       <section className="card summary-strip" aria-label="Research summary">
         <div>
           <div className="eyebrow">Experiments</div>
-          <div className="mid-num">{s.experiments.toLocaleString('en-US')}</div>
+          <div className="mid-num">{fx(s.experiments, (n) => n.toLocaleString('en-US'))}</div>
         </div>
         <div>
           <div className="eyebrow">Families tried</div>
@@ -109,18 +181,264 @@ function Research({ data }: { data: ResearchPayload }) {
         </section>
       )}
 
-      {top.map((e, i) => (
-        <RankCard key={e.spec.id} e={e} color={RANK_COLORS[i]} />
-      ))}
+      {data.buckets && (
+        <div className="bucket-tabs" role="tablist" aria-label="Timeframe">
+          {names.map((b) => (
+            <button
+              key={b}
+              type="button"
+              role="tab"
+              id={`tab-${b}`}
+              aria-selected={b === tab}
+              aria-controls="bucket-panel"
+              onClick={() => choose(b)}
+            >
+              {BUCKET_TITLES[b]}
+              <span className="count">{buckets[b]!.top.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
-      <Compare top={top} benches={benches} />
+      <div id="bucket-panel" role={data.buckets ? 'tabpanel' : undefined} aria-labelledby={data.buckets ? `tab-${tab}` : undefined} className="stack" style={{ gap: 26 }}>
+        {data.buckets && <BucketIntro name={tab} b={bucket} />}
+
+        {top.length === 0 ? (
+          <section className="card">
+            <EmptyState title={`Nothing made the cut for ${bucketTitle(tab).toLowerCase()} trading yet`}>
+              {bucket.notes || 'No strategy in this timeframe beat buying and holding after fees, so there is nothing worth running here yet.'}
+            </EmptyState>
+          </section>
+        ) : (
+          top.map((e, i) => (
+            <RankCard
+              key={e.spec.id}
+              e={e}
+              color={RANK_COLORS[i]}
+              anchor={`card-${tab}-${e.rank}`}
+              active={!!active && active.researchId === data.id && active.bucket === tab && active.rank === e.rank}
+              onActivate={data.id !== undefined ? () => setPick({ e, bucket: tab }) : undefined}
+            />
+          ))
+        )}
+
+        {top.length > 0 && <Compare top={top} benches={benches} />}
+      </div>
 
       <p className="footnote">
         <b>An honest note.</b> These results come from backtests: simulations on past prices, with Bitvavo’s fees and a careful fill model. They are
         not a forecast, and a strategy that did well before can do badly next month. Simply buying and holding is shown everywhere as the yardstick to
-        beat, not as a candidate. The numbers are from the test period, which the strategies were not tuned on.
+        beat, not as a candidate. Scores only compare within one timeframe: each is judged on a test period that fits how long its trades last.
       </p>
+
+      {pick && data.id !== undefined && (
+        <ActivateDialog
+          key={`${pick.bucket}-${pick.e.rank}`}
+          researchId={data.id}
+          bucket={pick.bucket}
+          e={pick.e}
+          overview={overview}
+          onClose={() => setPick(null)}
+          onDone={() => {
+            setPick(null);
+            onActivated();
+          }}
+          onStale={() => {
+            setPick(null);
+            onReload();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
+  const p = b.profile;
+  const luck = b.luckLine;
+  return (
+    <section className="card quiet bucket-intro" aria-label={`${bucketTitle(name)} trading`}>
+      <div className="row" style={{ gap: 8 }}>
+        <h2 style={{ marginRight: 'auto' }}>{b.label || `${bucketTitle(name)} trading`}</h2>
+        {b.intervals.map((iv) => (
+          <span className="chip" key={iv}>
+            every {iv}
+          </span>
+        ))}
+      </div>
+      {b.notes && <p className="notes">“{b.notes}”</p>}
+      <div className="bucket-lines">
+        <div>
+          <div className="eyebrow">Yardstick</div>
+          <p>
+            Simply buying and holding scores <b>{fx(b.holdScore, score)}</b> here.
+          </p>
+        </div>
+        <div>
+          <div className="eyebrow">
+            Luck line
+            <Tip>
+              The lab also runs strategies that buy and sell at random moments. Their scores show how far pure luck gets you on this timeframe; a real
+              strategy should clearly beat them.
+            </Tip>
+          </div>
+          <p>
+            {isNum(luck?.best) ? (
+              <>
+                Random timing scores up to <b>{score(luck!.best!)}</b> here
+                {isNum(luck?.median) ? <>, usually around {score(luck!.median!)}</> : null}.
+              </>
+            ) : (
+              'No luck line for this timeframe yet.'
+            )}
+          </p>
+        </div>
+        {p && (isNum(p.holdoutDays) || isNum(p.folds)) && (
+          <div>
+            <div className="eyebrow">How it was judged</div>
+            <p>
+              {isNum(p.folds) ? `${p.folds} practice windows${isNum(p.foldSpanDays) ? ` of ${p.foldSpanDays} days` : ''}` : 'Practice windows'}
+              {isNum(p.holdoutDays) ? `, then a final test on the last ${p.holdoutDays} days it never saw` : ''}.
+            </p>
+          </div>
+        )}
+      </div>
+      <p className="tiny muted">Scores only compare within this timeframe. A strategy is worth a look when it beats both lines above.</p>
+    </section>
+  );
+}
+
+function ActivateDialog({
+  researchId,
+  bucket,
+  e,
+  overview,
+  onClose,
+  onDone,
+  onStale,
+}: {
+  researchId: number;
+  bucket: BucketName;
+  e: ResearchEntry;
+  overview?: Overview;
+  onClose: () => void;
+  onDone: () => void;
+  onStale: () => void;
+}) {
+  const toast = useToast();
+  const [start, setStart] = useState(false);
+  const [liveText, setLiveText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ msg: string; stale: boolean } | null>(null);
+  const bot = overview?.bot;
+  const live = bot?.mode === 'live';
+  const on = !!bot?.enabled;
+  const current = bot?.strategy;
+  const same = current?.id === e.spec.id;
+  const orders = overview?.openOrders ?? 0;
+  const ready = !!bot && (!live || liveText.trim().toUpperCase() === 'LIVE');
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.activate({ researchId, bucket, rank: e.rank, start: !on && start, ...(live ? { confirmLive: true } : {}) });
+      toast(
+        res.started
+          ? `Activated. The bot is awake and running ${e.spec.name}.`
+          : res.startError
+            ? `Activated, but the bot didn’t start: ${res.startError}`
+            : on
+              ? 'Activated. The bot switches to it at its next check.'
+              : 'Activated. The bot is still resting; start it from the Overview whenever you like.',
+      );
+      onDone();
+    } catch (err) {
+      setError({ msg: (err as Error).message, stale: err instanceof ApiError && err.status === 409 });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Activate this strategy?"
+      actions={
+        <>
+          <button className="btn ghost" onClick={onClose}>
+            Not now
+          </button>
+          {error?.stale ? (
+            <button className="btn primary" onClick={onStale}>
+              Reload the research
+            </button>
+          ) : (
+            <button className={`btn ${live ? 'danger' : 'brass'}`} disabled={busy || !ready} onClick={submit}>
+              {busy ? 'Activating…' : live ? 'Activate with real money' : !on && start ? 'Activate and start' : 'Activate'}
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="activate-pick">
+        <div className="rank-badge small" aria-hidden="true" style={{ ['--rank-color' as string]: RANK_COLORS[(e.rank - 1) % 5] }}>
+          {e.rank}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <b>{e.spec.name}</b>
+          <div className="row" style={{ gap: 6, marginTop: 6 }}>
+            <span className="chip brass">{bucketTitle(bucket)} trading</span>
+            <span className="chip">every {e.spec.interval}</span>
+            {bot && <ModeBadge mode={bot.mode} />}
+          </div>
+        </div>
+      </div>
+      {!bot ? (
+        <div className="callout">Loading the bot’s current state…</div>
+      ) : (
+        <dl className="kv">
+          <dt>Mode</dt>
+          <dd>{live ? 'Live: real orders with real euros' : 'Paper: simulated orders on live prices, no real money'}</dd>
+          <dt>Replaces</dt>
+          <dd>{same ? 'nothing, it is already the bot’s strategy' : current?.name}</dd>
+          <dt>Open orders</dt>
+          <dd>
+            {orders === 0
+              ? 'none, so nothing to cancel'
+              : same
+                ? `${orders} open, they stay`
+                : `${orders} open order${orders === 1 ? '' : 's'} from the old strategy will be cancelled first`}
+          </dd>
+        </dl>
+      )}
+      {bot &&
+        (on ? (
+          <div className="callout brass">The bot is already on. It switches to this strategy at its next look at the market.</div>
+        ) : (
+          <label className="check">
+            <input type="checkbox" checked={start} onChange={(ev) => setStart(ev.target.checked)} />
+            Start the bot now
+          </label>
+        ))}
+      {bot && !on && !start && <p className="small soft">Leave this off to set the strategy while the bot keeps resting.</p>}
+      {live && (
+        <>
+          <div className="callout loss">
+            <b>Live mode.</b> The bot will trade this strategy on your Bitvavo account with real euros. It can lose money, up to{' '}
+            {eur(overview!.dailyLossLimitEur, true)} a day before it stops itself.
+          </div>
+          <div className="field">
+            <label htmlFor="activate-live">
+              Type <b>LIVE</b> to confirm
+            </label>
+            <input id="activate-live" className="input" autoComplete="off" value={liveText} onChange={(ev) => setLiveText(ev.target.value)} />
+          </div>
+        </>
+      )}
+      {error && <div className="callout loss">{error.msg}</div>}
+    </Modal>
   );
 }
 
@@ -147,7 +465,19 @@ function Metric({ label, tip, value, cls }: { label: string; tip: string; value:
   );
 }
 
-function RankCard({ e, color }: { e: ResearchEntry; color: string }) {
+function RankCard({
+  e,
+  color,
+  anchor,
+  active,
+  onActivate,
+}: {
+  e: ResearchEntry;
+  color: string;
+  anchor: string;
+  active: boolean;
+  onActivate?: () => void;
+}) {
   const m = e.metrics;
   const s = e.spec;
   const series: LineSeries[] = useMemo(
@@ -159,7 +489,7 @@ function RankCard({ e, color }: { e: ResearchEntry; color: string }) {
   );
   const markets = s.markets.length > 3 ? `${s.markets.length} markets` : s.markets.join(', ');
   return (
-    <article className="card rank-card" style={{ ['--rank-color' as string]: color }}>
+    <article id={anchor} className={`card rank-card${active ? ' is-active' : ''}`} style={{ ['--rank-color' as string]: color }}>
       <header className="rank-head">
         <div className="rank-badge" aria-label={`Rank ${e.rank}`}>
           {e.rank}
@@ -179,6 +509,16 @@ function RankCard({ e, color }: { e: ResearchEntry; color: string }) {
             ) : (
               <span className="chip outline muted">not yet runnable</span>
             )}
+            {isNum(m.score) && (
+              <span className="chip outline" title="The lab's ranking score; only comparable within this timeframe">
+                score {score(m.score)}
+              </span>
+            )}
+            {active && (
+              <span className="chip gain">
+                <span className="dot" /> running in the bot
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -190,14 +530,14 @@ function RankCard({ e, color }: { e: ResearchEntry; color: string }) {
       <div className="rank-body">
         <div className="stack" style={{ gap: 18 }}>
           <div className="metrics">
-            <Metric label="€1,000 became" tip={METRIC_TIPS.final} value={eur(m.finalEur, true)} />
-            <Metric label="Return" tip={METRIC_TIPS.ret} value={pct(m.returnPct, 1, true)} cls={m.returnPct >= 0 ? 'gain' : 'loss'} />
-            <Metric label="vs buy & hold" tip={METRIC_TIPS.vs} value={`${pct(m.vsBuyHoldPct, 1, true)}`} cls={m.vsBuyHoldPct >= 0 ? 'gain' : 'loss'} />
-            <Metric label="Worst drop" tip={METRIC_TIPS.dd} value={pct(-Math.abs(m.maxDrawdownPct), 1)} />
-            <Metric label="Win rate" tip={METRIC_TIPS.win} value={pct(m.winRatePct, 0)} />
-            <Metric label="Trades" tip={METRIC_TIPS.trades} value={m.trades.toLocaleString('en-US')} />
-            <Metric label="Fees paid" tip={METRIC_TIPS.fees} value={eur(m.feesEur, true)} />
-            <Metric label="Sharpe" tip={METRIC_TIPS.sharpe} value={m.sharpe.toFixed(2)} />
+            <Metric label="€1,000 became" tip={METRIC_TIPS.final} value={fx(m.finalEur, (v) => eur(v, true))} />
+            <Metric label="Return" tip={METRIC_TIPS.ret} value={fx(m.returnPct, (v) => pct(v, 1, true))} cls={m.returnPct >= 0 ? 'gain' : 'loss'} />
+            <Metric label="vs buy & hold" tip={METRIC_TIPS.vs} value={fx(m.vsBuyHoldPct, (v) => pct(v, 1, true))} cls={m.vsBuyHoldPct >= 0 ? 'gain' : 'loss'} />
+            <Metric label="Worst drop" tip={METRIC_TIPS.dd} value={fx(m.maxDrawdownPct, (v) => pct(-Math.abs(v), 1))} />
+            <Metric label="Win rate" tip={METRIC_TIPS.win} value={fx(m.winRatePct, (v) => pct(v, 0))} />
+            <Metric label="Trades" tip={METRIC_TIPS.trades} value={fx(m.trades, (v) => v.toLocaleString('en-US'))} />
+            <Metric label="Fees paid" tip={METRIC_TIPS.fees} value={fx(m.feesEur, (v) => eur(v, true))} />
+            <Metric label="Sharpe" tip={METRIC_TIPS.sharpe} value={fx(m.sharpe, (v) => v.toFixed(2))} />
           </div>
           <LineChart
             series={series}
@@ -255,17 +595,30 @@ function RankCard({ e, color }: { e: ResearchEntry; color: string }) {
         )}
         <span className="spacer" />
         {e.botReady ? (
-          <button
-            className="btn brass"
-            onClick={() => {
-              setHandoff({ spec: e.spec, rank: e.rank });
-              navigate('/settings');
-            }}
-          >
-            Use this strategy
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              className="btn ghost small"
+              onClick={() => {
+                setHandoff({ spec: e.spec, rank: e.rank });
+                navigate('/settings');
+              }}
+            >
+              Tweak in settings
+            </button>
+            {active ? (
+              <span className="chip gain">
+                <IconCheck width={13} /> active in the bot
+              </span>
+            ) : (
+              onActivate && (
+                <button className="btn brass" onClick={onActivate}>
+                  Activate in bot
+                </button>
+              )
+            )}
+          </div>
         ) : (
-          <span className="small muted">The bot can’t run this family yet.</span>
+          <span className="small muted">Waiting to be ported to the bot</span>
         )}
       </footer>
     </article>
@@ -292,12 +645,12 @@ function Compare({ top, benches }: { top: ResearchEntry[]; benches: Benchmark[] 
   return (
     <section className="card">
       <div className="card-head">
-        <h2 style={{ marginRight: 'auto' }}>All five side by side</h2>
+        <h2 style={{ marginRight: 'auto' }}>{top.length > 1 ? `All ${top.length} side by side` : 'Next to buy and hold'}</h2>
       </div>
       <p className="small soft" style={{ marginBottom: 16, maxWidth: '70ch' }}>
         €1,000 in each, over the test period. The dashed and dotted lines are the yardsticks: simply buying and holding.
       </p>
-      <LineChart series={series} height={300} ariaLabel="All five strategies and the buy-and-hold benchmarks" yFormat={euroAxis} tipFormat={(v) => eur(v, true)} baseline={1000} />
+      <LineChart series={series} height={300} ariaLabel="These strategies and the buy-and-hold benchmarks" yFormat={euroAxis} tipFormat={(v) => eur(v, true)} baseline={1000} />
       <div className="table-wrap" style={{ marginTop: 18 }}>
         <table className="data cards">
           <thead>
@@ -321,19 +674,19 @@ function Compare({ top, benches }: { top: ResearchEntry[]; benches: Benchmark[] 
                   </span>
                 </td>
                 <td data-label="€1,000 became" className="r">
-                  {eur(e.metrics.finalEur, true)}
+                  {fx(e.metrics.finalEur, (v) => eur(v, true))}
                 </td>
                 <td data-label="Return" className={`r ${e.metrics.returnPct >= 0 ? 'gain' : 'loss'}`}>
-                  {pct(e.metrics.returnPct, 1, true)}
+                  {fx(e.metrics.returnPct, (v) => pct(v, 1, true))}
                 </td>
                 <td data-label="Worst drop" className="r">
-                  {pct(-Math.abs(e.metrics.maxDrawdownPct), 1)}
+                  {fx(e.metrics.maxDrawdownPct, (v) => pct(-Math.abs(v), 1))}
                 </td>
                 <td data-label="Sharpe" className="r">
-                  {e.metrics.sharpe.toFixed(2)}
+                  {fx(e.metrics.sharpe, (v) => v.toFixed(2))}
                 </td>
                 <td data-label="Trades" className="r">
-                  {e.metrics.trades}
+                  {fx(e.metrics.trades, String)}
                 </td>
                 <td className="hide-sm">
                   <Spark points={toPts(e.equity)} color={RANK_COLORS[i]} />

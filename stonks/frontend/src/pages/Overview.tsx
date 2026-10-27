@@ -4,7 +4,7 @@ import { HeroBanner, SleepingCatArt } from '../components/art';
 import { DailyBars, LineChart, type LineSeries } from '../components/charts';
 import { WatchingCat } from '../components/icons';
 import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { ago, amount, eur, familyLabel, humanize, num, signedEur, toDate } from '../format';
+import { ago, amount, dateOnly, eur, familyLabel, humanize, num, signedEur, toDate } from '../format';
 import { navigate } from '../router';
 import type { EquityPoint, Overview } from '../types';
 
@@ -327,6 +327,7 @@ function StrategyCard({ o }: { o: Overview }) {
         </button>
       </div>
       <h2>{s.name}</h2>
+      <ActiveResearchLine o={o} />
       <div className="row" style={{ margin: '10px 0 14px' }}>
         <span className="chip brass">{familyLabel(s.family)}</span>
         <span className="chip">every {s.interval}</span>
@@ -394,5 +395,30 @@ function BalancesCard({ o }: { o: Overview }) {
         Fees: {humanize('maker')} {(o.bot.fees.maker * 100).toFixed(2)}% · taker {(o.bot.fees.taker * 100).toFixed(2)}%
       </p>
     </section>
+  );
+}
+
+const BUCKET_LABEL: Record<string, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly' };
+
+/** Where the current strategy came from, when it was activated from the Research page (SPEC §8). */
+function ActiveResearchLine({ o }: { o: Overview }) {
+  const a = o.activeResearch ?? o.bot.activeResearch;
+  if (!a) return null;
+  const href = `/research?bucket=${encodeURIComponent(a.bucket)}&rank=${a.rank}`;
+  return (
+    <div className="active-research small soft" style={{ marginTop: 8 }}>
+      <span>
+        From the research lab: <b>{BUCKET_LABEL[a.bucket] ?? a.bucket} #{a.rank}</b>, activated {dateOnly(a.activatedAt)}
+      </span>
+      <a
+        href={href}
+        onClick={(e) => {
+          e.preventDefault();
+          navigate(href);
+        }}
+      >
+        See its card →
+      </a>
+    </div>
   );
 }

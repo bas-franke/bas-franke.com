@@ -1849,3 +1849,129 @@ dialog.modal[open] {
 .card.summary-strip {
   padding: 0;
 }
+
+/* ---------- research timeframe tabs (SPEC §8) ---------- */
+
+.bucket-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  position: sticky;
+  top: 10px;
+  z-index: 5;
+  box-shadow: var(--shadow);
+}
+.bucket-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-weight: 500;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s, color 0.2s;
+}
+.bucket-tabs button:hover {
+  color: var(--ink);
+}
+.bucket-tabs button[aria-selected='true'] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.bucket-tabs .count {
+  font-size: 0.75rem;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.bucket-tabs button[aria-selected='true'] .count {
+  background: var(--brass-soft);
+  color: var(--brass-ink);
+}
+.bucket-intro {
+  display: grid;
+  gap: 14px;
+}
+.bucket-lines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px 22px;
+}
+.bucket-lines p {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  font-size: 0.95rem;
+}
+.bucket-lines b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.rank-card.is-active {
+  outline: 2px solid color-mix(in srgb, var(--gain) 55%, transparent);
+  outline-offset: 3px;
+}
+.rank-card {
+  scroll-margin-top: 80px;
+}
+.activate-pick {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.rank-badge.small {
+  width: 40px;
+  height: 40px;
+  font-size: 1.15rem;
+}
+.active-research {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-bottom: 14px;
+}
+.active-research a {
+  color: var(--brass-ink);
+  font-weight: 500;
+}
+@media (max-width: 760px) {
+  .bucket-tabs {
+    align-self: stretch;
+    top: 6px;
+  }
+  .bucket-tabs button {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 10px;
+  }
+  .modal .kv {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .modal .kv dd {
+    text-align: left;
+    margin-bottom: 8px;
+  }
+}

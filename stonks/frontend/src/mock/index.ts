@@ -1,17 +1,20 @@
 // Dev-only fake backend: patches window.fetch for /api/*. Loaded from main.tsx only when VITE_MOCK=1 in dev,
 // so production builds never contain it.
 //   ?mock=empty      research endpoint returns { empty: true }
+//   ?mock=v1         research endpoint returns the old payload without timeframe buckets
+//   ?mock=live       bot starts in live mode
 //   ?mock=off        bot starts switched off
 //   ?mock=login      start logged out
 // Any non-empty password logs in, except "wrong".
 import type { BotSettings } from '../types';
-import { equityPoints, families, fills, initialBot, logs, makeLog, markets, orders, research, rng } from './data';
+import { equityPoints, families, fills, initialBot, logs, makeLog, markets, orders, research, researchV2, rng } from './data';
 
 const flags = new URLSearchParams(location.search).get('mock') ?? '';
 const KEY = 'stonks-mock-session';
 let loggedIn = !flags.includes('login') && sessionStorage.getItem(KEY) !== '0';
 let bot: BotSettings = initialBot();
 if (flags.includes('off')) bot.enabled = false;
+if (flags.includes('live')) bot.mode = 'live';
 const liveRng = rng(1234);
 
 const json = (data: unknown, status = 200) =>
@@ -82,6 +85,7 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
       equityEur: equity,
       todayPnlEur: -38.4,
       dailyLossLimitEur: bot.dailyLossLimitEur,
+      activeResearch: bot.activeResearch ?? null,
       openOrders: orders.filter((o) => o.status === 'new' && o.mode === bot.mode).length,
       strategyExplanation:
         bot.strategy.family === 'ema_cross'
@@ -94,8 +98,21 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     const errors = validate(patch);
     if (Object.keys(errors).length) return json({ error: 'Invalid settings', errors }, 400);
     const { confirmLive: _c, ...rest } = patch;
-    bot = { ...bot, ...rest };
+    const strategyChanged = rest.strategy && JSON.stringify(rest.strategy) !== JSON.stringify(bot.strategy);
+    bot = { ...bot, ...rest, ...(strategyChanged ? { activeResearch: null } : {}) };
     return json(bot);
+  }
+  if (p === '/bot/activate' && method === 'POST') {
+    const b = body as { researchId?: number; bucket?: string; rank?: number; start?: boolean; confirmLive?: boolean };
+    if (flags.includes('v1')) return json({ error: 'Mock: v1 payload has no id' }, 400);
+    if (b.researchId !== researchV2.id) return json({ error: 'The research was updated since this page loaded. Reload it and pick the strategy again.' }, 409);
+    const entry = researchV2.buckets?.[b.bucket as 'daily']?.top.find((e) => e.rank === b.rank);
+    if (!entry) return json({ error: `There is no number ${b.rank} in the ${b.bucket} list of this research.` }, 400);
+    if (!entry.botReady) return json({ error: 'This strategy is still waiting to be ported to the bot.' }, 400);
+    if (bot.mode === 'live' && b.confirmLive !== true) return json({ error: 'Live mode: confirm it first (confirmLive: true).' }, 400);
+    const activeResearch = { researchId: researchV2.id, bucket: b.bucket!, rank: b.rank!, name: entry.spec.name, activatedAt: new Date().toISOString() };
+    bot = { ...bot, strategy: entry.spec, activeResearch, enabled: bot.enabled || b.start === true };
+    return json({ ok: true, bot, activeResearch, started: b.start === true });
   }
   if (p === '/bot/start' && method === 'POST') {
     bot = { ...bot, enabled: true };
@@ -131,7 +148,7 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
   }
   if (p === '/strategies/families') return json(families);
   if (p === '/markets') return json(markets);
-  if (p === '/research') return json(flags.includes('empty') ? { empty: true } : research);
+  if (p === '/research') return json(flags.includes('empty') ? { empty: true } : flags.includes('v1') ? research : researchV2);
   return json({ error: `Mock has no route for ${method} ${p}` }, 404);
 }
 

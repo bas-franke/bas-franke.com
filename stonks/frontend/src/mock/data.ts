@@ -4,10 +4,12 @@ import type {
   BotSettings,
   FamilyInfo,
   Fill,
+  Interval,
   LogLevel,
   LogRow,
   MarketInfo,
   Order,
+  ResearchBucket,
   ResearchEntry,
   ResearchPayload,
   Series,
@@ -406,6 +408,71 @@ function buildResearch(): ResearchPayload {
 }
 
 export const research = buildResearch();
+
+/** v2 payload (SPEC §8): the same entries spread over timeframe buckets, re-skinned per interval. */
+function buildResearchV2(): ResearchPayload & { id: number } {
+  const v1 = research;
+  const clone = (e: ResearchEntry, rank: number, interval: Interval, scoreV: number, ready = e.botReady): ResearchEntry => ({
+    ...e,
+    rank,
+    botReady: ready,
+    spec: { ...e.spec, id: `${e.spec.id}-${interval}`, interval, name: e.spec.name.replace(/,\s*([A-Z]+)\s+\w+$/, `, $1 ${interval}`) },
+    metrics: { ...e.metrics, score: scoreV },
+  });
+  const t = v1.top;
+  const bucket = (
+    label: string,
+    intervals: Interval[],
+    profile: ResearchBucket['profile'],
+    holdScore: number,
+    luckLine: ResearchBucket['luckLine'],
+    notes: string,
+    top: ResearchEntry[],
+  ): ResearchBucket => ({ label, intervals, profile, holdScore, luckLine, benchmark: v1.benchmark, notes, top });
+  return {
+    ...v1,
+    id: 7,
+    buckets: {
+      minute: bucket(
+        'Minute trading',
+        ['1m', '5m', '15m'],
+        { holdoutDays: 60, folds: 6, foldSpanDays: 56, dataFrom: '2025-09-21' },
+        -20.1,
+        { median: -35, best: -8, exposure: 0.7 },
+        'Nothing beats buy and hold after fees at minute level yet: every trade pays 0.25%, and at this speed the fees eat the edge.',
+        [],
+      ),
+      hourly: bucket(
+        'Hourly trading',
+        ['30m', '1h', '2h', '4h'],
+        { holdoutDays: 120, folds: 6, foldSpanDays: 140, dataFrom: '2023-10-26' },
+        4.2,
+        { median: -6.5, best: 3.1, exposure: 0.55 },
+        'Dip-buying on ETH and the 4-hour trend follower are the only ones that clear the luck line. Two more are close but not ported yet.',
+        [clone(t[3] ?? t[0], 1, '1h', 9.4, true), clone(t[0], 2, '4h', 7.8, true), clone(t[4] ?? t[1], 3, '2h', 6.1, false)],
+      ),
+      daily: bucket(
+        'Daily trading',
+        ['6h', '8h', '12h', '1d'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        12.5,
+        { median: 2.4, best: 10.8, exposure: 0.5 },
+        'The steadiest bucket: trend-following and rotation keep winning on daily candles.',
+        t.map((e, i) => ({ ...e, metrics: { ...e.metrics, score: Math.round((24 - i * 2.7) * 10) / 10 } })),
+      ),
+      weekly: bucket(
+        'Weekly trading',
+        ['1W'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        15.0,
+        { median: 3.2, best: 13.9, exposure: 0.6 },
+        'Weekly bars have few trades, so these scores wobble more. One candidate so far.',
+        [clone(t[2] ?? t[0], 1, '1W', 16.2, true)],
+      ),
+    },
+  };
+}
+export const researchV2 = buildResearchV2();
 
 // ---------- markets ----------
 export const markets: MarketInfo[] = [

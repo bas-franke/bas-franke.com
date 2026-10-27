@@ -39,6 +39,19 @@ export interface BotSettings {
   dailyLossLimitEur: number;
   fees: { maker: number; taker: number };
   paperStartEur: number;
+  /** Set when the strategy was activated from the Research page (SPEC §8). */
+  activeResearch?: ActiveResearch | null;
+}
+
+export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly';
+export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly'];
+
+export interface ActiveResearch {
+  researchId: number;
+  bucket: BucketName | string;
+  rank: number;
+  name: string;
+  activatedAt: string;
 }
 
 export interface Balance {
@@ -60,6 +73,7 @@ export interface Overview {
   dailyLossLimitEur: number;
   openOrders: number;
   strategyExplanation: string;
+  activeResearch?: ActiveResearch | null;
 }
 
 /** Order rows: SPEC §4 lists the columns but not the JSON names, so the UI reads them tolerantly (see `pick`). */
@@ -168,6 +182,8 @@ export interface ResearchMetrics {
   feesEur: number;
   exposurePct?: number;
   vsBuyHoldPct: number;
+  /** The lab's ranking score (only comparable within one timeframe bucket). */
+  score?: number;
   trainReturnPct?: number;
   testPeriod?: [string, string];
 }
@@ -196,7 +212,25 @@ export interface Benchmark {
   equity: Series;
 }
 
+/** One timeframe bucket of a v2 research payload (SPEC §8). */
+export interface ResearchBucket {
+  label: string;
+  intervals: string[];
+  profile?: { holdoutDays?: number; folds?: number; foldSpanDays?: number; dataFrom?: string } | null;
+  /** Buy and hold's score on this bucket's evaluation profile. */
+  holdScore?: number | null;
+  /** Placebo strategies (random timing): what pure luck scores here. */
+  luckLine?: { median?: number; best?: number; exposure?: number } | null;
+  benchmark?: Benchmark | null;
+  notes?: string;
+  top: ResearchEntry[];
+}
+
 export interface ResearchPayload {
+  /** Snapshot id (added by the backend). */
+  id?: number;
+  createdAt?: string;
+  buckets?: Partial<Record<BucketName, ResearchBucket>>;
   generatedAt: string;
   summary: { experiments: number; families: number; rounds: number; dataRange: [string, string]; notes?: string };
   benchmark: Benchmark;
@@ -205,3 +239,11 @@ export interface ResearchPayload {
 }
 
 export type ResearchResponse = ResearchPayload | { empty: true };
+
+export interface ActivateResult {
+  ok: true;
+  bot: BotSettings;
+  activeResearch: ActiveResearch;
+  started: boolean;
+  startError?: string;
+}
