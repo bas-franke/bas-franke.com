@@ -6,7 +6,7 @@ import { IconCheck } from '../components/icons';
 import { ErrorBox, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
-import { BUCKET_NAMES, type Benchmark, type BucketName, type Overview, type ResearchBucket, type ResearchEntry, type ResearchPayload, type Series } from '../types';
+import { BUCKET_NAMES, type Benchmark, type BucketName, type HallEntry, type Overview, type ResearchBucket, type ResearchEntry, type ResearchPayload, type Series } from '../types';
 
 const RANK_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
 const BENCH_STYLE = [
@@ -118,7 +118,21 @@ function Research({
     if (pick && buckets[pick]) return pick;
     return names.find((b) => buckets[b]!.top.length) ?? names[0] ?? 'daily';
   });
-  const [pick, setPick] = useState<{ e: ResearchEntry; bucket: BucketName } | null>(null);
+  const [pick, setPick] = useState<{ e: ResearchEntry; bucket: BucketName | 'hall'; hallId?: number } | null>(null);
+  const hall = useAsync(() => api.hallOfFame().then((r) => r.entries), []);
+  const [hallView, setHallView] = useState(() => query.get('bucket') === 'hall');
+  const hallKeys = useMemo(() => new Set((hall.data ?? []).map((h) => JSON.stringify(h.entry.spec))), [hall.data]);
+  const toast = useToast();
+  const addToHall = async (e: ResearchEntry) => {
+    if (data.id === undefined) return;
+    try {
+      await api.addToHall({ researchId: data.id, bucket: tab, rank: e.rank });
+      toast(`“${e.spec.name}” is in the hall of fame. New research will never replace it.`);
+    } catch (err) {
+      toast((err as Error).message);
+    }
+    hall.reload();
+  };
   const bucket = buckets[tab] ?? buckets[names[0]]!;
   const top = [...bucket.top].sort((a, b) => a.rank - b.rank).slice(0, 5);
   const benches = [bucket.benchmark ?? (data.buckets ? null : data.benchmark), ...(tab === 'daily' || !data.buckets ? (data.benchmarks ?? []) : [])].filter(
@@ -139,6 +153,7 @@ function Research({
   const choose = (b: BucketName) => {
     setTab(b);
     saveTab(b);
+    setHallView(false);
   };
 
   return (
@@ -197,9 +212,17 @@ function Research({
               <span className="count">{buckets[b]!.top.length}</span>
             </button>
           ))}
+          <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)}>
+            ★ Hall of fame
+            <span className="count">{hall.data?.length ?? 0}</span>
+          </button>
         </div>
       )}
 
+      {hallView && <HallOfFame hall={hall} active={active} onActivate={(h) => setPick({ e: h.entry, bucket: 'hall', hallId: h.id })} />}
+
+
+      {!hallView && (
       <div id="bucket-panel" role={data.buckets ? 'tabpanel' : undefined} aria-labelledby={data.buckets ? `tab-${tab}` : undefined} className="stack" style={{ gap: 26 }}>
         {data.buckets && <BucketIntro name={tab} b={bucket} />}
 
@@ -218,12 +241,15 @@ function Research({
               anchor={`card-${tab}-${e.rank}`}
               active={!!active && active.researchId === data.id && active.bucket === tab && active.rank === e.rank}
               onActivate={data.id !== undefined ? () => setPick({ e, bucket: tab }) : undefined}
+              inHall={hallKeys.has(JSON.stringify(e.spec))}
+              onAddToHall={data.id !== undefined && hall.data ? () => void addToHall(e) : undefined}
             />
           ))
         )}
 
         {top.length > 0 && <Compare top={top} benches={benches} />}
       </div>
+      )}
 
       <p className="footnote">
         <b>An honest note.</b> These results come from backtests: simulations on past prices, with Bitvavo’s fees and a careful fill model. They are
@@ -233,8 +259,9 @@ function Research({
 
       {pick && data.id !== undefined && (
         <ActivateDialog
-          key={`${pick.bucket}-${pick.e.rank}`}
+          key={`${pick.bucket}-${pick.hallId ?? pick.e.rank}`}
           researchId={data.id}
+          hallId={pick.hallId}
           bucket={pick.bucket}
           e={pick.e}
           overview={overview}
@@ -316,6 +343,7 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
 
 function ActivateDialog({
   researchId,
+  hallId,
   bucket,
   e,
   overview,
@@ -324,7 +352,9 @@ function ActivateDialog({
   onStale,
 }: {
   researchId: number;
-  bucket: BucketName;
+  /** Set when activating a hall of fame strategy (its stored copy). */
+  hallId?: number;
+  bucket: BucketName | 'hall';
   e: ResearchEntry;
   overview?: Overview;
   onClose: () => void;
@@ -348,7 +378,8 @@ function ActivateDialog({
     setBusy(true);
     setError(null);
     try {
-      const res = await api.activate({ researchId, bucket, rank: e.rank, start: !on && start, ...(live ? { confirmLive: true } : {}) });
+      const which = hallId !== undefined ? { hallOfFameId: hallId } : { researchId, bucket, rank: e.rank };
+      const res = await api.activate({ ...which, start: !on && start, ...(live ? { confirmLive: true } : {}) });
       toast(
         res.started
           ? `Activated. The bot is awake and running ${e.spec.name}.`
@@ -395,7 +426,7 @@ function ActivateDialog({
         <div style={{ minWidth: 0 }}>
           <b>{e.spec.name}</b>
           <div className="row" style={{ gap: 6, marginTop: 6 }}>
-            <span className="chip brass">{bucketTitle(bucket)} trading</span>
+            <span className="chip brass">{bucket === 'hall' ? '★ Hall of fame' : `${bucketTitle(bucket)} trading`}</span>
             <span className="chip">every {e.spec.interval}</span>
             {bot && <ModeBadge mode={bot.mode} />}
           </div>
@@ -477,12 +508,21 @@ function RankCard({
   anchor,
   active,
   onActivate,
+  inHall,
+  onAddToHall,
+  origin,
+  onRemove,
 }: {
   e: ResearchEntry;
   color: string;
   anchor: string;
   active: boolean;
   onActivate?: () => void;
+  inHall?: boolean;
+  onAddToHall?: () => void;
+  /** Hall of fame cards: where and when it was kept. */
+  origin?: string;
+  onRemove?: () => void;
 }) {
   const m = e.metrics;
   const s = e.spec;
@@ -525,8 +565,20 @@ function RankCard({
                 <span className="dot" /> running in the bot
               </span>
             )}
+            {origin && <span className="chip outline">{origin}</span>}
           </div>
         </div>
+        {inHall ? (
+          <span className="chip brass hall-star" title="In the hall of fame: kept forever">
+            ★ hall of fame
+          </span>
+        ) : (
+          onAddToHall && (
+            <button className="btn ghost small hall-star" onClick={onAddToHall} title="Keep this strategy forever, whatever new research finds">
+              ☆ Keep in hall of fame
+            </button>
+          )
+        )}
       </header>
 
       <p className="notes" style={{ fontStyle: 'normal', color: 'var(--ink)', fontSize: '1.12rem' }}>
@@ -600,6 +652,7 @@ function RankCard({
           </span>
         )}
         <span className="spacer" />
+        {onRemove && <RemoveButton onRemove={onRemove} />}
         {e.botReady ? (
           <div className="row" style={{ gap: 8 }}>
             <button
@@ -628,6 +681,73 @@ function RankCard({
         )}
       </footer>
     </article>
+  );
+}
+
+function RemoveButton({ onRemove }: { onRemove: () => void }) {
+  const [sure, setSure] = useState(false);
+  useEffect(() => {
+    if (!sure) return;
+    const t = setTimeout(() => setSure(false), 4000);
+    return () => clearTimeout(t);
+  }, [sure]);
+  return (
+    <button className={`btn small ${sure ? 'danger' : 'ghost'}`} onClick={() => (sure ? onRemove() : setSure(true))}>
+      {sure ? 'Yes, remove it' : 'Remove from hall of fame'}
+    </button>
+  );
+}
+
+/** The strategies the owner keeps forever, newest first; they never change when new research arrives. */
+function HallOfFame({
+  hall,
+  active,
+  onActivate,
+}: {
+  hall: { data?: HallEntry[] | null; error?: Error | null; reload: () => void };
+  active: Overview['activeResearch'] | null;
+  onActivate: (h: HallEntry) => void;
+}) {
+  const toast = useToast();
+  if (hall.error) return <ErrorBox error={hall.error} onRetry={hall.reload} />;
+  if (!hall.data) return <Skeleton h={200} />;
+  const remove = async (h: HallEntry) => {
+    try {
+      await api.removeFromHall(h.id);
+      toast(`Removed “${h.entry.spec.name}” from the hall of fame.`);
+    } catch (err) {
+      toast((err as Error).message);
+    }
+    hall.reload();
+  };
+  return (
+    <div id="bucket-panel" role="tabpanel" aria-labelledby="tab-hall" className="stack" style={{ gap: 26 }}>
+      <section className="card quiet bucket-intro">
+        <h2>Hall of fame</h2>
+        <p className="notes" style={{ marginTop: 8 }}>
+          Strategies you chose to keep. Each one is stored as it was when you kept it (results, charts and settings), so new research never replaces
+          or deletes it. Only you can remove one.
+        </p>
+      </section>
+      {hall.data.length === 0 ? (
+        <section className="card">
+          <EmptyState title="Nothing kept yet">Use “☆ Keep in hall of fame” on any strategy in the timeframe tabs to keep it here for good.</EmptyState>
+        </section>
+      ) : (
+        hall.data.map((h, i) => (
+          <RankCard
+            key={h.id}
+            e={{ ...h.entry, rank: i + 1 }}
+            color={RANK_COLORS[i % RANK_COLORS.length]}
+            anchor={`card-hall-${h.id}`}
+            active={!!active && active.bucket === 'hall' && active.researchId === h.id}
+            onActivate={() => onActivate(h)}
+            origin={`kept ${dateOnly(h.addedAt)} · was ${bucketTitle(h.bucket)} #${h.rank}`}
+            onRemove={() => void remove(h)}
+          />
+        ))
+      )}
+    </div>
   );
 }
 

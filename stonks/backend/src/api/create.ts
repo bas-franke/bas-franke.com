@@ -3,6 +3,7 @@ import { createAuth, csrfGuard } from '../auth.js';
 import { botRoutes } from './bot.js';
 import type { ApiDeps } from './deps.js';
 import { historyRoutes } from './history.js';
+import { hallRoutes } from './hall.js';
 import { researchRoutes } from './research.js';
 import { ConflictError, ValidationError } from './util.js';
 
@@ -57,6 +58,7 @@ export function createApi(rawDeps: ApiDeps) {
   api.use(botRoutes(deps));
   api.use(historyRoutes(deps));
   api.use(researchRoutes(deps));
+  api.use(hallRoutes(deps));
 
   const onError: ErrorRequestHandler = (err, _req, res, next) => {
     if (err instanceof ValidationError || deps.isSettingsError(err)) {

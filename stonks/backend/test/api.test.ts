@@ -593,6 +593,65 @@ describe('POST /api/bot/allocate', () => {
   });
 });
 
+describe('hall of fame', () => {
+  let h: Harness;
+  let cookie: string;
+  before(async () => {
+    h = await startHarness({
+      validateSpec: (spec) => {
+        if ((spec as { family?: unknown } | null)?.family !== 'ema_cross') throw new Error('unknown family');
+      },
+      isRunnable: (family) => family === 'ema_cross',
+    });
+    cookie = await h.login();
+  });
+  after(() => h.close());
+  const add = (json: unknown) => h.req('POST', '/api/hall-of-fame', { json, cookie });
+  const list = async () => ((await (await h.req('GET', '/api/hall-of-fame', { cookie })).json()) as any).entries as any[];
+
+  test('keeps a full copy of a research entry, once per spec', async () => {
+    assert.equal((await h.req('POST', '/api/research', { json: researchPayloadV2(), cookie })).status, 200);
+    const res = await add({ researchId: 1, bucket: 'hourly', rank: 2 });
+    assert.equal(res.status, 200);
+    const again = await add({ researchId: 1, bucket: 'hourly', rank: 2 });
+    assert.equal(again.status, 409);
+    const got = await list();
+    assert.equal(got.length, 1);
+    assert.equal(got[0].bucket, 'hourly');
+    assert.equal(got[0].entry.spec.family, 'mystery_family');
+    assert.equal(got[0].entry.botReady, false, 'botReady is what this server can run now');
+    assert.ok(Array.isArray(got[0].entry.equity) && got[0].entry.explanation.summary);
+    assert.ok(h.logs.some((l) => l.event === 'hall_of_fame_added'));
+  });
+
+  test('survives newer research uploads and can be activated from its own copy', async () => {
+    assert.equal((await add({ researchId: 1, bucket: 'weekly', rank: 1 })).status, 200);
+    assert.equal((await h.req('POST', '/api/research', { json: researchPayloadV2(), cookie })).status, 200); // snapshot 2
+    const got = await list();
+    assert.equal(got.length, 2);
+    const weekly = got.find((x) => x.bucket === 'weekly');
+    const res = await h.req('POST', '/api/bot/activate', { json: { hallOfFameId: weekly.id, start: false }, cookie });
+    assert.equal(res.status, 200);
+    assert.equal((h.settings.strategy as any).interval, '1W');
+    assert.deepEqual({ ...(h.settings.activeResearch as any), activatedAt: 0 }, { researchId: weekly.id, bucket: 'hall', rank: 1, name: 'ema_cross BTC 1W #1', activatedAt: 0 });
+    // a family this server cannot run is refused, as for research picks
+    const mystery = got.find((x) => x.bucket === 'hourly');
+    assert.equal((await h.req('POST', '/api/bot/activate', { json: { hallOfFameId: mystery.id }, cookie })).status, 400);
+  });
+
+  test('bad requests and removal', async () => {
+    for (const bad of [{}, { researchId: 1, bucket: 'monthly', rank: 1 }, { researchId: 1, bucket: 'daily', rank: 9 }, { researchId: 99, bucket: 'daily', rank: 1 }])
+      assert.equal((await add(bad)).status, 400, JSON.stringify(bad));
+    const before = await list();
+    const del = await h.req('DELETE', `/api/hall-of-fame/${before[0].id}`, { json: {}, cookie });
+    assert.equal(del.status, 200);
+    assert.equal((await list()).length, before.length - 1);
+    assert.equal((await h.req('DELETE', `/api/hall-of-fame/${before[0].id}`, { json: {}, cookie })).status, 404);
+    assert.equal((await h.req('POST', '/api/bot/activate', { json: { hallOfFameId: before[0].id }, cookie })).status, 400);
+    assert.ok(h.logs.some((l) => l.event === 'hall_of_fame_removed'));
+  });
+});
+
 describe('security hardening', () => {
   test('rateKey groups an IPv6 /64 and unwraps IPv4-mapped addresses', () => {
     assert.equal(rateKey('203.0.113.7'), '203.0.113.7');

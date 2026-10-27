@@ -88,4 +88,20 @@ export const migrations: { name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // Strategies the owner keeps forever: full copies of research entries, independent of research_snapshots (which
+    // keep only the newest 200 uploads). Rows only go away when the owner removes them.
+    name: '002_hall_of_fame',
+    sql: `
+      CREATE TABLE hall_of_fame (
+        id           bigserial PRIMARY KEY,
+        created_at   timestamptz NOT NULL DEFAULT now(),
+        research_id  bigint,
+        bucket       text NOT NULL,
+        rank         integer NOT NULL,
+        spec_key     text NOT NULL UNIQUE,
+        entry        jsonb NOT NULL
+      );
+    `,
+  },
 ];

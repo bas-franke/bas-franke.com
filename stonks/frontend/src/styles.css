@@ -2008,3 +2008,14 @@ dialog.modal[open] {
 .activity-list li.lv-warn {
   color: var(--warn);
 }
+
+/* Research: keep a strategy in the hall of fame */
+.rank-head .hall-star {
+  flex: none;
+  margin-left: auto;
+}
+@media (max-width: 640px) {
+  .rank-head {
+    flex-wrap: wrap;
+  }
+}

@@ -211,6 +211,9 @@ camelCase and numbers (not numeric strings).
 | `PUT /api/bot` | partial `settings.bot` | updated `settings.bot`; switching `mode` to `live` needs `{ confirmLive:true }`; validated |
 | `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
 | `POST /api/bot/allocate` | `{ target: "BTC"\|"ETH"\|"EUR"\|null, confirmLive? }` | `{ ok, bot, started, startError? }`; moves everything to one coin or euros (switches the bot on), `null` = back to the strategy; 400 live without confirm |
+| `GET /api/hall-of-fame` | | `{ entries: [{ id, addedAt, researchId, bucket, rank, entry }] }`, newest first; `entry` = the research entry as kept (§7 shape, `botReady` = runnable on this server now) |
+| `POST /api/hall-of-fame` | `{ researchId, bucket, rank }` | `{ ok, id }`; copies that entry from that stored snapshot; 409 when the same spec is already kept |
+| `DELETE /api/hall-of-fame/:id` | `{}` | `{ ok }`; only the owner removes entries, nothing else ever does |
 | `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot` (stop also cancels the bot's open orders) |
 | `GET /api/orders` | `?mode=&market=&limit=&before=` | `{ orders:[...] }` newest first |
 | `GET /api/fills` | same | `{ fills:[...] }` |
@@ -254,6 +257,14 @@ camelCase and numbers (not numeric strings).
   ]
 }
 ```
+
+## 8a. Hall of fame
+
+Strategies the owner keeps forever (table `hall_of_fame`: id, created_at, research_id, bucket, rank, spec_key unique,
+entry jsonb). Each row is a full copy of a research entry, so new uploads and the pruning of `research_snapshots`
+(newest 200 kept) never change or delete it; only `DELETE /api/hall-of-fame/:id` does. `POST /api/bot/activate` with
+`{ hallOfFameId, start, confirmLive? }` activates the kept copy; `activeResearch` is then
+`{ researchId: <hall id>, bucket: "hall", rank: 1, ... }`.
 
 ## 8. Timeframe buckets (research v2)
 

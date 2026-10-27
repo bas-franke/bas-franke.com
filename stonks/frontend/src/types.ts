@@ -54,6 +54,16 @@ export interface ChaseSettings {
 }
 export const DEFAULT_CHASE: ChaseSettings = { enabled: true, repriceSec: 30, marketAfterMin: 10 };
 
+/** A research entry the owner keeps forever (GET /api/hall-of-fame): a copy, independent of newer research. */
+export interface HallEntry {
+  id: number;
+  addedAt: string;
+  researchId: number | null;
+  bucket: string;
+  rank: number;
+  entry: ResearchEntry;
+}
+
 export type ManualTarget = 'BTC' | 'ETH' | 'EUR';
 export interface ManualAllocation {
   target: ManualTarget;

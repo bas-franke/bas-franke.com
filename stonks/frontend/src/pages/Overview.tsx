@@ -398,7 +398,7 @@ function BalancesCard({ o }: { o: Overview }) {
   );
 }
 
-const BUCKET_LABEL: Record<string, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed' };
+const BUCKET_LABEL: Record<string, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', hall: 'Hall of fame' };
 
 /** Where the current strategy came from, when it was activated from the Research page (SPEC §8). */
 function ActiveResearchLine({ o }: { o: Overview }) {

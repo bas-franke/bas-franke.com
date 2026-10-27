@@ -55,24 +55,36 @@ export function botRoutes(deps: ApiDeps) {
   r.post('/bot/activate', async (req, res) => {
     const body = req.body;
     if (typeof body !== 'object' || body === null || Array.isArray(body)) fail('Send { researchId, bucket, rank, start }.');
-    const { researchId, bucket, rank, start, confirmLive } = body as Record<string, unknown>;
-    if (typeof researchId !== 'number' || !Number.isInteger(researchId) || researchId < 1) fail('researchId must be a research snapshot id.');
-    if (typeof bucket !== 'string' || !(BUCKETS as readonly string[]).includes(bucket)) fail(`bucket must be one of ${BUCKETS.join(', ')}.`);
-    if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 1 || rank > 5) fail('rank must be 1 to 5.');
+    const { researchId, bucket, rank, start, confirmLive, hallOfFameId } = body as Record<string, unknown>;
     if (start !== undefined && typeof start !== 'boolean') fail('start must be true or false.');
     if (confirmLive !== undefined && typeof confirmLive !== 'boolean') fail('confirmLive must be true or false.');
 
-    const { rows } = await deps.query('SELECT id, created_at, payload FROM research_snapshots ORDER BY id DESC LIMIT 1');
-    if (!rows.length) fail('There is no research to activate yet.');
-    if (num(rows[0].id) !== researchId)
-      throw new ConflictError('The research was updated since this page loaded. Reload it and pick the strategy again.');
-    const payload = rows[0].payload as { top?: unknown[]; buckets?: Partial<Record<Bucket, { top?: unknown[] }>> };
-    // v1 snapshots only have `top`, which is the daily bucket.
-    const list = payload.buckets ? payload.buckets[bucket as Bucket]?.top : bucket === 'daily' ? payload.top : undefined;
-    const entry = (list ?? []).find((e) => (e as { rank?: unknown }).rank === rank) as
-      | { spec?: Record<string, unknown>; botReady?: boolean }
-      | undefined;
-    if (!entry || !entry.spec) fail(`There is no number ${rank} in the ${bucket} list of this research.`);
+    let entry: { spec?: Record<string, unknown>; botReady?: boolean } | undefined;
+    // What gets stored as activeResearch: a hall of fame pick is { researchId: hall id, bucket: 'hall', rank: 1 }.
+    let source: { researchId: number; bucket: string; rank: number; what: string };
+    if (hallOfFameId !== undefined) {
+      // A hall of fame strategy: its stored copy, whichever research snapshot it came from (SPEC §8).
+      if (typeof hallOfFameId !== 'number' || !Number.isInteger(hallOfFameId) || hallOfFameId < 1) fail('hallOfFameId must be a hall of fame id.');
+      const { rows } = await deps.query('SELECT id, entry FROM hall_of_fame WHERE id = $1', [hallOfFameId]);
+      if (!rows.length) fail('That strategy is no longer in the hall of fame.');
+      entry = rows[0].entry as typeof entry;
+      source = { researchId: hallOfFameId as number, bucket: 'hall', rank: 1, what: `hall of fame #${hallOfFameId}` };
+    } else {
+      if (typeof researchId !== 'number' || !Number.isInteger(researchId) || researchId < 1) fail('researchId must be a research snapshot id.');
+      if (typeof bucket !== 'string' || !(BUCKETS as readonly string[]).includes(bucket)) fail(`bucket must be one of ${BUCKETS.join(', ')}.`);
+      if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 1 || rank > 5) fail('rank must be 1 to 5.');
+      const { rows } = await deps.query('SELECT id, created_at, payload FROM research_snapshots ORDER BY id DESC LIMIT 1');
+      if (!rows.length) fail('There is no research to activate yet.');
+      if (num(rows[0].id) !== researchId)
+        throw new ConflictError('The research was updated since this page loaded. Reload it and pick the strategy again.');
+      const payload = rows[0].payload as { top?: unknown[]; buckets?: Partial<Record<Bucket, { top?: unknown[] }>> };
+      // v1 snapshots only have `top`, which is the daily bucket.
+      const list = payload.buckets ? payload.buckets[bucket as Bucket]?.top : bucket === 'daily' ? payload.top : undefined;
+      entry = (list ?? []).find((e) => (e as { rank?: unknown }).rank === rank) as typeof entry;
+      if (!entry || !entry.spec) fail(`There is no number ${rank} in the ${bucket} list of this research.`);
+      source = { researchId: researchId as number, bucket: bucket as string, rank: rank as number, what: `${bucket} #${rank}, snapshot ${researchId}` };
+    }
+    if (!entry || !entry.spec) fail('That strategy has no spec.');
     const spec = entry!.spec!;
     const ready = deps.isRunnable ? deps.isRunnable(String(spec.family), spec.familyVersion) : entry!.botReady === true;
     if (!ready) fail('The server does not have this strategy family (at this version) yet: deploy the newest lab code, then activate it.');
@@ -87,16 +99,16 @@ export function botRoutes(deps: ApiDeps) {
       fail('The bot is in live mode: activating a strategy trades real money. Confirm it first (confirmLive: true).');
 
     const activeResearch = {
-      researchId,
-      bucket,
-      rank,
+      researchId: source.researchId,
+      bucket: source.bucket,
+      rank: source.rank,
       name: String(spec.name ?? '').slice(0, 200),
       activatedAt: new Date(now()).toISOString(),
     };
     // Changing the strategy makes the bot cancel its open orders for the old one (settings change listener).
     let bot = await deps.updateBotSettings({ strategy: spec, activeResearch }, { confirmLive: confirmLive === true });
     await deps.log(current.mode === 'live' ? 'warn' : 'info', 'research_activated',
-      `Activated research strategy "${activeResearch.name}" (${bucket} #${rank}, snapshot ${researchId}) in ${current.mode} mode`,
+      `Activated research strategy "${activeResearch.name}" (${source.what}) in ${current.mode} mode`,
       activeResearch);
     let started = false;
     let startError: string | undefined;

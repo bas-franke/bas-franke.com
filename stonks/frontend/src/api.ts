@@ -4,6 +4,7 @@ import type {
   BotSettings,
   EquityPoint,
   FamilyInfo,
+  HallEntry,
   Fill,
   LogRow,
   ManualTarget,
@@ -99,8 +100,11 @@ export const api = {
   families: () => request<FamilyInfo[] | { families: FamilyInfo[] }>('GET', '/strategies/families'),
   markets: () => request<MarketInfo[] | { markets: MarketInfo[] } | string[]>('GET', '/markets'),
   research: () => request<ResearchResponse>('GET', '/research'),
-  activate: (body: { researchId: number; bucket: string; rank: number; start: boolean; confirmLive?: boolean }) =>
+  activate: (body: ({ researchId: number; bucket: string; rank: number } | { hallOfFameId: number }) & { start: boolean; confirmLive?: boolean }) =>
     request<ActivateResult>('POST', '/bot/activate', body),
+  hallOfFame: () => request<{ entries: HallEntry[] }>('GET', '/hall-of-fame'),
+  addToHall: (body: { researchId: number; bucket: string; rank: number }) => request<{ ok: true; id: number }>('POST', '/hall-of-fame', body),
+  removeFromHall: (id: number) => request<{ ok: true }>('DELETE', `/hall-of-fame/${id}`, {}),
   allocate: (body: { target: ManualTarget | null; confirmLive?: boolean }) => request<AllocateResult>('POST', '/bot/allocate', body),
 };
 

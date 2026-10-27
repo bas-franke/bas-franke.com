@@ -6,13 +6,14 @@
 //   ?mock=off        bot starts switched off
 //   ?mock=login      start logged out
 // Any non-empty password logs in, except "wrong".
-import type { BotSettings } from '../types';
+import type { BotSettings, HallEntry } from '../types';
 import { equityPoints, families, fills, initialBot, logs, makeLog, markets, orders, research, researchV2, rng } from './data';
 
 const flags = new URLSearchParams(location.search).get('mock') ?? '';
 const KEY = 'stonks-mock-session';
 let loggedIn = !flags.includes('login') && sessionStorage.getItem(KEY) !== '0';
 let bot: BotSettings = initialBot();
+let hall: HallEntry[] = [];
 if (flags.includes('off')) bot.enabled = false;
 if (flags.includes('live')) bot.mode = 'live';
 const liveRng = rng(1234);
@@ -113,6 +114,21 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     const activeResearch = { researchId: researchV2.id, bucket: b.bucket!, rank: b.rank!, name: entry.spec.name, activatedAt: new Date().toISOString() };
     bot = { ...bot, strategy: entry.spec, activeResearch, enabled: bot.enabled || b.start === true };
     return json({ ok: true, bot, activeResearch, started: b.start === true });
+  }
+  if (p === '/hall-of-fame' && method === 'GET') return json({ entries: hall });
+  if (p === '/hall-of-fame' && method === 'POST') {
+    const b = body as { researchId: number; bucket: string; rank: number };
+    const entry = researchV2.buckets?.[b.bucket as 'daily']?.top.find((e) => e.rank === b.rank);
+    if (!entry) return json({ error: `There is no number ${b.rank} in the ${b.bucket} list of that research.` }, 400);
+    if (hall.some((h) => JSON.stringify(h.entry.spec) === JSON.stringify(entry.spec))) return json({ error: 'This strategy is already in the hall of fame.' }, 409);
+    const id = hall.reduce((m, h) => Math.max(m, h.id), 0) + 1;
+    hall = [{ id, addedAt: new Date().toISOString(), researchId: b.researchId, bucket: b.bucket, rank: b.rank, entry: structuredClone(entry) }, ...hall];
+    return json({ ok: true, id });
+  }
+  if (p.startsWith('/hall-of-fame/') && method === 'DELETE') {
+    const id = Number(p.split('/').pop());
+    hall = hall.filter((h) => h.id !== id);
+    return json({ ok: true });
   }
   if (p === '/bot/allocate' && method === 'POST') {
     const b = (body ?? {}) as { target?: 'BTC' | 'ETH' | 'EUR' | null; confirmLive?: boolean };

@@ -22,8 +22,23 @@ export interface Harness {
 /** Answers the SQL the API sends with canned rows; research snapshots are kept in memory. */
 function fakeQuery(calls: Harness['calls'], tables: Record<string, any[]>): Query {
   const research: { id: string; created_at: Date; payload: unknown }[] = [];
+  const hall: { id: string; created_at: Date; research_id: string; bucket: string; rank: number; spec_key: string; entry: unknown }[] = [];
+  let hallSeq = 0;
   return async (sql, params = []) => {
     calls.push({ sql, params });
+    if (sql.startsWith('INSERT INTO hall_of_fame')) {
+      if (hall.some((h) => h.spec_key === params[3])) return { rows: [] };
+      const row = { id: String(++hallSeq), created_at: new Date(), research_id: String(params[0]), bucket: String(params[1]), rank: Number(params[2]), spec_key: String(params[3]), entry: JSON.parse(String(params[4])) };
+      hall.push(row);
+      return { rows: [{ id: row.id }] };
+    }
+    if (sql.includes('FROM hall_of_fame ORDER BY id DESC')) return { rows: [...hall].reverse() };
+    if (sql.startsWith('DELETE FROM hall_of_fame')) {
+      const i = hall.findIndex((h) => h.id === String(params[0]));
+      return { rows: i < 0 ? [] : hall.splice(i, 1) };
+    }
+    if (sql.includes('FROM hall_of_fame WHERE id = $1')) return { rows: hall.filter((h) => h.id === String(params[0])) };
+    if (sql.includes('FROM research_snapshots WHERE id = $1')) return { rows: research.filter((r) => r.id === String(params[0])) };
     if (sql.startsWith('INSERT INTO research_snapshots')) {
       const row = { id: String(research.length + 1), created_at: new Date(), payload: JSON.parse(String(params[0])) };
       research.push(row);
