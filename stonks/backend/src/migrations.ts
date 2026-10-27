@@ -118,4 +118,16 @@ export const migrations: { name: string; sql: string }[] = [
       CREATE INDEX track_points_ts ON track_points (mode, ts);
     `,
   },
+  {
+    // Long-form explanations of single strategies (SPEC §8b), keyed by the strategy's spec id.
+    name: '004_writeups',
+    sql: `
+      CREATE TABLE writeups (
+        spec_id     text PRIMARY KEY,
+        title       text NOT NULL,
+        body        jsonb NOT NULL,
+        updated_at  timestamptz NOT NULL DEFAULT now()
+      );
+    `,
+  },
 ];

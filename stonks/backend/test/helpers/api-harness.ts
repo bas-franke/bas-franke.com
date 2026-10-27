@@ -24,8 +24,15 @@ function fakeQuery(calls: Harness['calls'], tables: Record<string, any[]>): Quer
   const research: { id: string; created_at: Date; payload: unknown }[] = [];
   const hall: { id: string; created_at: Date; research_id: string; bucket: string; rank: number; spec_key: string; entry: unknown }[] = [];
   let hallSeq = 0;
+  const writeups = new Map<string, any>();
   return async (sql, params = []) => {
     calls.push({ sql, params });
+    if (sql.startsWith('INSERT INTO writeups')) {
+      writeups.set(String(params[0]), { spec_id: params[0], title: params[1], body: JSON.parse(String(params[2])), updated_at: new Date() });
+      return { rows: [] };
+    }
+    if (sql.includes('FROM writeups WHERE spec_id = $1')) return { rows: writeups.has(String(params[0])) ? [writeups.get(String(params[0]))] : [] };
+    if (sql.includes('FROM writeups ORDER BY')) return { rows: [...writeups.values()] };
     if (sql.startsWith('INSERT INTO hall_of_fame')) {
       if (hall.some((h) => h.spec_key === params[3])) return { rows: [] };
       const row = { id: String(++hallSeq), created_at: new Date(), research_id: String(params[0]), bucket: String(params[1]), rank: Number(params[2]), spec_key: String(params[3]), entry: JSON.parse(String(params[4])) };

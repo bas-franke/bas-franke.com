@@ -134,6 +134,16 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     });
   }
   if (p === '/portfolio-history/clear' && method === 'POST') return json({ ok: true, removed: 1234 });
+  // Write-ups: the mixed #1 card gets one; its content comes from public/mock-writeup.json when that file exists (dev only).
+  if (p === '/writeups' && method === 'GET') {
+    const id = researchV2.buckets?.mixed?.top[0]?.spec.id;
+    return json({ writeups: id ? [{ specId: id, title: 'Sample write-up', updatedAt: new Date().toISOString() }] : [] });
+  }
+  if (p.startsWith('/writeups/') && method === 'GET') {
+    const r = await fetch('/mock-writeup.json').catch(() => null);
+    if (!r?.ok || !(r.headers.get('content-type') ?? '').includes('json')) return json({ error: 'There is no write-up for this strategy.' }, 404);
+    return json(await r.json());
+  }
   if (p === '/hall-of-fame' && method === 'GET') return json({ entries: hall });
   if (p === '/hall-of-fame' && method === 'POST') {
     const b = body as { researchId: number; bucket: string; rank: number };

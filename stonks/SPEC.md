@@ -276,6 +276,15 @@ entry jsonb). Each row is a full copy of a research entry, so new uploads and th
 `{ hallOfFameId, start, confirmLive? }` activates the kept copy; `activeResearch` is then
 `{ researchId: <hall id>, bucket: "hall", rank: 1, ... }`.
 
+## 8b. Strategy write-ups
+
+Long-form explanations of single strategies, table `writeups (spec_id PK, title, body jsonb, updated_at)`, keyed by the
+research spec's `id`. A research card whose spec id has a write-up shows "Read the full write-up", which opens
+`/writeup?spec=<id>`. Body: `{ title, subtitle?, sections: [...] }`, section types `text`, `heading`, `candles`,
+`rules`, `callout`, `example` (eli5, story, charts with `[ms, value]` series, an optional position band, events,
+result), `table`. API: `GET /api/writeups` (list), `GET /api/writeups/:specId`, `PUT /api/writeups/:specId` (logged
+in; large bodies allowed like research uploads). Example charts are made-up prices run through the strategy's real code.
+
 ## 8. Timeframe buckets (research v2)
 
 Research is ranked separately per **timeframe bucket**, each judged on windows that fit how long its trades last.

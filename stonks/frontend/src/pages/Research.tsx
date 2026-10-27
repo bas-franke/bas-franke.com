@@ -120,6 +120,7 @@ function Research({
   });
   const [pick, setPick] = useState<{ e: ResearchEntry; bucket: BucketName | 'hall'; hallId?: number } | null>(null);
   const hall = useAsync(() => api.hallOfFame().then((r) => r.entries), []);
+  const writeups = useAsync(() => api.writeups().then((r) => new Set(r.writeups.map((w) => w.specId))), []);
   const [hallView, setHallView] = useState(() => query.get('bucket') === 'hall');
   const hallKeys = useMemo(() => new Set((hall.data ?? []).map((h) => JSON.stringify(h.entry.spec))), [hall.data]);
   const toast = useToast();
@@ -242,6 +243,7 @@ function Research({
               active={!!active && active.researchId === data.id && active.bucket === tab && active.rank === e.rank}
               onActivate={data.id !== undefined ? () => setPick({ e, bucket: tab }) : undefined}
               inHall={hallKeys.has(JSON.stringify(e.spec))}
+              hasWriteup={!!writeups.data?.has(e.spec.id)}
               onAddToHall={data.id !== undefined && hall.data ? () => void addToHall(e) : undefined}
             />
           ))
@@ -512,6 +514,7 @@ function RankCard({
   onAddToHall,
   origin,
   onRemove,
+  hasWriteup,
 }: {
   e: ResearchEntry;
   color: string;
@@ -523,6 +526,8 @@ function RankCard({
   /** Hall of fame cards: where and when it was kept. */
   origin?: string;
   onRemove?: () => void;
+  /** A long-form write-up exists for this spec: show a button to it. */
+  hasWriteup?: boolean;
 }) {
   const m = e.metrics;
   const s = e.spec;
@@ -652,6 +657,11 @@ function RankCard({
           </span>
         )}
         <span className="spacer" />
+        {hasWriteup && (
+          <button className="btn small" onClick={() => navigate(`/writeup?spec=${encodeURIComponent(s.id)}`)}>
+            Read the full write-up
+          </button>
+        )}
         {onRemove && <RemoveButton onRemove={onRemove} />}
         {e.botReady ? (
           <div className="row" style={{ gap: 8 }}>

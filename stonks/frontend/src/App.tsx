@@ -10,6 +10,7 @@ import TradesPage from './pages/Trades';
 import LogsPage from './pages/Logs';
 import SettingsPage from './pages/Settings';
 import ResearchPage from './pages/Research';
+import WriteupPage from './pages/Writeup';
 
 const NAV = [
   { path: '/', label: 'Overview', icon: IconHome },
@@ -25,6 +26,7 @@ const PAGES: Record<string, () => ReactNode> = {
   '/logs': () => <LogsPage />,
   '/research': () => <ResearchPage />,
   '/settings': () => <SettingsPage />,
+  '/writeup': () => <WriteupPage />,
 };
 
 function NavLink({ path, children, className }: { path: string; children: ReactNode; className?: string }) {
