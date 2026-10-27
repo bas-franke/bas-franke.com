@@ -640,9 +640,16 @@ def entry_payload(rank_no: int, e: dict, registry: reg.Registry | None = None) -
     }
 
 
+def _holdout_return(e: dict) -> float:
+    v = (e.get("holdout") or {}).get("returnPct")
+    return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else -math.inf
+
+
 def build_payload(registry: reg.Registry | None = None, n: int = 5) -> dict:
     registry = registry or reg.default()
     entries = rank(registry, n=n)
+    # Chosen by score, shown by last-year (holdout) profit; survivorship-biased ones stay below the honest ones.
+    entries.sort(key=lambda e: (bool(e.get("pitCheck")), -_holdout_return(e)))
     st = registry.stats()
     btc, others = benchmarks_for(entries)
     return {
