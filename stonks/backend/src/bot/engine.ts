@@ -3,7 +3,8 @@ import { bitvavo, roundAmount, roundQuote, sizeProblem, type MarketRules } from 
 import { query } from '../db.js';
 import { errText, log } from '../log.js';
 import { getBotSettings, getSetting, onSettingsChange, setSetting, updateBotSettings, type BotSettings } from '../settings.js';
-import { dataMarkets, INTERVAL_MS, targets, warmupBars, type Candle, type StrategySpec } from '../strategies/index.js';
+import { INTERVAL_MS, type Candle, type StrategySpec } from '../strategies/index.js';
+import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython } from '../strategies/runtime.js';
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
 import { checkDay, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
@@ -441,16 +442,21 @@ async function handleStops(s: BotSettings, broker: Broker, ms: ModeState, pf: Po
 
 async function loadCandles(spec: StrategySpec, ms: ModeState, bar: number): Promise<Record<string, Candle[]>> {
   const ms_ = INTERVAL_MS[spec.interval];
-  const bars = warmupBars(spec);
-  const from = spec.family === 'dca_dip' && ms.strategyStart ? barOpen(ms.strategyStart, spec.interval) - Number(spec.params.lookback) * ms_ : undefined;
+  const { markets, bars } = candlePlan(spec);
+  const from = isNativeDca(spec) && ms.strategyStart ? barOpen(ms.strategyStart, spec.interval) - Number(spec.params.lookback) * ms_ : undefined;
   const out: Record<string, Candle[]> = {};
-  for (const m of dataMarkets(spec)) out[m] = await closedCandles(m, spec.interval, bar, { bars, from, maxBars: from === undefined ? undefined : DCA_MAX_BARS });
+  for (const m of markets) out[m] = await closedCandles(m, spec.interval, bar, { bars, from, maxBars: from === undefined ? undefined : DCA_MAX_BARS });
   return out;
 }
 
+const isNativeDca = (spec: StrategySpec) => spec.family === 'dca_dip' && !runsInPython(spec);
+
+/** JSON of the strategy whose lab history download was last reported, so "loading" is logged once per strategy. */
+let warmingFor: string | null = null;
+
 /** Bars dca_dip must replay at `bar` (from the lookback before its start), or 0 for other families. */
 export function dcaBarsNeeded(spec: StrategySpec, strategyStart: number | undefined, bar: number): number {
-  if (spec.family !== 'dca_dip' || !strategyStart) return 0;
+  if (!isNativeDca(spec) || !strategyStart) return 0;
   const ms = INTERVAL_MS[spec.interval];
   const from = barOpen(strategyStart, spec.interval) - Number(spec.params.lookback) * ms;
   return Math.ceil((bar - from) / ms) + 1;
@@ -471,8 +477,26 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
     await log('warn', 'no_candles', `No candles for ${missing.join(', ')}; skipping this bar`);
     return;
   }
-  const state = spec.family === 'dca_dip' && ms.strategyStart ? { startTime: barOpen(ms.strategyStart, spec.interval) } : undefined;
-  const raw = targets(candles, spec, state);
+  const state = isAnchored(spec) && ms.strategyStart ? { startTime: barOpen(ms.strategyStart, spec.interval) } : undefined;
+  const decision = await decideTargets(spec, bar, candles, state);
+  if (decision.warming) {
+    // A lab family's first run: its full candle history (what the backtest saw) downloads in the background. No
+    // decision on this bar until it is there; the next tick asks again.
+    const key = JSON.stringify(spec);
+    if (warmingFor !== key) {
+      warmingFor = key;
+      await log('info', 'history_loading', `${spec.name}: downloading the candle history it decides on (${decision.warming.length} market${decision.warming.length === 1 ? '' : 's'}); the first decision follows when that is done`, { markets: decision.warming });
+    }
+    prepare(spec, (err) => {
+      if (err) void log('error', 'history_failed', `${spec.name}: downloading its candle history failed: ${errText(err)}`);
+      else {
+        void log('info', 'history_ready', `${spec.name}: candle history is ready`);
+        kick();
+      }
+    });
+    return;
+  }
+  const raw = decision.weights;
   const w = { ...raw };
   for (const m of Object.keys(ms.locks)) {
     if (!spec.markets.includes(m) || (raw[m] ?? 0) === 0) {

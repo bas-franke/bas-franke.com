@@ -450,7 +450,7 @@ describe('POST /api/bot/activate', () => {
   test('refuses entries that are not bot-ready or whose family the bot lacks', async () => {
     const notReady = await activate({ researchId: 1, bucket: 'hourly', rank: 3 });
     assert.equal(notReady.status, 400);
-    assert.match(await error(notReady), /waiting to be ported/);
+    assert.match(await error(notReady), /does not have this strategy family/);
     const unknown = await activate({ researchId: 1, bucket: 'hourly', rank: 2 });
     assert.equal(unknown.status, 400);
     assert.match(await error(unknown), /unknown family "mystery_family"/);

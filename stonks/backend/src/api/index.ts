@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { query } from '../db.js';
 import { log } from '../log.js';
 import { getBotSettings, SettingsError, updateBotSettings } from '../settings.js';
-import { families, validateSpec } from '../strategies/index.js';
+import { allFamilies, checkSpec, isRunnable } from '../strategies/runtime.js';
 import { createApi } from './create.js';
 
 export { createApi } from './create.js';
@@ -24,7 +24,8 @@ export const api = createApi({
   getBotSettings,
   updateBotSettings: (patch, opts) => updateBotSettings(patch, opts),
   isSettingsError: (err) => err instanceof SettingsError,
-  families: () => families,
-  validateSpec: (spec) => validateSpec(spec as Parameters<typeof validateSpec>[0]),
+  families: () => allFamilies(),
+  validateSpec: async (spec) => void (await checkSpec(spec)),
+  isRunnable,
   maxLoginAttempts: config.loginAttempts,
 });

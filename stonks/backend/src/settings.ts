@@ -1,6 +1,7 @@
 import { query } from './db.js';
 import { log } from './log.js';
 import { validateSpec, type StrategySpec } from './strategies/index.js';
+import { validateAnySpec } from './strategies/runtime.js';
 
 /** `settings.bot` (SPEC §5). */
 export interface BotSettings {
@@ -72,7 +73,7 @@ export function checkSettings(s: Record<string, unknown>): BotSettings {
   if (s.mode !== 'paper' && s.mode !== 'live') throw new SettingsError('mode must be "paper" or "live"');
   let strategy: StrategySpec;
   try {
-    strategy = validateSpec(s.strategy);
+    strategy = validateAnySpec(s.strategy);
   } catch (err) {
     throw new SettingsError((err as Error).message);
   }

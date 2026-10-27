@@ -33,7 +33,7 @@ export function botRoutes(deps: ApiDeps) {
     }
     if (rest.strategy !== undefined) {
       try {
-        deps.validateSpec(rest.strategy);
+        await deps.validateSpec(rest.strategy);
       } catch (err) {
         throw new ValidationError(`Strategy is not valid: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -73,10 +73,11 @@ export function botRoutes(deps: ApiDeps) {
       | { spec?: Record<string, unknown>; botReady?: boolean }
       | undefined;
     if (!entry || !entry.spec) fail(`There is no number ${rank} in the ${bucket} list of this research.`);
-    if (entry!.botReady !== true) fail('This strategy is still waiting to be ported to the bot, so it cannot be activated yet.');
     const spec = entry!.spec!;
+    const ready = deps.isRunnable ? deps.isRunnable(String(spec.family), spec.familyVersion) : entry!.botReady === true;
+    if (!ready) fail('The server does not have this strategy family (at this version) yet: deploy the newest lab code, then activate it.');
     try {
-      deps.validateSpec(spec);
+      await deps.validateSpec(spec);
     } catch (err) {
       throw new ValidationError(`The bot cannot run this strategy yet: ${err instanceof Error ? err.message : String(err)}`);
     }

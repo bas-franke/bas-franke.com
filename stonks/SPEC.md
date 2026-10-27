@@ -7,7 +7,7 @@ all three parts in line with it.
 |---|---|---|---|
 | Dashboard (site) | `stonks/frontend` | browser, served by Nginx on `stonks.bas-franke.com` | React + TS (Vite) |
 | API + trading bot | `stonks/backend` | EC2, PM2 process `stonks`, port **3006**, database `stonks` | Node + Express + TS |
-| Research lab | `stonks-local/` | the owner's PC only, never deployed | Python 3.12 |
+| Research lab | `stonks-local/` | the owner's PC; only its family code goes to the server for live signals (§6b) | Python 3.12 |
 
 The bot runs **inside** the backend process (one project = one PM2 process). It trades on Bitvavo.
 
@@ -83,8 +83,10 @@ orders; differences smaller than €5 or 2 % of equity are ignored (no churn).
 
 ## 3. Families the bot implements (v1)
 
-Research may invent new families in Python. A family is **bot-ready** only once it is also implemented in
-`stonks/backend/src/strategies/` with a parity fixture (§6). Until then the dashboard shows it with "not yet runnable".
+Research may invent new families in Python. The bot can run **every** family the lab has: the ones below are ported
+to `stonks/backend/src/strategies/` with a parity fixture (§6); every other family (or another version of one of
+these) runs as the lab's own Python code on the server (§6b). A family is only "not yet runnable" while the server
+does not have its code at the spec's `familyVersion` yet (the next deploy brings it).
 
 | family | idea | params |
 |---|---|---|
@@ -153,6 +155,31 @@ The bot only ever touches orders it created (its `clientOrderId`s start with the
 `stonks-local` exports, for each bot-ready family, a fixture `stonks/backend/test/fixtures/parity/<family>.json`:
 `{ spec, candles: { [market]: [[t,o,h,l,c,v], ...] }, targets: [[t, { market: weight }], ...] }`.
 `npm test` in `stonks/backend` replays the candles through the TS family and fails on any difference > 1e-9.
+
+## 6b. Lab families on the server
+
+For a spec whose family has no TypeScript port at its version, the bot runs the lab's code itself
+(`src/strategies/runtime.ts` picks the engine, `src/strategies/python.ts` talks to `stonks_lab/live.py`):
+
+- **What is deployed**: `deploy-stonks.yml` bundles `stonks_lab/{__init__,data,indicators,universe,live}.py` and
+  `stonks_lab/families/*.py` (no backtester, evaluator, registry or research tools) to `/srv/apps/stonks/lab`, keeps a
+  venv with `requirements.txt` in `/srv/apps/stonks/venv` and writes `lab/catalog.json` (every family with its param
+  space) with it. Any change to those files triggers a deploy, so the server always runs the code the research tested.
+- **Validation**: param types and ranges come from the catalog (0 is also allowed where the lab's space says `zero`);
+  cross-param rules run in Python (`describe`) when a strategy is saved or activated. A spec may carry `universe`
+  (e.g. `top10_pit`), which the lab reads.
+- **Same data as the backtest**: lab families decide on the full candle history, like the backtest, not on a warmup
+  window (expanding fits, placebo draws and state machines depend on all of it). `data.py` keeps it in
+  `/srv/apps/stonks/labdata`: the first decision of a new strategy starts a one-time background download (`prepare`;
+  1m keeps the last 400 days like the lab) and that bar waits for it (`history_loading` / `history_ready` events);
+  after that each decision only fetches the newest closed bars and decides at exactly the bar the bot is on.
+- **Per decision**: `python -m stonks_lab.live targets` gets `{ spec, bar, startTime? }` and answers the weights at
+  `bar`; NaN = out (0). Anchored families (`ANCHORED = True`) get the strategy's start time like `dca_dip`. The bot
+  clamps to `risk.maxWeight` and applies risk exits and execution exactly as for TypeScript families.
+- **Version bumps**: a deployed lab change that bumps the running family's `VERSION` makes the stored strategy invalid,
+  so the bot switches itself off (`settings_invalid`) instead of trading changed logic; activate the new research.
+- `botReady` in `GET /api/research` is decided by the backend (`isRunnable`: TypeScript port or lab catalog at that
+  version), not by the lab's flag.
 
 ## 7. HTTP API (`/api`, JSON)
 
@@ -259,4 +286,4 @@ Every top entry with `botReady: true` can be activated from the dashboard with o
 body), validates it, saves it as `settings.bot.strategy` (cancelling the bot's open orders for the old strategy),
 records `settings.bot.activeResearch = { researchId, bucket, rank, name, activatedAt }`, and when `start` is true
 also switches the bot on in its current mode (live mode still needs `confirmLive: true`). Entries with
-`botReady: false` cannot be activated; the dashboard shows them as "waiting to be ported to the bot".
+`botReady: false` (the server does not have that family version yet, §6b) cannot be activated.

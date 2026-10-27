@@ -19,8 +19,10 @@ Adding a family (research agents): create ``stonks_lab/families/<name>.py`` defi
     def explain(spec) -> dict     # summary, howItWorks[], whenItWins, whenItLoses
     INVALID_BELOW_VERSION = 2     # optional: older versions had a confirmed bug (look-ahead); their rows are ignored
 
-It is picked up automatically (BOT_READY defaults to False: the dashboard shows it as "not yet runnable" until it is
-ported to stonks/backend/src/strategies/ with a parity fixture). ``register_family(module_or_family)`` registers one
+It is picked up automatically, and the bot can trade it once it is pushed: the deploy ships the families to the server,
+where ``stonks_lab/live.py`` runs them for live signals (stonks/SPEC.md §6b). A family module must therefore only
+import numpy, pandas and ``_base``/``indicators``/``data``/``universe``/sibling families, never the backtester or the
+registry. BOT_READY (default False) only marks the families with a TypeScript port and a parity fixture. ``register_family(module_or_family)`` registers one
 explicitly (e.g. from a notebook). Never use data after bar t when deciding at bar t: tests/test_families.py has a
 generic no-look-ahead check that runs on every registered family.
 """

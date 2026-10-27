@@ -187,6 +187,19 @@ function researchCount(p: ReturnType<typeof validateResearch>) {
   return p.buckets ? Object.values(p.buckets).reduce((n, b) => n + (b?.top.length ?? 0), 0) : p.top.length;
 }
 
+/** The stored payload with every entry's `botReady` saying whether this server can run it now. */
+function withBotReady(payload: Json, isRunnable: ApiDeps['isRunnable']): Json {
+  if (!isRunnable) return payload;
+  const mark = (list: unknown) =>
+    Array.isArray(list)
+      ? list.map((e) => (isObj(e) && isObj(e.spec) ? { ...e, botReady: isRunnable(String(e.spec.family), e.spec.familyVersion) } : e))
+      : list;
+  const out: Json = { ...payload, top: mark(payload.top) };
+  if (isObj(payload.buckets))
+    out.buckets = Object.fromEntries(Object.entries(payload.buckets).map(([k, b]) => [k, isObj(b) ? { ...b, top: mark(b.top) } : b]));
+  return out;
+}
+
 export function researchRoutes(deps: ApiDeps) {
   const r = Router();
 
@@ -198,7 +211,7 @@ export function researchRoutes(deps: ApiDeps) {
       res.json({ empty: true });
       return;
     }
-    res.json({ ...rows[0].payload, id: num(rows[0].id), createdAt: iso(rows[0].created_at) });
+    res.json({ ...withBotReady(rows[0].payload, deps.isRunnable), id: num(rows[0].id), createdAt: iso(rows[0].created_at) });
   });
 
   r.post('/research', async (req, res) => {

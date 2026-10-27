@@ -27,8 +27,13 @@ export interface ApiDeps {
   /** True for the settings module's SettingsError (shown to the owner as a 400). */
   isSettingsError: (err: unknown) => boolean;
   families: () => unknown;
-  /** Throws with a readable message when the strategy spec is not runnable. */
-  validateSpec: (spec: unknown) => void;
+  /** Throws (or rejects) with a readable message when the strategy spec is not runnable. */
+  validateSpec: (spec: unknown) => void | Promise<void>;
+  /**
+   * True when the bot can run this family at this version (a TypeScript port or the server's lab code). Research
+   * entries get their `botReady` from it; without it the lab's own `botReady` flag is used.
+   */
+  isRunnable?: (family: string, version: unknown) => boolean;
   maxLoginAttempts?: number;
   now?: () => number;
 }

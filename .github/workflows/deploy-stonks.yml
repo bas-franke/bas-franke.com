@@ -5,6 +5,15 @@ on:
     branches: [master]
     paths:
       - 'stonks/**'
+      # The lab's family code runs on the server for families without a TypeScript port (SPEC.md §6b): a new or
+      # changed family deploys so the bot runs exactly what the research tested.
+      - 'stonks-local/stonks_lab/families/**'
+      - 'stonks-local/stonks_lab/__init__.py'
+      - 'stonks-local/stonks_lab/data.py'
+      - 'stonks-local/stonks_lab/indicators.py'
+      - 'stonks-local/stonks_lab/universe.py'
+      - 'stonks-local/stonks_lab/live.py'
+      - 'stonks-local/requirements.txt'
       - '.github/workflows/deploy-stonks.yml'
   workflow_dispatch:
 
@@ -17,6 +26,7 @@ env:
   DOMAIN: stonks.bas-franke.com
   BACKEND_PORT: 3006
   NODE_VERSION: '24'
+  PYTHON_VERSION: '3.12'
 
 jobs:
   deploy:
@@ -34,6 +44,32 @@ jobs:
             ${{ env.PROJECT }}/frontend/package-lock.json
             ${{ env.PROJECT }}/backend/package-lock.json
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: stonks-local/requirements.txt
+
+      # Only what live signals need (stonks_lab/live.py): the families and the modules they import. No backtester,
+      # evaluator, registry or research tools go to the server.
+      - name: Bundle the lab's signal code
+        run: |
+          pip install -r stonks-local/requirements.txt
+          b=lab-bundle
+          mkdir -p $b/stonks_lab/families
+          cp stonks-local/stonks_lab/{__init__,data,indicators,universe,live}.py $b/stonks_lab/
+          cp stonks-local/stonks_lab/families/*.py $b/stonks_lab/families/
+          grep -v '^pytest' stonks-local/requirements.txt > $b/requirements.txt
+          (cd $b && python -m stonks_lab.live catalog > catalog.json)
+          python - <<'PY'
+          import json
+          c = json.load(open("lab-bundle/catalog.json"))
+          print(f"{len(c['families'])} lab families bundled")
+          for name, err in c["errors"].items():
+              print(f"::warning::lab family module {name} does not import on its own and cannot run on the server: {err}")
+          PY
+          (cd stonks-local && python -m pytest tests/test_live.py -q)
+
       - name: Build frontend
         working-directory: ${{ env.PROJECT }}/frontend
         run: npm ci && npm run build
@@ -42,6 +78,9 @@ jobs:
       # differently from its backtest never deploys.
       - name: Build and test backend
         working-directory: ${{ env.PROJECT }}/backend
+        env:
+          STONKS_LAB_DIR: ${{ github.workspace }}/lab-bundle
+          STONKS_PYTHON: python
         run: npm ci && npm run build && npm test
 
       - name: Configure SSH
@@ -84,6 +123,26 @@ jobs:
             "$PROJECT/deploy/ecosystem.config.cjs" \
             "server:/srv/apps/$PROJECT/backend/"
           rsync -az "$PROJECT/deploy/nginx.conf" "server:/srv/apps/$PROJECT/nginx.conf"
+          ssh server "mkdir -p /srv/apps/$PROJECT/lab"
+          rsync -az --delete --exclude __pycache__ lab-bundle/ "server:/srv/apps/$PROJECT/lab/"
+
+      # The lab code's Python: a venv with numpy/pandas, reinstalled only when requirements.txt changes. The catalog
+      # is written on the server with that Python, so it lists exactly the families the server can import.
+      - name: Install the lab's Python
+        run: |
+          ssh server "set -e
+            cd /srv/apps/$PROJECT
+            mkdir -p labdata
+            if [ ! -x venv/bin/python ]; then
+              python3 -m venv venv 2>/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv && python3 -m venv venv; }
+            fi
+            if ! cmp -s lab/requirements.txt venv/installed-requirements.txt; then
+              venv/bin/pip install -q --upgrade pip
+              venv/bin/pip install -q -r lab/requirements.txt
+              cp lab/requirements.txt venv/installed-requirements.txt
+            fi
+            cd lab && ../venv/bin/python -m stonks_lab.live catalog > catalog.json.new && mv catalog.json.new catalog.json
+            ../venv/bin/python -c 'import json; print(len(json.load(open(\"catalog.json\"))[\"families\"]), \"lab families on the server\")'"
 
       # The first deploy sets the site up on the server by itself: the certificate (the wildcard DNS record already
       # points here and the shared 00-default site answers the ACME challenge), then the Nginx site from

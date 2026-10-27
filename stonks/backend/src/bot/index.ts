@@ -2,7 +2,7 @@ import { bitvavo } from '../bitvavo/index.js';
 import { config } from '../config.js';
 import { log } from '../log.js';
 import { getBotSettings, SettingsError, updateBotSettings, type BotSettings } from '../settings.js';
-import { explainStrategy } from '../strategies/index.js';
+import { explainAny } from '../strategies/runtime.js';
 import { cachedPortfolio, kick, portfolio, start, status, stop, switchOff, todayPnl, withLock } from './engine.js';
 import { marketRules } from './marketData.js';
 import { resetPaperWallet as resetWallet } from './paper.js';
@@ -87,7 +87,7 @@ export async function getOverview(): Promise<Overview> {
     todayPnlEur: pf ? await todayPnl(s.mode, equityEur) : null,
     dailyLossLimitEur: s.dailyLossLimitEur,
     openOrders: (await openOrders(s.mode)).length,
-    strategyExplanation: explainStrategy(s.strategy),
+    strategyExplanation: explainAny(s.strategy),
     activeResearch: s.activeResearch ?? null,
   };
 }
