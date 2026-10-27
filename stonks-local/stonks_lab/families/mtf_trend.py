@@ -21,6 +21,7 @@ VERSION = 1
 TITLE = "Multi-timeframe trend filter"
 BOT_READY = False
 MULTI_MARKET = False
+MIXED_TIMEFRAMES = True  # slow filter + fast entries: the dashboard's "mixed" bucket
 
 
 def default_params() -> dict:

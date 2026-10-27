@@ -90,6 +90,12 @@ def _on_fast(fast_ts: np.ndarray, slow_ts: np.ndarray, slow_vals: np.ndarray, sl
     return out
 
 
+def mixed_timeframes(spec: dict) -> bool:
+    """For the dashboard's "mixed" bucket: true when the lead or an active guard uses another candle size."""
+    p, iv = {**default_params(), **(spec.get("params") or {})}, spec.get("interval")
+    return _tf(p["leadTf"], iv) != iv or (int(p.get("guardLook") or 0) > 0 and _tf(p["guardTf"], iv) != iv)
+
+
 def warmup(p: dict) -> int:
     inner = p.get("inner") or DEFAULT_INNER
     fam = get_family(inner["family"])

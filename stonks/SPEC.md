@@ -253,6 +253,7 @@ A strategy belongs to the bucket of its decision interval (`spec.interval`):
 | `hourly` | 30m, 1h, 2h, 4h | folds over the last 3 years; holdout = last 120 days; 6 folds |
 | `daily` | 6h, 8h, 12h, 1d | unchanged eval v3 (folds since 2019, holdout = last 365 days) |
 | `weekly` | 1W | eval v3 windows on weekly bars (folds since 2019, holdout = last 365 days) |
+| `mixed` | any | strategies that decide on more than one candle size (family flag `MIXED_TIMEFRAMES` or `mixed_timeframes(spec)`, e.g. a daily lead with a 15m crash guard); they are left out of the interval buckets. `intervals` = the trading intervals of its entries |
 
 Scores are only comparable within a bucket. Each bucket carries its own buy-and-hold reference score and placebo
 (random timing) luck line computed on the same profile. Fees and fill rules (§1-2) are identical in every bucket.
@@ -271,7 +272,7 @@ The payload keeps every v1 field (old dashboards still work: `top` = the daily b
     "notes": "plain-language state of this bucket",
     "top": [ /* 0-5 entries, same shape as §7 top entries */ ]
   },
-  "hourly": { ... }, "daily": { ... }, "weekly": { ... }
+  "hourly": { ... }, "daily": { ... }, "weekly": { ... }, "mixed": { ... }
 }
 ```
 

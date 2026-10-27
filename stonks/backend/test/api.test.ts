@@ -354,7 +354,7 @@ describe('research', () => {
 describe('research v2 buckets', () => {
   test('validateResearch accepts buckets, keeps v1, and caps sizes', () => {
     const good: any = validateResearch(researchPayloadV2());
-    assert.deepEqual(Object.keys(good.buckets), ['minute', 'hourly', 'daily', 'weekly']);
+    assert.deepEqual(Object.keys(good.buckets), ['minute', 'hourly', 'daily', 'weekly', 'mixed']);
     assert.equal(good.buckets.minute.top.length, 0);
     assert.equal(good.buckets.hourly.top.length, 3);
     assert.equal(good.buckets.minute.holdScore, -20.1);

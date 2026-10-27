@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import registry as reg
 
@@ -188,7 +188,8 @@ def pit_check(registry: reg.Registry, e: dict, twin: dict | None = None, looked_
 
 def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance: float = 0.25,
          bot_ready_only: bool = False, pool: int = 3000, min_test_trades: int = 5,
-         intervals: list[str] | None = None, market_sets: list[list[str]] | None = None) -> list[dict]:
+         intervals: list[str] | None = None, market_sets: list[list[str]] | None = None,
+         keep: Callable[[dict], bool] | None = None) -> list[dict]:
     """The best ``n`` diverse done experiments of the current evaluation version, best first. Skips ineligible
     specs (:func:`ineligible_reason`), more than ``per_family`` per family, parameter near-duplicates of a chosen
     one, and specs that trade the same as a chosen one (:func:`same_outcome`), so only the best-scoring copy stays.
@@ -198,7 +199,7 @@ def rank(registry: reg.Registry, n: int = 5, per_family: int = 2, near_tolerance
     (honest specs first, then the biased ones); the payload says so."""
     cands: list[dict] = []
     rows = [e for e in registry.top(pool, bot_ready_only=bot_ready_only, intervals=intervals, market_sets=market_sets)
-            if not ineligible_reason(e, min_test_trades)]
+            if not ineligible_reason(e, min_test_trades) and (keep is None or keep(e))]
     twin_of: dict[str, str] = {}
     for e in rows:
         if survivorship_biased(e):
@@ -648,19 +649,48 @@ def _holdout_return(e: dict) -> float:
 # The dashboard only shows strategies that trade BTC and/or ETH against EUR (user decision 2026-10-27).
 TRADED_MARKET_SETS = [["BTC-EUR"], ["ETH-EUR"], ["BTC-EUR", "ETH-EUR"]]
 
-# SPEC section 8: a strategy belongs to the bucket of its decision interval.
+# SPEC section 8: a strategy belongs to the bucket of its decision interval, except strategies that combine
+# candle sizes (e.g. a daily lead with a 15-minute crash guard): those go to "mixed", whatever their interval.
 BUCKETS = {
     "minute": ("Minute trading", ["1m", "5m", "15m"]),
     "hourly": ("Hourly trading", ["30m", "1h", "2h", "4h"]),
     "daily": ("Daily trading", ["6h", "8h", "12h", "1d"]),
     "weekly": ("Weekly trading", ["1W"]),
+    "mixed": ("Mixed timeframes", ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1W"]),
 }
 
 
-def bucket_entries(registry: reg.Registry, intervals: list[str], n: int = 5) -> list[dict]:
+def mixed_timeframes(e: dict) -> bool:
+    """True when the spec decides on more than one candle size: its family sets MIXED_TIMEFRAMES = True, or a
+    module function ``mixed_timeframes(spec)`` says so for this spec."""
+    try:
+        from .families import FAMILIES  # type: ignore
+        mod = getattr(FAMILIES.get(e["family"]), "module", None)
+        fn = getattr(mod, "mixed_timeframes", None)
+        if callable(fn):
+            return bool(fn(e["spec"]))
+        return bool(getattr(mod, "MIXED_TIMEFRAMES", False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def bucket_entries(registry: reg.Registry, intervals: list[str], n: int = 5, mixed: bool = False) -> list[dict]:
     """The bucket's top ``n``: chosen by score among BTC/ETH-vs-EUR strategies, ordered by last-year (holdout)
-    profit."""
-    entries = rank(registry, n=n, intervals=intervals, market_sets=TRADED_MARKET_SETS)
+    profit. ``mixed`` picks only multi-timeframe specs; the other buckets leave them out."""
+    if not mixed:
+        entries = rank(registry, n=n, intervals=intervals, market_sets=TRADED_MARKET_SETS,
+                       keep=lambda e: not mixed_timeframes(e))
+    else:
+        # few families mix timeframes, and they wrap other leads: one entry per family + wrapped lead + market
+        entries, seen = [], set()
+        for e in rank(registry, n=n * 6, intervals=intervals, market_sets=TRADED_MARKET_SETS, per_family=n * 6,
+                      keep=mixed_timeframes):
+            inner = ((e["spec"].get("params") or {}).get("inner") or {}).get("family")
+            key = (e["family"], inner, tuple(e["spec"].get("markets") or []))
+            if key not in seen:
+                seen.add(key)
+                entries.append(e)
+        entries = entries[:n]
     entries.sort(key=lambda e: (bool(e.get("pitCheck")), -_holdout_return(e)))
     return entries
 
@@ -675,13 +705,15 @@ def bucket_notes(entries: list[dict]) -> str:
 
 def build_payload(registry: reg.Registry | None = None, n: int = 5) -> dict:
     registry = registry or reg.default()
-    per = {name: bucket_entries(registry, ivs, n) for name, (_, ivs) in BUCKETS.items()}
+    per = {name: bucket_entries(registry, ivs, n, mixed=name == "mixed") for name, (_, ivs) in BUCKETS.items()}
     entries = per["daily"]                     # v1 fields (top, benchmark, notes) = the daily bucket
     st = registry.stats()
     btc, others = benchmarks_for(entries or [e for es in per.values() for e in es])
     buckets = {}
     for name, (label, ivs) in BUCKETS.items():
         b_btc, _ = benchmarks_for(per[name]) if per[name] else (btc, [])
+        if name == "mixed":                    # the trading intervals actually used, not all twelve
+            ivs = [iv for iv in ivs if any(e["interval"] == iv for e in per[name])]
         buckets[name] = {"label": label, "intervals": ivs, "benchmark": b_btc if b_btc.get("equity") else btc,
                          "notes": bucket_notes(per[name]),
                          "top": [entry_payload(i + 1, e, registry) for i, e in enumerate(per[name])]}

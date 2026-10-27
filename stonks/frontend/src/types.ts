@@ -43,8 +43,8 @@ export interface BotSettings {
   activeResearch?: ActiveResearch | null;
 }
 
-export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly';
-export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly'];
+export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed';
+export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed'];
 
 export interface ActiveResearch {
   researchId: number;

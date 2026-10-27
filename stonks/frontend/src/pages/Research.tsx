@@ -16,7 +16,7 @@ const BENCH_STYLE = [
 ];
 
 /** Tab titles for the timeframe buckets (SPEC §8). */
-export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly' };
+export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed' };
 const bucketTitle = (b: string) => BUCKET_TITLES[b as BucketName] ?? b;
 const TAB_KEY = 'stonks-research-bucket';
 
@@ -85,7 +85,7 @@ const Head = ({ data }: { data?: ResearchPayload }) => (
       <h1>What the lab found</h1>
       <p className="lede">
         Thousands of strategies were tested on years of past prices, each starting with €1,000. These are the ones that held up best on data they had
-        never seen, ranked separately for minute, hourly, daily and weekly trading, and explained in plain words.
+        never seen, ranked separately for minute, hourly, daily and weekly trading and for strategies that mix candle sizes, and explained in plain words.
       </p>
     </div>
     {data && <span className="chip outline">updated {ago(data.generatedAt)}</span>}
@@ -262,10 +262,16 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
         <h2 style={{ marginRight: 'auto' }}>{b.label || `${bucketTitle(name)} trading`}</h2>
         {b.intervals.map((iv) => (
           <span className="chip" key={iv}>
-            every {iv}
+            {name === 'mixed' ? 'trades' : 'every'} {iv}
           </span>
         ))}
       </div>
+      {name === 'mixed' && (
+        <p>
+          Each strategy here looks at two candle sizes at once: a slow one (daily or weekly) for the long-term decision, and a fast one that watches for
+          sudden drops and sells early, or the other way round.
+        </p>
+      )}
       {b.notes && <p className="notes">“{b.notes}”</p>}
       <div className="bucket-lines">
         <div>

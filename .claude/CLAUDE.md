@@ -44,6 +44,9 @@ Per-project setup lives in each project's own `README.md`.
 8. **Push intermittently.** Commit and push each verified, working piece to `master` as it lands (per feature or step,
    also mid-task and during multi-agent work), never one big commit at the end, so every iteration can be tested live.
    Don't push broken builds or failing tests. Tell subagents to do the same.
+9. **stonks: publish research results.** After any stonks-local experiments (sweeps, campaigns, agent rounds) run
+   `.venv/Scripts/python lab.py publish` in `stonks-local/` so the Research page (minute/hourly/daily/weekly/mixed tabs)
+   shows the newest results. Campaign scripts publish at the end themselves.
 
 ## Screenshots of design changes
 

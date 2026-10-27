@@ -48,8 +48,9 @@ Repeat until the file `stonks-local/STOP` exists (check before each step; if it 
    Good findings state the scope (family, interval, markets), the number, and what to try next or never again.
    Tag negative results `dead-end` (they appear in FINDINGS.md "Dead ends"). Tag bugs you notice `bug`.
 7. **Release** the lane with a one-line summary: `$PY lab.py lane release <lane> --agent A --note "summary"`.
-8. **Publish** only if your round put an experiment of yours into `$PY lab.py top --diverse -n 5`:
-   `$PY lab.py publish`. If it says the dashboard isn't reachable, carry on: the payload is kept in `out/`.
+8. **Publish** after every round or campaign, always (user rule, 2026-10-27): `$PY lab.py publish`. It rebuilds
+   every bucket (minute, hourly, daily, weekly, mixed) from the whole registry, so new results reach the Research
+   page even when they don't top it. If it says the dashboard isn't reachable, say so; the payload is kept in `out/`.
 9. Next round (R+1), back to 1.
 
 ## Lanes

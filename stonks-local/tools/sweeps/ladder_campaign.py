@@ -202,6 +202,9 @@ def main():
     finally:
         if had_stop:
             stop.write_text("paused by ladder_campaign\n", encoding="utf8")
+    # new results always go to the dashboard (user rule): every bucket is rebuilt from the whole registry
+    p = subprocess.run([PY, "lab.py", "publish"], cwd=LAB, capture_output=True, text=True)
+    log(f"publish exit {p.returncode}: {(p.stdout.strip().splitlines() or [''])[-1][:200]} {p.stderr.strip()[-200:]}")
     log("campaign done")
 
 

@@ -166,6 +166,7 @@ export function researchPayloadV2() {
       ]),
       daily: bucket('Daily trading', ['6h', '8h', '12h', '1d'], v1.top),
       weekly: bucket('Weekly trading', ['1W'], [entry(1, '1W')]),
+      mixed: bucket('Mixed timeframes', ['1h'], [entry(1, '1h')]),
     },
   };
 }
