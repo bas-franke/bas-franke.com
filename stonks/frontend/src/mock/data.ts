@@ -469,6 +469,15 @@ function buildResearchV2(): ResearchPayload & { id: number } {
         'Weekly bars have few trades, so these scores wobble more. One candidate so far.',
         [clone(t[2] ?? t[0], 1, '1W', 16.2, true)],
       ),
+      mixed: bucket(
+        'Mixed timeframes',
+        ['1h'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-03-08' },
+        -26.1,
+        null,
+        '1 of these 2 beat buying and holding the same coin(s) in the last test year.',
+        [clone(t[1] ?? t[0], 1, '1h', 7.7, false), clone(t[3] ?? t[0], 2, '1h', 5.1, false)],
+      ),
     },
   };
 }
