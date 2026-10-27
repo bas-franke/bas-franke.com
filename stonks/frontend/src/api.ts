@@ -1,10 +1,12 @@
 import type {
   ActivateResult,
+  AllocateResult,
   BotSettings,
   EquityPoint,
   FamilyInfo,
   Fill,
   LogRow,
+  ManualTarget,
   MarketInfo,
   Order,
   Overview,
@@ -99,6 +101,7 @@ export const api = {
   research: () => request<ResearchResponse>('GET', '/research'),
   activate: (body: { researchId: number; bucket: string; rank: number; start: boolean; confirmLive?: boolean }) =>
     request<ActivateResult>('POST', '/bot/activate', body),
+  allocate: (body: { target: ManualTarget | null; confirmLive?: boolean }) => request<AllocateResult>('POST', '/bot/allocate', body),
 };
 
 export const unwrapFamilies = (r: FamilyInfo[] | { families: FamilyInfo[] }) => (Array.isArray(r) ? r : (r.families ?? []));

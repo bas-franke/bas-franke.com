@@ -208,3 +208,21 @@ test('dca_dip that ran past its replayable history places nothing instead of res
   assert.equal(candleCalls, 0);
   assert.ok(engine.dcaBarsNeeded(dca, now - 1000 * 60_000, now) < engine.DCA_MAX_BARS);
 });
+
+test('a manual "move everything to ETH" places one post-only limit buy for the whole cash, without candles', async (t) => {
+  reset(ema);
+  botSettings.manual = { target: 'ETH', setAt: '2026-10-27T12:00:00Z' };
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-27T12:00:30Z') + stray * 120_000 });
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(candleCalls, 0, 'a manual move needs no strategy candles');
+  assert.equal(placed.length, 1);
+  const o = placed[0].intent;
+  assert.equal(o.market, 'ETH-EUR');
+  assert.equal(o.side, 'buy');
+  assert.equal(o.orderType, 'limit');
+  assert.equal(o.postOnly, true);
+  assert.ok(o.valueEur > 990 && o.valueEur <= 1000, `whole cash minus room for the fee, got ${o.valueEur}`);
+  assert.equal(engine.manualSpec(botSettings.manual).interval, '1m');
+  assert.deepEqual(engine.manualWeights({ target: 'EUR', setAt: '' }), { 'BTC-EUR': 0, 'ETH-EUR': 0 });
+});

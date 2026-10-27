@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { bitvavo, roundAmount, roundQuote, sizeProblem, type MarketRules } from '../bitvavo/index.js';
 import { query } from '../db.js';
 import { errText, log } from '../log.js';
-import { getBotSettings, getSetting, onSettingsChange, setSetting, updateBotSettings, type BotSettings } from '../settings.js';
-import { INTERVAL_MS, type Candle, type StrategySpec } from '../strategies/index.js';
+import { getBotSettings, getSetting, onSettingsChange, setSetting, updateBotSettings, type BotSettings, type ManualAllocation } from '../settings.js';
+import { INTERVAL_MS, validateSpec, type Candle, type StrategySpec } from '../strategies/index.js';
 import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython } from '../strategies/runtime.js';
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
@@ -38,6 +38,30 @@ interface ModeState {
 type BotState = Record<Mode, ModeState>;
 const STATE_KEY = 'bot_state';
 const emptyMode = (): ModeState => ({ locks: {}, trail: {} });
+
+/** Markets a manual "move everything" trades: the only ones the bot may hold (owner's rule, 2026-10-27). */
+export const MANUAL_MARKETS = ['BTC-EUR', 'ETH-EUR'];
+
+/** The stand-in strategy the bot runs while a manual allocation is set: decides every minute, post-only limit
+ * orders at the best price that stays maker, unfilled ones cancelled after a minute and placed again. */
+export function manualSpec(m: ManualAllocation): StrategySpec {
+  const where = m.target === 'EUR' ? 'euros' : m.target;
+  return {
+    ...validateSpec({
+      // any two-market family will do: only its markets, interval and execution are used, never its signal
+      family: 'rotation_momentum', markets: MANUAL_MARKETS, interval: '1m', params: { lookback: 3, top: 2 },
+      execution: { orderType: 'limit', postOnly: true, limitOffsetBps: 0, timeoutBars: 1, fallback: 'cancel' },
+    }),
+    id: `manual-${m.target.toLowerCase()}-${m.setAt}`,
+    name: `Manual: everything in ${where}`,
+  };
+}
+
+export const manualWeights = (m: ManualAllocation): Record<string, number> =>
+  Object.fromEntries(MANUAL_MARKETS.map((mk) => [mk, mk === `${m.target}-EUR` ? 1 : 0]));
+
+/** The settings the loop acts on: a manual allocation replaces the strategy while it is set. */
+export const effective = (s: BotSettings): BotSettings => (s.manual ? { ...s, strategy: manualSpec(s.manual) } : s);
 
 async function loadState(): Promise<BotState> {
   const s = await getSetting<Partial<BotState>>(STATE_KEY);
@@ -129,6 +153,8 @@ function listen() {
     if (before.mode !== after.mode) pending.push({ cancelMode: before.mode, resetDay: after.mode, reason: `mode changed to ${after.mode}` });
     if (JSON.stringify(before.strategy) !== JSON.stringify(after.strategy))
       pending.push({ cancelMode: after.mode, resetStrategy: after.mode, reason: 'strategy changed' });
+    if (JSON.stringify(before.manual) !== JSON.stringify(after.manual))
+      pending.push({ cancelMode: after.mode, resetStrategy: after.mode, reason: after.manual ? `moving everything to ${after.manual.target}` : 'back to the strategy' });
     if (before.paperStartEur !== after.paperStartEur) pending.push({ resetPaper: after.paperStartEur, resetDay: 'paper', reason: 'paper start changed' });
     kick();
   });
@@ -228,7 +254,7 @@ export async function tick(): Promise<void> {
 
 async function tickBody() {
   await runPending();
-  const s = await getBotSettings();
+  const s = effective(await getBotSettings());
   currentPaperStart = s.paperStartEur;
   const version = status.settingsVersion;
   const now = Date.now();
@@ -464,6 +490,14 @@ export function dcaBarsNeeded(spec: StrategySpec, strategyStart: number | undefi
 
 async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, stillValid: () => boolean, markDecided: () => Promise<void>) {
   const spec = s.strategy;
+  if (s.manual) {
+    const prices: Record<string, number> = {};
+    for (const m of spec.markets) {
+      const p = pf.prices.get(m);
+      if (p) prices[m] = p;
+    }
+    return placeTargets(s, broker, ms, bar, pf, manualWeights(s.manual), prices, stillValid, markDecided);
+  }
   if (dcaBarsNeeded(spec, ms.strategyStart, bar) > DCA_MAX_BARS) {
     // Replaying from a later bar would restart the virtual DCA portfolio at zero and sell the position.
     await markDecided();
@@ -496,7 +530,20 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
     });
     return;
   }
-  const raw = decision.weights;
+  const prices: Record<string, number> = {};
+  for (const m of spec.markets) {
+    const cs = candles[m];
+    if (cs?.length) prices[m] = cs[cs.length - 1][4];
+  }
+  return placeTargets(s, broker, ms, bar, pf, decision.weights, prices, stillValid, markDecided);
+}
+
+/** Target weights -> orders (planOrders) -> placed, for the strategy's decision or a manual allocation. */
+async function placeTargets(
+  s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, raw: Record<string, number>,
+  prices: Record<string, number>, stillValid: () => boolean, markDecided: () => Promise<void>,
+) {
+  const spec = s.strategy;
   const w = { ...raw };
   for (const m of Object.keys(ms.locks)) {
     if (!spec.markets.includes(m) || (raw[m] ?? 0) === 0) {
@@ -507,14 +554,11 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
 
   const rulesMap = await marketRules();
   const rules: Record<string, MarketRules> = {};
-  const prices: Record<string, number> = {};
   const holdings: Record<string, Holding> = {};
   let strategyCoins = 0;
   for (const m of spec.markets) {
     const r = rulesMap.get(m);
     if (r) rules[m] = r;
-    const cs = candles[m];
-    if (cs?.length) prices[m] = cs[cs.length - 1][4];
     const b = pf.balances.find((x) => x.symbol === baseOf(m));
     holdings[m] = { total: b ? b.available + b.inOrder : 0, available: b?.available ?? 0 };
     strategyCoins += b ? b.eurValue : 0;

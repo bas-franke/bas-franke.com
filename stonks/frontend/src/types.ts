@@ -41,6 +41,21 @@ export interface BotSettings {
   paperStartEur: number;
   /** Set when the strategy was activated from the Research page (SPEC §8). */
   activeResearch?: ActiveResearch | null;
+  /** "Move everything" from Settings: the bot holds all of it in this coin (or euros) instead of following the strategy. */
+  manual?: ManualAllocation | null;
+}
+
+export type ManualTarget = 'BTC' | 'ETH' | 'EUR';
+export interface ManualAllocation {
+  target: ManualTarget;
+  setAt: string;
+}
+
+export interface AllocateResult {
+  ok: true;
+  bot: BotSettings;
+  started: boolean;
+  startError?: string;
 }
 
 export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed';

@@ -135,7 +135,10 @@ Family details both sides implement (the docstrings in `stonks_lab/families/*.py
   "dailyLossLimitEur": 100,      // loss since 00:00 Europe/Amsterdam (realized + unrealized) that switches the bot off
   "fees": { "maker": 0.0015, "taker": 0.0025 },
   "paperStartEur": 1000,
-  "activeResearch": null         // set by POST /api/bot/activate (§8); reset to null when the strategy is changed by hand
+  "activeResearch": null,        // set by POST /api/bot/activate (§8); reset to null when the strategy is changed by hand
+  "manual": null                 // { target: "BTC"|"ETH"|"EUR", setAt } from POST /api/bot/allocate: while set the bot holds
+                                 // everything there (BTC-EUR/ETH-EUR, 1m decisions, post-only limit at the best price,
+                                 // re-placed each minute) instead of the strategy; a strategy change clears it
 }
 ```
 
@@ -198,6 +201,7 @@ camelCase and numbers (not numeric strings).
 | `GET /api/overview` | | `{ bot: settings.bot, running:bool, lastTickAt, bitvavo:{connected, error?}, balances:[{symbol, available, inOrder, eurValue}], equityEur, todayPnlEur, dailyLossLimitEur, openOrders:n, strategyExplanation, activeResearch }` |
 | `PUT /api/bot` | partial `settings.bot` | updated `settings.bot`; switching `mode` to `live` needs `{ confirmLive:true }`; validated |
 | `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
+| `POST /api/bot/allocate` | `{ target: "BTC"\|"ETH"\|"EUR"\|null, confirmLive? }` | `{ ok, bot, started, startError? }`; moves everything to one coin or euros (switches the bot on), `null` = back to the strategy; 400 live without confirm |
 | `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot` (stop also cancels the bot's open orders) |
 | `GET /api/orders` | `?mode=&market=&limit=&before=` | `{ orders:[...] }` newest first |
 | `GET /api/fills` | same | `{ fills:[...] }` |

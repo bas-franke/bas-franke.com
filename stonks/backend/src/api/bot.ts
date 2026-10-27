@@ -112,6 +112,43 @@ export function botRoutes(deps: ApiDeps) {
     res.json({ ok: true, bot, activeResearch, started, ...(startError ? { startError } : {}) });
   });
 
+  // "Move everything" (Settings): hold all of it in BTC, ETH or euros instead of following the strategy, with post-only
+  // limit orders; `target: null` goes back to the strategy. The bot runs it, so it is switched on if it was off.
+  r.post('/bot/allocate', async (req, res) => {
+    const body = req.body;
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) fail('Send { target, confirmLive? }.');
+    const { target, confirmLive } = body as Record<string, unknown>;
+    if (target !== null && target !== 'BTC' && target !== 'ETH' && target !== 'EUR') fail('target must be "BTC", "ETH", "EUR" or null (back to the strategy).');
+    if (confirmLive !== undefined && typeof confirmLive !== 'boolean') fail('confirmLive must be true or false.');
+    const current = await deps.getBotSettings();
+    if (target === null) {
+      const was = current.manual?.target;
+      const name = current.strategy?.name ?? '';
+      const bot = await deps.updateBotSettings({ manual: null }, {});
+      if (was) await deps.log('info', 'manual_cleared', `Back to the strategy ${name} after the manual move to ${was}`);
+      res.json({ ok: true, bot, started: false });
+      return;
+    }
+    if (current.mode === 'live' && confirmLive !== true)
+      fail(`The bot is in live mode: moving everything to ${target} trades real money. Confirm it first (confirmLive: true).`);
+    const manual = { target, setAt: new Date(now()).toISOString() };
+    let bot = await deps.updateBotSettings({ manual }, { confirmLive: confirmLive === true });
+    await deps.log(current.mode === 'live' ? 'warn' : 'info', 'manual_allocation',
+      `Moving everything to ${target === 'EUR' ? 'euros' : target} in ${current.mode} mode with post-only limit orders (re-placed every minute until filled)`, manual);
+    let started = false;
+    let startError: string | undefined;
+    if (!(bot as { enabled?: boolean }).enabled) {
+      try {
+        bot = await deps.enableTrading();
+        started = true;
+      } catch (err) {
+        if (!(err instanceof ValidationError) && !deps.isSettingsError(err)) throw err;
+        startError = (err as Error).message;
+      }
+    }
+    res.json({ ok: true, bot, started, ...(startError ? { startError } : {}) });
+  });
+
   r.get('/strategies/families', (_req, res) => {
     res.json(deps.families());
   });

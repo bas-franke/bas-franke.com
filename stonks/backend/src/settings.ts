@@ -14,6 +14,15 @@ export interface BotSettings {
   paperStartEur: number;
   /** The research strategy the owner activated (SPEC §8); null once the strategy is changed any other way. */
   activeResearch: ActiveResearch | null;
+  /** "Move everything" from Settings: while set, the bot holds all of it in this coin (or euros) instead of following
+   * the strategy, with post-only limit orders re-placed every minute until filled. null = follow the strategy. */
+  manual: ManualAllocation | null;
+}
+
+export const MANUAL_TARGETS = ['BTC', 'ETH', 'EUR'] as const;
+export interface ManualAllocation {
+  target: (typeof MANUAL_TARGETS)[number];
+  setAt: string;
 }
 
 export interface ActiveResearch {
@@ -50,7 +59,16 @@ export function defaultBotSettings(): BotSettings {
     fees: { maker: 0.0015, taker: 0.0025 },
     paperStartEur: 1000,
     activeResearch: null,
+    manual: null,
   };
+}
+
+function checkManual(v: unknown): ManualAllocation | null {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v)) throw new SettingsError('manual must be an object or null');
+  if (!(MANUAL_TARGETS as readonly unknown[]).includes(v.target)) throw new SettingsError(`manual.target must be one of ${MANUAL_TARGETS.join(', ')}`);
+  if (typeof v.setAt !== 'string' || Number.isNaN(Date.parse(v.setAt))) throw new SettingsError('manual.setAt must be an ISO date');
+  return { target: v.target as ManualAllocation['target'], setAt: v.setAt };
 }
 
 function checkActiveResearch(v: unknown): ActiveResearch | null {
@@ -100,6 +118,7 @@ export function checkSettings(s: Record<string, unknown>): BotSettings {
     fees: { maker: maker as number, taker: taker as number },
     paperStartEur,
     activeResearch: checkActiveResearch(s.activeResearch),
+    manual: checkManual(s.manual),
   };
 }
 
@@ -141,7 +160,7 @@ async function safeParse(stored: Record<string, unknown>, defaults: BotSettings)
   }
 }
 
-const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur', 'activeResearch']);
+const ALLOWED = new Set(['enabled', 'mode', 'strategy', 'maxExposureEur', 'dailyLossLimitEur', 'fees', 'paperStartEur', 'activeResearch', 'manual']);
 
 let chain: Promise<unknown> = Promise.resolve();
 /** Serializes settings writes inside this process. */
@@ -170,6 +189,8 @@ export function updateBotSettings(patch: Record<string, unknown>, opts: { confir
     const after = checkSettings(merged);
     // A strategy picked by hand is no longer the activated research strategy.
     if (!keys.includes('activeResearch') && JSON.stringify(after.strategy) !== JSON.stringify(before.strategy)) after.activeResearch = null;
+    // Picking a strategy (by hand or from research) ends a manual "move everything".
+    if (!keys.includes('manual') && JSON.stringify(after.strategy) !== JSON.stringify(before.strategy)) after.manual = null;
     await query(
       `INSERT INTO settings (key, value, updated_at) VALUES ('bot', $1, now())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,

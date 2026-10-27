@@ -3,7 +3,7 @@ import { api, ApiError, unwrapFamilies, unwrapMarkets } from '../api';
 import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { eur, familyLabel, humanize } from '../format';
 import { navigate, takeHandoff } from '../router';
-import { INTERVALS, type BotSettings, type FamilyInfo, type Interval, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
+import { INTERVALS, type BotSettings, type FamilyInfo, type Interval, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
 
 type Draft = Omit<BotSettings, 'enabled'>;
 
@@ -163,6 +163,15 @@ export default function SettingsPage() {
         </div>
       )}
       {fam.error && <ErrorBox error={fam.error} onRetry={fam.reload} />}
+
+      <MoveEverything
+        bot={{ ...saved, enabled: ov.data?.bot.enabled ?? false }}
+        onDone={(bot) => {
+          setSaved((x) => (x ? { ...x, manual: bot.manual ?? null } : x));
+          setDraft((x) => (x ? { ...x, manual: bot.manual ?? null } : x));
+          ov.reload();
+        }}
+      />
 
       <div className="card" style={{ paddingTop: 4, paddingBottom: 4 }}>
         <Section title="Strategy" intro="Which algorithm runs, on which market, and how often it looks.">
@@ -484,6 +493,99 @@ function fieldFromMessage(msg: string): Record<string, string> {
   const s = /(markets|interval|name|family)/.exec(short);
   if (s && /strategy/i.test(msg)) return { [`strategy.${s[1]}`]: short };
   return {};
+}
+
+const WHERE: Record<ManualTarget, string> = { ETH: 'Ethereum (ETH)', BTC: 'Bitcoin (BTC)', EUR: 'euros' };
+
+/** Buttons that move the whole portfolio into ETH, BTC or euros with limit orders (POST /api/bot/allocate). */
+function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSettings) => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState<ManualTarget | 'back' | null>(null);
+  const [ask, setAsk] = useState<ManualTarget | null>(null);
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const live = bot.mode === 'live';
+  const current = bot.manual?.target ?? null;
+
+  const run = async (target: ManualTarget | null) => {
+    setBusy(target ?? 'back');
+    setError(null);
+    try {
+      const res = await api.allocate({ target, ...(live && target ? { confirmLive: true } : {}) });
+      onDone(res.bot);
+      if (!target) toast('Back to the strategy. It decides again at its next candle.');
+      else if (res.startError) setError(`Saved, but the bot could not start: ${res.startError}`);
+      else toast(`Moving everything to ${WHERE[target]}${res.started ? ' (bot switched on)' : ''}. Limit orders go out within a minute.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+      setAsk(null);
+      setText('');
+    }
+  };
+  const press = (t: ManualTarget) => (live ? setAsk(t) : void run(t));
+
+  return (
+    <div className="card" style={{ paddingTop: 4, paddingBottom: 4, marginBottom: 18 }}>
+      <Section
+        title="Move everything"
+        intro="Put the whole portfolio into one coin or into euros, right now. The bot then holds it there instead of following the strategy."
+      >
+        <div className="stack" style={{ gap: 12 }}>
+          {current && (
+            <div className="callout brass">
+              The bot is holding <b>everything in {WHERE[current]}</b> since {new Date(bot.manual!.setAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}, instead of
+              running <b>{bot.strategy.name}</b>.
+            </div>
+          )}
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {(['ETH', 'BTC', 'EUR'] as const).map((t) => (
+              <button key={t} className={`btn ${current === t ? 'primary' : 'ghost'}`} disabled={!!busy || current === t} onClick={() => press(t)}>
+                {busy === t ? 'Moving…' : t === 'EUR' ? 'All to euros' : `All in ${t}`}
+              </button>
+            ))}
+            {current && (
+              <button className="btn ghost" disabled={!!busy} onClick={() => void run(null)}>
+                {busy === 'back' ? 'Switching…' : 'Back to the strategy'}
+              </button>
+            )}
+          </div>
+          <p className="small soft" style={{ margin: 0 }}>
+            Uses limit orders only (maker fee 0.15 %): one at the best price every minute until it fills, selling first and buying with the euros that
+            frees up. Switches the bot on if it is off. {live ? <b>The bot is in live mode: this trades real money.</b> : 'The bot is in paper mode: practice money only.'}
+          </p>
+          {error && <div className="callout loss">{error}</div>}
+        </div>
+      </Section>
+      <Modal
+        open={!!ask}
+        onClose={() => setAsk(null)}
+        title={ask ? `Move everything to ${WHERE[ask]} with real money?` : ''}
+        actions={
+          <>
+            <button className="btn ghost" onClick={() => setAsk(null)}>
+              Cancel
+            </button>
+            <button className="btn danger" disabled={text.trim().toUpperCase() !== 'LIVE' || !!busy} onClick={() => ask && void run(ask)}>
+              {busy ? 'Moving…' : 'Place real orders'}
+            </button>
+          </>
+        }
+      >
+        <div className="callout loss">
+          The bot will place <b>real limit orders</b> on your Bitvavo account to put the whole portfolio into {ask ? WHERE[ask] : ''}, and keep it there
+          until you go back to the strategy.
+        </div>
+        <div className="field">
+          <label htmlFor="move-confirm">
+            Type <b>LIVE</b> to confirm
+          </label>
+          <input id="move-confirm" className="input" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
+        </div>
+      </Modal>
+    </div>
+  );
 }
 
 function Section({ title, intro, children }: { title: string; intro: string; children: ReactNode }) {

@@ -114,6 +114,13 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     bot = { ...bot, strategy: entry.spec, activeResearch, enabled: bot.enabled || b.start === true };
     return json({ ok: true, bot, activeResearch, started: b.start === true });
   }
+  if (p === '/bot/allocate' && method === 'POST') {
+    const b = (body ?? {}) as { target?: 'BTC' | 'ETH' | 'EUR' | null; confirmLive?: boolean };
+    if (b.target && bot.mode === 'live' && !b.confirmLive) return json({ error: 'The bot is in live mode: confirm it first (confirmLive: true).' }, 400);
+    const started = !!b.target && !bot.enabled;
+    bot = { ...bot, manual: b.target ? { target: b.target, setAt: new Date().toISOString() } : null, enabled: bot.enabled || started };
+    return json({ ok: true, bot, started });
+  }
   if (p === '/bot/start' && method === 'POST') {
     bot = { ...bot, enabled: true };
     return json(bot);

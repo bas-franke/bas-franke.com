@@ -543,6 +543,56 @@ describe('POST /api/bot/activate', () => {
   });
 });
 
+describe('POST /api/bot/allocate', () => {
+  let h: Harness;
+  let cookie: string;
+  let started = 0;
+  before(async () => {
+    h = await startHarness({
+      enableTrading: async () => {
+        started++;
+        return Object.assign(h.settings, { enabled: true });
+      },
+    });
+    cookie = await h.login();
+  });
+  after(() => h.close());
+  const allocate = (json: unknown) => h.req('POST', '/api/bot/allocate', { json, cookie });
+
+  test('paper: moves everything to ETH and switches the bot on', async () => {
+    const res = await allocate({ target: 'ETH' });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as any;
+    assert.equal(body.started, true);
+    assert.equal(started, 1);
+    assert.equal((h.settings.manual as any).target, 'ETH');
+    assert.ok(!Number.isNaN(Date.parse((h.settings.manual as any).setAt)));
+    assert.ok(h.logs.some((l) => l.event === 'manual_allocation'));
+  });
+
+  test('a running bot is not started again; null goes back to the strategy', async () => {
+    assert.equal((await allocate({ target: 'EUR' })).status, 200);
+    assert.equal(started, 1);
+    assert.equal((h.settings.manual as any).target, 'EUR');
+    const back = await allocate({ target: null });
+    assert.equal(back.status, 200);
+    assert.equal(h.settings.manual, null);
+    assert.ok(h.logs.some((l) => l.event === 'manual_cleared'));
+  });
+
+  test('live mode needs confirmLive; bad targets are refused', async () => {
+    Object.assign(h.settings, { mode: 'live', manual: null });
+    const res = await allocate({ target: 'BTC' });
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as any).error, /real money/);
+    assert.equal(h.settings.manual, null);
+    assert.equal((await allocate({ target: 'BTC', confirmLive: true })).status, 200);
+    assert.equal((h.settings.manual as any).target, 'BTC');
+    for (const bad of [{ target: 'SOL' }, { target: 'ETH', confirmLive: 'yes' }, [], {}]) assert.equal((await allocate(bad)).status, 400);
+    Object.assign(h.settings, { mode: 'paper', manual: null, enabled: false });
+  });
+});
+
 describe('security hardening', () => {
   test('rateKey groups an IPv6 /64 and unwraps IPv4-mapped addresses', () => {
     assert.equal(rateKey('203.0.113.7'), '203.0.113.7');
