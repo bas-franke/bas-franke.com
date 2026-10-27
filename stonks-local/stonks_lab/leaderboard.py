@@ -736,24 +736,21 @@ def bucket_notes(entries: list[dict]) -> str:
 
 
 def custom_month(bucket: dict) -> None:
-    """Custom bucket: every card shows its last-month backtest (metrics and curves); notes compare them."""
+    """Custom bucket: cards keep the same view as every other tab (the last test year, as Mixed #1); the last-month
+    backtest is only added as text (explanation and notes)."""
     rows = []
     for t in bucket["top"]:
         e = {"spec": t["spec"]}
         v = month_view(e)
         if not v:
             continue
-        t["metrics"] = {**t["metrics"], **v["metrics"], "holdoutReturnPct": t["metrics"].get("returnPct")}
-        t["equity"], t["buyHoldEquity"] = v["equity"], v["buyHoldEquity"]
         t["explanation"] = {**t["explanation"], "vsBuyHold": (
             f"Last {CUSTOM_DAYS} days on its own candles: {v['metrics'].get('returnPct', 0):+.1f} % vs holding "
             f"{v['metrics'].get('buyHoldReturnPct', 0):+.1f} %. " + (t["explanation"].get("vsBuyHold") or ""))}
         rows.append(f"{t['spec'].get('name', t['spec']['family'])}: {v['metrics'].get('returnPct', 0):+.1f} %")
     if bucket["top"]:
-        bh = bucket["top"][0]["metrics"].get("buyHoldReturnPct")
-        bucket["notes"] = (f"Hand-made variants of other strategies. The charts and numbers on these cards are the last "
-                           f"{CUSTOM_DAYS} days{f' (holding: {bh:+.1f} %)' if bh is not None else ''}; the score is the "
-                           f"usual multi-year out-of-sample one. " + "; ".join(rows))
+        bucket["notes"] = (f"Hand-made variants of Mixed #1, tested on the same windows: the charts and numbers are its "
+                           f"last test year, like every other tab. Last {CUSTOM_DAYS} days: " + "; ".join(rows))
 
 
 def build_payload(registry: reg.Registry | None = None, n: int = 5) -> dict:

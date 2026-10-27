@@ -297,8 +297,8 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
       </div>
       {name === 'custom' && (
         <p>
-          Hand-made variants of strategies from the other tabs, each fixing one weakness. Their charts and numbers show the <b>last 30 days</b>
-          {' '}on their own candles; the score is still the usual multi-year one.
+          Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their
+          last-30-day result is in the notes above and in each card’s comparison text.
         </p>
       )}
       {name === 'mixed' && (
