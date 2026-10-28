@@ -16,7 +16,21 @@ const FORMATS: Record<string, (v: number) => string> = {
   eur: (v) => `€${Math.round(v).toLocaleString('en-US')}`,
   num3: (v) => v.toFixed(3),
   pct: (v) => `${Math.round(v)}%`,
+  idx: (v) => Math.round(v).toLocaleString('en-US'),
+  px: (v) => {
+    const a = Math.abs(v);
+    if (a >= 20) return `€${Math.round(v).toLocaleString('en-US')}`;
+    if (a >= 1) return v.toFixed(3);
+    if (a >= 0.01) return v.toFixed(4);
+    return v.toPrecision(3);
+  },
 };
+
+function fromStart(points: [number, number][], to: number): [number, number][] {
+  const base = points[0]?.[1];
+  if (!base) return points;
+  return points.map(([t, v]) => [t, Math.round((v / base) * to * 1e6) / 1e6]);
+}
 
 const BACK_BUCKETS = new Set<string>([...BUCKET_NAMES, 'hall']);
 
@@ -144,37 +158,41 @@ function CoinCharts({
   const charts = useMemo(() => {
     const gap = range.equity.map(([t, v], i) => [t, Math.round((v - (range.holdEquity[i]?.[1] ?? v)) * 100) / 100] as [number, number]);
     const out: WriteupChart[] = [];
-    if (range.price?.length) {
-      const cheap = Math.max(...range.price.map(([, v]) => Math.abs(v))) < 20;
+    const label = range.label.toLowerCase();
+    if (range.equity.length && range.holdEquity.length) {
       out.push({
-        title: `${coin.id} price, ${range.label.toLowerCase()}`,
-        yFormat: cheap ? 'num3' : 'eur',
+        title: `Indexed at 100, ${label}`,
+        yFormat: 'idx',
         height: 220,
-        series: [{ name: `${coin.id} price`, color: 'ink', points: range.price }],
+        baseline: 100,
+        baselineLabel: '100 at the start',
+        series: [
+          { name: 'This strategy', color: 'brass', points: fromStart(range.equity, 100) },
+          { name: `Holding ${coin.id}`, color: 'ink2', dash: '7 5', points: fromStart(range.holdEquity, 100) },
+        ],
+      });
+    }
+    if (range.price?.length && range.equity.length && range.holdEquity.length) {
+      const first = range.price[0][1];
+      out.push({
+        title: `${coin.id} price, from its first close`,
+        yFormat: Math.abs(first) < 20 ? 'px' : 'eur',
+        height: 220,
+        series: [
+          { name: 'This strategy', color: 'brass', points: fromStart(range.equity, first) },
+          { name: `Holding ${coin.id}`, color: 'ink2', dash: '7 5', points: fromStart(range.holdEquity, first) },
+        ],
         band: range.band ? { name: `Share of the portfolio in ${coin.id}`, points: range.band } : undefined,
       });
     }
-    out.push(
-      {
-        title: `€1,000, ${range.label.toLowerCase()}: strategy and holding`,
-        yFormat: 'eur',
-        height: 240,
-        baseline: 1000,
-        baselineLabel: '€1,000 start',
-        series: [
-          { name: 'This strategy', color: 'brass', points: range.equity },
-          { name: `Holding ${coin.id}`, color: 'ink2', dash: '7 5', points: range.holdEquity },
-        ],
-      },
-      {
-        title: 'Strategy minus holding, at every hour',
-        yFormat: 'eur',
-        height: 170,
-        baseline: 0,
-        baselineLabel: 'level',
-        series: [{ name: 'Ahead of holding', color: 'brass', points: gap }],
-      },
-    );
+    out.push({
+      title: 'Strategy minus holding',
+      yFormat: 'eur',
+      height: 170,
+      baseline: 0,
+      baselineLabel: 'level',
+      series: [{ name: 'Ahead of holding', color: 'brass', points: gap }],
+    });
     return out;
   }, [coin, range]);
   const gap = range.strategy - range.hold;
@@ -210,7 +228,7 @@ function CoinCharts({
       </div>
       <Fold title="How to read the lines">
         <p className="small soft">
-          Move along either line and both values are for that hour. The lower chart is the strategy minus holding at every hour.
+          The first chart starts both lines at 100, so coins can be compared. The price chart starts both lines at this coin’s first close, so holding tracks the coin. The lower chart is the strategy minus holding, in euros.
           {range.fees !== undefined ? ` Fees in this stretch ${eur(range.fees)}.` : ''}
           {range.trips !== undefined ? ` ${range.trips} full exits.` : ''}
           {range.exposure !== undefined && range.exposure !== null ? ` In the market ${Math.round(range.exposure)}% of the time.` : ''}

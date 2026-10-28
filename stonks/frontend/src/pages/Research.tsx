@@ -16,7 +16,7 @@ const BENCH_STYLE = [
 ];
 
 /** Tab titles for the timeframe buckets (SPEC §8). */
-export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom' };
+export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss' };
 const bucketTitle = (b: string) => BUCKET_TITLES[b as BucketName] ?? b;
 const TAB_KEY = 'stonks-research-bucket';
 
@@ -299,7 +299,13 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
         ))}
       </div>
       <Fold title="About this tab">
-        {name === 'custom' && (
+        {name === 'stoploss' && (
+          <p>
+            Long-only rules with a stop that only moves up, and buys that are spread out once the coin looks up or steady again.
+            Each card is ranked on every EUR coin, from that coin’s own first candle. The table’s euro numbers are the ether run.
+          </p>
+        )}
+      {name === 'custom' && (
           <p>
             Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their
             last-30-day result is in the notes above and in each card’s comparison text.

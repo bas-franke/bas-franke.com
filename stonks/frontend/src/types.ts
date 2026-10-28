@@ -88,7 +88,7 @@ export interface CompareData {
 /** A strategy write-up (GET /api/writeups/:specId, SPEC §8b). */
 export interface WriteupChart {
   title: string;
-  yFormat?: 'eur' | 'num3' | 'pct';
+  yFormat?: 'eur' | 'num3' | 'pct' | 'idx' | 'px';
   height?: number;
   /** Drawn as a dashed horizontal line, e.g. 0 on a "strategy minus holding" chart. */
   baseline?: number;
@@ -159,8 +159,8 @@ export interface AllocateResult {
   startError?: string;
 }
 
-export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed' | 'custom';
-export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom'];
+export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed' | 'custom' | 'stoploss';
+export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom', 'stoploss'];
 
 export interface ActiveResearch {
   researchId: number;
