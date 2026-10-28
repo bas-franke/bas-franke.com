@@ -169,7 +169,7 @@ test('validateSpec fills defaults and rejects bad specs with readable messages',
 });
 
 test('every family has info, valid defaults and an explanation', () => {
-  assert.equal(families.length, 8);
+  assert.equal(families.length, 9);
   for (const f of families) {
     const markets = f.multiMarket ? ['BTC-EUR', 'ETH-EUR', 'SOL-EUR'] : ['BTC-EUR'];
     const s = validateSpec({ family: f.family, markets, interval: '1d' });
