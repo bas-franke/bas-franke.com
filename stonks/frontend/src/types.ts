@@ -159,8 +159,8 @@ export interface AllocateResult {
   startError?: string;
 }
 
-export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed' | 'custom' | 'stoploss' | 'session1';
-export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom', 'stoploss', 'session1'];
+export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed' | 'custom' | 'stoploss' | 'session1' | 'session2' | 'session3';
+export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom', 'stoploss', 'session1', 'session2', 'session3'];
 
 export interface ActiveResearch {
   researchId: number;
