@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { LineChart, type LineSeries } from '../components/charts';
-import { ErrorBox, Skeleton, useAsync } from '../components/ui';
+import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
 import { navigate, useLocation } from '../router';
 import { BUCKET_NAMES, type Writeup, type WriteupChart, type WriteupCoin, type WriteupSection } from '../types';
@@ -27,7 +27,7 @@ export default function WriteupPage() {
   const back = BACK_BUCKETS.has(asked) ? asked : 'mixed';
   const w = useAsync(() => api.writeup(id), [id]);
   return (
-    <div className="stack writeup" style={{ gap: 22 }}>
+    <div className="stack writeup" style={{ gap: 12 }}>
       <div className="page-head">
         <div>
           <span className="eyebrow">
@@ -208,12 +208,14 @@ function CoinCharts({
           <b className={gap >= 0 ? 'gain' : 'loss'}>{eur(Math.abs(gap))}</b>
         </div>
       </div>
-      <p className="small soft">
-        Move along either line and both values are for that hour. The lower chart is the strategy minus holding at every hour.
-        {range.fees !== undefined ? ` Fees in this stretch ${eur(range.fees)}.` : ''}
-        {range.trips !== undefined ? ` ${range.trips} full exits.` : ''}
-        {range.exposure !== undefined && range.exposure !== null ? ` In the market ${Math.round(range.exposure)}% of the time.` : ''}
-      </p>
+      <Fold title="How to read the lines">
+        <p className="small soft">
+          Move along either line and both values are for that hour. The lower chart is the strategy minus holding at every hour.
+          {range.fees !== undefined ? ` Fees in this stretch ${eur(range.fees)}.` : ''}
+          {range.trips !== undefined ? ` ${range.trips} full exits.` : ''}
+          {range.exposure !== undefined && range.exposure !== null ? ` In the market ${Math.round(range.exposure)}% of the time.` : ''}
+        </p>
+      </Fold>
       <div className="writeup-charts">
         {charts.map((c, i) => (
           <Chart key={`${coin.id}-${range.id}-${i}`} c={c} />
@@ -226,40 +228,48 @@ function CoinCharts({
 function Section({ s, n }: { s: WriteupSection; n: number }) {
   switch (s.type) {
     case 'heading':
-      return (
-        <div style={{ marginTop: 14 }}>
-          <h2 className="writeup-h">{s.title}</h2>
-          <Paragraphs text={s.body} />
-        </div>
+      return s.body ? (
+        <section className="card quiet writeup-fold">
+          <Fold title={s.title || 'Note'}>
+            <Paragraphs text={s.body} />
+          </Fold>
+        </section>
+      ) : (
+        <h2 className="writeup-h">{s.title}</h2>
       );
     case 'text':
       return (
-        <section className="card">
-          <h2>{s.title}</h2>
-          <div className="writeup-text">
-            <Paragraphs text={s.body} />
-          </div>
+        <section className="card quiet writeup-fold">
+          <Fold title={s.title || 'Notes'}>
+            <div className="writeup-text">
+              <Paragraphs text={s.body} />
+            </div>
+          </Fold>
         </section>
       );
     case 'callout':
       return (
-        <div className={`callout ${s.tone === 'gain' ? 'gain' : s.tone === 'warn' ? 'loss' : 'brass'}`}>
-          <b>{s.title}</b>
-          <Paragraphs text={s.body} />
-        </div>
+        <section className="card quiet writeup-fold">
+          <Fold title={s.title || 'Note'}>
+            <div className={`callout ${s.tone === 'gain' ? 'gain' : s.tone === 'warn' ? 'loss' : 'brass'}`}>
+              <Paragraphs text={s.body} />
+            </div>
+          </Fold>
+        </section>
       );
     case 'rules':
       return (
-        <section className="card">
-          <h2>{s.title}</h2>
-          <dl className="writeup-rules">
-            {(s.items ?? []).map(([k, v]) => (
-              <div key={k}>
-                <dt>{k}</dt>
-                <dd>{v}</dd>
-              </div>
-            ))}
-          </dl>
+        <section className="card quiet writeup-fold">
+          <Fold title={s.title || 'The rules'}>
+            <dl className="writeup-rules">
+              {(s.items ?? []).map(([k, v]) => (
+                <div key={k}>
+                  <dt>{k}</dt>
+                  <dd>{v}</dd>
+                </div>
+              ))}
+            </dl>
+          </Fold>
         </section>
       );
     case 'table':
@@ -269,7 +279,11 @@ function Section({ s, n }: { s: WriteupSection; n: number }) {
         <section className="card">
           <h2>{s.title}</h2>
           <Candles candles={s.candles ?? []} />
-          <Paragraphs text={s.body} />
+          {s.body && (
+            <Fold title="What the candles show">
+              <Paragraphs text={s.body} />
+            </Fold>
+          )}
         </section>
       );
     case 'example':
@@ -327,7 +341,7 @@ function Chart({ c }: { c: WriteupChart }) {
       <div className="eyebrow">{c.title}</div>
       <LineChart
         series={series}
-        height={c.height ?? 200}
+        height={Math.min(c.height ?? 160, 160)}
         ariaLabel={c.title}
         yFormat={FORMATS[c.yFormat ?? 'eur'] ?? FORMATS.eur}
         legend={series.length > 1}
@@ -359,10 +373,15 @@ function Example({ s, n }: { s: WriteupSection; n: number }) {
         <h2 style={{ marginRight: 'auto' }}>{s.title}</h2>
         <span className={`chip ${s.trades ? 'brass' : 'outline'}`}>{s.trades ? 'trades' : 'no trade'}</span>
       </div>
-      {s.eli5 && <p className="notes">“{s.eli5}”</p>}
-      <Paragraphs text={s.story} />
+      {r && (
+        <p className="small">
+          Strategy <b className={r.strategy >= r.hold ? 'gain' : 'loss'}>{eur(r.strategy)}</b> · holding {s.holdName ?? 'ETH'} <b>{eur(r.hold)}</b>
+        </p>
+      )}
       <div className="writeup-charts">{(s.charts ?? []).map((c, i) => <Chart key={`${n}-${i}`} c={c} />)}</div>
-      <div className="writeup-outcome">
+      <Fold title="What happened">
+        {s.eli5 && <p className="notes">“{s.eli5}”</p>}
+        <Paragraphs text={s.story} />
         <div>
           <div className="eyebrow">What the bot does here</div>
           {s.events && s.events.length ? (
@@ -378,16 +397,8 @@ function Example({ s, n }: { s: WriteupSection; n: number }) {
             <p className="small">Nothing: no orders in this stretch (it {s.startPosition ? 'keeps holding ETH' : 'stays in euros'}).</p>
           )}
         </div>
-        {r && (
-          <div>
-            <div className="eyebrow">€1,000 at the start of this stretch</div>
-            <p className="small">
-              Strategy <b className={r.strategy >= r.hold ? 'gain' : 'loss'}>{eur(r.strategy)}</b> · holding {s.holdName ?? 'ETH'} <b>{eur(r.hold)}</b>
-            </p>
-          </div>
-        )}
-      </div>
-      {s.verdict && <div className="callout brass">{s.verdict}</div>}
+        {s.verdict && <div className="callout brass">{s.verdict}</div>}
+      </Fold>
     </section>
   );
 }

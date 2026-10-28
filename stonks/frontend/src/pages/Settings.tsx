@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, ApiError, unwrapFamilies, unwrapMarkets } from '../api';
-import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
+import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { familyLabel, humanize, lossLimitText, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
 import { navigate, takeHandoff } from '../router';
@@ -214,7 +214,11 @@ export default function SettingsPage() {
               <input className="input" value={s.name} onChange={(e) => setStrategy({ name: e.target.value })} />
             </Field>
           </div>
-          {(family?.description ?? family?.summary) && <p className="small soft" style={{ marginTop: 14 }}>{family?.description ?? family?.summary}</p>}
+          {(family?.description ?? family?.summary) && (
+            <Fold title="What this algorithm does">
+              <p className="small soft">{family?.description ?? family?.summary}</p>
+            </Fold>
+          )}
           {!family && fam.data && (
             <div className="callout loss" style={{ marginTop: 14 }}>
               “{familyLabel(s.family)}” isn’t implemented in the bot yet, so it can’t be saved. Pick one of the algorithms above.

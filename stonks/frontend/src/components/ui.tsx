@@ -1,5 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
+/** A closed-by-default block. Descriptions on the research screens and the overview live in one of these. */
+export function Fold({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="rank-more">
+      <summary>{title}</summary>
+      <div className="rank-more-body">{children}</div>
+    </details>
+  );
+}
+
 /** Small "?" bubble with a plain-language explanation. Works with hover, focus and tap. */
 export function Tip({ children, align }: { children: ReactNode; align?: 'left' }) {
   const id = useId();

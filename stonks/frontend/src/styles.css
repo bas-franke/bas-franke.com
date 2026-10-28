@@ -1248,10 +1248,35 @@ dialog.modal[open] {
   font-variation-settings: 'opsz' 24;
 }
 
+.overview-page {
+  gap: 12px;
+}
+.overview-page .card {
+  padding: 14px 16px;
+}
+.research-page .page-head,
+.writeup .page-head {
+  margin: 0 0 2px;
+}
+.research-page h1,
+.writeup h1 {
+  font-size: clamp(1.35rem, 2.2vw, 1.7rem);
+}
+.research-about,
+.writeup-fold {
+  padding: 2px 14px 4px;
+}
+.research-about .summary-strip > div {
+  padding: 10px 12px;
+}
+.bucket-intro h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
 .rank-card {
   display: grid;
-  gap: 14px;
-  padding: 18px 20px;
+  gap: 8px;
+  padding: 12px 14px;
 }
 .rank-head {
   display: flex;
@@ -1296,18 +1321,18 @@ dialog.modal[open] {
   flex: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   font-family: var(--serif);
-  font-size: 1.05rem;
+  font-size: 0.9rem;
   font-weight: 500;
   color: var(--surface);
   background: var(--rank-color, var(--ink));
   box-shadow: var(--shadow);
 }
 .rank-head h2 {
-  font-size: 1.25rem;
+  font-size: 1.05rem;
 }
 .rank-body {
   display: grid;
@@ -1565,7 +1590,7 @@ dialog.modal[open] {
     margin: 0 -16px;
   }
   .rank-card {
-    padding: 20px 16px;
+    padding: 12px 14px;
   }
   .rank-head h2 {
     font-size: 1.15rem;
@@ -1936,7 +1961,8 @@ dialog.modal[open] {
 }
 .bucket-intro {
   display: grid;
-  gap: 14px;
+  gap: 4px;
+  padding: 12px 14px;
 }
 .bucket-lines {
   display: grid;

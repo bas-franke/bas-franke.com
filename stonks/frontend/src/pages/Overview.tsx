@@ -3,7 +3,7 @@ import { api } from '../api';
 import { HeroBanner, SleepingCatArt } from '../components/art';
 import { DailyBars, LineChart, type LineSeries } from '../components/charts';
 import { WatchingCat } from '../components/icons';
-import { ErrorBox, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
+import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { ago, amount, dateOnly, eur, familyLabel, humanize, lossLimitText, num, pct, signedEur, toDate } from '../format';
 import { navigate } from '../router';
 import type { CompareRange, EquityPoint, Overview } from '../types';
@@ -22,7 +22,7 @@ export default function OverviewPage() {
   const todayPct = o && o.todayPnlEur !== null && o.equityEur - o.todayPnlEur > 0 ? (o.todayPnlEur / (o.equityEur - o.todayPnlEur)) * 100 : null;
 
   return (
-    <div className="stack">
+    <div className="stack overview-page">
       <HeroBanner>
         <span className="eyebrow">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
         <span className="greet">{greeting()}.</span>
@@ -239,16 +239,18 @@ function LossCard({ o }: { o: Overview }) {
       >
         <span style={{ width: `${Math.max(frac * 100, (pnl ?? 0) < 0 ? 2 : 0)}%`, background: color }} />
       </div>
-      <p className="small soft" style={{ marginTop: 10 }}>
-        {pnl === null
-          ? 'The 24-hour count starts once the bot is switched on and has recorded its first value.'
-          : pnl >= 0
-          ? 'Up over the last 24 hours. Nothing to worry about.'
-          : frac < 0.75
-            ? `${Math.round(frac * 100)}% of the loss budget used. ${eur(limit - loss)} left before the bot pauses.`
-            : `Close to the limit: ${eur(limit - loss)} left before the bot switches itself off.`}
-        {partial && since && ` Counting since ${since.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}, when the bot was switched on.`}
-      </p>
+      <Fold title="What this means">
+        <p className="small soft">
+          {pnl === null
+            ? 'The 24-hour count starts once the bot is switched on and has recorded its first value.'
+            : pnl >= 0
+            ? 'Up over the last 24 hours. Nothing to worry about.'
+            : frac < 0.75
+              ? `${Math.round(frac * 100)}% of the loss budget used. ${eur(limit - loss)} left before the bot pauses.`
+              : `Close to the limit: ${eur(limit - loss)} left before the bot switches itself off.`}
+          {partial && since && ` Counting since ${since.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}, when the bot was switched on.`}
+        </p>
+      </Fold>
     </section>
   );
 }
@@ -346,7 +348,7 @@ function CompareCard({ mode }: { mode: string }) {
         <div className="compare-grid">
           <LineChart
             series={lines.map((l) => l.series)}
-            height={260}
+            height={180}
             legend={false}
             baseline={100}
             ariaLabel={`Your portfolio and buy and hold BTC and ETH over the last ${label}, indexed to 100`}
@@ -369,13 +371,15 @@ function CompareCard({ mode }: { mode: string }) {
         </div>
       )}
       {lines.length > 0 && (
-        <p className="tiny soft" style={{ marginTop: 10 }}>
-          All lines start at 100{' '}
-          {range !== 'all' && Date.parse(cmp.data!.start) - Date.parse(cmp.data!.from) < 3_600_000
-            ? `at the beginning of the ${label}`
-            : `when your portfolio tracking began (${dateOnly(cmp.data!.start)})`}
-          . Informative only: it does not change what the bot does. Deposits and withdrawals show up as jumps in your line.
-        </p>
+        <Fold title="How to read this">
+          <p className="tiny soft">
+            All lines start at 100{' '}
+            {range !== 'all' && Date.parse(cmp.data!.start) - Date.parse(cmp.data!.from) < 3_600_000
+              ? `at the beginning of the ${label}`
+              : `when your portfolio tracking began (${dateOnly(cmp.data!.start)})`}
+            . Informative only: it does not change what the bot does. Deposits and withdrawals show up as jumps in your line.
+          </p>
+        </Fold>
       )}
     </section>
   );
@@ -438,18 +442,15 @@ function EquityCard({ mode }: { mode: string }) {
           </p>
           <LineChart
             series={series}
-            height={240}
+            height={160}
             ariaLabel={`Portfolio value over the last ${days} days`}
             yFormat={(v) => `€${Math.round(v).toLocaleString('en-US')}`}
             tipFormat={(v) => eur(v)}
           />
           {bars.length > 1 && (
-            <>
-              <div className="card-head" style={{ marginTop: 20, marginBottom: 6 }}>
-                <span className="eyebrow">Result per day</span>
-              </div>
+            <Fold title="Result per day">
               <DailyBars days={bars} format={signedEur} />
-            </>
+            </Fold>
           )}
         </>
       )}
@@ -474,35 +475,36 @@ function StrategyCard({ o }: { o: Overview }) {
         <span className="chip">every {s.interval}</span>
         {s.markets.length <= 3 ? s.markets.map((m) => <span className="chip outline" key={m}>{m}</span>) : <span className="chip outline">{s.markets.length} markets</span>}
       </div>
-      <p className="soft" style={{ fontSize: '0.95rem' }}>
-        {o.strategyExplanation}
-      </p>
-      <hr className="divider" />
-      <div className="params">
-        {Object.entries(s.params).map(([k, v]) => (
-          <span className="chip" key={k}>
-            {k} {String(v)}
-          </span>
-        ))}
-      </div>
-      <dl className="kv" style={{ marginTop: 14 }}>
-        <dt>Orders</dt>
-        <dd>
-          {s.execution.orderType === 'limit'
-            ? `limit, ${s.execution.limitOffsetBps} bps from close${s.execution.postOnly ? ', maker only' : ''}`
-            : 'market'}
-        </dd>
-        <dt>Stop-loss</dt>
-        <dd>{s.risk.stopLossPct ? `${Math.round(s.risk.stopLossPct * 100)}%` : 'none'}</dd>
-        {s.risk.trailingStopPct ? (
-          <>
-            <dt>Trailing stop</dt>
-            <dd>{Math.round(s.risk.trailingStopPct * 100)}%</dd>
-          </>
-        ) : null}
-        <dt>Max in coins</dt>
-        <dd>{o.bot.maxExposureEur === null ? 'whole portfolio' : eur(o.bot.maxExposureEur, true)}</dd>
-      </dl>
+      <Fold title="How this plan works">
+        <p className="soft" style={{ fontSize: '0.95rem' }}>
+          {o.strategyExplanation}
+        </p>
+        <div className="params">
+          {Object.entries(s.params).map(([k, v]) => (
+            <span className="chip" key={k}>
+              {k} {String(v)}
+            </span>
+          ))}
+        </div>
+        <dl className="kv">
+          <dt>Orders</dt>
+          <dd>
+            {s.execution.orderType === 'limit'
+              ? `limit, ${s.execution.limitOffsetBps} bps from close${s.execution.postOnly ? ', maker only' : ''}`
+              : 'market'}
+          </dd>
+          <dt>Stop-loss</dt>
+          <dd>{s.risk.stopLossPct ? `${Math.round(s.risk.stopLossPct * 100)}%` : 'none'}</dd>
+          {s.risk.trailingStopPct ? (
+            <>
+              <dt>Trailing stop</dt>
+              <dd>{Math.round(s.risk.trailingStopPct * 100)}%</dd>
+            </>
+          ) : null}
+          <dt>Max in coins</dt>
+          <dd>{o.bot.maxExposureEur === null ? 'whole portfolio' : eur(o.bot.maxExposureEur, true)}</dd>
+        </dl>
+      </Fold>
     </section>
   );
 }

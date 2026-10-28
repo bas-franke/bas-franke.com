@@ -3,7 +3,7 @@ import { api, ApiError } from '../api';
 import { EmptyState } from '../components/art';
 import { LineChart, Spark, type LineSeries } from '../components/charts';
 import { IconCheck } from '../components/icons';
-import { ErrorBox, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
+import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
 import { BUCKET_NAMES, type Benchmark, type BucketName, type HallEntry, type Overview, type ResearchBucket, type ResearchEntry, type ResearchPayload, type Series } from '../types';
@@ -83,10 +83,6 @@ const Head = ({ data }: { data?: ResearchPayload }) => (
     <div>
       <span className="eyebrow">Research</span>
       <h1>What the lab found</h1>
-      <p className="lede">
-        Thousands of strategies were tested on years of past prices, each starting with €1,000. These are the ones that held up best on data they had
-        never seen, ranked separately for minute, hourly, daily and weekly trading and for strategies that mix candle sizes, and explained in plain words.
-      </p>
     </div>
     {data && <span className="chip outline">updated {ago(data.generatedAt)}</span>}
   </div>
@@ -158,44 +154,49 @@ function Research({
   };
 
   return (
-    <div className="stack" style={{ gap: 26 }}>
+    <div className="stack research-page" style={{ gap: 12 }}>
       <Head data={data} />
 
-      <section className="card summary-strip" aria-label="Research summary">
-        <div>
-          <div className="eyebrow">Experiments</div>
-          <div className="mid-num">{fx(s.experiments, (n) => n.toLocaleString('en-US'))}</div>
-        </div>
-        <div>
-          <div className="eyebrow">Families tried</div>
-          <div className="mid-num">{s.families}</div>
-        </div>
-        <div>
-          <div className="eyebrow">Rounds</div>
-          <div className="mid-num">{s.rounds}</div>
-        </div>
-        <div>
-          <div className="eyebrow">Price history</div>
-          <div className="mid-num" style={{ fontSize: '1.05rem', paddingTop: 6 }}>
-            {dateOnly(s.dataRange[0])} – {dateOnly(s.dataRange[1])}
+      <section className="card quiet research-about">
+        <Fold title="About the lab">
+          <p>
+            Thousands of strategies were tested on years of past prices, each starting with €1,000. These are the ones that held up best on data they had
+            never seen, ranked separately for minute, hourly, daily and weekly trading and for strategies that mix candle sizes.
+          </p>
+          <div className="summary-strip" aria-label="Research summary">
+            <div>
+              <div className="eyebrow">Experiments</div>
+              <div className="mid-num">{fx(s.experiments, (n) => n.toLocaleString('en-US'))}</div>
+            </div>
+            <div>
+              <div className="eyebrow">Families tried</div>
+              <div className="mid-num">{s.families}</div>
+            </div>
+            <div>
+              <div className="eyebrow">Rounds</div>
+              <div className="mid-num">{s.rounds}</div>
+            </div>
+            <div>
+              <div className="eyebrow">Price history</div>
+              <div className="mid-num" style={{ fontSize: '1.05rem', paddingTop: 6 }}>
+                {dateOnly(s.dataRange[0])} – {dateOnly(s.dataRange[1])}
+              </div>
+            </div>
+            <div>
+              <div className="eyebrow">Last update</div>
+              <div className="mid-num" style={{ fontSize: '1.05rem', paddingTop: 6 }}>
+                {new Date(data.generatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              </div>
+            </div>
           </div>
-        </div>
-        <div>
-          <div className="eyebrow">Last update</div>
-          <div className="mid-num" style={{ fontSize: '1.05rem', paddingTop: 6 }}>
-            {new Date(data.generatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-          </div>
-        </div>
+          {s.notes && <p className="notes">“{s.notes}”</p>}
+          <p>
+            <b>An honest note.</b> These results come from backtests: simulations on past prices, with Bitvavo’s fees and a careful fill model. They are
+            not a forecast, and a strategy that did well before can do badly next month. Simply buying and holding is shown everywhere as the yardstick to
+            beat, not as a candidate. Scores only compare within one timeframe: each is judged on a test period that fits how long its trades last.
+          </p>
+        </Fold>
       </section>
-
-      {s.notes && (
-        <section className="card quiet">
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Notes from the lab
-          </div>
-          <p className="notes">“{s.notes}”</p>
-        </section>
-      )}
 
       {data.buckets && (
         <div className="bucket-tabs" role="tablist" aria-label="Timeframe">
@@ -231,7 +232,7 @@ function Research({
 
 
       {!hallView && (
-      <div id="bucket-panel" role={data.buckets ? 'tabpanel' : undefined} aria-labelledby={data.buckets ? `tab-${tab}` : undefined} className="stack" style={{ gap: 26 }}>
+      <div id="bucket-panel" role={data.buckets ? 'tabpanel' : undefined} aria-labelledby={data.buckets ? `tab-${tab}` : undefined} className="stack" style={{ gap: 12 }}>
         {data.buckets && <BucketIntro name={tab} b={bucket} />}
 
         {top.length === 0 ? (
@@ -260,12 +261,6 @@ function Research({
         {top.length > 0 && <Compare top={top} benches={benches} />}
       </div>
       )}
-
-      <p className="footnote">
-        <b>An honest note.</b> These results come from backtests: simulations on past prices, with Bitvavo’s fees and a careful fill model. They are
-        not a forecast, and a strategy that did well before can do badly next month. Simply buying and holding is shown everywhere as the yardstick to
-        beat, not as a candidate. Scores only compare within one timeframe: each is judged on a test period that fits how long its trades last.
-      </p>
 
       {pick && data.id !== undefined && (
         <ActivateDialog
@@ -303,56 +298,58 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
           </span>
         ))}
       </div>
-      {name === 'custom' && (
-        <p>
-          Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their
-          last-30-day result is in the notes above and in each card’s comparison text.
-        </p>
-      )}
-      {name === 'mixed' && (
-        <p>
-          Each strategy here looks at two candle sizes at once: a slow one (daily or weekly) for the long-term decision, and a fast one that watches for
-          sudden drops and sells early, or the other way round.
-        </p>
-      )}
-      {b.notes && <p className="notes">“{b.notes}”</p>}
-      <div className="bucket-lines">
-        <div>
-          <div className="eyebrow">Yardstick</div>
+      <Fold title="About this tab">
+        {name === 'custom' && (
           <p>
-            Simply buying and holding scores <b>{fx(b.holdScore, score)}</b> here.
+            Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their
+            last-30-day result is in the notes above and in each card’s comparison text.
           </p>
-        </div>
-        <div>
-          <div className="eyebrow">
-            Luck line
-            <Tip>
-              The lab also runs strategies that buy and sell at random moments. Their scores show how far pure luck gets you on this timeframe; a real
-              strategy should clearly beat them.
-            </Tip>
-          </div>
+        )}
+        {name === 'mixed' && (
           <p>
-            {isNum(luck?.best) ? (
-              <>
-                Random timing scores up to <b>{score(luck!.best!)}</b> here
-                {isNum(luck?.median) ? <>, usually around {score(luck!.median!)}</> : null}.
-              </>
-            ) : (
-              'No luck line for this timeframe yet.'
-            )}
+            Each strategy here looks at two candle sizes at once: a slow one (daily or weekly) for the long-term decision, and a fast one that watches for
+            sudden drops and sells early, or the other way round.
           </p>
-        </div>
-        {p && (isNum(p.holdoutDays) || isNum(p.folds)) && (
+        )}
+        {b.notes && <p className="notes">“{b.notes}”</p>}
+        <div className="bucket-lines">
           <div>
-            <div className="eyebrow">How it was judged</div>
+            <div className="eyebrow">Yardstick</div>
             <p>
-              {isNum(p.folds) ? `${p.folds} practice windows${isNum(p.foldSpanDays) ? ` of ${p.foldSpanDays} days` : ''}` : 'Practice windows'}
-              {isNum(p.holdoutDays) ? `, then a final test on the last ${p.holdoutDays} days it never saw` : ''}.
+              Simply buying and holding scores <b>{fx(b.holdScore, score)}</b> here.
             </p>
           </div>
-        )}
-      </div>
-      <p className="tiny muted">Scores only compare within this timeframe. A strategy is worth a look when it beats both lines above.</p>
+          <div>
+            <div className="eyebrow">
+              Luck line
+              <Tip>
+                The lab also runs strategies that buy and sell at random moments. Their scores show how far pure luck gets you on this timeframe; a real
+                strategy should clearly beat them.
+              </Tip>
+            </div>
+            <p>
+              {isNum(luck?.best) ? (
+                <>
+                  Random timing scores up to <b>{score(luck!.best!)}</b> here
+                  {isNum(luck?.median) ? <>, usually around {score(luck!.median!)}</> : null}.
+                </>
+              ) : (
+                'No luck line for this timeframe yet.'
+              )}
+            </p>
+          </div>
+          {p && (isNum(p.holdoutDays) || isNum(p.folds)) && (
+            <div>
+              <div className="eyebrow">How it was judged</div>
+              <p>
+                {isNum(p.folds) ? `${p.folds} practice windows${isNum(p.foldSpanDays) ? ` of ${p.foldSpanDays} days` : ''}` : 'Practice windows'}
+                {isNum(p.holdoutDays) ? `, then a final test on the last ${p.holdoutDays} days it never saw` : ''}.
+              </p>
+            </div>
+          )}
+        </div>
+        <p className="tiny muted">Scores only compare within this timeframe. A strategy is worth a look when it beats both lines above.</p>
+      </Fold>
     </section>
   );
 }
@@ -567,7 +564,7 @@ function RankCard({
 
       <LineChart
         series={series}
-        height={200}
+        height={140}
         ariaLabel={`Value of €1,000 with ${s.name} versus buy and hold`}
         yFormat={euroAxis}
         tipFormat={(v) => eur(v)}
@@ -744,13 +741,15 @@ function HallOfFame({
     hall.reload();
   };
   return (
-    <div id="bucket-panel" role="tabpanel" aria-labelledby="tab-hall" className="stack" style={{ gap: 26 }}>
+    <div id="bucket-panel" role="tabpanel" aria-labelledby="tab-hall" className="stack" style={{ gap: 12 }}>
       <section className="card quiet bucket-intro">
         <h2>Hall of fame</h2>
-        <p className="notes" style={{ marginTop: 8 }}>
-          Strategies you chose to keep. Each one is stored as it was when you kept it (results, charts and settings), so new research never replaces
-          or deletes it. Only you can remove one.
-        </p>
+        <Fold title="What this is">
+          <p className="notes">
+            Strategies you chose to keep. Each one is stored as it was when you kept it (results, charts and settings), so new research never replaces
+            or deletes it. Only you can remove one.
+          </p>
+        </Fold>
       </section>
       {hall.data.length === 0 ? (
         <section className="card">
@@ -798,11 +797,12 @@ function Compare({ top, benches }: { top: ResearchEntry[]; benches: Benchmark[] 
       <div className="card-head">
         <h2 style={{ marginRight: 'auto' }}>{top.length > 1 ? `All ${top.length} side by side` : 'Next to buy and hold'}</h2>
       </div>
-      <p className="small soft" style={{ marginBottom: 16, maxWidth: '70ch' }}>
+      <LineChart series={series} height={180} ariaLabel="These strategies and the buy-and-hold benchmarks" yFormat={euroAxis} tipFormat={(v) => eur(v, true)} baseline={1000} />
+      <Fold title="The numbers">
+      <p className="small soft">
         €1,000 in each, over the test period. The dashed and dotted lines are the yardsticks: simply buying and holding.
       </p>
-      <LineChart series={series} height={300} ariaLabel="These strategies and the buy-and-hold benchmarks" yFormat={euroAxis} tipFormat={(v) => eur(v, true)} baseline={1000} />
-      <div className="table-wrap" style={{ marginTop: 18 }}>
+      <div className="table-wrap">
         <table className="data cards">
           <thead>
             <tr>
@@ -882,6 +882,7 @@ function Compare({ top, benches }: { top: ResearchEntry[]; benches: Benchmark[] 
           </tbody>
         </table>
       </div>
+      </Fold>
     </section>
   );
 }
