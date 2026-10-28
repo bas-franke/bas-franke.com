@@ -16,7 +16,7 @@ const BENCH_STYLE = [
 ];
 
 /** Tab titles for the timeframe buckets (SPEC §8). */
-export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss' };
+export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss', session1: 'Session 1' };
 const bucketTitle = (b: string) => BUCKET_TITLES[b as BucketName] ?? b;
 const TAB_KEY = 'stonks-research-bucket';
 
@@ -303,6 +303,13 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
           <p>
             Long-only rules with a stop that only moves up, and buys that are spread out once the coin looks up or steady again.
             Each card is ranked on every EUR coin, from that coin’s own first candle. The table’s euro numbers are the ether run.
+          </p>
+        )}
+        {name === 'session1' && (
+          <p>
+            This session’s five. A sale scores by the percent it made or lost, a position built in steps scores higher than one all-in buy,
+            and a long stretch in euros or in the coin loses points. Shown here are the five whose account also beat holding,
+            on 18 markets, from each coin’s first candle. The table’s euro numbers are the ether run.
           </p>
         )}
       {name === 'custom' && (
