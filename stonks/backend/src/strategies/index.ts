@@ -1,4 +1,4 @@
-import { ALT_FROTH_BTC, ALT_FROTH_POOL, families, REGIME_MARKET, runners } from './families.js';
+import { ALT_FROTH_BTC, ALT_FROTH_POOL, families, FROTH_DIP_POOL, REGIME_MARKET, runners } from './families.js';
 import {
   INTERVAL_MS,
   INTERVALS,
@@ -14,7 +14,7 @@ import {
 } from './types.js';
 
 export * from './types.js';
-export { ALT_FROTH_POOL, families, REGIME_MARKET } from './families.js';
+export { ALT_FROTH_POOL, families, FROTH_DIP_POOL, REGIME_MARKET } from './families.js';
 export { cleanCandles } from './families.js';
 
 export const DEFAULT_RISK: RiskSpec = { maxWeight: 1, stopLossPct: null, takeProfitPct: null, trailingStopPct: null };
@@ -26,7 +26,7 @@ export const DEFAULT_EXECUTION: ExecutionSpec = {
   fallback: 'cancel',
 };
 
-export const familyInfo = (family: string): FamilyInfo | undefined => families.find((f) => f.family === family);
+export const familyInfo =(family: string): FamilyInfo | undefined => families.find((f) => f.family === family);
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -96,6 +96,7 @@ export function validateSpec(input: unknown): StrategySpec {
     fail('top cannot be larger than the number of markets');
   if (family === 'alt_froth' && (params.trendSma as number) > 0 && (params.trendSma as number) < 10)
     fail('trendSma must be 0 (off) or at least 10');
+  if (family === 'froth_dip') frothDipRules(params);
 
   const r = input.risk ?? {};
   if (!isObj(r)) fail('"risk" must be an object');
@@ -133,6 +134,18 @@ export function validateSpec(input: unknown): StrategySpec {
   return { id, name, family: family as FamilyName, familyVersion: info.version, markets, interval: interval as Interval, params, risk, execution };
 }
 
+/** froth_dip's switch-off knobs: 0 (off) or inside the lab's range; the RSI levels must be ordered. */
+function frothDipRules(params: Record<string, number | boolean | string>) {
+  const zeroOr = (name: string, min: number, what: string) => {
+    const v = params[name] as number;
+    if (v !== 0 && v < min) fail(`${name} must be 0 (${what}) or at least ${min}`);
+  };
+  zeroOr('coreSma', 20, 'always hold');
+  zeroOr('maxHold', 5, 'no limit');
+  zeroOr('frothThr', 0.02, 'froth exit off');
+  if (!((params.rsiBelow as number) < (params.sellAbove as number))) fail('rsiBelow must be below sellAbove');
+}
+
 function hashParams(s: string): string {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
@@ -149,6 +162,7 @@ export function dataMarkets(spec: StrategySpec): string[] {
   const set = new Set(spec.markets);
   if (spec.family === 'rotation_momentum' && Number(spec.params.regimeSma) > 0) set.add(REGIME_MARKET);
   if (spec.family === 'alt_froth') for (const m of [ALT_FROTH_BTC, ...ALT_FROTH_POOL]) set.add(m);
+  if (spec.family === 'froth_dip') for (const m of FROTH_DIP_POOL) set.add(m);
   return [...set];
 }
 
@@ -192,6 +206,8 @@ function clampWeights(w: Weights, spec: StrategySpec): Weights {
   return out;
 }
 
+const holdName = (spec: StrategySpec) =>
+  spec.markets.length === 1 && spec.markets[0] === 'BTC-EUR' ? 'Bitcoin' : spec.markets.map(coin).join(', ');
 const pctText = (v: number) => `${+(v * 100).toFixed(2)} %`;
 const coin = (m: string) => m.split('-')[0];
 const intervalText: Record<Interval, string> = {
@@ -239,6 +255,16 @@ export function explainStrategy(specInput: StrategySpec): string {
       const thr = Number(p.threshold);
       const back = thr - Number(p.band);
       parts.push(`After every ${intervalText[spec.interval]} candle it compares the return over the last ${p.lookback} candles of nine altcoins that were already trading in 2019 (${ALT_FROTH_POOL.map(coin).join(', ')}; only watched, never traded) with Bitcoin's; when they are more than ${pctText(Math.expm1(thr))} ahead it sells and waits in euros, and it buys back once their lead is under ${pctText(Math.expm1(back))}${Number(p.minOut) > 0 ? ` and at least ${p.minOut} candles have passed` : ''}.${Number(p.trendSma) > 0 ? ` It also stays out of a coin while its price is under its ${p.trendSma}-bar average.` : ''}`);
+      break;
+    }
+    case 'froth_dip': {
+      const k = spec.markets.length;
+      const share = k > 1 ? ` (${+(100 / k).toFixed(1)} % of the money per coin)` : '';
+      const held = holdName(spec);
+      parts.push(Number(p.coreSma) > 0 ? `Holds ${held}${share} while the price is above its ${p.coreSma}-candle average (the trend core) on ${bars}.` : `Holds ${held}${share} by default, on ${bars}.`);
+      parts.push(`It also watches eleven coins that were already trading in 2019 (${FROTH_DIP_POOL.map(coin).join(', ')}): when at least ${pctText(Number(p.breadthMin))} of them have a ${p.rsiPeriod}-candle RSI under ${p.rsiBelow} at once, the whole market is in a panic sell-off and it buys, even below the average. It ends that dip purchase once the coin's own RSI climbs over ${p.sellAbove}${Number(p.maxHold) > 0 ? `, or after ${p.maxHold} candles at the latest` : ''}.`);
+      if (Number(p.frothThr) > 0) parts.push(`It sells everything and waits in euros while nine old altcoins have beaten Bitcoin by more than ${pctText(Math.expm1(Number(p.frothThr)))} over ${p.frothLook} candles (an alt-season frenzy that usually ends badly), until that lead is back under ${pctText(Math.expm1(Number(p.frothThr) - Number(p.frothBand)))}.`);
+      parts.push('It wins in bull markets with sharp market-wide dips that recover and at alt-season tops; it loses in choppy markets around the average and in panics that keep falling.');
       break;
     }
   }

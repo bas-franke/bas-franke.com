@@ -1,5 +1,5 @@
 import { ema, macd, priorMax, priorMin, rollingMax, rsi, sma, stdPop } from './indicators.js';
-import type { Candle, CandlesByMarket, FamilyInfo, FamilyName, StrategySpec, StrategyState, Weights } from './types.js';
+import type { Candle, CandlesByMarket, FamilyInfo, FamilyName, ParamInfo, StrategySpec, StrategyState, Weights } from './types.js';
 
 /**
  * The v1 families (SPEC §3). Each one turns closed candles into a target weight per bar:
@@ -268,24 +268,19 @@ function logReturn(cs: Candle[], n: number): number[] {
   return lc.map((v, i) => (i >= n ? v - lc[i - n] : NaN));
 }
 
-/**
- * Bars = union of the open times of spec.markets. froth[t] = mean `lookback` log return of the ALT_FROTH_POOL markets
- * that have a defined return as of t (each on its own series, "as of" t; NaN with fewer than 3 of them) minus BTC-EUR's
- * `lookback` log return as of t. One shared state, starting "in": when froth is defined, in -> out when froth >
- * threshold; out -> in when froth < threshold - band and at least `minOut` defined bars have passed since the exit.
- * Weight per market = maxWeight / markets.length while in, times (with trendSma > 0) [close > SMA(trendSma)] of that
- * market as of t; 0 while out, before the market's first candle, or while the signal is undefined.
- */
-const altFroth: FamilyRun = (candles, spec) => {
-  const lookback = num(spec, 'lookback');
-  const thr = num(spec, 'threshold');
-  const band = num(spec, 'band');
-  const minOut = num(spec, 'minOut');
-  const tsma = num(spec, 'trendSma');
-  const own = new Map(spec.markets.map((m) => [m, cleanCandles(candles[m])]));
+/** Cleaned candles of the traded markets and the sorted union of their open times (the bars a family decides on). */
+function unionTimes(candles: CandlesByMarket, markets: string[]): { own: Map<string, Candle[]>; idx: number[] } {
+  const own = new Map(markets.map((m) => [m, cleanCandles(candles[m])]));
   const times = new Set<number>();
   for (const cs of own.values()) for (const c of cs) times.add(c[0]);
-  const idx = [...times].sort((a, b) => a - b);
+  return { own, idx: [...times].sort((a, b) => a - b) };
+}
+
+/**
+ * alt_froth's spread on `idx`: mean `lookback` log return of the ALT_FROTH_POOL markets defined as of t (NaN with
+ * fewer than 3) minus BTC-EUR's `lookback` log return as of t (NaN without BTC).
+ */
+function frothSpread(candles: CandlesByMarket, lookback: number, idx: number[]): number[] {
   const n = idx.length;
   const tot = new Array<number>(n).fill(0);
   const cnt = new Array<number>(n).fill(0);
@@ -301,11 +296,31 @@ const altFroth: FamilyRun = (candles, spec) => {
   }
   const btcCs = cleanCandles(candles[ALT_FROTH_BTC]);
   const btc = btcCs.length ? asOf(btcCs, logReturn(btcCs, lookback), idx) : new Array<number>(n).fill(NaN);
+  return idx.map((_, i) => (cnt[i] >= ALT_FROTH_MIN_POOL ? tot[i] / cnt[i] - btc[i] : NaN));
+}
+
+/**
+ * Bars = union of the open times of spec.markets. froth[t] = mean `lookback` log return of the ALT_FROTH_POOL markets
+ * that have a defined return as of t (each on its own series, "as of" t; NaN with fewer than 3 of them) minus BTC-EUR's
+ * `lookback` log return as of t. One shared state, starting "in": when froth is defined, in -> out when froth >
+ * threshold; out -> in when froth < threshold - band and at least `minOut` defined bars have passed since the exit.
+ * Weight per market = maxWeight / markets.length while in, times (with trendSma > 0) [close > SMA(trendSma)] of that
+ * market as of t; 0 while out, before the market's first candle, or while the signal is undefined.
+ */
+const altFroth: FamilyRun = (candles, spec) => {
+  const lookback = num(spec, 'lookback');
+  const thr = num(spec, 'threshold');
+  const band = num(spec, 'band');
+  const minOut = num(spec, 'minOut');
+  const tsma = num(spec, 'trendSma');
+  const { own, idx } = unionTimes(candles, spec.markets);
+  const n = idx.length;
+  const sp = frothSpread(candles, lookback, idx);
   const state = new Array<number>(n).fill(NaN);
   let out = false;
   let since = 0;
   for (let i = 0; i < n; i++) {
-    const s = cnt[i] >= ALT_FROTH_MIN_POOL ? tot[i] / cnt[i] - btc[i] : NaN;
+    const s = sp[i];
     if (!Number.isFinite(s)) continue;
     if (out) {
       since++;
@@ -337,6 +352,130 @@ const altFroth: FamilyRun = (candles, spec) => {
   });
 };
 
+/** froth_dip's signal-only panic pool: BTC, ETH and the 2019 altcoins (no hindsight in the list). */
+export const FROTH_DIP_POOL = ['BTC-EUR', 'ETH-EUR', ...ALT_FROTH_POOL];
+
+/** Weights per bar (rows) and market (columns in `markets` order), NaN on bars before the first decision. */
+type Matrix = number[][];
+
+function toSeries(idx: number[], markets: string[], W: Matrix): Array<[number, Weights]> {
+  return idx.map((t, i) => {
+    const w: Weights = {};
+    markets.forEach((m, j) => (w[m] = Number.isFinite(W[i][j]) ? W[i][j] : 0));
+    return [t, w];
+  });
+}
+
+/** Like the lab's tail: NaN before the first bar where every column is defined, undefined values 0 after it. */
+function fromFirstGood(cols: number[][], n: number): Matrix {
+  let first = n;
+  for (let i = 0; i < n; i++)
+    if (cols.every((c) => Number.isFinite(c[i]))) {
+      first = i;
+      break;
+    }
+  return Array.from({ length: n }, (_, i) => cols.map((c) => (i < first ? NaN : Number.isFinite(c[i]) ? c[i] : 0)));
+}
+
+export interface FrothDipParams {
+  coreSma: number;
+  rsiPeriod: number;
+  rsiBelow: number;
+  breadthMin: number;
+  sellAbove: number;
+  maxHold: number;
+  frothLook: number;
+  frothThr: number;
+  frothBand: number;
+}
+
+/**
+ * froth_dip on the union bars `idx` of `markets` (each market gets maxWeight/markets.length while on):
+ *  - panic[t] = at least breadthMin (-1e-12) of the FROTH_DIP_POOL markets defined as of t have RSI(rsiPeriod) <
+ *    rsiBelow (each on its own series, as of t); undefined with fewer than 3 defined pool markets.
+ *  - froth[t] = alt_froth's spread with lookback frothLook: in -> out when > frothThr, back when < frothThr - frothBand
+ *    (undefined while the spread is; frothThr 0 = never froth).
+ *  - per market: core = close > SMA(coreSma) as of t (coreSma 0 = 1 from the first candle); RSI as of t. On bars where
+ *    panic, RSI, core and froth are all defined: not in a dip trade -> start one when panic (held = 0); in one ->
+ *    held += 1 and end it when RSI > sellAbove or (maxHold > 0 and held >= maxHold). On = (dip trade or core) and not
+ *    froth.
+ */
+function frothDipMatrix(candles: CandlesByMarket, markets: string[], p: FrothDipParams, maxWeight: number, idx: number[]): Matrix {
+  const n = idx.length;
+  const low = new Array<number>(n).fill(0);
+  const defined = new Array<number>(n).fill(0);
+  for (const m of FROTH_DIP_POOL) {
+    const cs = cleanCandles(candles[m]);
+    if (!cs.length) continue;
+    const r = rsi(cs.map((c) => c[4]), p.rsiPeriod);
+    const f = asOf(cs, r.map((v) => (Number.isFinite(v) ? (v < p.rsiBelow ? 1 : 0) : NaN)), idx);
+    for (let i = 0; i < n; i++)
+      if (Number.isFinite(f[i])) {
+        low[i] += f[i];
+        defined[i]++;
+      }
+  }
+  const panic = idx.map((_, i) =>
+    defined[i] >= ALT_FROTH_MIN_POOL ? (low[i] / defined[i] >= p.breadthMin - 1e-12 ? 1 : 0) : NaN,
+  );
+  let froth: number[];
+  if (p.frothThr <= 0) froth = new Array<number>(n).fill(0);
+  else {
+    const sp = frothSpread(candles, p.frothLook, idx);
+    const lo = p.frothThr - p.frothBand;
+    froth = new Array<number>(n).fill(NaN);
+    let inside = false;
+    for (let i = 0; i < n; i++) {
+      const s = sp[i];
+      if (Number.isNaN(s)) continue;
+      if (inside) {
+        if (s < lo) inside = false;
+      } else if (s > p.frothThr) inside = true;
+      froth[i] = inside ? 1 : 0;
+    }
+  }
+  const each = maxWeight / markets.length;
+  const cols = markets.map((m) => {
+    const cs = cleanCandles(candles[m]);
+    const closes = cs.map((c) => c[4]);
+    const r = asOf(cs, rsi(closes, p.rsiPeriod), idx);
+    let coreRaw: number[];
+    if (p.coreSma) {
+      const s = sma(closes, p.coreSma);
+      coreRaw = closes.map((c, i) => (Number.isFinite(s[i]) ? (c > s[i] ? 1 : 0) : NaN));
+    } else coreRaw = closes.map(() => 1);
+    const core = asOf(cs, coreRaw, idx);
+    const w = new Array<number>(n).fill(NaN);
+    let inside = false;
+    let held = 0;
+    for (let i = 0; i < n; i++) {
+      if (!(Number.isFinite(panic[i]) && Number.isFinite(r[i]) && Number.isFinite(core[i]) && Number.isFinite(froth[i]))) continue;
+      if (!inside) {
+        if (panic[i] === 1) {
+          inside = true;
+          held = 0;
+        }
+      } else {
+        held++;
+        if (r[i] > p.sellAbove || (p.maxHold && held >= p.maxHold)) inside = false;
+      }
+      w[i] = (inside || core[i] === 1) && froth[i] === 0 ? each : 0;
+    }
+    return w;
+  });
+  return fromFirstGood(cols, n);
+}
+
+const FROTH_DIP_KNOBS = ['coreSma', 'rsiPeriod', 'rsiBelow', 'breadthMin', 'sellAbove', 'maxHold', 'frothLook', 'frothThr', 'frothBand'] as const;
+const frothDipParams = (spec: StrategySpec): FrothDipParams =>
+  Object.fromEntries(FROTH_DIP_KNOBS.map((k) => [k, num(spec, k)])) as unknown as FrothDipParams;
+
+/** froth_dip: trend core + market-wide panic buys + alt-froth exit (see frothDipMatrix). */
+const frothDip: FamilyRun = (candles, spec) => {
+  const { idx } = unionTimes(candles, spec.markets);
+  return toSeries(idx, spec.markets, frothDipMatrix(candles, spec.markets, frothDipParams(spec), spec.risk.maxWeight, idx));
+};
+
 export const runners: Record<FamilyName, FamilyRun> = {
   ema_cross: emaCross,
   macd_trend: macdTrend,
@@ -346,7 +485,20 @@ export const runners: Record<FamilyName, FamilyRun> = {
   dca_dip: dcaDip,
   rotation_momentum: rotation,
   alt_froth: altFroth,
+  froth_dip: frothDip,
 };
+
+const FROTH_DIP_PARAMS: ParamInfo[] = [
+  { name: 'coreSma', type: 'int', default: 132, min: 0, max: 600, description: 'Hold while the close is above this SMA (20 or more); 0 = always hold unless froth.' },
+  { name: 'rsiPeriod', type: 'int', default: 12, min: 4, max: 40, description: 'RSI length in candles.' },
+  { name: 'rsiBelow', type: 'number', default: 36.5, min: 15, max: 45, description: 'A pool coin counts as oversold while its RSI is under this.' },
+  { name: 'breadthMin', type: 'number', default: 0.85, min: 0.4, max: 1, description: 'Panic buy when at least this fraction of the 2019 coin pool is oversold at once.' },
+  { name: 'sellAbove', type: 'number', default: 85, min: 50, max: 95, description: "End the dip trade when the coin's own RSI rises over this." },
+  { name: 'maxHold', type: 'int', default: 97, min: 0, max: 500, description: 'End the dip trade after this many candles at the latest (5 or more); 0 = no limit.' },
+  { name: 'frothLook', type: 'int', default: 120, min: 20, max: 400, description: "Candles over which the old altcoins' return is compared with Bitcoin's." },
+  { name: 'frothThr', type: 'number', default: 0.1, min: 0, max: 0.6, description: 'Step aside while the old altcoins beat Bitcoin by more than this log return (0.02 or more); 0 = froth exit off.' },
+  { name: 'frothBand', type: 'number', default: 0.05, min: 0, max: 0.3, description: "Back in once the altcoins' lead is under the threshold minus this." },
+];
 
 export const families: FamilyInfo[] = [
   {
@@ -449,5 +601,13 @@ export const families: FamilyInfo[] = [
       { name: 'minOut', type: 'int', default: 0, min: 0, max: 400, description: 'Stay out at least this many candles after a froth exit; 0 = no minimum.' },
       { name: 'trendSma', type: 'int', default: 0, min: 0, max: 600, description: 'Also stay out of a coin while it is under this SMA (10 or more); 0 turns the filter off.' },
     ],
+  },
+  {
+    family: 'froth_dip',
+    title: 'Trend core, panic buys and froth exits',
+    summary: 'Rides the uptrend above a moving average, buys market-wide panic sell-offs, and steps aside while old altcoins race far ahead of Bitcoin.',
+    version: 1,
+    multiMarket: true,
+    params: FROTH_DIP_PARAMS,
   },
 ];

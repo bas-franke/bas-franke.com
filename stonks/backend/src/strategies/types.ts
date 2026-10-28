@@ -32,7 +32,8 @@ export type FamilyName =
   | 'bollinger_reversion'
   | 'dca_dip'
   | 'rotation_momentum'
-  | 'alt_froth';
+  | 'alt_froth'
+  | 'froth_dip';
 
 export interface RiskSpec {
   maxWeight: number;

@@ -25,11 +25,13 @@ BOT_READY = False
 MULTI_MARKET = True
 POOL = ["ADA-EUR", "BCH-EUR", "ETC-EUR", "LINK-EUR", "LTC-EUR", "MIOTA-EUR", "NEO-EUR", "TRX-EUR", "XLM-EUR",
         "XRP-EUR", "XTZ-EUR"]
+ALT9 = ["XRP-EUR", "ADA-EUR", "LINK-EUR", "TRX-EUR", "LTC-EUR", "BCH-EUR", "XLM-EUR", "XTZ-EUR", "MIOTA-EUR"]
+POOLS = {"old11": POOL, "alt9": ALT9}   # alt9 = alt_froth's pool (has 1h candles, for close-hour checks)
 MIN_POOL = 5
 
 
 def default_params() -> dict:
-    return {"lookback": 30, "quantile": 0.9, "rankLen": 365, "minOut": 20}
+    return {"lookback": 30, "quantile": 0.9, "rankLen": 365, "minOut": 20, "pool": "old11"}
 
 
 def param_space() -> dict:
@@ -42,6 +44,8 @@ def param_space() -> dict:
                     "description": "candles of skew history the rank is taken over"},
         "minOut": {"type": "int", "min": 1, "max": 120, "log": True,
                    "description": "candles to stay out after the latest trigger (1 = only on trigger candles)"},
+        "pool": {"type": "choice", "values": ["old11", "alt9"],
+                 "description": "old11 = the 11 alts listed by 2019; alt9 = alt_froth's 9 (no ETC/NEO)"},
     }
 
 
@@ -50,7 +54,7 @@ def warmup(p: dict) -> int:
 
 
 def required_markets(spec: dict) -> list[str]:
-    return list(POOL)
+    return list(POOLS[(spec.get("params") or {}).get("pool") or "old11"])
 
 
 def _asof(df: pd.DataFrame, values: np.ndarray, idx: np.ndarray) -> np.ndarray:
@@ -62,10 +66,10 @@ def _asof(df: pd.DataFrame, values: np.ndarray, idx: np.ndarray) -> np.ndarray:
     return out
 
 
-def pool_skew(candles: dict, lookback: int, idx: np.ndarray, exclude=()) -> np.ndarray:
+def pool_skew(candles: dict, lookback: int, idx: np.ndarray, exclude=(), pool=None) -> np.ndarray:
     """Bias-corrected cross-sectional skew of lookback log returns over the pool on idx (NaN if < MIN_POOL coins)."""
     cols = []
-    for m in POOL:
+    for m in (pool or POOL):
         if m in exclude or m not in candles or len(candles[m]) <= lookback:
             continue
         c = np.log(candles[m]["close"].to_numpy(np.float64))
@@ -86,7 +90,8 @@ def targets(candles, spec, start_time=None):
     markets = list(spec["markets"])
     idx = union_index(candles, markets)
     n = len(idx)
-    sk = pd.Series(pool_skew(candles, int(p["lookback"]), idx, exclude=set(markets)))
+    sk = pd.Series(pool_skew(candles, int(p["lookback"]), idx, exclude=set(markets),
+                             pool=POOLS[p.get("pool") or "old11"]))
     L = int(p["rankLen"])
     rk = sk.rolling(L, min_periods=max(L // 2, 2)).rank(pct=True).to_numpy()
     q, k_out = float(p["quantile"]), max(int(p["minOut"]), 1)
@@ -120,7 +125,7 @@ def explain(spec) -> dict:
                    "rest (a lottery-style chase that tends to precede weaker weeks).",
         "howItWorks": [
             f"It holds {mk}" + (f" ({100 / k:.0f} % of the money per coin)" if k > 1 else "") + " by default.",
-            f"After every {iv} candle it takes the return over {bars_text(p['lookback'], iv)} of eleven altcoins "
+            f"After every {iv} candle it takes the return over {bars_text(p['lookback'], iv)} of {'nine' if p.get('pool') == 'alt9' else 'eleven'} altcoins "
             "that were already trading in 2019 and measures how lopsided they are: is one coin far ahead of the "
             "pack (high skew) or are they spread evenly?",
             f"When that lopsidedness is in the top {pct(1 - float(p['quantile']))} of the last "

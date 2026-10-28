@@ -220,7 +220,14 @@ function Research({
         </div>
       )}
 
-      {hallView && <HallOfFame hall={hall} active={active} onActivate={(h) => setPick({ e: h.entry, bucket: 'hall', hallId: h.id })} />}
+      {hallView && (
+        <HallOfFame
+          hall={hall}
+          writeups={writeups.data}
+          active={active}
+          onActivate={(h) => setPick({ e: h.entry, bucket: 'hall', hallId: h.id })}
+        />
+      )}
 
 
       {!hallView && (
@@ -244,6 +251,7 @@ function Research({
               onActivate={data.id !== undefined ? () => setPick({ e, bucket: tab }) : undefined}
               inHall={hallKeys.has(JSON.stringify(e.spec))}
               hasWriteup={!!writeups.data?.has(e.spec.id)}
+              bucket={tab}
               onAddToHall={data.id !== undefined && hall.data ? () => void addToHall(e) : undefined}
             />
           ))
@@ -521,6 +529,7 @@ function RankCard({
   origin,
   onRemove,
   hasWriteup,
+  bucket,
 }: {
   e: ResearchEntry;
   color: string;
@@ -534,6 +543,8 @@ function RankCard({
   onRemove?: () => void;
   /** A long-form write-up exists for this spec: show a button to it. */
   hasWriteup?: boolean;
+  /** Research tab this card sits on, so the write-up link returns here. */
+  bucket?: string;
 }) {
   const m = e.metrics;
   const s = e.spec;
@@ -551,9 +562,67 @@ function RankCard({
         <div className="rank-badge" aria-label={`Rank ${e.rank}`}>
           {e.rank}
         </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h2>{s.name}</h2>
-          <div className="row" style={{ marginTop: 8, gap: 6 }}>
+        <h2>{s.name}</h2>
+      </header>
+
+      <LineChart
+        series={series}
+        height={200}
+        ariaLabel={`Value of €1,000 with ${s.name} versus buy and hold`}
+        yFormat={euroAxis}
+        tipFormat={(v) => eur(v)}
+        baseline={1000}
+        baselineLabel="€1,000 start"
+      />
+
+      <footer className="row rank-actions">
+        {hasWriteup && (
+          <button className="btn small" onClick={() => navigate(`/writeup?spec=${encodeURIComponent(s.id)}${bucket ? `&bucket=${encodeURIComponent(bucket)}` : ''}`)}>
+            Read the full write-up
+          </button>
+        )}
+        {inHall ? (
+          <span className="chip brass hall-star" title="In the hall of fame: kept forever">
+            ★ hall of fame
+          </span>
+        ) : (
+          onAddToHall && (
+            <button className="btn ghost small hall-star" onClick={onAddToHall} title="Keep this strategy forever, whatever new research finds">
+              ☆ Keep in hall of fame
+            </button>
+          )
+        )}
+        {onRemove && <RemoveButton onRemove={onRemove} />}
+        {e.botReady && (
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              className="btn ghost small"
+              onClick={() => {
+                setHandoff({ spec: e.spec, rank: e.rank });
+                navigate('/settings');
+              }}
+            >
+              Tweak in settings
+            </button>
+            {active ? (
+              <span className="chip gain">
+                <IconCheck width={13} /> active in the bot
+              </span>
+            ) : (
+              onActivate && (
+                <button className="btn brass" onClick={onActivate}>
+                  Activate in bot
+                </button>
+              )
+            )}
+          </div>
+        )}
+      </footer>
+
+      <details className="rank-more">
+        <summary>Details</summary>
+        <div className="rank-more-body">
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
             <span className="chip brass">{familyLabel(s.family)}</span>
             <span className="chip">every {s.interval}</span>
             <span className="chip outline" title={s.markets.join(', ')}>
@@ -578,26 +647,9 @@ function RankCard({
             )}
             {origin && <span className="chip outline">{origin}</span>}
           </div>
-        </div>
-        {inHall ? (
-          <span className="chip brass hall-star" title="In the hall of fame: kept forever">
-            ★ hall of fame
-          </span>
-        ) : (
-          onAddToHall && (
-            <button className="btn ghost small hall-star" onClick={onAddToHall} title="Keep this strategy forever, whatever new research finds">
-              ☆ Keep in hall of fame
-            </button>
-          )
-        )}
-      </header>
-
-      <p className="notes" style={{ fontStyle: 'normal', color: 'var(--ink)', fontSize: '1.12rem' }}>
-        {e.explanation.summary}
-      </p>
-
-      <div className="rank-body">
-        <div className="stack" style={{ gap: 18 }}>
+          <p className="notes" style={{ fontStyle: 'normal', color: 'var(--ink)', fontSize: '1.05rem' }}>
+            {e.explanation.summary}
+          </p>
           <div className="metrics">
             <Metric label="€1,000 became" tip={METRIC_TIPS.final} value={fx(m.finalEur, (v) => eur(v, true))} />
             <Metric label="Return" tip={METRIC_TIPS.ret} value={fx(m.returnPct, (v) => pct(v, 1, true))} cls={m.returnPct >= 0 ? 'gain' : 'loss'} />
@@ -608,23 +660,11 @@ function RankCard({
             <Metric label="Fees paid" tip={METRIC_TIPS.fees} value={fx(m.feesEur, (v) => eur(v, true))} />
             <Metric label="Sharpe" tip={METRIC_TIPS.sharpe} value={fx(m.sharpe, (v) => v.toFixed(2))} />
           </div>
-          <LineChart
-            series={series}
-            height={220}
-            ariaLabel={`Value of €1,000 with ${s.name} versus buy and hold`}
-            yFormat={euroAxis}
-            tipFormat={(v) => eur(v)}
-            baseline={1000}
-            baselineLabel="€1,000 start"
-          />
           <p className="tiny muted">
             Test period {m.testPeriod ? `${dateOnly(m.testPeriod[0])} – ${dateOnly(m.testPeriod[1])}` : ''}
             {m.trainReturnPct !== undefined ? ` · on the tuning period it made ${pct(m.trainReturnPct, 0, true)}` : ''}
             {m.exposurePct !== undefined ? ` · in the market ${pct(m.exposurePct, 0)} of the time` : ''}
           </p>
-        </div>
-
-        <div className="stack" style={{ gap: 18 }}>
           <div>
             <div className="eyebrow" style={{ marginBottom: 10 }}>
               How it works
@@ -651,51 +691,16 @@ function RankCard({
             </div>
             {e.explanation.vsBuyHold}
           </div>
+          {e.lineage && (
+            <span className="tiny muted mono">
+              {e.lineage.experimentId}
+              {e.lineage.agent ? ` · ${e.lineage.agent}` : ''}
+              {e.lineage.round !== undefined ? ` · round ${e.lineage.round}` : ''}
+            </span>
+          )}
+          {!e.botReady && <span className="small muted">Waiting to be ported to the bot</span>}
         </div>
-      </div>
-
-      <footer className="row" style={{ borderTop: '1px solid var(--line)', paddingTop: 16 }}>
-        {e.lineage && (
-          <span className="tiny muted mono">
-            {e.lineage.experimentId}
-            {e.lineage.agent ? ` · ${e.lineage.agent}` : ''}
-            {e.lineage.round !== undefined ? ` · round ${e.lineage.round}` : ''}
-          </span>
-        )}
-        <span className="spacer" />
-        {hasWriteup && (
-          <button className="btn small" onClick={() => navigate(`/writeup?spec=${encodeURIComponent(s.id)}`)}>
-            Read the full write-up
-          </button>
-        )}
-        {onRemove && <RemoveButton onRemove={onRemove} />}
-        {e.botReady ? (
-          <div className="row" style={{ gap: 8 }}>
-            <button
-              className="btn ghost small"
-              onClick={() => {
-                setHandoff({ spec: e.spec, rank: e.rank });
-                navigate('/settings');
-              }}
-            >
-              Tweak in settings
-            </button>
-            {active ? (
-              <span className="chip gain">
-                <IconCheck width={13} /> active in the bot
-              </span>
-            ) : (
-              onActivate && (
-                <button className="btn brass" onClick={onActivate}>
-                  Activate in bot
-                </button>
-              )
-            )}
-          </div>
-        ) : (
-          <span className="small muted">Waiting to be ported to the bot</span>
-        )}
-      </footer>
+      </details>
     </article>
   );
 }
@@ -717,10 +722,12 @@ function RemoveButton({ onRemove }: { onRemove: () => void }) {
 /** The strategies the owner keeps forever, newest first; they never change when new research arrives. */
 function HallOfFame({
   hall,
+  writeups,
   active,
   onActivate,
 }: {
   hall: { data?: HallEntry[] | null; error?: Error | null; reload: () => void };
+  writeups?: Set<string> | null;
   active: Overview['activeResearch'] | null;
   onActivate: (h: HallEntry) => void;
 }) {
@@ -760,6 +767,8 @@ function HallOfFame({
             onActivate={() => onActivate(h)}
             origin={`kept ${dateOnly(h.addedAt)} · was ${bucketTitle(h.bucket)} #${h.rank}`}
             onRemove={() => void remove(h)}
+            hasWriteup={!!writeups?.has(h.entry.spec.id)}
+            bucket="hall"
           />
         ))
       )}

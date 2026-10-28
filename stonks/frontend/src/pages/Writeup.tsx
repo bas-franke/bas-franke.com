@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
 import { navigate, useLocation } from '../router';
-import type { Writeup, WriteupChart, WriteupSection } from '../types';
+import { BUCKET_NAMES, type Writeup, type WriteupChart, type WriteupCoin, type WriteupSection } from '../types';
 
 // A long-form explanation of one strategy (SPEC §8b): /writeup?spec=<spec id>. The content is stored in the database.
 
@@ -18,16 +18,20 @@ const FORMATS: Record<string, (v: number) => string> = {
   pct: (v) => `${Math.round(v)}%`,
 };
 
+const BACK_BUCKETS = new Set<string>([...BUCKET_NAMES, 'hall']);
+
 export default function WriteupPage() {
   const { query } = useLocation();
   const id = query.get('spec') ?? '';
+  const asked = query.get('bucket') ?? '';
+  const back = BACK_BUCKETS.has(asked) ? asked : 'mixed';
   const w = useAsync(() => api.writeup(id), [id]);
   return (
     <div className="stack writeup" style={{ gap: 22 }}>
       <div className="page-head">
         <div>
           <span className="eyebrow">
-            <a href="/research" onClick={(e) => (e.preventDefault(), navigate('/research?bucket=mixed'))}>
+            <a href={`/research?bucket=${encodeURIComponent(back)}`} onClick={(e) => (e.preventDefault(), navigate(`/research?bucket=${encodeURIComponent(back)}`))}>
               ← Research
             </a>
           </span>
@@ -38,14 +42,19 @@ export default function WriteupPage() {
       {w.error && <ErrorBox error={w.error} onRetry={w.reload} />}
       {!w.data && !w.error && <Skeleton h={400} />}
       {w.data && <Toc doc={w.data} />}
-      {w.data?.sections.map((s, i) => <Section key={i} s={s} n={i} />)}
+      {w.data?.sections.map((s, i) =>
+        hasCoinBoard(w.data!) && s.key?.startsWith('coin-') ? null : <Section key={i} s={s} n={i} />,
+      )}
     </div>
   );
 }
 
+const hasCoinBoard = (doc: Writeup) => doc.sections.some((s) => (s.coins?.length ?? 0) > 0);
+
 function Toc({ doc }: { doc: Writeup }) {
-  const examples = doc.sections.filter((s) => s.type === 'example');
-  if (!examples.length) return null;
+  const board = hasCoinBoard(doc);
+  const examples = doc.sections.filter((s) => s.type === 'example' && !(board && s.key?.startsWith('coin-')));
+  if (!examples.length && !board) return null;
   return (
     <nav className="card quiet writeup-toc" aria-label="Examples">
       <div className="eyebrow">Examples in this write-up</div>
@@ -55,6 +64,11 @@ function Toc({ doc }: { doc: Writeup }) {
             <a href={`#ex-${s.key}`}>{s.title}</a> <span className={`chip ${s.trades ? 'brass' : 'outline'}`}>{s.trades ? 'trades' : 'no trade'}</span>
           </li>
         ))}
+        {board && (
+          <li>
+            <a href="#coin-board">Every coin, strategy against holding</a>
+          </li>
+        )}
       </ol>
     </nav>
   );
@@ -68,6 +82,144 @@ function Paragraphs({ text }: { text?: string }) {
         <p key={i}>{p}</p>
       ))}
     </>
+  );
+}
+
+function CoinTable({ s }: { s: WriteupSection }) {
+  const coins = s.coins ?? [];
+  const [coinId, setCoinId] = useState(coins[0]?.id ?? '');
+  const coin = coins.find((c) => c.id === coinId) ?? coins[0];
+  const [rangeId, setRangeId] = useState(coin?.ranges[0]?.id ?? 'year');
+  const range = coin?.ranges.find((r) => r.id === rangeId) ?? coin?.ranges[0];
+  const pick = (id: string) => {
+    setCoinId(id);
+    document.getElementById('coin-board')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  return (
+    <section className="card" id={coins.length ? 'coin-board' : undefined}>
+      <h2>{s.title}</h2>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>{(s.head ?? []).map((h) => <th key={h}>{h}</th>)}</tr>
+          </thead>
+          <tbody>
+            {(s.rows ?? []).map((r, i) => (
+              <tr key={i} className={coins.length && r[0] === coin?.id ? 'is-picked' : undefined}>
+                {r.map((c, j) => (
+                  <td key={j}>
+                    {j === 0 && coins.some((x) => x.id === c) ? (
+                      <button type="button" className="writeup-coin" aria-pressed={c === coin?.id} onClick={() => pick(c)}>
+                        {c}
+                      </button>
+                    ) : (
+                      c
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {coin && range && <CoinCharts coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} />}
+    </section>
+  );
+}
+
+function CoinCharts({
+  coins,
+  coin,
+  rangeId,
+  onCoin,
+  onRange,
+}: {
+  coins: WriteupCoin[];
+  coin: WriteupCoin;
+  rangeId: string;
+  onCoin: (id: string) => void;
+  onRange: (id: string) => void;
+}) {
+  const range = coin.ranges.find((r) => r.id === rangeId) ?? coin.ranges[0];
+  const charts = useMemo(() => {
+    const gap = range.equity.map(([t, v], i) => [t, Math.round((v - (range.holdEquity[i]?.[1] ?? v)) * 100) / 100] as [number, number]);
+    const out: WriteupChart[] = [];
+    if (range.price?.length) {
+      const cheap = Math.max(...range.price.map(([, v]) => Math.abs(v))) < 20;
+      out.push({
+        title: `${coin.id} price, ${range.label.toLowerCase()}`,
+        yFormat: cheap ? 'num3' : 'eur',
+        height: 220,
+        series: [{ name: `${coin.id} price`, color: 'ink', points: range.price }],
+        band: range.band ? { name: `Share of the portfolio in ${coin.id}`, points: range.band } : undefined,
+      });
+    }
+    out.push(
+      {
+        title: `€1,000, ${range.label.toLowerCase()}: strategy and holding`,
+        yFormat: 'eur',
+        height: 240,
+        baseline: 1000,
+        baselineLabel: '€1,000 start',
+        series: [
+          { name: 'This strategy', color: 'brass', points: range.equity },
+          { name: `Holding ${coin.id}`, color: 'ink2', dash: '7 5', points: range.holdEquity },
+        ],
+      },
+      {
+        title: 'Strategy minus holding, at every hour',
+        yFormat: 'eur',
+        height: 170,
+        baseline: 0,
+        baselineLabel: 'level',
+        series: [{ name: 'Ahead of holding', color: 'brass', points: gap }],
+      },
+    );
+    return out;
+  }, [coin, range]);
+  const gap = range.strategy - range.hold;
+  return (
+    <div className="writeup-board">
+      <div className="writeup-picks" role="tablist" aria-label="Coin">
+        {coins.map((c) => (
+          <button key={c.id} type="button" className={`chip ${c.id === coin.id ? 'brass' : 'outline'}`} aria-pressed={c.id === coin.id} onClick={() => onCoin(c.id)}>
+            {c.id}
+          </button>
+        ))}
+      </div>
+      <div className="writeup-picks" role="tablist" aria-label="Stretch">
+        {coin.ranges.map((r) => (
+          <button key={r.id} type="button" className={`chip ${r.id === range.id ? 'brass' : 'outline'}`} aria-pressed={r.id === range.id} onClick={() => onRange(r.id)}>
+            {r.label}
+          </button>
+        ))}
+      </div>
+      <div className="writeup-compare">
+        <div>
+          <div className="eyebrow">This strategy</div>
+          <b className={range.strategy >= range.hold ? 'gain' : 'loss'}>{eur(range.strategy)}</b>
+        </div>
+        <div>
+          <div className="eyebrow">Holding {coin.id}</div>
+          <b>{eur(range.hold)}</b>
+        </div>
+        <div>
+          <div className="eyebrow">{gap >= 0 ? 'Ahead of holding' : 'Behind holding'}</div>
+          <b className={gap >= 0 ? 'gain' : 'loss'}>{eur(Math.abs(gap))}</b>
+        </div>
+      </div>
+      <p className="small soft">
+        Move along either line and both values are for that hour. The lower chart is the strategy minus holding at every hour.
+        {range.fees !== undefined ? ` Fees in this stretch ${eur(range.fees)}.` : ''}
+        {range.trips !== undefined ? ` ${range.trips} full exits.` : ''}
+        {range.exposure !== undefined && range.exposure !== null ? ` In the market ${Math.round(range.exposure)}% of the time.` : ''}
+      </p>
+      <div className="writeup-charts">
+        {charts.map((c, i) => (
+          <Chart key={`${coin.id}-${range.id}-${i}`} c={c} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -111,27 +263,7 @@ function Section({ s, n }: { s: WriteupSection; n: number }) {
         </section>
       );
     case 'table':
-      return (
-        <section className="card">
-          <h2>{s.title}</h2>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>{(s.head ?? []).map((h) => <th key={h}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {(s.rows ?? []).map((r, i) => (
-                  <tr key={i}>
-                    {r.map((c, j) => (
-                      <td key={j}>{c}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      );
+      return <CoinTable s={s} />;
     case 'candles':
       return (
         <section className="card">
@@ -193,16 +325,24 @@ function Chart({ c }: { c: WriteupChart }) {
   return (
     <div className="writeup-chart">
       <div className="eyebrow">{c.title}</div>
-      <LineChart series={series} height={c.height ?? 200} ariaLabel={c.title} yFormat={FORMATS[c.yFormat ?? 'eur'] ?? FORMATS.eur} legend={series.length > 1} />
+      <LineChart
+        series={series}
+        height={c.height ?? 200}
+        ariaLabel={c.title}
+        yFormat={FORMATS[c.yFormat ?? 'eur'] ?? FORMATS.eur}
+        legend={series.length > 1}
+        baseline={c.baseline}
+        baselineLabel={c.baselineLabel}
+      />
       {c.band && (
         <>
-          <div className="tiny soft" style={{ marginTop: 6 }}>Share of the portfolio in ETH</div>
+          <div className="tiny soft" style={{ marginTop: 6 }}>{c.band.name || 'Share of the portfolio in ETH'}</div>
           <LineChart
-            series={[{ name: 'in ETH', color: 'var(--brass)', area: true, points: stepPoints(c.band.points), width: 2 }]}
+            series={[{ name: c.band.name || 'in the coin', color: 'var(--brass)', area: true, points: stepPoints(c.band.points), width: 2 }]}
             height={80}
             legend={false}
             baseline={0}
-            ariaLabel="Share of the portfolio in ETH"
+            ariaLabel={c.band.name || 'Share of the portfolio in ETH'}
             yFormat={(v) => (v > 100.5 || v < -0.5 ? '' : `${Math.round(v)}%`)}
           />
         </>
@@ -242,7 +382,7 @@ function Example({ s, n }: { s: WriteupSection; n: number }) {
           <div>
             <div className="eyebrow">€1,000 at the start of this stretch</div>
             <p className="small">
-              Strategy <b className={r.strategy >= r.hold ? 'gain' : 'loss'}>{eur(r.strategy)}</b> · holding ETH <b>{eur(r.hold)}</b>
+              Strategy <b className={r.strategy >= r.hold ? 'gain' : 'loss'}>{eur(r.strategy)}</b> · holding {s.holdName ?? 'ETH'} <b>{eur(r.hold)}</b>
             </p>
           </div>
         )}

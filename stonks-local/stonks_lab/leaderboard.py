@@ -662,7 +662,7 @@ BUCKETS = {
 }
 CUSTOM_AGENT = "custom"
 # Families custom variants are built on (the registry query is per family); add one when a new variant uses it.
-CUSTOM_FAMILIES: list[str] = ["mtf_guard_a24"]
+CUSTOM_FAMILIES: list[str] = ["mtf_guard_a24", "rsi_dip", "trend_trail", "ta_trend", "range_band", "week_mom", "pyramid_high"]
 CUSTOM_DAYS = 30
 
 
@@ -703,12 +703,14 @@ def mixed_timeframes(e: dict) -> bool:
 def bucket_entries(registry: reg.Registry, intervals: list[str], n: int = 5, mixed: bool = False,
                    custom: bool = False) -> list[dict]:
     """The bucket's top ``n``: chosen by score among BTC/ETH-vs-EUR strategies, ordered by last-year (holdout)
-    profit. ``mixed`` picks only multi-timeframe specs; the other buckets leave them out."""
+    profit. ``mixed`` picks only multi-timeframe specs; the other buckets leave them out. ``custom`` is the
+    hand-made variants, and the five slots go to the best last-year returns."""
     if custom:
-        # every hand-made variant is shown (no eligibility or near-duplicate filtering), best score first
+        # every hand-made variant is eligible (no near-duplicate filtering). The chip has five slots and
+        # shows the last test year, so the five with the best last-year return are the ones published.
         rows = [e for f in CUSTOM_FAMILIES for e in registry.top(5000, family=f, market_sets=TRADED_MARKET_SETS)
                 if e.get("agent") == CUSTOM_AGENT and not superseded_reason(e)]
-        return sorted(rows, key=lambda e: -(e.get("score") or -1e9))[:n]
+        return sorted(rows, key=lambda e: -_holdout_return(e))[:n]
     elif not mixed:
         entries = rank(registry, n=n, intervals=intervals, market_sets=TRADED_MARKET_SETS,
                        keep=lambda e: not mixed_timeframes(e) and e.get("agent") != CUSTOM_AGENT)

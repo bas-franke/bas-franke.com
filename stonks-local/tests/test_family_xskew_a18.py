@@ -45,6 +45,8 @@ def test_contract_and_validation():
             assert not np.isnan(v[first:]).any()
             assert (v[first:] >= 0).all() and (v[first:].sum(axis=1) <= 0.7 + 1e-12).all()
     assert set(FAM.markets_needed(spec(["ETH-EUR"]))) >= {"ETH-EUR", "XRP-EUR", "XTZ-EUR"}
+    alt9 = set(FAM.markets_needed(spec(["ETH-EUR"], pool="alt9")))
+    assert "XRP-EUR" in alt9 and "NEO-EUR" not in alt9 and "ETC-EUR" not in alt9
     ex = FAM.explain(spec(["BTC-EUR", "ETH-EUR"]))
     assert ex["summary"] and len(ex["howItWorks"]) >= 4 and ex["whenItWins"] and ex["whenItLoses"]
 

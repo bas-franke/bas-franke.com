@@ -90,9 +90,30 @@ export interface WriteupChart {
   title: string;
   yFormat?: 'eur' | 'num3' | 'pct';
   height?: number;
+  /** Drawn as a dashed horizontal line, e.g. 0 on a "strategy minus holding" chart. */
+  baseline?: number;
+  baselineLabel?: string;
   series: { name: string; color?: string; dash?: string; points: [number, number][] }[];
-  /** Position in ETH (%) as change points, drawn as a step line under the chart. */
+  /** Position in the coin (%) as change points, drawn as a step line under the chart. */
   band?: { name: string; points: [number, number][] };
+}
+/** One stretch of one coin, so the write-up can switch the comparison charts. */
+export interface WriteupCoinRange {
+  id: string;
+  label: string;
+  strategy: number;
+  hold: number;
+  fees?: number;
+  trips?: number;
+  exposure?: number | null;
+  equity: [number, number][];
+  holdEquity: [number, number][];
+  price?: [number, number][];
+  band?: [number, number][];
+}
+export interface WriteupCoin {
+  id: string;
+  ranges: WriteupCoinRange[];
 }
 export interface WriteupSection {
   type: 'text' | 'heading' | 'candles' | 'rules' | 'callout' | 'example' | 'table';
@@ -102,12 +123,16 @@ export interface WriteupSection {
   items?: [string, string][];
   head?: string[];
   rows?: string[][];
+  /** Per-coin curves for the comparison charts under a table. */
+  coins?: WriteupCoin[];
   candles?: { label: string; o: number; h: number; l: number; c: number; note: string }[];
   key?: string;
   eli5?: string;
   story?: string;
   trades?: boolean;
   verdict?: string;
+  /** Coin name in the "holding X" result line. Defaults to ETH. */
+  holdName?: string;
   startPosition?: number;
   charts?: WriteupChart[];
   events?: { ts: number; text: string }[];
