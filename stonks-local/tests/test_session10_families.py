@@ -8,7 +8,7 @@ from stonks_lab.families import FAMILIES, normalize_spec
 
 T0 = 1_600_000_000_000
 STEP = 15 * 60_000
-NAMES = ("s10_bearlows", ""s10_combo", "s10_bearbreadth", "s10_missed")
+NAMES = ("s10_bearbreadth", "s10_combo", "s10_bearlows", "s10_bearmix", "s10_missed")
 
 
 def _df(n=6000):
