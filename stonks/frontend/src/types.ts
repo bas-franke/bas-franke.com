@@ -310,6 +310,14 @@ export interface ResearchMetrics {
   score?: number;
   trainReturnPct?: number;
   testPeriod?: [string, string];
+  /** One fixed yardstick for every session (0.6 window + 0.2 mountain + 0.2 last 12 months, Bitvavo fees, 10 coins). */
+  absoluteScore?: number;
+  absWindow?: number;
+  absMountain?: number;
+  absLast12?: number;
+  /** Average yearly return over the 10 coins, and holding's, on the absolute yardstick. */
+  absCagr?: number;
+  absHoldCagr?: number;
 }
 
 export interface ResearchEntry {

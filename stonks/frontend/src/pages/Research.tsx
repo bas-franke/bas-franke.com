@@ -216,10 +216,18 @@ function Research({
           <p>
             <b>An honest note.</b> These results come from backtests: simulations on past prices, with Bitvavo’s fees and a careful fill model. They are
             not a forecast, and a strategy that did well before can do badly next month. Simply buying and holding is shown everywhere as the yardstick to
-            beat, not as a candidate. Scores only compare within one session.
+            beat, not as a candidate. A session’s own score only compares within that session; the absolute score below compares across all of them.
           </p>
         </Fold>
       </section>
+
+      <AbsoluteBoard
+        buckets={buckets}
+        onOpen={(b, rank) => {
+          choose(b);
+          setTimeout(() => document.getElementById(`card-${b}-${rank}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+        }}
+      />
 
       <div className="bucket-tabs" role="tablist" aria-label="Sessions">
         {/* Hall of fame first; the page still opens on the newest session unless a link asks for the hall. */}
@@ -368,6 +376,25 @@ function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
             This session’s five pay Bitvavo’s real fees: 0.15 percent for a limit order that rests in the book and 0.25 percent for a market order.
             They started from the best books of Sessions 5 and 3, on the same windows, coins and grades, and each also had to beat holding half
             the account in coins over the last 12 months alone. The table’s euro numbers are the ether run.
+          </p>
+        )}
+        {name === 'session7' && (
+          <p>
+            This session’s five are all built on Dip and breakout, the owner’s favourite, at Bitvavo’s real fees and with any TAAPI indicator allowed.
+            Same windows, coins and grades as Session 6, so the two tabs compare directly. The table’s euro numbers are the ether run.
+          </p>
+        )}
+        {name === 'session8' && (
+          <p>
+            Session 7’s winner kept too little of the big rallies, like 2021. This session’s five also score a mountain grade: every rally where a coin
+            at least doubled, and how much of it the strategy kept, with the biggest rallies counting most. The final score is three quarters the usual
+            window score and one quarter the mountain grade, at Bitvavo’s real fees. The table’s euro numbers are the ether run.
+          </p>
+        )}
+        {name === 'session9' && (
+          <p>
+            This session’s five are variants of Session 8’s winner, scored exactly like Session 8: three quarters the window score and one quarter
+            the mountain grade, at Bitvavo’s real fees. The table’s euro numbers are the ether run.
           </p>
         )}
       {name === 'custom' && (
@@ -631,6 +658,11 @@ function RankCard({
           {e.rank}
         </div>
         <h2>{s.name}</h2>
+        {isNum(m.absoluteScore) && (
+          <span className="chip outline abs-chip" title="Absolute score: the same yardstick for every session (holding scores 45.7)">
+            absolute {m.absoluteScore.toFixed(1)}
+          </span>
+        )}
       </header>
 
       <LineChart
@@ -770,6 +802,79 @@ function RankCard({
         </div>
       </details>
     </article>
+  );
+}
+
+/** The fixed yardstick's lines to beat (out/abs_results/_yardsticks.json in stonks-local). */
+const ABS_HOLD = 45.7;
+const ABS_HALF = 43.0;
+
+/** Every session card on the absolute score, best first. */
+function AbsoluteBoard({ buckets, onOpen }: { buckets: Partial<Record<BucketName, ResearchBucket>>; onOpen: (bucket: string, rank: number) => void }) {
+  const [all, setAll] = useState(false);
+  const rows = useMemo(
+    () =>
+      Object.entries(buckets)
+        .filter(([b]) => /^session\d+$/.test(b) || b === 'stoploss')
+        .flatMap(([b, bk]) => (bk?.top ?? []).filter((e) => isNum(e.metrics.absoluteScore)).map((e) => ({ b, e })))
+        .sort((x, y) => (y.e.metrics.absoluteScore ?? 0) - (x.e.metrics.absoluteScore ?? 0)),
+    [buckets],
+  );
+  if (!rows.length) return null;
+  const shown = all ? rows : rows.slice(0, 10);
+  const yr = (v: unknown) => fx(v, (n) => pct(n, 0, true));
+  return (
+    <section className="card abs-board">
+      <div className="eyebrow">All sessions on one scale</div>
+      <p className="small muted" style={{ margin: '4px 0 10px' }}>
+        Every session’s strategies scored the same way: 60% the 1-3 month window score, 20% how much of the big rallies (a coin at least doubling)
+        they kept, and 20% the last 12 months, at Bitvavo’s fees on the same 10 coins since 2019. Holding scores {ABS_HOLD}, always half in {ABS_HALF}.
+      </p>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Strategy</th>
+              <th>Session</th>
+              <th className="r">Absolute</th>
+              <th className="r">Windows</th>
+              <th className="r">Rallies kept</th>
+              <th className="r">Last 12 months</th>
+              <th className="r">Per year vs holding</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map(({ b, e }, i) => {
+              const m = e.metrics;
+              return (
+                <tr key={`${b}-${e.spec.id}`} className="abs-row" onClick={() => onOpen(b, e.rank)} title="Open this card">
+                  <td>{i + 1}</td>
+                  <td>{e.spec.name}</td>
+                  <td>
+                    {bucketTitle(b)} #{e.rank}
+                  </td>
+                  <td className="r">
+                    <b>{fx(m.absoluteScore, (n) => n.toFixed(1))}</b>
+                  </td>
+                  <td className="r">{fx(m.absWindow, (n) => n.toFixed(1))}</td>
+                  <td className="r">{fx(m.absMountain, (n) => `${n.toFixed(0)}%`)}</td>
+                  <td className="r">{fx(m.absLast12, (n) => n.toFixed(1))}</td>
+                  <td className="r">
+                    {yr(m.absCagr)} vs {yr(m.absHoldCagr)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 10 && (
+        <button className="btn ghost small" style={{ marginTop: 8 }} onClick={() => setAll(!all)}>
+          {all ? 'Show the top 10' : `Show all ${rows.length}`}
+        </button>
+      )}
+    </section>
   );
 }
 

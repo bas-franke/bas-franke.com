@@ -1350,6 +1350,16 @@ dialog.modal[open] {
   margin: 0;
   min-width: 0;
 }
+.abs-chip {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.abs-row {
+  cursor: pointer;
+}
+.abs-row:hover td {
+  background: var(--paper-2, rgba(127, 127, 127, 0.08));
+}
 .rank-actions {
   justify-content: flex-end;
   flex-wrap: wrap;
