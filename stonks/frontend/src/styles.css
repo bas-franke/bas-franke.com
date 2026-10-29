@@ -2104,9 +2104,9 @@ dialog.modal[open] {
     top: 6px;
   }
   .bucket-tabs button {
-    flex: 1;
+    flex: 1 0 auto;
     justify-content: center;
-    padding: 8px 10px;
+    padding: 8px 12px;
   }
   .modal .kv {
     grid-template-columns: 1fr;
@@ -2195,20 +2195,113 @@ dialog.modal[open] {
 }
 
 /* Strategy write-up page */
+html:has(.writeup) {
+  scroll-padding-top: 16px;
+}
 .writeup p {
   line-height: 1.6;
 }
+.writeup .lede {
+  max-width: 62ch;
+}
 .writeup-h {
-  margin-bottom: 6px;
+  margin: 14px 0 0;
+  font-size: 1.3rem;
+}
+.writeup-text,
+.writeup .callout,
+.writeup-example .rank-more-body > p {
+  max-width: 70ch;
 }
 .writeup-text p + p {
   margin-top: 10px;
 }
+.writeup-fold .rank-more {
+  border-top: 0;
+}
+.writeup-fold .rank-more summary,
+.writeup-example .rank-more summary,
+.writeup-board .rank-more summary {
+  padding: 12px 0 10px;
+}
+.writeup-toc {
+  padding: 4px 16px;
+}
+.writeup-toc summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.writeup-toc summary::-webkit-details-marker {
+  display: none;
+}
+.writeup-toc summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--ink-3);
+  transition: transform 0.2s;
+}
+.writeup-toc details:not([open]) summary::after {
+  transform: rotate(-90deg);
+}
+.writeup-toc .count {
+  font-size: 0.75rem;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
 .writeup-toc ol {
-  margin: 8px 0 0;
+  margin: 0 0 12px;
   padding-left: 22px;
   display: grid;
-  gap: 6px;
+  gap: 2px;
+}
+.writeup-toc li {
+  padding: 4px 0;
+}
+.writeup-toc li a {
+  margin-right: 8px;
+}
+.writeup-toc li .chip {
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  vertical-align: 1px;
+}
+.writeup-totop {
+  position: fixed;
+  right: 18px;
+  bottom: 22px;
+  z-index: 30;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  color: var(--ink);
+  box-shadow: var(--shadow-lift);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.writeup-totop.is-shown {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.writeup-example,
+#coin-board,
+#coin-charts {
+  scroll-margin-top: 12px;
 }
 .writeup-rules {
   display: grid;
@@ -2222,6 +2315,9 @@ dialog.modal[open] {
   border-bottom: 1px solid var(--line);
   padding-bottom: 10px;
 }
+.writeup-rules > div:last-child {
+  border-bottom: 0;
+}
 .writeup-rules dt {
   color: var(--ink-3);
   font-weight: 500;
@@ -2230,8 +2326,8 @@ dialog.modal[open] {
   margin: 0;
 }
 .writeup-candles {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 160px));
   gap: 28px;
   margin: 14px 0 6px;
 }
@@ -2239,13 +2335,27 @@ dialog.modal[open] {
   margin: 0;
   display: grid;
   justify-items: center;
+  align-content: start;
   gap: 6px;
-  max-width: 160px;
   text-align: center;
+}
+.writeup-candles svg {
+  width: 80px;
+  height: 180px;
 }
 .writeup-candles figcaption {
   display: grid;
   gap: 2px;
+}
+.writeup-hint {
+  margin: 4px 0 8px;
+}
+.writeup-table {
+  border-top: 1px solid var(--line);
+}
+.writeup-table td.r,
+.writeup-table th.r {
+  white-space: nowrap;
 }
 .writeup-picks {
   display: flex;
@@ -2264,12 +2374,18 @@ dialog.modal[open] {
 .writeup-compare {
   display: flex;
   flex-wrap: wrap;
-  gap: 22px;
+  gap: 10px 28px;
   margin: 14px 0 6px;
 }
+.writeup-compare > div {
+  min-width: 0;
+}
 .writeup-compare b {
+  font-family: var(--serif);
   font-size: 1.35rem;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .writeup-coin {
   font: inherit;
@@ -2277,7 +2393,7 @@ dialog.modal[open] {
   color: var(--brass-ink);
   background: none;
   border: 0;
-  padding: 0;
+  padding: 4px 0;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -2290,10 +2406,14 @@ tr.is-picked td {
   gap: 18px;
   margin: 16px 0;
 }
-.writeup-example .writeup-charts {
+.writeup-events {
+  margin: 6px 0 0;
+  padding-left: 18px;
   display: grid;
-  gap: 18px;
-  margin: 16px 0;
+  gap: 6px;
+}
+.writeup-events li > .mono {
+  margin-right: 6px;
 }
 .writeup-outcome {
   display: grid;
@@ -2307,9 +2427,103 @@ tr.is-picked td {
   display: grid;
   gap: 4px;
 }
-@media (max-width: 720px) {
+@media (min-width: 1000px) {
+  .writeup-example .writeup-charts,
+  .writeup-board .writeup-charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px 28px;
+  }
+  .writeup-example .writeup-charts > :first-child,
+  .writeup-board .writeup-charts > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 760px) {
+  .writeup {
+    gap: 10px !important;
+  }
+  .writeup .lede {
+    font-size: 0.95rem;
+  }
   .writeup-rules > div,
   .writeup-outcome {
     grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .writeup-totop {
+    right: 16px;
+    bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+  .writeup-example h2,
+  .writeup .card > h2 {
+    font-size: 1.15rem;
+  }
+  /* Three candles side by side instead of one tall column. */
+  .writeup-candles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .writeup-candles svg {
+    width: 56px;
+    height: 120px;
+  }
+  .writeup-candles figcaption {
+    font-size: 0.85rem;
+  }
+  /* Pickers become one swipeable row, so 15 coins don't push the charts off screen. */
+  .writeup-picks {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 12px -16px 0;
+    padding: 0 16px 2px;
+    mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 24px), transparent);
+  }
+  .writeup-picks::-webkit-scrollbar {
+    display: none;
+  }
+  .writeup-picks button {
+    flex: none;
+    padding: 6px 12px;
+  }
+  .writeup-compare {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .writeup-compare .eyebrow {
+    font-size: 0.62rem;
+  }
+  .writeup-compare b {
+    font-size: 1.05rem;
+  }
+  /* Coin table: smaller type and the coin column stays put while the numbers scroll. */
+  .writeup-table table.data {
+    font-size: 0.8rem;
+  }
+  .writeup-table table.data th,
+  .writeup-table table.data td {
+    padding: 8px 8px;
+  }
+  .writeup-table table.data th {
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    white-space: normal;
+    vertical-align: bottom;
+  }
+  .writeup-table table.data th:first-child,
+  .writeup-table table.data td:first-child {
+    padding-left: 16px;
+    position: sticky;
+    left: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+  .writeup-table table.data th:last-child,
+  .writeup-table table.data td:last-child {
+    padding-right: 16px;
+  }
+  .writeup-table tr.is-picked td:first-child {
+    background: color-mix(in srgb, var(--brass) 18%, var(--surface));
   }
 }

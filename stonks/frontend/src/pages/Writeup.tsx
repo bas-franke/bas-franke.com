@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { api } from '../api';
 import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
@@ -57,6 +57,7 @@ export default function WriteupPage() {
       {w.data?.sections.map((s, i) =>
         hasCoinBoard(w.data!) && s.key?.startsWith('coin-') ? null : <Section key={i} s={s} n={i} />,
       )}
+      {w.data && <ToTop />}
     </div>
   );
 }
@@ -66,23 +67,68 @@ const hasCoinBoard = (doc: Writeup) => doc.sections.some((s) => (s.coins?.length
 function Toc({ doc }: { doc: Writeup }) {
   const board = hasCoinBoard(doc);
   const examples = doc.sections.filter((s) => s.type === 'example' && !(board && s.key?.startsWith('coin-')));
+  // Open on wide screens; on a phone the list would fill the first screen, so it starts folded.
+  const [open] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   if (!examples.length && !board) return null;
+  const jump = (e: MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    history.replaceState(history.state, '', `#${id}`);
+  };
   return (
-    <nav className="card quiet writeup-toc" aria-label="Examples">
-      <div className="eyebrow">Examples in this write-up</div>
-      <ol>
-        {examples.map((s) => (
-          <li key={s.key}>
-            <a href={`#ex-${s.key}`}>{s.title}</a> <span className={`chip ${s.trades ? 'brass' : 'outline'}`}>{s.trades ? 'trades' : 'no trade'}</span>
-          </li>
-        ))}
-        {board && (
-          <li>
-            <a href="#coin-board">Every coin, strategy against holding</a>
-          </li>
-        )}
-      </ol>
+    <nav className="card quiet writeup-toc" id="writeup-toc" aria-label="Examples">
+      <details open={open}>
+        <summary>
+          <span className="eyebrow">Examples in this write-up</span>
+          <span className="count">{examples.length + (board ? 1 : 0)}</span>
+        </summary>
+        <ol>
+          {examples.map((s) => (
+            <li key={s.key}>
+              <a href={`#ex-${s.key}`} onClick={(e) => jump(e, `ex-${s.key}`)}>
+                {s.title}
+              </a>
+              <span className={`chip ${s.trades ? 'brass' : 'outline'}`}>{s.trades ? 'trades' : 'no trade'}</span>
+            </li>
+          ))}
+          {board && (
+            <li>
+              <a href="#coin-board" onClick={(e) => jump(e, 'coin-board')}>
+                Every coin, strategy against holding
+              </a>
+            </li>
+          )}
+        </ol>
+      </details>
     </nav>
+  );
+}
+
+/** Floating button back to the list of examples, shown once the reader has scrolled past it. */
+function ToTop() {
+  const [shown, setShown] = useState(false);
+  const frame = useRef(0);
+  useEffect(() => {
+    const check = () => {
+      cancelAnimationFrame(frame.current);
+      frame.current = requestAnimationFrame(() => {
+        const toc = document.getElementById('writeup-toc');
+        setShown(toc ? toc.getBoundingClientRect().bottom < 0 : window.scrollY > 900);
+      });
+    };
+    check();
+    window.addEventListener('scroll', check, { passive: true });
+    return () => (window.removeEventListener('scroll', check), cancelAnimationFrame(frame.current));
+  }, []);
+  const go = () => {
+    const toc = document.getElementById('writeup-toc');
+    toc?.querySelector('details')?.setAttribute('open', '');
+    toc?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  return (
+    <button type="button" className={`writeup-totop${shown ? ' is-shown' : ''}`} onClick={go} aria-hidden={!shown} tabIndex={shown ? 0 : -1}>
+      ↑ Examples
+    </button>
   );
 }
 
@@ -105,21 +151,28 @@ function CoinTable({ s }: { s: WriteupSection }) {
   const range = coin?.ranges.find((r) => r.id === rangeId) ?? coin?.ranges[0];
   const pick = (id: string) => {
     setCoinId(id);
-    document.getElementById('coin-board')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    document.getElementById('coin-charts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   return (
     <section className="card" id={coins.length ? 'coin-board' : undefined}>
       <h2>{s.title}</h2>
-      <div className="table-wrap">
-        <table className="table">
+      {coins.length > 0 && <p className="small soft writeup-hint">Tap a coin to see its charts below.</p>}
+      <div className="table-wrap writeup-table">
+        <table className="data">
           <thead>
-            <tr>{(s.head ?? []).map((h) => <th key={h}>{h}</th>)}</tr>
+            <tr>
+              {(s.head ?? []).map((h, j) => (
+                <th key={h} className={j ? 'r' : undefined}>
+                  {h}
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
             {(s.rows ?? []).map((r, i) => (
               <tr key={i} className={coins.length && r[0] === coin?.id ? 'is-picked' : undefined}>
                 {r.map((c, j) => (
-                  <td key={j}>
+                  <td key={j} className={j ? 'r' : undefined}>
                     {j === 0 && coins.some((x) => x.id === c) ? (
                       <button type="button" className="writeup-coin" aria-pressed={c === coin?.id} onClick={() => pick(c)}>
                         {c}
@@ -195,15 +248,15 @@ function CoinCharts({
   }, [coin, range]);
   const gap = range.strategy - range.hold;
   return (
-    <div className="writeup-board">
-      <div className="writeup-picks" role="tablist" aria-label="Coin">
+    <div className="writeup-board" id="coin-charts">
+      <div className="writeup-picks" role="group" aria-label="Coin">
         {coins.map((c) => (
           <button key={c.id} type="button" className={`chip ${c.id === coin.id ? 'brass' : 'outline'}`} aria-pressed={c.id === coin.id} onClick={() => onCoin(c.id)}>
             {c.id}
           </button>
         ))}
       </div>
-      <div className="writeup-picks" role="tablist" aria-label="Stretch">
+      <div className="writeup-picks" role="group" aria-label="Stretch">
         {coin.ranges.map((r) => (
           <button key={r.id} type="button" className={`chip ${r.id === range.id ? 'brass' : 'outline'}`} aria-pressed={r.id === range.id} onClick={() => onRange(r.id)}>
             {r.label}
@@ -322,7 +375,7 @@ function Candles({ candles }: { candles: NonNullable<WriteupSection['candles']> 
         const col = up ? 'var(--gain)' : 'var(--loss)';
         return (
           <figure key={c.label}>
-            <svg viewBox={`0 0 80 ${H}`} width="80" height={H} role="img" aria-label={`${c.label}: ${c.note}`}>
+            <svg viewBox={`0 0 80 ${H}`} role="img" aria-label={`${c.label}: ${c.note}`}>
               <line x1="40" x2="40" y1={y(c.h)} y2={y(c.l)} stroke={col} strokeWidth="2" />
               <rect x="25" width="30" y={y(Math.max(c.o, c.c))} height={Math.max(2, Math.abs(y(c.o) - y(c.c)))} fill={col} rx="2" />
             </svg>
@@ -390,9 +443,16 @@ function Example({ s, n }: { s: WriteupSection; n: number }) {
         <span className={`chip ${s.trades ? 'brass' : 'outline'}`}>{s.trades ? 'trades' : 'no trade'}</span>
       </div>
       {r && (
-        <p className="small">
-          Strategy <b className={r.strategy >= r.hold ? 'gain' : 'loss'}>{eur(r.strategy)}</b> · holding {s.holdName ?? 'ETH'} <b>{eur(r.hold)}</b>
-        </p>
+        <div className="writeup-compare">
+          <div>
+            <div className="eyebrow">This strategy</div>
+            <b className={r.strategy >= r.hold ? 'gain' : 'loss'}>{eur(r.strategy)}</b>
+          </div>
+          <div>
+            <div className="eyebrow">Holding {s.holdName ?? 'ETH'}</div>
+            <b>{eur(r.hold)}</b>
+          </div>
+        </div>
       )}
       <div className="writeup-charts">{(s.charts ?? []).map((c, i) => <Chart key={`${n}-${i}`} c={c} />)}</div>
       <Fold title="What happened">
@@ -401,11 +461,11 @@ function Example({ s, n }: { s: WriteupSection; n: number }) {
         <div>
           <div className="eyebrow">What the bot does here</div>
           {s.events && s.events.length ? (
-            <ul>
+            <ul className="writeup-events">
               {s.events.map((e) => (
                 <li key={e.ts}>
-                  <span className="mono small soft">{new Date(e.ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC</span>{' '}
-                  {e.text}
+                  <span className="mono small soft">{new Date(e.ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC</span>
+                  <span>{e.text}</span>
                 </li>
               ))}
             </ul>
