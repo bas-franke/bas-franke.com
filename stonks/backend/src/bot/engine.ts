@@ -543,6 +543,12 @@ async function loadCandles(spec: StrategySpec, ms: ModeState, bar: number): Prom
 
 const isNativeDca = (spec: StrategySpec) => spec.family === 'dca_dip' && !runsInPython(spec);
 
+/** How long the bot keeps retrying a bar whose candle has not arrived: half a bar, at most 5 minutes. */
+export const staleGraceMs = (interval: StrategySpec['interval']) => Math.min(INTERVAL_MS[interval] / 2, 5 * 60_000);
+
+/** Bar whose late candle was last reported, so "retrying" is logged once per bar. */
+let lateBar: number | null = null;
+
 /** JSON of the strategy whose lab history download was last reported, so "loading" is logged once per strategy. */
 let warmingFor: string | null = null;
 
@@ -595,6 +601,20 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
       }
     });
     return;
+  }
+  if (decision.t !== null && decision.t < bar) {
+    // The bar that just closed is not in the candles yet (Bitvavo is late, or the fetch failed): deciding now would
+    // act on the previous bar's signal and then never revisit this bar. Retry on the next ticks; only after a grace
+    // period (a market with no trades has no candle at all) decide on what there is, and say so.
+    const lateMs = Date.now() - (bar + INTERVAL_MS[spec.interval]);
+    if (lateMs < staleGraceMs(spec.interval)) {
+      if (lateBar !== bar) {
+        lateBar = bar;
+        await log('info', 'candle_late', `${spec.name}: the ${new Date(bar).toISOString()} candle is not available yet (newest is ${new Date(decision.t).toISOString()}); retrying`, { bar, newest: decision.t });
+      }
+      return;
+    }
+    await log('warn', 'stale_candles', `${spec.name}: the ${new Date(bar).toISOString()} candle never arrived; deciding on the newest one there is (${new Date(decision.t).toISOString()})`, { bar, newest: decision.t });
   }
   const prices: Record<string, number> = {};
   for (const m of spec.markets) {

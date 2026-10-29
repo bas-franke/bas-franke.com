@@ -5,7 +5,7 @@ import * as realClient from '../src/bitvavo/client.js';
 import * as precision from '../src/bitvavo/precision.js';
 import type { OrderIntent } from '../src/bot/logic.js';
 import type { OrderRow } from '../src/bot/store.js';
-import { validateSpec, type Candle, type StrategySpec } from '../src/strategies/index.js';
+import { INTERVAL_MS, validateSpec, type Candle, type StrategySpec } from '../src/strategies/index.js';
 
 /**
  * The engine's tick against fake brokers, store, settings and market data (no DB, no network).
@@ -25,6 +25,8 @@ let book = { bid: 400, ask: 401 };
 const cancelled: Array<{ mode: string; id: number }> = [];
 let candleFailures = 0;
 let candleCalls = 0;
+/** Bars the newest candle lags behind the bar asked for (a late Bitvavo candle). */
+let candleLag = 0;
 let onPlace: (() => void) | null = null;
 
 function makeCandles(n: number, lastBar: number, rising = true): Candle[] {
@@ -104,7 +106,7 @@ mock.module('../src/bot/marketData.js', {
         candleFailures--;
         throw new Error('candles: network error');
       }
-      return makeCandles(Math.min(opts.bars, 400), lastBar);
+      return makeCandles(Math.min(opts.bars, 400), lastBar - candleLag * INTERVAL_MS[_i as keyof typeof INTERVAL_MS]);
     },
   },
 });
@@ -116,7 +118,7 @@ mock.module('../src/log.js', { exports: { log: async () => undefined, errText: (
 /** Runs code outside the tick's async context, like an API request arriving while a tick runs. */
 const outside = AsyncLocalStorage.snapshot();
 const engine = await import('../src/bot/engine.js');
-const { tick, status, switchOff, start, stop } = engine;
+const { tick, status, switchOff, start, stop, staleGraceMs } = engine;
 
 const ema = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 }, execution: { orderType: 'market' } });
 const rot = validateSpec({ family: 'rotation_momentum', markets: ['BTC-EUR', 'ETH-EUR'], interval: '1h', params: { lookback: 3, top: 2 }, execution: { orderType: 'market' } });
@@ -127,6 +129,7 @@ function reset(spec: StrategySpec, enabled = true, mode: 'paper' | 'live' = 'pap
   placed.length = 0;
   cancelled.length = 0;
   candleFailures = 0;
+  candleLag = 0;
   candleCalls = 0;
   onPlace = null;
   botSettings = { enabled, mode, strategy: spec, maxExposureEur: null, dailyLossLimit: { unit: 'eur', value: 100 }, fees: { maker: 0.0015, taker: 0.0025 }, paperStartEur: 1000 };
@@ -166,6 +169,34 @@ test('a failed candle fetch does not skip the bar: the next tick decides it', as
   await tick();
   assert.equal(candleCalls, calls, 'and only once');
   assert.equal(placed.length, 1);
+});
+
+test('a late candle is retried instead of deciding on the previous bar', async (t) => {
+  reset(ema);
+  // 10 s after a bar closes: its candle may simply not be published yet.
+  const step = INTERVAL_MS[ema.interval];
+  const t0 = Math.ceil((Date.parse('2026-10-26T10:30:00Z') + stray * 120_000) / step) * step + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  candleLag = 1;
+  await tick();
+  assert.equal(placed.length, 0, 'the newest candle is the previous bar: wait');
+  candleLag = 0;
+  await tick();
+  assert.equal(placed.length, 1, 'decided once the candle is there');
+});
+
+test('a candle that never arrives is decided on the newest one after the grace period', async (t) => {
+  reset(ema);
+  // 10 s after a bar closes: its candle may simply not be published yet.
+  const step = INTERVAL_MS[ema.interval];
+  const t0 = Math.ceil((Date.parse('2026-10-26T10:30:00Z') + stray * 120_000) / step) * step + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  candleLag = 1;
+  await tick();
+  assert.equal(placed.length, 0);
+  t.mock.timers.setTime(t0 + staleGraceMs(ema.interval) + 1_000);
+  await tick();
+  assert.equal(placed.length, 1, 'after the grace period it decides anyway');
 });
 
 test('switching off during a tick stops the orders that tick had not placed yet', async (t) => {

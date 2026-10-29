@@ -189,17 +189,22 @@ export function candlePlan(spec: AnySpec): { markets: string[]; bars: number } {
   return { markets: dataMarkets(spec), bars: warmupBars(spec) };
 }
 
-export type Decision = { weights: Weights; warming?: undefined } | { warming: string[] };
+/** `t`: open time of the newest candle the decision used (null when there were none), so a late candle can be caught. */
+export type Decision = { weights: Weights; t: number | null; warming?: undefined } | { warming: string[] };
 
 /**
  * Target weights at `bar` (open time of the last closed bar), from the candles of `candlePlan`. `{ warming }` means
  * the lab is still downloading a lab family's history for the first time: no decision on this bar yet.
  */
 export async function decide(spec: AnySpec, bar: number, candles: CandlesByMarket, state?: StrategyState): Promise<Decision> {
-  if (!runsInPython(spec)) return { weights: targets(candles, spec, state) };
+  if (!runsInPython(spec)) {
+    // The oldest "newest candle" over the markets: one market lagging is enough to call the decision stale.
+    const newest = Object.values(candles).filter((cs) => cs?.length).map((cs) => cs[cs.length - 1][0]);
+    return { weights: targets(candles, spec, state), t: newest.length ? Math.min(...newest) : null };
+  }
   const r = await targetsPy(spec, bar, state?.startTime);
   if (r.warming) return { warming: r.warming };
-  return { weights: clamp(r.weights, spec) };
+  return { weights: clamp(r.weights, spec), t: r.t };
 }
 
 /** Starts the lab's one-time history download for `spec` in the background (no-op for TypeScript families). */
