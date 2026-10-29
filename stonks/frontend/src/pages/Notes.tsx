@@ -89,6 +89,22 @@ export default function NotesPage() {
   }, []);
 
   useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    const phone = window.matchMedia('(max-width: 760px)').matches;
+    if (!meta || !phone) return;
+    const previous = meta.getAttribute('content');
+    meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+    const block = (e: Event) => e.preventDefault();
+    document.addEventListener('gesturestart', block, { passive: false });
+    document.addEventListener('gesturechange', block, { passive: false });
+    return () => {
+      if (previous != null) meta.setAttribute('content', previous);
+      document.removeEventListener('gesturestart', block);
+      document.removeEventListener('gesturechange', block);
+    };
+  }, []);
+
+  useEffect(() => {
     const onHide = () => {
       if (document.visibilityState === 'hidden') flush();
     };

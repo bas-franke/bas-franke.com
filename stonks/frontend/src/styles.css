@@ -294,11 +294,38 @@ code,
   max-width: 60ch;
 }
 
+/* The pad fills the window. The page itself does not scroll, and the box hides its bar. */
+html:has(.notes-page),
+body:has(.notes-page) {
+  height: 100dvh;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+body:has(.notes-page) {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+.shell:has(.notes-page) {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.shell:has(.notes-page) main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .notes-page {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 160px);
-  min-height: 280px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: pan-y;
 }
 .notes-page .page-head {
   flex: none;
@@ -314,9 +341,20 @@ code,
   flex: 1;
   min-height: 0;
   resize: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   line-height: 1.55;
-  font-size: 1rem;
+  /* 16px keeps iOS from zooming the page when the box is focused. */
+  font-size: 16px;
   padding: 16px 18px;
+  touch-action: pan-y;
+}
+.notes-input::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .eyebrow {
   font-size: 0.72rem;
@@ -1731,9 +1769,6 @@ dialog.modal[open] {
     top: calc(14px + env(safe-area-inset-top));
   }
 
-  .notes-page {
-    height: calc(100dvh - 168px - env(safe-area-inset-bottom));
-  }
   .tabbar {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
