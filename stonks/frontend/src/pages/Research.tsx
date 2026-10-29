@@ -824,9 +824,9 @@ function AbsoluteBoard({ buckets, onOpen }: { buckets: Partial<Record<BucketName
   const shown = all ? rows : rows.slice(0, 10);
   const yr = (v: unknown) => fx(v, (n) => pct(n, 0, true));
   return (
-    <section className="card abs-board">
-      <div className="eyebrow">All sessions on one scale</div>
-      <p className="small muted" style={{ margin: '4px 0 10px' }}>
+    <section className="card quiet research-about abs-board">
+      <Fold title={`All sessions on one scale: the top ${Math.min(10, rows.length)}`}>
+      <p className="small muted" style={{ margin: '0 0 10px' }}>
         Every session’s strategies scored the same way: 60% the 1-3 month window score, 20% how much of the big rallies (a coin at least doubling)
         they kept, and 20% the last 12 months, at Bitvavo’s fees on the same 10 coins since 2019. Holding scores {ABS_HOLD}, always half in {ABS_HALF}.
       </p>
@@ -874,6 +874,7 @@ function AbsoluteBoard({ buckets, onOpen }: { buckets: Partial<Record<BucketName
           {all ? 'Show the top 10' : `Show all ${rows.length}`}
         </button>
       )}
+      </Fold>
     </section>
   );
 }
