@@ -79,6 +79,40 @@
         "5186"
       ],
       "port": 5186
+    },
+    {
+      "name": "stonks-dash-buckets",
+      "runtimeExecutable": "C:/Users/buunn/AppData/Local/Temp/claude/C--Projects-bas-franke-com/86f10e05-ca30-4fd7-94c8-6b6ac6aab81c/scratchpad/node24/node-v24.22.1-win-x64/node.exe",
+      "runtimeArgs": [
+        "stonks/frontend/node_modules/vite/bin/vite.js",
+        "stonks/frontend",
+        "--host",
+        "127.0.0.1",
+        "--strictPort",
+        "--port",
+        "5199"
+      ],
+      "env": {
+        "BACKEND_PORT": "3019"
+      },
+      "port": 5199
+    },
+    {
+      "name": "stonks-dash-mock",
+      "runtimeExecutable": "C:/Users/buunn/AppData/Local/Temp/claude/C--Projects-bas-franke-com/86f10e05-ca30-4fd7-94c8-6b6ac6aab81c/scratchpad/node24/node-v24.22.1-win-x64/node.exe",
+      "runtimeArgs": [
+        "stonks/frontend/node_modules/vite/bin/vite.js",
+        "stonks/frontend",
+        "--host",
+        "127.0.0.1",
+        "--strictPort",
+        "--port",
+        "5198"
+      ],
+      "env": {
+        "VITE_MOCK": "1"
+      },
+      "port": 5198
     }
   ]
 }
