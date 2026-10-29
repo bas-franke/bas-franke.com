@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { ApiDeps } from './deps.js';
-import { BUCKETS, type Bucket } from './research.js';
+import { BUCKETS, isBucket, type Bucket } from './research.js';
 import { ConflictError, fail, num, ValidationError } from './util.js';
 
 // Bot control: overview, settings, start/stop, strategy families and markets (SPEC.md §7).
@@ -71,7 +71,7 @@ export function botRoutes(deps: ApiDeps) {
       source = { researchId: hallOfFameId as number, bucket: 'hall', rank: 1, what: `hall of fame #${hallOfFameId}` };
     } else {
       if (typeof researchId !== 'number' || !Number.isInteger(researchId) || researchId < 1) fail('researchId must be a research snapshot id.');
-      if (typeof bucket !== 'string' || !(BUCKETS as readonly string[]).includes(bucket)) fail(`bucket must be one of ${BUCKETS.join(', ')}.`);
+      if (!isBucket(bucket)) fail(`bucket must be one of ${BUCKETS.join(', ')} or sessionN.`);
       if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 1 || rank > 5) fail('rank must be 1 to 5.');
       const { rows } = await deps.query('SELECT id, created_at, payload FROM research_snapshots ORDER BY id DESC LIMIT 1');
       if (!rows.length) fail('There is no research to activate yet.');

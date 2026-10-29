@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { ApiDeps } from './deps.js';
-import { BUCKETS, type Bucket } from './research.js';
+import { BUCKETS, isBucket, type Bucket } from './research.js';
 import { ConflictError, fail, iso, num } from './util.js';
 
 // Hall of fame (SPEC.md §8): research entries the owner keeps forever. Each row is a full copy of the entry (spec,
@@ -41,7 +41,7 @@ export function hallRoutes(deps: ApiDeps) {
     if (!isObj(body)) fail('Send { researchId, bucket, rank }.');
     const { researchId, bucket, rank } = body as Json;
     if (typeof researchId !== 'number' || !Number.isInteger(researchId) || researchId < 1) fail('researchId must be a research snapshot id.');
-    if (typeof bucket !== 'string' || !(BUCKETS as readonly string[]).includes(bucket)) fail(`bucket must be one of ${BUCKETS.join(', ')}.`);
+    if (!isBucket(bucket)) fail(`bucket must be one of ${BUCKETS.join(', ')} or sessionN.`);
     if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 1 || rank > 5) fail('rank must be 1 to 5.');
     const { rows } = await deps.query('SELECT id, payload FROM research_snapshots WHERE id = $1', [researchId]);
     if (!rows.length) fail('That research snapshot is no longer stored. Reload the research and pick the strategy again.');

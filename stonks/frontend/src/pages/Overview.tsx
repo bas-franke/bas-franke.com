@@ -551,7 +551,7 @@ function ActiveResearchLine({ o }: { o: Overview }) {
   return (
     <div className="active-research small soft" style={{ marginTop: 8 }}>
       <span>
-        From the research lab: <b>{BUCKET_LABEL[a.bucket] ?? a.bucket} #{a.rank}</b>, activated {dateOnly(a.activatedAt)}
+        From the research lab: <b>{BUCKET_LABEL[a.bucket] ?? a.bucket.replace(/^session(\d+)$/, 'Session $1')} #{a.rank}</b>, activated {dateOnly(a.activatedAt)}
       </span>
       <a
         href={href}

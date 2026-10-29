@@ -344,6 +344,13 @@ function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
             coins and 0.05 percent fee, so the two tabs compare directly. The table’s euro numbers are the ether run.
           </p>
         )}
+        {name === 'session6' && (
+          <p>
+            This session’s five pay Bitvavo’s real fees: 0.15 percent for a limit order that rests in the book and 0.25 percent for a market order.
+            They started from the best books of Sessions 5 and 3, on the same windows, coins and grades, and each also had to beat holding half
+            the account in coins over the last 12 months alone. The table’s euro numbers are the ether run.
+          </p>
+        )}
       {name === 'custom' && (
           <p>
             Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their

@@ -132,7 +132,10 @@ function topList(v: unknown, path: string, min: number) {
 
 /** Timeframe buckets (SPEC.md §8), in display order. */
 export const BUCKETS = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom', 'stoploss', 'session1', 'session2', 'session3', 'session4', 'session5'] as const;
-export type Bucket = (typeof BUCKETS)[number];
+/** Research sessions are numbered tabs; any `sessionN` is accepted so a new session needs no deploy first. */
+export type Bucket = (typeof BUCKETS)[number] | `session${number}`;
+const SESSION = /^session[1-9]\d{0,2}$/;
+export const isBucket = (v: unknown): v is Bucket => typeof v === 'string' && ((BUCKETS as readonly string[]).includes(v) || SESSION.test(v));
 
 const optFinite = (v: unknown, path: string) => (v === undefined || v === null ? null : finite(v, path));
 
@@ -161,7 +164,7 @@ export function validateResearch(body: unknown) {
   if (p.buckets !== undefined) {
     const raw = obj(p.buckets, 'buckets');
     buckets = {};
-    for (const k of BUCKETS) if (raw[k] !== undefined && raw[k] !== null) buckets[k] = bucket(raw[k], `buckets.${k}`);
+    for (const k of Object.keys(raw)) if (isBucket(k) && raw[k] !== undefined && raw[k] !== null) buckets[k] = bucket(raw[k], `buckets.${k}`);
     if (!Object.keys(buckets).length) fail(`buckets must contain at least one of ${BUCKETS.join(', ')}`);
   }
   const top = topList(p.top ?? (buckets ? [] : undefined), 'top', buckets ? 0 : 1);
