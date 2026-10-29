@@ -149,6 +149,9 @@ function CoinTable({ s }: { s: WriteupSection }) {
   const coin = coins.find((c) => c.id === coinId) ?? coins[0];
   const [rangeId, setRangeId] = useState(coin?.ranges[0]?.id ?? 'year');
   const range = coin?.ranges.find((r) => r.id === rangeId) ?? coin?.ranges[0];
+  // `compact` lists the columns shown at first; the rest appear behind "Show all columns".
+  const [all, setAll] = useState(false);
+  const cols = (s.head ?? []).map((_, j) => j).filter((j) => all || !s.compact || s.compact.includes(j));
   const pick = (id: string) => {
     setCoinId(id);
     document.getElementById('coin-charts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -157,13 +160,18 @@ function CoinTable({ s }: { s: WriteupSection }) {
     <section className="card" id={coins.length ? 'coin-board' : undefined}>
       <h2>{s.title}</h2>
       {coins.length > 0 && <p className="small soft writeup-hint">Tap a coin to see its charts below.</p>}
+      {s.compact && s.compact.length < (s.head ?? []).length && (
+        <button type="button" className="chip outline writeup-cols" aria-pressed={all} onClick={() => setAll((v) => !v)}>
+          {all ? 'Show fewer columns' : 'Show all columns'}
+        </button>
+      )}
       <div className="table-wrap writeup-table">
         <table className="data">
           <thead>
             <tr>
-              {(s.head ?? []).map((h, j) => (
-                <th key={h} className={j ? 'r' : undefined}>
-                  {h}
+              {cols.map((j) => (
+                <th key={j} className={j ? 'r' : undefined}>
+                  {s.head![j]}
                 </th>
               ))}
             </tr>
@@ -171,7 +179,7 @@ function CoinTable({ s }: { s: WriteupSection }) {
           <tbody>
             {(s.rows ?? []).map((r, i) => (
               <tr key={i} className={coins.length && r[0] === coin?.id ? 'is-picked' : undefined}>
-                {r.map((c, j) => (
+                {cols.map((j) => [r[j] ?? '', j] as const).map(([c, j]) => (
                   <td key={j} className={j ? 'r' : undefined}>
                     {j === 0 && coins.some((x) => x.id === c) ? (
                       <button type="button" className="writeup-coin" aria-pressed={c === coin?.id} onClick={() => pick(c)}>
@@ -187,6 +195,7 @@ function CoinTable({ s }: { s: WriteupSection }) {
           </tbody>
         </table>
       </div>
+      {s.body && <p className="tiny muted writeup-hint">{s.body}</p>}
       {coin && range && <CoinCharts coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} />}
     </section>
   );

@@ -2541,3 +2541,8 @@ tr.is-picked td {
   white-space: pre;
   tab-size: 4;
 }
+
+.writeup-cols {
+  margin: 0 0 8px;
+  cursor: pointer;
+}

@@ -123,6 +123,8 @@ export interface WriteupSection {
   items?: [string, string][];
   head?: string[];
   rows?: string[][];
+  /** Column indexes shown at first; the others sit behind a "Show all columns" button. */
+  compact?: number[];
   /** Per-coin curves for the comparison charts under a table. */
   coins?: WriteupCoin[];
   candles?: { label: string; o: number; h: number; l: number; c: number; note: string }[];
