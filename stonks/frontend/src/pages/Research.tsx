@@ -404,6 +404,13 @@ function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
             the ether run.
           </p>
         )}
+        {name === 'session11' && (
+          <p>
+            No new strategies here: the number one of Sessions 6 to 10, unchanged, run on all 29 coins the lab has candles for. Nineteen of them were
+            never used by any research agent, so this is the first real test on unseen coins. Ranked on the absolute score over all 29. The table’s
+            euro numbers are the ether run.
+          </p>
+        )}
       {name === 'custom' && (
           <p>
             Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their
@@ -823,7 +830,9 @@ function AbsoluteBoard({ buckets, onOpen }: { buckets: Partial<Record<BucketName
     () =>
       Object.entries(buckets)
         .filter(([b]) => /^session\d+$/.test(b) || b === 'stoploss')
-        .flatMap(([b, bk]) => (bk?.top ?? []).filter((e) => isNum(e.metrics.absoluteScore)).map((e) => ({ b, e })))
+        .flatMap(([b, bk]) =>
+          (bk?.top ?? []).filter((e) => isNum(e.metrics.absoluteScore) && (e.metrics.coinsTested ?? 10) === 10).map((e) => ({ b, e })),
+        )
         .sort((x, y) => (y.e.metrics.absoluteScore ?? 0) - (x.e.metrics.absoluteScore ?? 0)),
     [buckets],
   );

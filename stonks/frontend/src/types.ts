@@ -318,6 +318,8 @@ export interface ResearchMetrics {
   /** Average yearly return over the 10 coins, and holding's, on the absolute yardstick. */
   absCagr?: number;
   absHoldCagr?: number;
+  /** Coins the card was scored on; the absolute board only compares cards on the usual 10. */
+  coinsTested?: number;
 }
 
 export interface ResearchEntry {

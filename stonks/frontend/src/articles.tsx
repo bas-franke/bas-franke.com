@@ -214,7 +214,199 @@ function WillItLast() {
   );
 }
 
+type RankRow = [string, string, string, string, string, string, string];
+
+const ALL_COINS: RankRow[] = [
+  ['1', 'Session 9: Bitcoin bull, cycle check', '53.5', '47.7', '+49% vs −16%', '28 of 29', '−59%'],
+  ['2', 'Session 10: Bear mode, breadth bull', '52.7', '47.0', '+47% vs −16%', '28 of 29', '−60%'],
+  ['3', 'Session 8: Bitcoin bull', '52.2', '47.6', '+45% vs −16%', '28 of 29', '−60%'],
+  ['4', 'Session 7: Dip and breakout, laddered dips', '48.3', '43.1', '+42% vs −16%', '28 of 29', '−45%'],
+  ['5', 'Session 6: Hourly breakout and dips', '46.8', '42.6', '+31% vs −10%', '27 of 29', '−45%'],
+  ['', 'Holding the coin', '44.5', '44.1', '−16%', '–', '−91%'],
+  ['', 'Always half in', '42.9', '42.8', '+6% vs −16%', '23 of 29', '−62%'],
+];
+
+function AllCoinsTable() {
+  return (
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Strategy</th>
+            <th className="r">Score, all 29</th>
+            <th className="r">Score, 19 unseen</th>
+            <th className="r">Yearly return vs holding</th>
+            <th className="r">Beat holding</th>
+            <th className="r">Typical worst drop</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ALL_COINS.map((r) => (
+            <tr key={r[1]}>
+              <td className="tnum">{r[0]}</td>
+              <td>{r[1]}</td>
+              <td className="r tnum">
+                <b>{r[2]}</b>
+              </td>
+              <td className="r tnum">{r[3]}</td>
+              <td className="r tnum nowrap">{r[4]}</td>
+              <td className="r tnum nowrap">{r[5]}</td>
+              <td className="r tnum">{r[6]}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const PARTS: [string, string, string, string][] = [
+  ['Windows (60%)', '41.8', '46.9', '32.1'],
+  ['Big rallies kept (20%)', '59.6', '32.3', '93.7'],
+  ['Last 12 months (20%)', '53.5', '42.6', '30.3'],
+];
+
+function PartsTable() {
+  return (
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr>
+            <th>On the 19 unseen coins</th>
+            <th className="r">Cycle bull (S9)</th>
+            <th className="r">Ladder (S7)</th>
+            <th className="r">Holding</th>
+          </tr>
+        </thead>
+        <tbody>
+          {PARTS.map((r) => (
+            <tr key={r[0]}>
+              <td>{r[0]}</td>
+              <td className="r tnum">
+                <b>{r[1]}</b>
+              </td>
+              <td className="r tnum">{r[2]}</td>
+              <td className="r tnum">{r[3]}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AllCoins() {
+  return (
+    <>
+      <p className="lede">
+        Every research session so far tested its strategies on the same ten coins. So we took the number one of Sessions 6 to 10, changed
+        nothing, and ran them on all 29 coins we have prices for. Nineteen of those coins were never seen by any research agent. Session 9’s
+        cycle bull came out on top. Here is why, and how much the win is worth.
+      </p>
+
+      <h2>The ranking</h2>
+      <p>
+        Scored with the absolute score every card carries: 60% the window score (hundreds of one- to three-month stretches), 20% the share of
+        every big rally it kept, 20% the last twelve months. Bitvavo’s real fees, March 2019 to October 2026, each coin from its first candle.
+        The yearly return is the typical (median) coin. The full tables per coin are in the new <b>Session 11</b> tab on the Research page.
+      </p>
+      <AllCoinsTable />
+
+      <h2>The first thing to notice: everyone got worse</h2>
+      <p>
+        On the ten coins they were built on, the five score 56 to 66. On the nineteen new coins they score 43 to 48. That is the honest
+        price of tuning on the same data, and it grows with every session that built on the last one:
+      </p>
+      <ul>
+        <li>
+          Session 6 drops 13 points, Session 7 15, Session 8 15, Session 9 17, and Session 10 19.
+        </li>
+        <li>
+          Session 10 was the best on the original ten coins, but only second on all 29. Its extra rules were learned from those ten coins.
+        </li>
+      </ul>
+
+      <h2>Why the cycle bull wins</h2>
+      <ol>
+        <li>
+          <b>Its edge doesn’t depend on the coin.</b> The big switch reads bitcoin, not the coin it trades: when bitcoin is in a bull market,
+          it goes all in. Crypto bull markets lift nearly everything at once, so the rule works just as well on a coin it has never seen. On
+          the nineteen new coins it kept 60% of the big rallies, against 32% for the ladder of Session 7.
+        </li>
+        <li>
+          <b>The mania-top check helps a little.</b> It differs from Session 8 by stopping its rides when bitcoin runs far above its long
+          average. On the new coins that keeps a bit more of each rally (60 against 56), enough to edge past Session 8.
+        </li>
+        <li>
+          <b>It has fewer layers than Session 10.</b> Session 10 added a bear mode and a “most coins are rising” rule. On new coins these hurt:
+          a last-twelve-months score of 46 against 54, and a typical worst drop of 72% against 64%.
+        </li>
+        <li>
+          <b>It works in the recent market, not only in 2021.</b> On the new coins its last twelve months score 53.5, against 30 for holding.
+        </li>
+      </ol>
+      <PartsTable />
+      <p>
+        The table also shows its weak spot. On the plain window score the ladder of Session 7 is clearly better on new coins (46.9 against
+        41.8), and the cycle bull is no better than simply keeping half your money in the coin there (41.9). The cycle bull wins on the big
+        rallies and the recent year, not on everyday trading.
+      </p>
+
+      <h2>How much is the win worth?</h2>
+      <ul>
+        <li>
+          <b>Not much over Sessions 8 and 10.</b> 53.5, 52.7 and 52.2 is close to a tie. What holds up is the family: the three bitcoin-bull
+          books clearly beat the two dip-and-breakout books.
+        </li>
+        <li>
+          <b>Beating holding was easy this time.</b> Most of the nineteen new coins lost money: the typical one fell 27% a year. Even keeping
+          half in the coin beat holding on 23 of the 29 coins. The cycle bull made about +28% a year on the typical new coin.
+        </li>
+        <li>
+          <b>It still sold too early in a clean rally.</b> HYPE is the only coin where all five lost to holding: €1,000 became about €2,030
+          with the cycle bull and €2,710 by holding.
+        </li>
+        <li>
+          <b>It survived LUNA, but barely.</b> LUNA went from €93 to almost nothing in May 2022. Holding turned €1,000 into €0. The cycle bull
+          ended at €824 after a 76% drop, and Session 6 lost everything on a dip buy. The ladder came out ahead, mostly from trading the
+          worthless leftovers afterwards, which in practice would be hard to fill.
+        </li>
+        <li>
+          <b>The drops are big.</b> A typical worst drop of 59%, and 64% on the new coins, against 45% for the ladder.
+        </li>
+      </ul>
+
+      <div className="callout brass">
+        <p>
+          <b>In one sentence:</b> the cycle bull wins because its main rule, “all in while bitcoin is in a bull market”, doesn’t care which
+          coin it trades. That is the part of the research that worked on new coins. The coin-by-coin tuning added on top mostly didn’t.
+        </p>
+      </div>
+      <p>
+        That fits the last article’s warning. Session 7’s ladder is still the steadiest on everyday stretches, with the smallest drops, but it
+        misses the big bull markets. If the next bull market is real, the cycle bull is the better bet. If it isn’t, the ladder is.
+      </p>
+      <p className="small soft">
+        The 19 new coins: ALGO, ATOM, BCH, CRO, DOT, ETC, HBAR, HYPE, ICP, LTC, LUNA, IOTA, NEO, POL, SHIB, SUI, UNI, XLM and XTZ. A coin only
+        counts after 60 days of history, so young coins such as HYPE and SUI only count for their recent years. Several of them trade
+        thinly, so real fills would be worse than in the test. Past results say nothing certain about the future; this is research, not
+        financial advice.
+      </p>
+    </>
+  );
+}
+
 export const ARTICLES: Article[] = [
+  {
+    slug: 'twenty-nine-coins',
+    title: 'Tested on 29 coins: why the cycle bull wins',
+    blurb: 'The number one of Sessions 6 to 10, run unchanged on 19 coins no research agent ever saw. Session 9’s cycle bull comes out on top, and its main rule is why.',
+    date: '2026-10-29',
+    minutes: 5,
+    tag: 'Research',
+    body: AllCoins,
+  },
   {
     slug: 'will-the-winners-last',
     title: 'Will the winners last?',
