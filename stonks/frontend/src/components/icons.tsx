@@ -28,6 +28,13 @@ export const IconResearch = (p: P) => (
     <path d="M8 14.5h8" />
   </svg>
 );
+export const IconNotes = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} {...p}>
+    <path d="M7.5 3.5h6.2L18.5 8.2V19a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z" />
+    <path d="M13.5 3.6V8.2H18.4" />
+    <path d="M9 12h6M9 15.5h4" />
+  </svg>
+);
 export const IconSettings = (p: P) => (
   <svg viewBox="0 0 24 24" {...base} {...p}>
     <path d="M5 7h9M18 7h1M5 17h1M10 17h9" />

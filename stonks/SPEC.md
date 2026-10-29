@@ -236,6 +236,8 @@ camelCase and numbers (not numeric strings).
 | `GET /api/markets` | | Bitvavo EUR markets (cached 1 h) |
 | `GET /api/research` | | newest research snapshot payload or `{ empty:true }` |
 | `POST /api/research` | payload below | `{ ok:true, id }` (session cookie: the lab logs in with the same password) |
+| `GET /api/notes` | | `{ text, updatedAt }` the personal scratch pad (`settings` key `notes`); `{ text:"", updatedAt:null }` when nothing is saved yet |
+| `PUT /api/notes` | `{ text }` | `{ ok:true }`; `text` is a string of at most 50 000 characters |
 
 ### Research payload (`POST /api/research`)
 

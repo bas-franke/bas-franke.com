@@ -113,6 +113,8 @@ export const api = {
   addToHall: (body: { researchId: number; bucket: string; rank: number }) => request<{ ok: true; id: number }>('POST', '/hall-of-fame', body),
   removeFromHall: (id: number) => request<{ ok: true }>('DELETE', `/hall-of-fame/${id}`, {}),
   allocate: (body: { target: ManualTarget | null; confirmLive?: boolean }) => request<AllocateResult>('POST', '/bot/allocate', body),
+  notes: () => request<{ text: string; updatedAt: string | null }>('GET', '/notes'),
+  saveNotes: (text: string) => request<{ ok: true }>('PUT', '/notes', { text }),
 };
 
 export const unwrapFamilies = (r: FamilyInfo[] | { families: FamilyInfo[] }) => (Array.isArray(r) ? r : (r.families ?? []));

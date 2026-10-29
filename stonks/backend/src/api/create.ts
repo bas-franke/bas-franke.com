@@ -5,6 +5,7 @@ import type { ApiDeps } from './deps.js';
 import { historyRoutes } from './history.js';
 import { hallRoutes } from './hall.js';
 import { trackRoutes } from './track.js';
+import { notesRoutes } from './notes.js';
 import { writeupRoutes } from './writeups.js';
 import { researchRoutes } from './research.js';
 import { ConflictError, ValidationError } from './util.js';
@@ -46,10 +47,12 @@ export function createApi(rawDeps: ApiDeps) {
   });
   api.use(csrfGuard);
   const smallJson = express.json({ limit: SMALL_BODY });
-  // Large bodies are only parsed after login: research uploads and strategy write-ups (charts inside).
-  const isResearchUpload = (req: express.Request) =>
-    (req.method === 'POST' && req.path.toLowerCase() === '/research') || (req.method === 'PUT' && req.path.toLowerCase().startsWith('/writeups/'));
-  api.use((req, res, next) => (isResearchUpload(req) ? next() : smallJson(req, res, next)));
+  // Large bodies are only parsed after login: research uploads, strategy write-ups (charts inside), and the notes pad.
+  const isLargeBody = (req: express.Request) =>
+    (req.method === 'POST' && req.path.toLowerCase() === '/research') ||
+    (req.method === 'PUT' && req.path.toLowerCase().startsWith('/writeups/')) ||
+    (req.method === 'PUT' && req.path.toLowerCase() === '/notes');
+  api.use((req, res, next) => (isLargeBody(req) ? next() : smallJson(req, res, next)));
 
   api.post('/auth/login', auth.login);
   api.post('/auth/logout', auth.logout);
@@ -65,6 +68,7 @@ export function createApi(rawDeps: ApiDeps) {
   api.use(hallRoutes(deps));
   api.use(trackRoutes(deps));
   api.use(writeupRoutes(deps));
+  api.use(notesRoutes(deps));
 
   const onError: ErrorRequestHandler = (err, _req, res, next) => {
     if (err instanceof ValidationError || deps.isSettingsError(err)) {

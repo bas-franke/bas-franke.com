@@ -12,6 +12,8 @@ import { equityPoints, families, fills, initialBot, logs, makeLog, markets, orde
 const flags = new URLSearchParams(location.search).get('mock') ?? '';
 const KEY = 'stonks-mock-session';
 let loggedIn = !flags.includes('login') && sessionStorage.getItem(KEY) !== '0';
+let notesText = '';
+let notesAt: string | null = null;
 let bot: BotSettings = initialBot();
 let hall: HallEntry[] = [];
 if (flags.includes('off')) bot.enabled = false;
@@ -201,6 +203,15 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     // newest first when not tailing, oldest first when tailing with `after`
     rows = after ? rows.slice(0, limit) : rows.slice(-limit).reverse();
     return json({ logs: rows });
+  }
+  if (p === '/notes' && method === 'GET') return json({ text: notesText, updatedAt: notesAt });
+  if (p === '/notes' && method === 'PUT') {
+    const text = (body as { text?: unknown } | null)?.text;
+    if (typeof text !== 'string') return json({ error: 'Send { text }.' }, 400);
+    if (text.length > 50_000) return json({ error: 'Notes can be at most 50000 characters.' }, 400);
+    notesText = text;
+    notesAt = new Date().toISOString();
+    return json({ ok: true });
   }
   if (p === '/strategies/families') return json(families);
   if (p === '/markets') return json(markets);

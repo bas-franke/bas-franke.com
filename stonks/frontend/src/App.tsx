@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, setUnauthorizedHandler } from './api';
-import { IconHome, IconLogout, IconLogs, IconMoon, IconResearch, IconSettings, IconSun, IconTrades } from './components/icons';
+import { IconHome, IconLogout, IconLogs, IconMoon, IconNotes, IconResearch, IconSettings, IconSun, IconTrades } from './components/icons';
 import { ToastProvider } from './components/ui';
 import { navigate, useLocation } from './router';
 import { useTheme } from './theme';
@@ -10,6 +10,7 @@ import TradesPage from './pages/Trades';
 import LogsPage from './pages/Logs';
 import SettingsPage from './pages/Settings';
 import ResearchPage from './pages/Research';
+import NotesPage from './pages/Notes';
 import WriteupPage from './pages/Writeup';
 
 const NAV = [
@@ -17,6 +18,7 @@ const NAV = [
   { path: '/trades', label: 'Trades', icon: IconTrades },
   { path: '/logs', label: 'Logs', icon: IconLogs },
   { path: '/research', label: 'Research', icon: IconResearch },
+  { path: '/notes', label: 'Notes', icon: IconNotes },
   { path: '/settings', label: 'Settings', icon: IconSettings },
 ];
 
@@ -25,16 +27,18 @@ const PAGES: Record<string, () => ReactNode> = {
   '/trades': () => <TradesPage />,
   '/logs': () => <LogsPage />,
   '/research': () => <ResearchPage />,
+  '/notes': () => <NotesPage />,
   '/settings': () => <SettingsPage />,
   '/writeup': () => <WriteupPage />,
 };
 
-function NavLink({ path, children, className }: { path: string; children: ReactNode; className?: string }) {
+function NavLink({ path, children, className, title }: { path: string; children: ReactNode; className?: string; title?: string }) {
   const { path: here } = useLocation();
   return (
     <a
       href={path}
       className={className}
+      title={title}
       aria-current={here === path ? 'page' : undefined}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -79,7 +83,7 @@ export default function App() {
           </NavLink>
           <nav className="nav" aria-label="Main">
             {NAV.map(({ path: p, label, icon: Icon }) => (
-              <NavLink key={p} path={p}>
+              <NavLink key={p} path={p} title={label}>
                 <Icon />
                 {label}
               </NavLink>
@@ -103,7 +107,7 @@ export default function App() {
       </div>
       <nav className="tabbar" aria-label="Main">
         {NAV.map(({ path: p, label, icon: Icon }) => (
-          <NavLink key={p} path={p}>
+          <NavLink key={p} path={p} title={label}>
             <Icon />
             {label}
           </NavLink>

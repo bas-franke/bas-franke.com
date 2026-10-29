@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-// A tiny history router: the app has six flat pages, no params beyond the query string.
+// A tiny history router: the app has flat pages, no params beyond the query string.
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 addEventListener('popstate', emit);

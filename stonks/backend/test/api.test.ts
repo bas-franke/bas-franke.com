@@ -790,6 +790,29 @@ describe('security hardening', () => {
     }
   });
 
+  test('notes start empty, then save and reject a bad body', async () => {
+    const h = await startHarness();
+    try {
+      const cookie = await h.login();
+      assert.equal((await h.req('GET', '/api/notes')).status, 401);
+      const first = await h.req('GET', '/api/notes', { cookie });
+      assert.equal(first.status, 200);
+      assert.deepEqual(await first.json(), { text: '', updatedAt: null });
+      assert.equal((await h.req('PUT', '/api/notes', { json: { text: 'buy milk' }, cookie })).status, 200);
+      const again = (await (await h.req('GET', '/api/notes', { cookie })).json()) as { text: string; updatedAt: string | null };
+      assert.equal(again.text, 'buy milk');
+      assert.equal(typeof again.updatedAt, 'string');
+      assert.equal((await h.req('PUT', '/api/notes', { json: { text: 1 }, cookie })).status, 400);
+      assert.equal((await h.req('PUT', '/api/notes', { json: { text: 'x'.repeat(50_001) }, cookie })).status, 400);
+      const still = (await (await h.req('GET', '/api/notes', { cookie })).json()) as { text: string };
+      assert.equal(still.text, 'buy milk');
+      assert.equal((await h.req('PUT', '/api/notes', { json: { text: '' }, cookie })).status, 200);
+      assert.equal(((await (await h.req('GET', '/api/notes', { cookie })).json()) as { text: string }).text, '');
+    } finally {
+      await h.close();
+    }
+  });
+
   test('research maps cannot carry a __proto__ key', () => {
     const p: any = researchPayload(1);
     p.top[0].metrics = JSON.parse('{"__proto__": null, "returnPct": 1}');

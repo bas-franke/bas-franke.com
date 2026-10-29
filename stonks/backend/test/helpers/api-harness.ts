@@ -25,8 +25,17 @@ function fakeQuery(calls: Harness['calls'], tables: Record<string, any[]>): Quer
   const hall: { id: string; created_at: Date; research_id: string; bucket: string; rank: number; spec_key: string; entry: unknown }[] = [];
   let hallSeq = 0;
   const writeups = new Map<string, any>();
+  const settingsRows = new Map<string, { value: unknown; updated_at: Date }>();
   return async (sql, params = []) => {
     calls.push({ sql, params });
+    if (sql.includes('FROM settings WHERE key = $1')) {
+      const row = settingsRows.get(String(params[0]));
+      return { rows: row ? [row] : [] };
+    }
+    if (sql.startsWith('INSERT INTO settings')) {
+      settingsRows.set(String(params[0]), { value: JSON.parse(String(params[1])), updated_at: new Date() });
+      return { rows: [] };
+    }
     if (sql.startsWith('INSERT INTO writeups')) {
       writeups.set(String(params[0]), { spec_id: params[0], title: params[1], body: JSON.parse(String(params[2])), updated_at: new Date() });
       return { rows: [] };

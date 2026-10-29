@@ -293,6 +293,31 @@ code,
   margin-top: 6px;
   max-width: 60ch;
 }
+
+.notes-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 160px);
+  min-height: 280px;
+}
+.notes-page .page-head {
+  flex: none;
+  margin-top: 8px;
+}
+.notes-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+.notes-input {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  line-height: 1.55;
+  font-size: 1rem;
+  padding: 16px 18px;
+}
 .eyebrow {
   font-size: 0.72rem;
   font-weight: 600;
@@ -1535,6 +1560,29 @@ dialog.modal[open] {
   display: none;
 }
 
+@media (max-width: 1120px) {
+  .topbar {
+    gap: 12px;
+  }
+  .nav a {
+    padding: 7px 10px;
+    gap: 5px;
+    font-size: 0.86rem;
+  }
+}
+
+@media (max-width: 880px) {
+  .nav a {
+    font-size: 0;
+    gap: 0;
+    padding: 8px 11px;
+  }
+  .nav a svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
 @media (max-width: 960px) {
   .overview-grid,
   .rank-body {
@@ -1683,9 +1731,12 @@ dialog.modal[open] {
     top: calc(14px + env(safe-area-inset-top));
   }
 
+  .notes-page {
+    height: calc(100dvh - 168px - env(safe-area-inset-bottom));
+  }
   .tabbar {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     position: fixed;
     left: 10px;
     right: 10px;
@@ -1706,8 +1757,9 @@ dialog.modal[open] {
     border-radius: 16px;
     color: var(--ink-3);
     text-decoration: none;
-    font-size: 0.68rem;
+    font-size: 0.62rem;
     font-weight: 500;
+    min-width: 0;
   }
   .tabbar a svg {
     width: 21px;
