@@ -397,6 +397,13 @@ function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
             the mountain grade, at Bitvavo’s real fees. The table’s euro numbers are the ether run.
           </p>
         )}
+        {name === 'session10' && (
+          <p>
+            Session 9’s winners lost about four points when every setting was nudged at once, so this session ranks on steadiness too: half the usual
+            robust score and half the score with all settings nudged together. Same scoring as Sessions 8 and 9 otherwise. The table’s euro numbers are
+            the ether run.
+          </p>
+        )}
       {name === 'custom' && (
           <p>
             Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their
