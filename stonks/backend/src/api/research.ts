@@ -131,7 +131,7 @@ function topList(v: unknown, path: string, min: number) {
 }
 
 /** Timeframe buckets (SPEC.md §8), in display order. */
-export const BUCKETS = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom', 'stoploss', 'session1', 'session2', 'session3', 'session4'] as const;
+export const BUCKETS = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom', 'stoploss', 'session1', 'session2', 'session3', 'session4', 'session5'] as const;
 export type Bucket = (typeof BUCKETS)[number];
 
 const optFinite = (v: unknown, path: string) => (v === undefined || v === null ? null : finite(v, path));

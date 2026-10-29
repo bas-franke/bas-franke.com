@@ -337,6 +337,13 @@ function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
             Each card is ranked on its score with its settings nudged up and down, so a lucky setting does not win. The table’s euro numbers are the ether run.
           </p>
         )}
+        {name === 'session5' && (
+          <p>
+            This session’s five were built from what made Session 4’s top three work: buying deep, sudden drops and selling the bounce, riding
+            rare strong breakouts, and letting the trend set how deep a dip must be. They are scored exactly like Session 4, on the same windows,
+            coins and 0.05 percent fee, so the two tabs compare directly. The table’s euro numbers are the ether run.
+          </p>
+        )}
       {name === 'custom' && (
           <p>
             Hand-made variants of strategies from the other tabs, tested on the same windows and shown the same way (the last test year). Their
