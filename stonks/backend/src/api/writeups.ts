@@ -9,7 +9,7 @@ type Json = Record<string, unknown>;
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
 const SPEC_ID = /^[A-Za-z0-9_.:-]{1,200}$/;
 const MAX_BYTES = 3_000_000;
-const SECTION_TYPES = new Set(['text', 'heading', 'candles', 'rules', 'callout', 'example', 'table']);
+const SECTION_TYPES = new Set(['text', 'heading', 'candles', 'rules', 'callout', 'example', 'table', 'code']);
 
 /** Shape check of a write-up body; throws ValidationError with a readable message. */
 export function checkWriteup(body: unknown): { title: string; doc: Json } {

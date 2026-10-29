@@ -343,6 +343,18 @@ function Section({ s, n }: { s: WriteupSection; n: number }) {
       );
     case 'table':
       return <CoinTable s={s} />;
+    case 'code':
+      // The exact algorithm: the strategy's own source, folded so it doesn't push the charts down.
+      return (
+        <section className="card quiet writeup-fold">
+          <Fold title={s.title || 'Exact algorithm'}>
+            {s.story && <Paragraphs text={s.story} />}
+            <pre className="writeup-code">
+              <code>{s.body}</code>
+            </pre>
+          </Fold>
+        </section>
+      );
     case 'candles':
       return (
         <section className="card">

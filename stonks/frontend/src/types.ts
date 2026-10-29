@@ -116,7 +116,7 @@ export interface WriteupCoin {
   ranges: WriteupCoinRange[];
 }
 export interface WriteupSection {
-  type: 'text' | 'heading' | 'candles' | 'rules' | 'callout' | 'example' | 'table';
+  type: 'text' | 'heading' | 'candles' | 'rules' | 'callout' | 'example' | 'table' | 'code';
   title?: string;
   body?: string;
   tone?: 'gain' | 'warn';
