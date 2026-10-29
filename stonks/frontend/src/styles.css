@@ -2546,3 +2546,14 @@ tr.is-picked td {
   margin: 0 0 8px;
   cursor: pointer;
 }
+
+/* Hall of fame: the owner orders it by hand. */
+.hall-move {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0 0 4px;
+}
+.hall-move .btn {
+  min-width: 36px;
+}

@@ -160,6 +160,11 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     hall = [{ id, addedAt: new Date().toISOString(), researchId: b.researchId, bucket: b.bucket, rank: b.rank, entry: structuredClone(entry) }, ...hall];
     return json({ ok: true, id });
   }
+  if (p === '/hall-of-fame/order' && method === 'PUT') {
+    const ids = (body as { ids: number[] }).ids;
+    hall = ids.map((id) => hall.find((h) => h.id === id)!).filter(Boolean);
+    return json({ ok: true });
+  }
   if (p.startsWith('/hall-of-fame/') && method === 'DELETE') {
     const id = Number(p.split('/').pop());
     hall = hall.filter((h) => h.id !== id);

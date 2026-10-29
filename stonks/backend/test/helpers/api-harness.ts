@@ -22,7 +22,7 @@ export interface Harness {
 /** Answers the SQL the API sends with canned rows; research snapshots are kept in memory. */
 function fakeQuery(calls: Harness['calls'], tables: Record<string, any[]>): Query {
   const research: { id: string; created_at: Date; payload: unknown }[] = [];
-  const hall: { id: string; created_at: Date; research_id: string; bucket: string; rank: number; spec_key: string; entry: unknown }[] = [];
+  const hall: { id: string; created_at: Date; research_id: string; bucket: string; rank: number; spec_key: string; entry: unknown; position: number }[] = [];
   let hallSeq = 0;
   const writeups = new Map<string, any>();
   const settingsRows = new Map<string, { value: unknown; updated_at: Date }>();
@@ -44,11 +44,20 @@ function fakeQuery(calls: Harness['calls'], tables: Record<string, any[]>): Quer
     if (sql.includes('FROM writeups ORDER BY')) return { rows: [...writeups.values()] };
     if (sql.startsWith('INSERT INTO hall_of_fame')) {
       if (hall.some((h) => h.spec_key === params[3])) return { rows: [] };
-      const row = { id: String(++hallSeq), created_at: new Date(), research_id: String(params[0]), bucket: String(params[1]), rank: Number(params[2]), spec_key: String(params[3]), entry: JSON.parse(String(params[4])) };
+      const position = Math.min(1, ...hall.map((h) => h.position)) - 1;
+      const row = { id: String(++hallSeq), created_at: new Date(), research_id: String(params[0]), bucket: String(params[1]), rank: Number(params[2]), spec_key: String(params[3]), entry: JSON.parse(String(params[4])), position };
       hall.push(row);
       return { rows: [{ id: row.id }] };
     }
-    if (sql.includes('FROM hall_of_fame ORDER BY id DESC')) return { rows: [...hall].reverse() };
+    if (sql.includes('FROM hall_of_fame ORDER BY position')) return { rows: [...hall].sort((a, b) => a.position - b.position || Number(b.id) - Number(a.id)) };
+    if (sql === 'SELECT id FROM hall_of_fame') return { rows: hall.map((h) => ({ id: h.id })) };
+    if (sql.startsWith('UPDATE hall_of_fame h SET position')) {
+      (params[0] as number[]).forEach((id, n) => {
+        const row = hall.find((h) => h.id === String(id));
+        if (row) row.position = n + 1;
+      });
+      return { rows: [] };
+    }
     if (sql.startsWith('DELETE FROM hall_of_fame')) {
       const i = hall.findIndex((h) => h.id === String(params[0]));
       return { rows: i < 0 ? [] : hall.splice(i, 1) };

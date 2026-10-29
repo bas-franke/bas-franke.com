@@ -25,7 +25,7 @@ export function hallRoutes(deps: ApiDeps) {
   const r = Router();
 
   r.get('/hall-of-fame', async (_req, res) => {
-    const { rows } = await deps.query('SELECT id, created_at, research_id, bucket, rank, entry FROM hall_of_fame ORDER BY id DESC');
+    const { rows } = await deps.query('SELECT id, created_at, research_id, bucket, rank, entry FROM hall_of_fame ORDER BY position NULLS FIRST, id DESC');
     res.json({
       entries: rows.map((x) => {
         const entry = x.entry as Json;
@@ -49,7 +49,8 @@ export function hallRoutes(deps: ApiDeps) {
     if (!entry || !isObj(entry.spec)) fail(`There is no number ${rank} in the ${bucket} list of that research.`);
     const key = specKey(entry!.spec);
     const ins = await deps.query(
-      `INSERT INTO hall_of_fame (research_id, bucket, rank, spec_key, entry) VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO hall_of_fame (research_id, bucket, rank, spec_key, entry, position)
+       VALUES ($1, $2, $3, $4, $5, (SELECT COALESCE(MIN(position), 1) - 1 FROM hall_of_fame))
        ON CONFLICT (spec_key) DO NOTHING RETURNING id`,
       [researchId, bucket, rank, key, JSON.stringify(entry)],
     );
@@ -58,6 +59,21 @@ export function hallRoutes(deps: ApiDeps) {
     const name = String((entry!.spec as Json).name ?? '');
     await deps.log('info', 'hall_of_fame_added', `Added "${name}" (${bucket} #${rank}, snapshot ${researchId}) to the hall of fame`, { id, researchId, bucket, rank });
     res.json({ ok: true, id });
+  });
+
+  // The owner's order: every id once, top first.
+  r.put('/hall-of-fame/order', async (req, res) => {
+    const ids = isObj(req.body) ? (req.body as Json).ids : undefined;
+    if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'number' && Number.isInteger(x) && x > 0)) fail('Send { ids: [...] } with every hall of fame id, top first.');
+    const { rows } = await deps.query('SELECT id FROM hall_of_fame');
+    const have = new Set(rows.map((x) => num(x.id)));
+    const want = ids as number[];
+    if (new Set(want).size !== want.length || want.length !== have.size || !want.every((id) => have.has(id))) {
+      throw new ConflictError('The hall of fame changed meanwhile. Reload it and try again.');
+    }
+    await deps.query('UPDATE hall_of_fame h SET position = o.n FROM unnest($1::bigint[]) WITH ORDINALITY AS o(id, n) WHERE h.id = o.id', [want]);
+    await deps.log('info', 'hall_of_fame_reordered', 'Reordered the hall of fame', { ids: want });
+    res.json({ ok: true });
   });
 
   r.delete('/hall-of-fame/:id', async (req, res) => {

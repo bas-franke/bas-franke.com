@@ -43,6 +43,8 @@ function NavLink({ path, children, className, title }: { path: string; children:
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
         e.preventDefault();
+        // Pressing the page you are on resets it (Research goes back to the newest session).
+        if (here === path) window.dispatchEvent(new CustomEvent('stonks:reselect', { detail: path }));
         navigate(path);
       }}
     >

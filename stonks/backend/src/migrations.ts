@@ -130,4 +130,12 @@ export const migrations: { name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // The owner orders the hall of fame by hand. Existing rows keep today's order (newest first); new rows go on top.
+    name: '005_hall_of_fame_position',
+    sql: `
+      ALTER TABLE hall_of_fame ADD COLUMN position integer;
+      UPDATE hall_of_fame h SET position = o.n FROM (SELECT id, row_number() OVER (ORDER BY id DESC) AS n FROM hall_of_fame) o WHERE h.id = o.id;
+    `,
+  },
 ];

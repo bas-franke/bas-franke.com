@@ -639,6 +639,19 @@ describe('hall of fame', () => {
     assert.equal((await h.req('POST', '/api/bot/activate', { json: { hallOfFameId: mystery.id }, cookie })).status, 400);
   });
 
+  test('can be put in any order, which then sticks', async () => {
+    const before = await list();
+    assert.ok(before.length >= 2);
+    const ids = before.map((x) => Number(x.id)).reverse();
+    const put = (json: unknown) => h.req('PUT', '/api/hall-of-fame/order', { json, cookie });
+    assert.equal((await put({ ids })).status, 200);
+    assert.deepEqual((await list()).map((x) => Number(x.id)), ids);
+    assert.equal((await put({ ids: ids.slice(1) })).status, 409, 'a missing id means the list changed meanwhile');
+    assert.equal((await put({ ids: [ids[0], ids[0]] })).status, 409);
+    assert.equal((await put({ ids: 'x' })).status, 400);
+    assert.ok(h.logs.some((l) => l.event === 'hall_of_fame_reordered'));
+  });
+
   test('bad requests and removal', async () => {
     for (const bad of [{}, { researchId: 1, bucket: 'monthly', rank: 1 }, { researchId: 1, bucket: 'daily', rank: 9 }, { researchId: 99, bucket: 'daily', rank: 1 }])
       assert.equal((await add(bad)).status, 400, JSON.stringify(bad));

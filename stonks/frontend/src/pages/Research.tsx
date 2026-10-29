@@ -114,6 +114,24 @@ function Research({
   const hall = useAsync(() => api.hallOfFame().then((r) => r.entries), []);
   const writeups = useAsync(() => api.writeups().then((r) => new Set(r.writeups.map((w) => w.specId))), []);
   const [hallView, setHallView] = useState(() => query.get('bucket') === 'hall');
+  // The menu's Research link always opens the newest session, also when you are already on this page.
+  const newest = sessions[0] ?? '';
+  const asked = query.get('bucket');
+  useEffect(() => {
+    if (asked === 'hall') return setHallView(true);
+    setHallView(false);
+    setTab(asked && sessions.includes(asked) ? asked : newest);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked, newest]);
+  useEffect(() => {
+    const reset = (ev: Event) => {
+      if ((ev as CustomEvent).detail !== '/research') return;
+      setHallView(false);
+      setTab(newest);
+    };
+    window.addEventListener('stonks:reselect', reset);
+    return () => window.removeEventListener('stonks:reselect', reset);
+  }, [newest]);
   const hallKeys = useMemo(() => new Set((hall.data ?? []).map((h) => JSON.stringify(h.entry.spec))), [hall.data]);
   const toast = useToast();
   const addToHall = async (e: ResearchEntry) => {
@@ -204,6 +222,11 @@ function Research({
       </section>
 
       <div className="bucket-tabs" role="tablist" aria-label="Sessions">
+        {/* Hall of fame first; the page still opens on the newest session unless a link asks for the hall. */}
+        <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)} title="Hall of fame">
+          ★ HOF
+          <span className="count">{hall.data?.length ?? 0}</span>
+        </button>
         {sessions.map((b) => (
           <button
             key={b}
@@ -218,10 +241,6 @@ function Research({
             <span className="count">{buckets[b as BucketName]!.top.length}</span>
           </button>
         ))}
-        <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)}>
-          ★ Hall of fame
-          <span className="count">{hall.data?.length ?? 0}</span>
-        </button>
       </div>
 
       {hallView && (
@@ -781,8 +800,26 @@ function HallOfFame({
   onActivate: (h: HallEntry) => void;
 }) {
   const toast = useToast();
+  // The owner's order, shown at once while the server saves it.
+  const [order, setOrder] = useState<number[] | null>(null);
   if (hall.error) return <ErrorBox error={hall.error} onRetry={hall.reload} />;
   if (!hall.data) return <Skeleton h={200} />;
+  const byId = new Map(hall.data.map((h) => [h.id, h]));
+  const list = order && order.length === hall.data.length && order.every((id) => byId.has(id)) ? order.map((id) => byId.get(id)!) : hall.data;
+  const move = async (i: number, to: number) => {
+    if (to < 0 || to >= list.length) return;
+    const ids = list.map((h) => h.id);
+    const [id] = ids.splice(i, 1);
+    ids.splice(to, 0, id);
+    setOrder(ids);
+    try {
+      await api.reorderHall(ids);
+    } catch (err) {
+      toast((err as Error).message);
+      setOrder(null);
+    }
+    hall.reload();
+  };
   const remove = async (h: HallEntry) => {
     try {
       await api.removeFromHall(h.id);
@@ -808,9 +845,22 @@ function HallOfFame({
           <EmptyState title="Nothing kept yet">Use “☆ Keep in hall of fame” on a strategy in a session to keep it here for good.</EmptyState>
         </section>
       ) : (
-        hall.data.map((h, i) => (
+        list.map((h, i) => (
+          <div key={h.id} className="hall-item">
+            {list.length > 1 && (
+              <div className="hall-move" role="group" aria-label={`Move ${h.entry.spec.name}`}>
+                <button type="button" className="btn ghost small" disabled={i === 0} onClick={() => void move(i, 0)} title="Move to the top" aria-label="Move to the top">
+                  ⤒
+                </button>
+                <button type="button" className="btn ghost small" disabled={i === 0} onClick={() => void move(i, i - 1)} title="Move up" aria-label="Move up">
+                  ↑
+                </button>
+                <button type="button" className="btn ghost small" disabled={i === list.length - 1} onClick={() => void move(i, i + 1)} title="Move down" aria-label="Move down">
+                  ↓
+                </button>
+              </div>
+            )}
           <RankCard
-            key={h.id}
             e={{ ...h.entry, rank: i + 1 }}
             color={RANK_COLORS[i % RANK_COLORS.length]}
             anchor={`card-hall-${h.id}`}
@@ -821,6 +871,7 @@ function HallOfFame({
             hasWriteup={!!writeups?.has(h.entry.spec.id)}
             bucket="hall"
           />
+          </div>
         ))
       )}
     </div>
