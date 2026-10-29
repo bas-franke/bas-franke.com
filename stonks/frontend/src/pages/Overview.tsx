@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
+import { ARTICLES } from '../articles';
 import { HeroBanner, SleepingCatArt } from '../components/art';
 import { DailyBars, LineChart, type LineSeries } from '../components/charts';
 import { WatchingCat } from '../components/icons';
@@ -77,6 +78,7 @@ export default function OverviewPage() {
           </div>
         </div>
       )}
+      {o && <ReadingCard />}
       {!o && !ov.error && (
         <div className="grid overview-grid">
           <div className="card">
@@ -88,6 +90,39 @@ export default function OverviewPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function ReadingCard() {
+  return (
+    <section className="card" aria-labelledby="reading-h">
+      <div className="card-head">
+        <span className="eyebrow" id="reading-h">
+          Reading
+        </span>
+      </div>
+      <div className="article-cards">
+        {ARTICLES.map((a) => (
+          <a
+            key={a.slug}
+            className="article-card"
+            href={`/article?slug=${a.slug}`}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              navigate(`/article?slug=${a.slug}`);
+            }}
+          >
+            <span className="tiny muted">
+              {a.tag} · {dateOnly(a.date)} · {a.minutes} min read
+            </span>
+            <h3>{a.title}</h3>
+            <p className="small soft">{a.blurb}</p>
+            <span className="small article-more">Read the full article →</span>
+          </a>
+        ))}
+      </div>
+    </section>
   );
 }
 

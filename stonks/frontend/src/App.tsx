@@ -12,6 +12,7 @@ import SettingsPage from './pages/Settings';
 import ResearchPage from './pages/Research';
 import NotesPage from './pages/Notes';
 import WriteupPage from './pages/Writeup';
+import ArticlePage from './pages/Article';
 
 const NAV = [
   { path: '/', label: 'Overview', icon: IconHome },
@@ -30,6 +31,7 @@ const PAGES: Record<string, () => ReactNode> = {
   '/notes': () => <NotesPage />,
   '/settings': () => <SettingsPage />,
   '/writeup': () => <WriteupPage />,
+  '/article': () => <ArticlePage />,
 };
 
 function NavLink({ path, children, className, title }: { path: string; children: ReactNode; className?: string; title?: string }) {
