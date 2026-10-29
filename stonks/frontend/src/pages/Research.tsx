@@ -150,6 +150,14 @@ function Research({
     setHallView(false);
   };
 
+  // On a phone the tab row scrolls sideways: keep the chosen tab in view.
+  useEffect(() => {
+    const el = document.getElementById(hallView ? 'tab-hall' : `tab-${tab}`);
+    const row = el?.parentElement;
+    if (!el || !row || row.scrollWidth <= row.clientWidth) return;
+    row.scrollTo({ left: el.offsetLeft - (row.clientWidth - el.offsetWidth) / 2, behavior: 'smooth' });
+  }, [tab, hallView]);
+
   return (
     <div className="stack research-page" style={{ gap: 12 }}>
       <Head data={data} />
@@ -319,6 +327,14 @@ function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
             This session’s five are all in or all out. Each coin is cut into 90-day sections, each section is compared with holding that same stretch,
             and each year counts the same, so one spike cannot carry the book. A high that then falls at least 8 percent scores extra when the book
             was in on the way up and out on the way down. Shown here are the five that also beat holding. The table’s euro numbers are the ether run.
+          </p>
+        )}
+        {name === 'session4' && (
+          <p>
+            This session’s five ride the big rises, step aside in the big drops and trade the quiet stretches, on 15-minute candles with a 0.05 percent
+            fee per trade. The whole chart is cut into overlapping windows of one, two and three months, starting on the 1st and the 15th of each month.
+            A rising window scores the share of the rise the strategy kept, a falling one the share of the fall it avoided, and a quiet one what it made.
+            Each card is ranked on its score with its settings nudged up and down, so a lucky setting does not win. The table’s euro numbers are the ether run.
           </p>
         )}
       {name === 'custom' && (

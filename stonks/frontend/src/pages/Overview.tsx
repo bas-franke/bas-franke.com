@@ -541,7 +541,7 @@ function BalancesCard({ o }: { o: Overview }) {
   );
 }
 
-const BUCKET_LABEL: Record<string, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss', session1: 'Session 1', session2: 'Session 2', session3: 'Session 3', hall: 'Hall of fame' };
+const BUCKET_LABEL: Record<string, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss', session1: 'Session 1', session2: 'Session 2', session3: 'Session 3', session4: 'Session 4', hall: 'Hall of fame' };
 
 /** Where the current strategy came from, when it was activated from the Research page (SPEC §8). */
 function ActiveResearchLine({ o }: { o: Overview }) {
