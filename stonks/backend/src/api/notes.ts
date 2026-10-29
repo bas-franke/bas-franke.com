@@ -25,8 +25,9 @@ export function notesRoutes(deps: ApiDeps) {
   });
 
   r.put('/notes', async (req, res) => {
-    const text = req.body && typeof req.body === 'object' ? (req.body as { text?: unknown }).text : undefined;
-    if (typeof text !== 'string') fail('Send { text }.');
+    const raw = req.body && typeof req.body === 'object' ? (req.body as { text?: unknown }).text : undefined;
+    if (typeof raw !== 'string') fail('Send { text }.');
+    const text = raw as string;
     if (text.length > MAX_CHARS) fail(`Notes can be at most ${MAX_CHARS} characters.`);
     await deps.query(
       `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now())
