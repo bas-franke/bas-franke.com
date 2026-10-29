@@ -6,7 +6,7 @@ import { IconCheck } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
-import { BUCKET_NAMES, type Benchmark, type BucketName, type HallEntry, type Overview, type ResearchBucket, type ResearchEntry, type ResearchPayload, type Series } from '../types';
+import type { Benchmark, BucketName, HallEntry, Overview, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
 
 const RANK_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
 const BENCH_STYLE = [
@@ -15,27 +15,24 @@ const BENCH_STYLE = [
   { color: 'var(--ink-3)', dash: '12 4 2 4' },
 ];
 
-/** Tab titles for the timeframe buckets (SPEC §8). */
-export const BUCKET_TITLES: Record<BucketName, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss', session1: 'Session 1', session2: 'Session 2', session3: 'Session 3' };
-const bucketTitle = (b: string) => BUCKET_TITLES[b as BucketName] ?? b;
-const TAB_KEY = 'stonks-research-bucket';
+/** Labels for buckets that can still be named from the hall of fame (older research). */
+const BUCKET_TITLES: Record<string, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss' };
+const bucketTitle = (b: string) => {
+  const session = /^session(\d+)$/.exec(b);
+  if (session) return `Session ${Number(session[1])}`;
+  return BUCKET_TITLES[b] ?? b;
+};
 
-const isBucket = (v: unknown): v is BucketName => BUCKET_NAMES.includes(v as BucketName);
-const savedTab = (): BucketName | null => {
-  try {
-    const v = localStorage.getItem(TAB_KEY);
-    return isBucket(v) ? v : null;
-  } catch {
-    return null;
-  }
-};
-const saveTab = (b: BucketName) => {
-  try {
-    localStorage.setItem(TAB_KEY, b);
-  } catch {
-    /* private window: just don't remember */
-  }
-};
+/** Session tabs only, newest first (session 3 before session 1). */
+function sessionTabs(buckets: Partial<Record<string, unknown>>): string[] {
+  return Object.keys(buckets)
+    .flatMap((name) => {
+      const m = /^session(\d+)$/.exec(name);
+      return m ? [{ name, n: Number(m[1]) }] : [];
+    })
+    .sort((a, b) => b.n - a.n)
+    .map((s) => s.name);
+}
 
 const toPts = (s: Series | undefined): [number, number][] =>
   (s ?? []).map(([t, v]) => [toDate(t)?.getTime() ?? 0, Number(v)] as [number, number]).filter(([t]) => t > 0);
@@ -107,14 +104,13 @@ function Research({
 }) {
   const { query } = useLocation();
   const buckets = bucketsOf(data);
-  const names = BUCKET_NAMES.filter((b) => buckets[b]);
-  const [tab, setTab] = useState<BucketName>(() => {
+  const sessions = sessionTabs(buckets);
+  const [tab, setTab] = useState<string>(() => {
     const q = query.get('bucket');
-    const pick = isBucket(q) ? q : savedTab();
-    if (pick && buckets[pick]) return pick;
-    return names.find((b) => buckets[b]!.top.length) ?? names[0] ?? 'daily';
+    if (q && sessions.includes(q)) return q;
+    return sessions[0] ?? '';
   });
-  const [pick, setPick] = useState<{ e: ResearchEntry; bucket: BucketName | 'hall'; hallId?: number } | null>(null);
+  const [pick, setPick] = useState<{ e: ResearchEntry; bucket: string; hallId?: number } | null>(null);
   const hall = useAsync(() => api.hallOfFame().then((r) => r.entries), []);
   const writeups = useAsync(() => api.writeups().then((r) => new Set(r.writeups.map((w) => w.specId))), []);
   const [hallView, setHallView] = useState(() => query.get('bucket') === 'hall');
@@ -130,26 +126,27 @@ function Research({
     }
     hall.reload();
   };
-  const bucket = buckets[tab] ?? buckets[names[0]]!;
-  const top = [...bucket.top].sort((a, b) => a.rank - b.rank).slice(0, 5);
-  const benches = [bucket.benchmark ?? (data.buckets ? null : data.benchmark), ...(tab === 'daily' || !data.buckets ? (data.benchmarks ?? []) : [])].filter(
-    (b): b is Benchmark => !!b,
-  );
+  const bucket = tab ? buckets[tab as BucketName] : undefined;
+  const top = bucket ? [...bucket.top].sort((a, b) => a.rank - b.rank).slice(0, 5) : [];
+  const benches = bucket
+    ? [bucket.benchmark ?? (data.buckets ? null : data.benchmark), ...(tab === 'daily' || !data.buckets ? (data.benchmarks ?? []) : [])].filter(
+        (b): b is Benchmark => !!b,
+      )
+    : [];
   const active = overview ? (overview.activeResearch ?? overview.bot.activeResearch ?? null) : null;
   const s = data.summary;
 
-  // Deep link from the Overview: /research?bucket=hourly&rank=2 scrolls to that card.
+  // Deep link from the Overview: /research?bucket=session3&rank=2 scrolls to that card.
   useEffect(() => {
     const rank = query.get('rank');
-    if (!rank) return;
+    if (!rank || query.get('bucket') !== tab) return;
     const t = setTimeout(() => document.getElementById(`card-${tab}-${rank}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const choose = (b: BucketName) => {
+  const choose = (b: string) => {
     setTab(b);
-    saveTab(b);
     setHallView(false);
   };
 
@@ -160,8 +157,8 @@ function Research({
       <section className="card quiet research-about">
         <Fold title="About the lab">
           <p>
-            Thousands of strategies were tested on years of past prices, each starting with €1,000. These are the ones that held up best on data they had
-            never seen, ranked separately for minute, hourly, daily and weekly trading and for strategies that mix candle sizes.
+            Thousands of strategies were tested on years of past prices, each starting with €1,000. Each session is one of those searches. The newest
+            session opens first.
           </p>
           <div className="summary-strip" aria-label="Research summary">
             <div>
@@ -193,33 +190,31 @@ function Research({
           <p>
             <b>An honest note.</b> These results come from backtests: simulations on past prices, with Bitvavo’s fees and a careful fill model. They are
             not a forecast, and a strategy that did well before can do badly next month. Simply buying and holding is shown everywhere as the yardstick to
-            beat, not as a candidate. Scores only compare within one timeframe: each is judged on a test period that fits how long its trades last.
+            beat, not as a candidate. Scores only compare within one session.
           </p>
         </Fold>
       </section>
 
-      {data.buckets && (
-        <div className="bucket-tabs" role="tablist" aria-label="Timeframe">
-          {names.map((b) => (
-            <button
-              key={b}
-              type="button"
-              role="tab"
-              id={`tab-${b}`}
-              aria-selected={b === tab}
-              aria-controls="bucket-panel"
-              onClick={() => choose(b)}
-            >
-              {BUCKET_TITLES[b]}
-              <span className="count">{buckets[b]!.top.length}</span>
-            </button>
-          ))}
-          <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)}>
-            ★ Hall of fame
-            <span className="count">{hall.data?.length ?? 0}</span>
+      <div className="bucket-tabs" role="tablist" aria-label="Sessions">
+        {sessions.map((b) => (
+          <button
+            key={b}
+            type="button"
+            role="tab"
+            id={`tab-${b}`}
+            aria-selected={!hallView && b === tab}
+            aria-controls="bucket-panel"
+            onClick={() => choose(b)}
+          >
+            {bucketTitle(b)}
+            <span className="count">{buckets[b as BucketName]!.top.length}</span>
           </button>
-        </div>
-      )}
+        ))}
+        <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)}>
+          ★ Hall of fame
+          <span className="count">{hall.data?.length ?? 0}</span>
+        </button>
+      </div>
 
       {hallView && (
         <HallOfFame
@@ -231,14 +226,14 @@ function Research({
       )}
 
 
-      {!hallView && (
-      <div id="bucket-panel" role={data.buckets ? 'tabpanel' : undefined} aria-labelledby={data.buckets ? `tab-${tab}` : undefined} className="stack" style={{ gap: 12 }}>
-        {data.buckets && <BucketIntro name={tab} b={bucket} />}
+      {!hallView && bucket && (
+      <div id="bucket-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="stack" style={{ gap: 12 }}>
+        <BucketIntro name={tab} b={bucket} />
 
         {top.length === 0 ? (
           <section className="card">
             <EmptyState title={`Nothing made the cut for ${bucketTitle(tab).toLowerCase()} trading yet`}>
-              {bucket.notes || 'No strategy in this timeframe beat buying and holding after fees, so there is nothing worth running here yet.'}
+              {bucket.notes || 'No strategy in this session beat buying and holding after fees, so there is nothing worth running here yet.'}
             </EmptyState>
           </section>
         ) : (
@@ -285,7 +280,7 @@ function Research({
   );
 }
 
-function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
+function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
   const p = b.profile;
   const luck = b.luckLine;
   return (
@@ -375,7 +370,7 @@ function BucketIntro({ name, b }: { name: BucketName; b: ResearchBucket }) {
             </div>
           )}
         </div>
-        <p className="tiny muted">Scores only compare within this timeframe. A strategy is worth a look when it beats both lines above.</p>
+        <p className="tiny muted">Scores only compare within this session. A strategy is worth a look when it beats both lines above.</p>
       </Fold>
     </section>
   );
@@ -394,7 +389,7 @@ function ActivateDialog({
   researchId: number;
   /** Set when activating a hall of fame strategy (its stored copy). */
   hallId?: number;
-  bucket: BucketName | 'hall';
+  bucket: string;
   e: ResearchEntry;
   overview?: Overview;
   onClose: () => void;
@@ -780,7 +775,7 @@ function HallOfFame({
       </section>
       {hall.data.length === 0 ? (
         <section className="card">
-          <EmptyState title="Nothing kept yet">Use “☆ Keep in hall of fame” on any strategy in the timeframe tabs to keep it here for good.</EmptyState>
+          <EmptyState title="Nothing kept yet">Use “☆ Keep in hall of fame” on a strategy in a session to keep it here for good.</EmptyState>
         </section>
       ) : (
         hall.data.map((h, i) => (

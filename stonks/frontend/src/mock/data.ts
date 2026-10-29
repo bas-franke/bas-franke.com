@@ -478,6 +478,33 @@ function buildResearchV2(): ResearchPayload & { id: number } {
         '1 of these 2 beat buying and holding the same coin(s) in the last test year.',
         [clone(t[1] ?? t[0], 1, '1h', 7.7, false), clone(t[3] ?? t[0], 2, '1h', 5.1, false)],
       ),
+      session1: bucket(
+        'Session 1',
+        ['1d'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        8.2,
+        { median: 1.1, best: 6.4, exposure: 0.5 },
+        'The first session’s five.',
+        [clone(t[0], 1, '1d', 11.2, true)],
+      ),
+      session2: bucket(
+        'Session 2',
+        ['1d'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        9.4,
+        { median: 1.4, best: 7.1, exposure: 0.48 },
+        'Aimed at the coins session 1 lost to holding.',
+        [clone(t[1] ?? t[0], 1, '1d', 12.4, true), clone(t[2] ?? t[0], 2, '1d', 10.1, true)],
+      ),
+      session3: bucket(
+        'Session 3',
+        ['1d'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        10.8,
+        { median: 2.0, best: 9.2, exposure: 0.52 },
+        'All in or all out, judged in 90-day sections.',
+        [clone(t[0], 1, '1d', 14.6, true), clone(t[2] ?? t[0], 2, '1d', 13.1, true), clone(t[3] ?? t[1], 3, '1d', 11.8, false)],
+      ),
     },
   };
 }

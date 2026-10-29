@@ -4,7 +4,7 @@ import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
 import { navigate, useLocation } from '../router';
-import { BUCKET_NAMES, type Writeup, type WriteupChart, type WriteupCoin, type WriteupSection } from '../types';
+import type { Writeup, WriteupChart, WriteupCoin, WriteupSection } from '../types';
 
 // A long-form explanation of one strategy (SPEC §8b): /writeup?spec=<spec id>. The content is stored in the database.
 
@@ -32,20 +32,18 @@ function fromStart(points: [number, number][], to: number): [number, number][] {
   return points.map(([t, v]) => [t, Math.round((v / base) * to * 1e6) / 1e6]);
 }
 
-const BACK_BUCKETS = new Set<string>([...BUCKET_NAMES, 'hall']);
-
 export default function WriteupPage() {
   const { query } = useLocation();
   const id = query.get('spec') ?? '';
   const asked = query.get('bucket') ?? '';
-  const back = BACK_BUCKETS.has(asked) ? asked : 'mixed';
+  const back = /^session\d+$/.test(asked) || asked === 'hall' ? asked : '';
   const w = useAsync(() => api.writeup(id), [id]);
   return (
     <div className="stack writeup" style={{ gap: 12 }}>
       <div className="page-head">
         <div>
           <span className="eyebrow">
-            <a href={`/research?bucket=${encodeURIComponent(back)}`} onClick={(e) => (e.preventDefault(), navigate(`/research?bucket=${encodeURIComponent(back)}`))}>
+            <a href={back ? `/research?bucket=${encodeURIComponent(back)}` : '/research'} onClick={(e) => (e.preventDefault(), navigate(back ? `/research?bucket=${encodeURIComponent(back)}` : '/research'))}>
               ← Research
             </a>
           </span>
