@@ -64,7 +64,7 @@
   box-shadow: 0 0 0 3px var(--warm-soft);
 }
 
-/* the open phone menu hangs over the bar's edge */
+/* the open phone menu is one picture, with no bar to ride */
 :root:has(.nav--open) .sunpath {
   visibility: hidden;
 }

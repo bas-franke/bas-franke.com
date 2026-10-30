@@ -50,7 +50,7 @@
   transition: fill var(--fade) var(--ease);
 }
 
-/* the section links are always there on wide screens; the toggle is for phones */
+/* the section links are always there on wide screens; the two lines are for phones */
 .nav__menu {
   display: none;
 }
@@ -151,14 +151,13 @@
   transform: none;
 }
 
-/* One row: name, Menu, résumé, lamp. The section links drop in beneath it on request. */
+/* One row: name, lamp, the two lines. The sections and the résumé are in the menu (menu.css). */
 @media (max-width: 760px) {
   :root {
     --nav-h: 64px;
   }
 
   .nav__inner {
-    justify-content: flex-start;
     gap: 8px;
   }
 
@@ -167,151 +166,69 @@
     white-space: nowrap;
   }
 
-  .nav__menu {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0 6px;
-    border: 0;
-    background: transparent;
-    font-family: var(--sans);
-    font-size: var(--text-sm);
-    color: var(--ink-2);
-    cursor: pointer;
-    transition: color var(--fade);
-  }
-
-  .nav__menu[aria-expanded='true'] {
-    color: var(--ink);
-  }
-
-  .nav__links {
+  .nav__links,
+  .nav__right .btn--nav {
     display: none;
   }
 
-  /* open, the bar and its row are one solid piece of ground; --paper is the night's over the night */
-  .nav--open {
-    background: var(--paper);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-
-  /* a sheet of the same paper hanging from the bar, one row to a section */
-  .nav--open .nav__links {
-    position: absolute;
-    inset: 100% 0 auto;
-    display: grid;
-    gap: 0;
-    padding: 4px var(--gutter) 12px;
-    background: var(--paper);
-    border-bottom: 1px solid color-mix(in srgb, var(--warm) 28%, transparent);
-    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-    box-shadow: 0 24px 40px -24px rgb(0 0 0 / 0.5);
-    animation: nav-drop 0.28s var(--ease) both;
-  }
-
-  @keyframes nav-drop {
-    from {
-      opacity: 0;
-      translate: 0 -8px;
-    }
-  }
-
-  .nav__links a {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 64px;
-    border-bottom: 0;
-    font-family: var(--serif);
-    font-size: var(--text-h3);
-    color: var(--ink);
-    animation: nav-row 0.32s var(--ease) both;
-    animation-delay: calc(var(--row, 0) * 36ms);
-  }
-
-  .nav__links a + a,
-  .nav__links a + a:hover,
-  .nav__links a + a[aria-current] {
-    border-top: 1px solid var(--line);
-  }
-
-  .nav__links a:nth-child(2) {
-    --row: 1;
-  }
-
-  .nav__links a:nth-child(3) {
-    --row: 2;
-  }
-
-  .nav__links a:nth-child(4) {
-    --row: 3;
-  }
-
-  @keyframes nav-row {
-    from {
-      opacity: 0;
-      translate: 0 6px;
-    }
-  }
-
-  /* where you are: the sun from the bar's edge, resting on this row */
-  .nav__links a[aria-current] {
-    font-style: italic;
-  }
-
-  .nav__links a[aria-current]::after {
-    content: '';
-    width: 8px;
-    height: 8px;
-    margin-right: 3px;
-    border-radius: 50%;
-    background: var(--sun);
-    box-shadow: 0 0 0 3px var(--warm-soft);
-  }
-
-  /* the page steps back; a press on it closes the menu (see useNavMenu) */
-  .nav__scrim {
-    position: fixed;
-    inset: 0;
-    z-index: 49;
-    background: color-mix(in srgb, var(--night) 42%, transparent);
-    animation: scrim-in 0.28s var(--ease) both;
-  }
-
-  @keyframes scrim-in {
-    from {
-      opacity: 0;
-    }
-  }
-
   .nav__right {
-    gap: 4px;
-    margin-left: auto;
-  }
-
-  .btn--nav {
-    min-height: 44px;
-    padding: 0 14px;
-    white-space: nowrap;
+    gap: 0;
+    margin-right: -10px;
   }
 
   .theme {
     width: 44px;
     height: 44px;
   }
-}
 
-/* the narrowest phones keep the name and lose the two ornaments */
-@media (max-width: 360px) {
-  .nav__brand .mark,
-  .btn--nav svg {
-    display: none;
+  /* the bar steps aside: the open menu is the ground under it */
+  .nav--open {
+    background: transparent;
+    border-color: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
-  .btn--nav {
-    padding: 0 12px;
+  .nav__menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: color var(--fade);
+  }
+
+  .nav__menu:hover,
+  .nav__menu[aria-expanded='true'] {
+    color: var(--ink);
+  }
+
+  /* drawn like the lamp beside it; open, the two lines meet in a cross */
+  .nav__menu path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    transform-box: view-box;
+    transform-origin: 12px 9px;
+    transition: translate 0.4s var(--ease), rotate 0.4s var(--ease);
+  }
+
+  .nav__menu path + path {
+    transform-origin: 12px 15px;
+  }
+
+  .nav__menu[aria-expanded='true'] path {
+    translate: 0 3px;
+    rotate: 45deg;
+  }
+
+  .nav__menu[aria-expanded='true'] path + path {
+    translate: 0 -3px;
+    rotate: -45deg;
   }
 }
