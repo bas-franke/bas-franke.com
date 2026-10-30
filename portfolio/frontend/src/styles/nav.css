@@ -198,7 +198,7 @@
     backdrop-filter: none;
   }
 
-  .nav__links--open {
+  .nav--open .nav__links {
     position: absolute;
     inset: 100% 0 auto;
     display: flex;
