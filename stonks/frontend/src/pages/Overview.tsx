@@ -76,7 +76,6 @@ export default function OverviewPage() {
         <div className="desk-grid">
           <div className="stack">
             <CompareCard mode={o.bot.mode} />
-            <TrackingCard mode={o.bot.mode} />
           </div>
           <div className="stack">
             <RecentTradesCard o={o} />
@@ -518,6 +517,7 @@ function CompareCard({ mode }: { mode: string }) {
           </ul>
         </div>
       )}
+      <TrackingStats mode={mode} />
       {lines.length > 0 && (
         <Fold title="How to read this">
           <p className="tiny soft">
@@ -526,6 +526,11 @@ function CompareCard({ mode }: { mode: string }) {
               ? `at the beginning of the ${label}`
               : `when your portfolio tracking began (${dateOnly(cmp.data!.start)})`}
             . Informative only: it does not change what the bot does. Deposits and withdrawals show up as jumps in your line.
+          </p>
+          <p className="tiny soft">
+            Expected is a paper copy that follows every decision by the backtest’s rules: filled at the bar’s close with the maker fee. A gap means the real
+            account lost or gained something the backtest doesn’t see, such as slippage, taker fees or orders that never filled. Slippage is each fill against
+            the close it was decided on; positive means worse than that close. Expected ignores your max-in-coins setting.
           </p>
         </Fold>
       )}
@@ -555,91 +560,45 @@ function GuardNotice({ o }: { o: Overview }) {
   );
 }
 
-/** What the strategy should have made by the backtest's rules, what the account really did, and just holding (SPEC §5b). */
-function TrackingCard({ mode }: { mode: string }) {
-  const [range, setRange] = useState<CompareRange>('month');
-  const t = useAsync(() => api.tracking({ mode, range }), [mode, range]);
+/** Real account against the backtest's paper copy (SPEC §5b): four figures since the strategy started, plus any drift alert. */
+function TrackingStats({ mode }: { mode: string }) {
+  const t = useAsync(() => api.tracking({ mode, range: 'month' }), [mode]);
   useVisibleInterval(() => t.reload(), 60_000);
   const d = t.data;
-  const series = useMemo<LineSeries[]>(() => {
-    if (!d) return [];
-    return [
-      { name: 'Actual', color: 'var(--ink)', points: d.actual, area: true, width: 2.4 },
-      { name: 'Expected', color: 'var(--brass)', points: d.expected, dash: '6 4', width: 1.8 },
-      { name: 'Just holding', color: 'var(--s2)', points: d.hold, dash: '2 4', width: 1.8 },
-    ];
-  }, [d]);
-  const drawn = series.filter((s) => s.points.length > 1);
-  const label = COMPARE_RANGES.find((r) => r.value === range)!.label.toLowerCase();
   const slip = d?.slippage;
-  const since = d?.since ? dateOnly(d.since) : null;
-
+  if (!d || !slip || !d.strategyId) return null;
+  const since = d.since ? dateOnly(d.since) : null;
   return (
-    <section className="card">
-      <div className="card-head has-seg">
-        <h2>Is it doing what it should?</h2>
-        <Segmented label="Range" value={range} onChange={setRange} options={COMPARE_RANGES} />
-      </div>
-      {t.error && <ErrorBox error={t.error} onRetry={t.reload} />}
-      {!d && !t.error && <Skeleton h={220} />}
-      {d && !drawn.length && (
-        <p className="soft small" style={{ padding: '30px 0' }}>
-          {d.strategyId
-            ? `Nothing to draw for this ${label} yet. A new point is added every minute while the bot is on.`
-            : 'Nothing to compare yet. The tracking starts at this strategy’s first decision.'}
-        </p>
-      )}
-      {d && drawn.length > 0 && slip && (
-        <>
-          <div className="tracking-body">
-            <LineChart
-              series={drawn}
-              height={200}
-              ariaLabel={`What the strategy expected, what the account did and just holding, over the last ${label}`}
-              yFormat={(v) => `€${Math.round(v).toLocaleString('en-US')}`}
-              tipFormat={(v) => eur(v)}
-            />
-            <dl className="tracking-stats" aria-label={since ? `Since ${since}` : undefined}>
-              <div>
-                <dt>Gap to expected</dt>
-                <dd className={`mid-num ${d.gapPct === null ? 'muted' : d.gapPct >= 0 ? 'gain' : 'loss'}`}>{d.gapPct === null ? '–' : pct(d.gapPct, 2, true)}</dd>
-                <dd className="tiny soft">actual against expected</dd>
-              </div>
-              <div>
-                <dt>Slippage</dt>
-                <dd className="mid-num">{slip.avgBps === null ? '–' : `${slip.avgBps.toFixed(1)} bps`}</dd>
-                <dd className="tiny soft">{slip.measured ? `average over ${slip.measured} of ${slip.fills} fills` : 'no fills to measure yet'}</dd>
-              </div>
-              <div>
-                <dt>Fees paid</dt>
-                <dd className="mid-num">{eur(slip.feesEur)}</dd>
-                <dd className="tiny soft">{slip.takerShare === null ? 'no fills yet' : `${pct(slip.takerShare * 100, 0)} at the taker fee`}</dd>
-              </div>
-              <div>
-                <dt>Decisions</dt>
-                <dd className="mid-num">{d.decisions.total}</dd>
-                <dd className="tiny soft">{d.decisions.withOrders} placed orders</dd>
-              </div>
-            </dl>
-          </div>
-          {since && <p className="tiny soft" style={{ marginTop: 10 }}>The four figures count since this strategy started on {since}, whatever the range.</p>}
-        </>
-      )}
-      {d?.alerts.map((a) => (
+    <>
+      <dl className="tracking-stats" aria-label={since ? `Since ${since}` : undefined}>
+        <div>
+          <dt>Gap to expected</dt>
+          <dd className={`mid-num ${d.gapPct === null ? 'muted' : d.gapPct >= 0 ? 'gain' : 'loss'}`}>{d.gapPct === null ? '–' : pct(d.gapPct, 2, true)}</dd>
+          <dd className="tiny soft">actual against expected</dd>
+        </div>
+        <div>
+          <dt>Slippage</dt>
+          <dd className="mid-num">{slip.avgBps === null ? '–' : `${slip.avgBps.toFixed(1)} bps`}</dd>
+          <dd className="tiny soft">{slip.measured ? `average over ${slip.measured} of ${slip.fills} fills` : 'no fills to measure yet'}</dd>
+        </div>
+        <div>
+          <dt>Fees paid</dt>
+          <dd className="mid-num">{eur(slip.feesEur)}</dd>
+          <dd className="tiny soft">{slip.takerShare === null ? 'no fills yet' : `${pct(slip.takerShare * 100, 0)} at the taker fee`}</dd>
+        </div>
+        <div>
+          <dt>Decisions</dt>
+          <dd className="mid-num">{d.decisions.total}</dd>
+          <dd className="tiny soft">{d.decisions.withOrders} placed orders</dd>
+        </div>
+      </dl>
+      {since && <p className="tiny soft" style={{ marginTop: 8 }}>These four count since this strategy started on {since}, whatever the range above.</p>}
+      {d.alerts.map((a) => (
         <div className="callout brass" style={{ marginTop: 12 }} key={a.kind}>
           {a.message}
         </div>
       ))}
-      {d && drawn.length > 0 && (
-        <Fold title="How to read this">
-          <p className="tiny soft">
-            Expected is a paper copy that follows every decision by the backtest’s rules: filled at the bar’s close with the maker fee. A gap means the real
-            account lost or gained something the backtest doesn’t see, such as slippage, taker fees or orders that never filled. Slippage is each fill against
-            the close it was decided on; positive means worse than that close. Expected ignores your max-in-coins setting.
-          </p>
-        </Fold>
-      )}
-    </section>
+    </>
   );
 }
 

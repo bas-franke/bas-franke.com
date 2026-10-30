@@ -161,15 +161,13 @@
 
 /* ---------- expected vs actual ---------- */
 
-.tracking-body {
-  display: grid;
-  gap: 16px;
-}
 .tracking-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px 18px;
-  margin: 0;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 .tracking-stats dt {
   font-size: 0.85rem;
