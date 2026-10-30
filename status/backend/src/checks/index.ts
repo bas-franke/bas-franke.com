@@ -19,6 +19,7 @@ import {
   pm2Check,
   pm2ProcessCheck,
 } from './server.js';
+import { stonksBotCheck } from './stonks.js';
 import { publicApiCheck, siteCheck, tlsCheck, websocketCheck } from './web.js';
 
 const accessCheck: CheckDef = {
@@ -72,6 +73,7 @@ export function projectChecks(project: Project): CheckDef[] {
     publicApiCheck(project),
     ...(project.websocket ? [websocketCheck(project)] : []),
     ...(project.database ? [databaseCheck(project)] : []),
+    ...(project.name === 'stonks' ? [stonksBotCheck(project)] : []),
   ];
 }
 
