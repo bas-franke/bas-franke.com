@@ -1,6 +1,4 @@
-import type { CSSProperties } from 'react';
 import ContactForm from './ContactForm';
-import ResumeButton from './ResumeButton';
 import { artUrl } from '../artwork';
 import { contact, site } from '../content';
 
@@ -8,15 +6,11 @@ export default function Contact() {
   const art = artUrl('contact-night');
 
   return (
-    <section
-      id="contact"
-      className="contact night"
-      style={art ? ({ '--contact-art': `url(${art})` } as CSSProperties) : undefined}
-    >
+    <section id="contact" className="contact night">
+      {art && <img className="contact__art" src={art} alt="" loading="lazy" decoding="async" />}
       <div className="container contact__grid">
-        <div className="contact__invite">
+        <div>
           <div className="section__head" data-reveal>
-            <p className="eyebrow">{contact.eyebrow}</p>
             <h2>{contact.heading}</h2>
           </div>
           <div data-reveal>
@@ -35,7 +29,6 @@ export default function Contact() {
                 </a>
               </li>
             </ul>
-            <ResumeButton variant="quiet" />
           </div>
         </div>
         <div data-reveal>

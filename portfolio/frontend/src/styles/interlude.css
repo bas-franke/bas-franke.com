@@ -20,4 +20,5 @@
   font-weight: 300;
   font-variation-settings: 'opsz' 48;
   color: var(--ink);
+  text-wrap: balance;
 }

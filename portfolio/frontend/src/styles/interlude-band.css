@@ -2,7 +2,9 @@
    the page rather than a box on it. Without a picture for this hour the line stands alone (`--bare`). */
 
 .interlude--band {
-  --edges: linear-gradient(to bottom, transparent 7%, #000 22%, #000 58%, transparent 86%);
+  /* the top stop clears the band's edge at every point of the drift below */
+  --edges: linear-gradient(to bottom, transparent 14%, #000 28%, #000 58%, transparent 86%);
+  --foot: linear-gradient(to top, transparent, #000 clamp(24px, 4vw, 48px));
   height: clamp(420px, 78vh, 820px);
   display: flex;
   align-items: flex-end;
@@ -28,10 +30,13 @@
   z-index: -1;
   background: radial-gradient(
     ellipse 64% 84% at 14% 100%,
-    color-mix(in srgb, var(--paper) 94%, transparent) 30%,
-    color-mix(in srgb, var(--paper) 72%, transparent) 60%,
+    color-mix(in srgb, var(--noon) 94%, transparent) 30%,
+    color-mix(in srgb, var(--noon) 72%, transparent) 60%,
     transparent
   );
+  /* the ground here is still moving towards noon, so the pool melts away before the band's foot */
+  -webkit-mask-image: var(--foot);
+  mask-image: var(--foot);
   pointer-events: none;
 }
 
@@ -41,7 +46,7 @@
 
 .interlude--band .interlude__voice {
   max-width: 26ch;
-  font-size: clamp(1.6rem, 3.4vw, 2.7rem);
+  font-size: var(--text-h3);
   line-height: 1.2;
 }
 
@@ -62,7 +67,7 @@
 
 .interlude--band.interlude--bare .interlude__voice {
   max-width: 24ch;
-  font-size: clamp(2rem, 4.8vw, 3.8rem);
+  font-size: var(--text-h2);
   line-height: 1.14;
   letter-spacing: -0.015em;
 }
@@ -95,7 +100,7 @@
     height: 58%;
     background: linear-gradient(
       to top,
-      color-mix(in srgb, var(--paper) 94%, transparent) 55%,
+      color-mix(in srgb, var(--noon) 94%, transparent) 55%,
       transparent
     );
   }

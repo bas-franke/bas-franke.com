@@ -23,6 +23,7 @@
     <meta property="og:image" content="https://bas-franke.com/og.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preload" href="/src/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/fonts/newsreader-italic.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/src/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <!-- No rel yet: the script below preloads only the painting of the current theme. -->
     <link id="art-light" href="/src/art/hero.webp" as="image" fetchpriority="high" />
@@ -43,6 +44,12 @@
     </script>
   </head>
   <body>
+    <noscript>
+      <p style="padding: 2rem">
+        Bas Franke, Head of Development, Amsterdam.
+        <a href="mailto:bas.franke.89@gmail.com">bas.franke.89@gmail.com</a>
+      </p>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

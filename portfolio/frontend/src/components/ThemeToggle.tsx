@@ -6,7 +6,7 @@ export default function ThemeToggle() {
   const { theme, toggle } = useTheme();
   const label = nav.theme[theme === 'dark' ? 'light' : 'dark'];
   return (
-    <button type="button" className="theme" onClick={toggle} aria-label={label} title={label}>
+    <button type="button" className="theme" onClick={(event) => toggle(event.currentTarget)} aria-label={label} title={label}>
       <svg className="lamp" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
         <circle className="lamp__glow" cx="12" cy="10" r="11" />
         <path className="lamp__shade" d="M8.6 3.5h6.8L18.8 12H5.2z" />

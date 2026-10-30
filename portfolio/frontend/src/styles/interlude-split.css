@@ -7,14 +7,9 @@
   align-items: center;
 }
 
-.interlude--split .interlude__text {
-  display: grid;
-  gap: 24px;
-}
-
 .interlude__line {
   max-width: 17ch;
-  font-size: clamp(1.9rem, 3.7vw, 3.2rem);
+  font-size: var(--text-h2);
   line-height: 1.16;
   letter-spacing: -0.01em;
 }

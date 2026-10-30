@@ -1,5 +1,4 @@
 import Logo from './Logo';
-import Mark from './Mark';
 import { experience, work, type Experience } from '../content';
 
 function Arrow() {
@@ -65,11 +64,9 @@ export default function Work() {
         </h2>
       </div>
       <div className="work">
-        {/* A hairline down the list; the half-sun of the site mark travels along it as the list scrolls by. */}
+        {/* A hairline down the list; the sun of the page's top arc travels along it as the list scrolls by. */}
         <div className="work__rail" aria-hidden="true">
-          <div className="work__sun">
-            <Mark size={34} />
-          </div>
+          <div className="work__sun" />
         </div>
         <ol className="work__list">
           {jobs.map((item) => (

@@ -10,7 +10,7 @@
   justify-content: space-between;
   gap: 6px 28px;
   flex-wrap: wrap;
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
   color: var(--ink-3);
 }
 

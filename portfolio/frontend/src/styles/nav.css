@@ -36,7 +36,7 @@
   min-height: 44px;
   text-decoration: none;
   font-family: var(--serif);
-  font-size: 1.2rem;
+  font-size: var(--text-body);
   letter-spacing: 0.005em;
 }
 
@@ -61,7 +61,7 @@
 }
 
 .nav__links a {
-  font-size: 0.94rem;
+  font-size: var(--text-sm);
   color: var(--ink-2);
   text-decoration: none;
   padding: 6px 0;
@@ -163,7 +163,6 @@
   }
 
   .nav__brand {
-    font-size: 1.1rem;
     gap: 8px;
     white-space: nowrap;
   }
@@ -178,7 +177,7 @@
     border: 0;
     background: transparent;
     font-family: var(--sans);
-    font-size: 0.9375rem;
+    font-size: var(--text-sm);
     color: var(--ink-2);
     cursor: pointer;
     transition: color var(--fade);
@@ -190,6 +189,13 @@
 
   .nav__links {
     display: none;
+  }
+
+  /* open, the bar and its row are one solid piece of ground; --paper is the night's over the night */
+  .nav--open {
+    background: var(--paper);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .nav__links--open {
@@ -214,9 +220,9 @@
   .nav__links a {
     display: inline-flex;
     align-items: center;
-    min-height: 44px;
+    /* a row as tall as the bar, which ends below the hero's first line rather than through it */
+    min-height: var(--nav-h);
     padding: 0 2px;
-    font-size: 0.9375rem;
   }
 
   .nav__right {

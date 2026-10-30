@@ -6,14 +6,13 @@ type State = 'idle' | 'busy' | 'failed';
 const copy = resume.button;
 
 interface Props {
-  /** 'primary' is the big hero button, 'nav' the small pill in the header, 'quiet' the outlined one beside a primary action. */
-  variant?: 'primary' | 'nav' | 'quiet';
+  /** 'primary' is the big hero button, 'nav' the small pill in the header. */
+  variant?: 'primary' | 'nav';
 }
 
 const classNames = {
   primary: 'btn btn--primary',
   nav: 'btn btn--small btn--nav',
-  quiet: 'btn btn--quiet',
 };
 
 /** Builds the PDF résumé on demand; the PDF code and pdf-lib only load when clicked. */

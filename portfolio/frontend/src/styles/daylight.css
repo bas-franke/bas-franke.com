@@ -22,6 +22,10 @@
   background: linear-gradient(to bottom, var(--dawn-1), var(--dawn-2) 45%, var(--paper));
 }
 
+.day__light--noon {
+  background: var(--noon);
+}
+
 .day__light--afternoon {
   background: linear-gradient(to bottom, var(--afternoon-1), var(--afternoon-2));
 }
@@ -35,8 +39,8 @@
 .sunpath {
   display: none;
   position: fixed;
-  inset: 0 var(--page-edge) auto;
-  --arc: 16px;
+  inset: 6px var(--page-edge) auto;
+  --arc: 12px;
   height: var(--arc);
   z-index: 60;
   pointer-events: none;
@@ -79,7 +83,7 @@
 
 /* a crescent: all that shows of the disc is its inset shadow */
 .sunpath__moon {
-  box-shadow: inset -3px -1px 0 0 var(--accent);
+  box-shadow: inset -3px -1px 0 0 var(--warm);
   opacity: 0;
 }
 
@@ -127,6 +131,12 @@
     to {
       opacity: 0;
     }
+  }
+
+  /* the working day: it rises through About and holds, and the afternoon comes in over it */
+  .day__light--noon {
+    animation-timeline: --day-about;
+    animation-range: cover 15% cover 70%;
   }
 
   .day__light--afternoon {

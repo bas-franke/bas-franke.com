@@ -18,6 +18,7 @@
   --sun: #e3a25f;
   --dawn-1: #f8dfc8;
   --dawn-2: #f7e8d8;
+  --noon: #fbf7ef;
   --afternoon-1: #f3e9da;
   --afternoon-2: #f1e1cc;
   --dusk-1: #f0dcc3;
@@ -36,6 +37,15 @@
 
   --serif: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
   --sans: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* the type scale: every size on the page is one of these. Each runs from phone to its size at 1440, then holds. */
+  --text-display: clamp(2.5rem, 6.2vw, 5.5625rem);
+  --text-h1: clamp(2.375rem, 1.68rem + 2.857vw, 4.25rem);
+  --text-h2: clamp(2rem, 1.72rem + 1.143vw, 2.75rem);
+  --text-h3: clamp(1.625rem, 1.49rem + 0.571vw, 2rem);
+  --text-lg: clamp(1.25rem, 1.157rem + 0.381vw, 1.5rem);
+  --text-body: clamp(1rem, 0.977rem + 0.095vw, 1.0625rem);
+  --text-sm: 0.875rem;
 
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --dur: 520ms;
@@ -65,13 +75,14 @@
   --warm-soft: rgba(224, 150, 80, 0.14);
   --dawn-1: #2a1d1e;
   --dawn-2: #1f1815;
+  --noon: var(--paper);
   --afternoon-1: #1a1510;
   --afternoon-2: #201711;
   --dusk-1: #1c1719;
   --dusk-2: #251a16;
   --sunset-1: #2a1d17;
-  --sunset-2: #4a2b26;
-  --sunset-3: #352024;
+  --sunset-2: #33211c;
+  --sunset-3: #2a1b1c;
   --sunset-4: #201513;
   --art-hero: #44302e;
   --art-morning: #2a1d17;
@@ -96,3 +107,9 @@
   background: var(--paper);
 }
 
+/* on a phone the display line stands on its own row, so it can be larger for the width */
+@media (max-width: 640px) {
+  :root {
+    --text-display: clamp(2.5rem, 13vw, 3.5rem);
+  }
+}

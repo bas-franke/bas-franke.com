@@ -57,7 +57,7 @@
 }
 
 .interlude__half {
-  font-size: clamp(2.4rem, 6.2vw, 5.8rem);
+  font-size: var(--text-display);
   line-height: 1;
   letter-spacing: -0.025em;
   white-space: nowrap;
@@ -154,7 +154,6 @@
 
   .interlude__half {
     text-align: center;
-    font-size: clamp(2.4rem, 13vw, 3.6rem);
   }
 
   .interlude__window {

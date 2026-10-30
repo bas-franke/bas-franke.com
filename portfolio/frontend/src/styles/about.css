@@ -1,48 +1,85 @@
 /* About: morning. */
 
+/* A window's light on the wall: four soft panes. Skills has the same window later in the day. Each section sets
+   --light, --light-blur and --light-skew, and where the panes fall. */
+.window-light {
+  --pane: linear-gradient(var(--light), var(--light));
+  position: absolute;
+  background:
+    var(--pane) 0 0 / 47% 48% no-repeat,
+    var(--pane) 100% 0 / 47% 48% no-repeat,
+    var(--pane) 0 100% / 47% 48% no-repeat,
+    var(--pane) 100% 100% / 47% 48% no-repeat;
+  filter: blur(var(--light-blur));
+  transform: skewX(var(--light-skew));
+  pointer-events: none;
+}
+
+/* No sun at night: the dark theme is the hero's moonlit evening all the way down. */
+:root[data-theme='dark'] .window-light {
+  display: none;
+}
+
 .about {
+  --light: color-mix(in srgb, var(--sun) 14%, transparent);
+  --light-blur: 14px;
+  --light-skew: -16deg;
+  position: relative;
+  isolation: isolate;
+  /* clip, not hidden: a scroll container here would become the view() scroller and the light would never move */
+  overflow: clip;
+  /* a jump from the nav lands on the statement, with the whole section in view */
+  scroll-margin-top: calc(32px - var(--section-gap));
+}
+
+/* The morning falls across the portrait and the wall beside it, under the words. */
+.about .window-light {
+  z-index: 1;
+  top: 26%;
+  bottom: 3%;
+  left: calc(var(--page-edge) - 48px);
+  width: min(44vw, 580px);
+}
+
+.about__inner {
   display: grid;
   grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
-  grid-template-rows: auto auto 1fr;
   grid-template-areas:
-    'portrait head'
-    'portrait lead'
-    'portrait text';
+    'statement statement'
+    'portrait text'
+    'facts facts';
   column-gap: clamp(32px, 6vw, 96px);
 }
 
-.about__head {
-  grid-area: head;
-  margin-bottom: clamp(20px, 2.4vw, 30px);
+.about__statement,
+.about__text,
+.facts {
+  position: relative;
+  z-index: 2;
 }
 
-.about__lead,
-.about__text {
-  --d: 120ms;
+.about__statement {
+  grid-area: statement;
+  max-width: none;
+  margin-bottom: clamp(32px, 4vh, 48px);
+  font-size: var(--text-h2);
+  line-height: 1.16;
+  text-wrap: balance;
 }
 
-.about__lead {
-  grid-area: lead;
-  max-width: 58ch;
-  margin: 0 0 1em;
-  color: var(--ink);
-  font-family: var(--serif);
-  font-size: clamp(1.3rem, 1.9vw, 1.5rem);
-  line-height: 1.4;
-  font-variation-settings: 'opsz' 24;
-}
-
-/* The photo is a cold evening selfie: graded into the painted world, cropped to the face, never taller than the screen. */
+/* The photo is a cold evening selfie: graded into the painted world, cropped to the face. Short screens shrink it, so
+   statement, portrait and facts stay on one screen. */
 .portrait {
   --portrait-glow: color-mix(in srgb, var(--warm) 34%, transparent);
+  --d: 120ms;
   grid-area: portrait;
-  position: sticky;
-  top: calc(var(--nav-h) + 20px);
+  position: relative;
+  z-index: 0;
   align-self: start;
   justify-self: start;
   width: 100%;
   max-width: 340px;
-  max-height: calc(100svh - var(--nav-h) - 40px);
+  max-height: calc(100svh - var(--nav-h) - 20rem);
   aspect-ratio: 4 / 5;
   margin: 0;
   overflow: hidden;
@@ -74,104 +111,96 @@
 }
 
 .about__text {
+  --d: 180ms;
   grid-area: text;
+  align-self: end;
 }
 
 .about__text p {
-  max-width: 58ch;
+  max-width: 56ch;
   color: var(--ink-2);
 }
 
-/* The facts sit on a sill of darker paper; a window of morning light crosses it (see the motion below). */
+.about__text p:last-child {
+  margin-bottom: 0;
+}
+
 .facts {
-  --sill-light: rgba(255, 238, 205, 0.72);
-  --pane: linear-gradient(var(--sill-light), var(--sill-light));
-  position: relative;
-  isolation: isolate;
-  /* clip, not hidden: a scroll container here would become the view() scroller and the light would never move */
-  overflow: clip;
+  --d: 240ms;
+  grid-area: facts;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 26px 32px;
-  margin: 36px 0 0;
-  padding: clamp(24px, 3vw, 32px);
-  background: var(--paper-2);
-  border-radius: calc(var(--radius) * 1.6);
-}
-
-:root[data-theme='dark'] .facts {
-  --sill-light: rgba(224, 164, 110, 0.12);
-}
-
-.facts::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: -22% auto -22% 34%;
-  width: 46%;
-  background:
-    var(--pane) 0 0 / 47% 48% no-repeat,
-    var(--pane) 100% 0 / 47% 48% no-repeat,
-    var(--pane) 0 100% / 47% 48% no-repeat,
-    var(--pane) 100% 100% / 47% 48% no-repeat;
-  filter: blur(7px);
-  transform: skewX(-16deg);
+  grid-template-columns: repeat(4, auto);
+  justify-content: space-between;
+  gap: 16px 32px;
+  margin: clamp(24px, 3.2vh, 36px) 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-2);
 }
 
 .facts dt {
-  font-size: 0.86rem;
+  font-size: var(--text-sm);
   color: var(--ink-2);
-  margin-bottom: 2px;
 }
 
 .facts dd {
   margin: 0;
   font-family: var(--serif);
-  font-size: 1.3rem;
-  line-height: 1.3;
-  font-variation-settings: 'opsz' 24;
+  font-size: var(--text-body);
+  line-height: 1.4;
 }
 
 @supports (animation-timeline: view()) {
-  .facts::before {
+  /* at rest, halfway, the panes lie across the portrait: that is about where the section fills the screen */
+  .about .window-light {
     animation: morning-light linear both;
     animation-timeline: view();
-    animation-range: entry 20% exit 40%;
+    animation-range: cover 15% cover 95%;
   }
 
   @keyframes morning-light {
     from {
-      translate: -120% 0;
+      translate: -75% 0;
     }
     to {
-      translate: 130% 0;
+      translate: 75% 0;
     }
   }
 }
 
 @media (max-width: 960px) {
-  .about {
+  .about .window-light {
+    top: 18%;
+    bottom: 34%;
+    left: -4vw;
+    width: 78vw;
+  }
+
+  /* the portrait comes early in the stacked section, so the light reaches it sooner */
+  @supports (animation-timeline: view()) {
+    .about .window-light {
+      animation-range: cover 5% cover 70%;
+    }
+  }
+
+  .about__inner {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: none;
     grid-template-areas:
-      'head'
-      'lead'
+      'statement'
       'portrait'
-      'text';
+      'text'
+      'facts';
   }
 
   .portrait {
-    position: relative;
-    top: auto;
     width: 70%;
+    max-height: none;
     aspect-ratio: 4 / 3;
-    margin: 12px 0 32px;
+    margin: 0 0 32px;
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 760px) {
   .facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

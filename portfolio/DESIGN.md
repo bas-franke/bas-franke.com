@@ -38,7 +38,9 @@ page should feel like walking through it, not like a template with pictures drop
 
 ## Motion rules
 
-- Animate `transform` and `opacity` only (plus `filter` sparingly). Slow and eased, using `--ease` and `--dur`.
+- On the page, animate `transform` and `opacity` only (plus `filter` sparingly). Slow and eased, using `--ease` and
+  `--dur`. The one exception is the lamp: the theme change is a view transition, a soft mask growing over a still
+  picture of the page.
 - Prefer CSS and scroll-driven animations; JS only where CSS can't. No animation library unless it pays for itself.
 - Everything must work with `prefers-reduced-motion: reduce` (static, complete, no hidden content) and in browsers
   without scroll-driven animations.

@@ -1,8 +1,8 @@
-/* Hero: dawn. The text keeps the page's left edge; the window leans past the container on the right. */
+/* Hero: dawn. The text keeps the page's left edge; the window leans a little past the container on the right. */
 
 .hero {
   /* the window takes what the height allows, so the first screen is full at every size without crowding */
-  --window-w: min(38vw, calc((100svh - var(--nav-h) - 88px) * 0.8), 672px);
+  --window-w: min(34vw, calc((100svh - var(--nav-h) - 88px) * 0.8), 30.5rem);
   position: relative;
   isolation: isolate;
   min-height: 100svh;
@@ -16,10 +16,10 @@
 .hero__inner {
   max-width: none;
   padding-left: var(--page-edge);
-  padding-right: clamp(20px, 3vw, 48px);
+  padding-right: max(clamp(20px, 3vw, 48px), var(--page-edge) - 64px);
   display: grid;
-  grid-template-columns: minmax(0, 42rem) var(--window-w);
-  gap: clamp(40px, 5vw, 80px);
+  grid-template-columns: minmax(0, 1fr) var(--window-w);
+  gap: clamp(40px, 4.5vw, 64px);
   align-items: center;
 }
 
@@ -28,17 +28,16 @@
   container-type: inline-size;
 }
 
-.hero .eyebrow {
-  font-size: 0.95rem;
-  color: var(--ink-2);
-}
-
 .hero__actions {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 14px 28px;
   flex-wrap: wrap;
   margin-top: 8px;
+}
+
+.hero .lead {
+  text-wrap: balance;
 }
 
 /* Page load: the words arrive first and quickly, then the window, then its light. */
@@ -225,11 +224,11 @@
     view-timeline: --hero;
   }
 
-  /* the words stay whole until the hero is nearly half gone, so they read through most of the way out */
+  /* the words stay whole until they are about to pass under the nav, so they fade only on their way out of sight */
   .hero__text {
     animation: hero-text-out linear both;
     animation-timeline: --hero;
-    animation-range: exit 45% exit 100%;
+    animation-range: exit 65% exit 100%;
   }
 
   .hero__scene {
@@ -295,14 +294,6 @@
 @media (max-width: 640px) {
   .hero {
     padding-top: calc(var(--nav-h) + 28px);
-  }
-
-  .hero .eyebrow {
-    font-size: 0.875rem;
-  }
-
-  .hero .lead {
-    font-size: 1.05rem;
   }
 
   .hero .link {

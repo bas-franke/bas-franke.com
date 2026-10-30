@@ -18,7 +18,7 @@ function Words({ text }: { text: string }) {
 }
 
 /** A framed picture that opens up as it scrolls in, beside the line, which lights up word by word. */
-export default function InterludeSplit({ name, line, alt, nightPainting, label }: InterludeProps & { label: string }) {
+export default function InterludeSplit({ name, line, alt, nightPainting }: InterludeProps) {
   const url = useInterludeArt(name, nightPainting);
   if (!url) return null;
 
@@ -26,9 +26,6 @@ export default function InterludeSplit({ name, line, alt, nightPainting, label }
     <figure className="interlude interlude--split">
       <div className="container interlude__grid">
         <figcaption className="interlude__text">
-          <p className="eyebrow" data-reveal>
-            {label}
-          </p>
           <p className="interlude__voice interlude__line">
             <Words text={line} />
           </p>

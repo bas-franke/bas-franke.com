@@ -51,9 +51,9 @@ export const hero = {
 };
 
 export const about = {
-  heading: 'Who I am',
-  paragraphs: [
+  statement:
     'I still love the craft: understanding a problem properly, shaping a solution no bigger than it needs to be, then looking after it in production.',
+  paragraphs: [
     'I’m at home across the stack: C#, Java and Python on the server, JavaScript and TypeScript in the browser, SQL underneath, and the infrastructure in between. Four years as tech lead at online brokers taught me that correctness and uptime are not negotiable; the proptech and loyalty platforms since taught me to move fast without losing that.',
     'Lately the way I work has changed as much as the tools. I build with Claude and Claude Code, GitHub Copilot in Visual Studio, Cursor, and agentic workflows that take on whole tasks while I focus on design, review and the final call.',
   ],
@@ -212,7 +212,6 @@ export const interludes = {
     alt: 'A desk by a window in soft morning light, with a laptop, a notebook and a cup of coffee.',
   },
   evening: {
-    label: 'End of the day',
     line: 'And the best software is the kind nobody has to think about at the end of the day.',
     alt: 'A canal in the evening with warm light in the windows of old houses.',
   },
@@ -223,7 +222,6 @@ export const interludes = {
 };
 
 export const contact = {
-  eyebrow: 'Contact',
   heading: 'Let’s talk.',
   lead: 'A product to build, a platform to steady, or a team that could use a senior pair of hands? My inbox is open, and I read every message myself.',
   phone: 'Phone',

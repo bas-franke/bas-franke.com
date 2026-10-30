@@ -4,6 +4,7 @@ import { skills } from '../content';
 export default function Skills() {
   return (
     <section id="skills" className="section skills">
+      <div className="window-light" aria-hidden="true" />
       <div className="container">
         <div className="section__head" data-reveal>
           <h2>{skills.approach}</h2>

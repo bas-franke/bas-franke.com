@@ -19,7 +19,7 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 1.0625rem;
+  font-size: var(--text-body);
   line-height: 1.65;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
@@ -73,10 +73,16 @@ h3 {
   font-family: var(--serif);
   font-weight: 400;
   margin: 0;
+  text-wrap: balance;
 }
 
 p {
   margin: 0 0 1.1em;
+}
+
+p,
+li {
+  text-wrap: pretty;
 }
 
 .container {
@@ -107,7 +113,7 @@ p {
   padding: 10px 14px;
   background: var(--ink);
   color: var(--paper);
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
   text-decoration: none;
   transition: top 0.2s;
 }
@@ -117,27 +123,16 @@ p {
 }
 
 .eyebrow {
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: 0.01em;
-  color: var(--ink-3);
+  color: var(--ink-2);
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.eyebrow::before {
-  content: '';
-  width: 28px;
-  height: 1px;
-  background: var(--line-2);
-  flex: none;
 }
 
 h1 {
-  /* the widest line is about 8.9em: it sizes to the hero text column (.hero__text) and stays on one line */
-  font-size: clamp(1.9rem, 100cqi / 8.9, 5rem);
+  /* the widest line is about 8.9em: narrower than that, it sizes to the hero text column (.hero__text) to stay on one line */
+  font-size: min(var(--text-h1), 100cqi / 8.9);
   line-height: 1.04;
   letter-spacing: -0.018em;
   font-variation-settings: 'opsz' 72;
@@ -154,7 +149,7 @@ h2 em {
 }
 
 h2 {
-  font-size: clamp(2rem, 4.2vw, 3.3rem);
+  font-size: var(--text-h2);
   line-height: 1.06;
   letter-spacing: -0.012em;
   font-variation-settings: 'opsz' 48;
@@ -166,14 +161,14 @@ h3 {
 }
 
 .lead {
-  font-size: clamp(1.1rem, 1.5vw, 1.3rem);
-  line-height: 1.6;
+  font-size: var(--text-lg);
+  line-height: 1.5;
   color: var(--ink-2);
   max-width: 50ch;
 }
 
 .link {
-  font-size: 0.975rem;
+  font-size: var(--text-body);
   font-weight: 500;
   text-decoration: none;
   color: var(--ink-2);
@@ -192,7 +187,7 @@ h3 {
   align-items: center;
   gap: 10px;
   font-family: var(--sans);
-  font-size: 0.975rem;
+  font-size: var(--text-body);
   font-weight: 500;
   line-height: 1.3;
   text-decoration: none;
@@ -241,7 +236,7 @@ h3 {
 
 .btn--small {
   padding: 8px 14px;
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
   gap: 7px;
 }
 
@@ -250,27 +245,46 @@ h3 {
   height: 12px;
 }
 
-/* The theme toggle fades the whole page as one, so gradients and paintings keep time with the text (see useTheme). */
+/* The lamp changes the theme: the new page spreads from it on a soft edge over a still picture of the old one, so
+   gradients and paintings keep time with the text and nothing shows double (see useTheme). */
+@property --lamp-reach {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: var(--dur);
-  animation-timing-function: var(--ease);
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  animation: none;
+}
+
+::view-transition-new(root) {
+  --lamp-edge: 120px;
+  --lamp-light: radial-gradient(
+    circle at var(--lamp-x) var(--lamp-y),
+    #000 calc(var(--lamp-reach) - var(--lamp-edge)),
+    transparent var(--lamp-reach)
+  );
+  -webkit-mask-image: var(--lamp-light);
+  mask-image: var(--lamp-light);
+  /* eased at both ends: the lit area grows with the square of the radius, so --ease would be over in a flash */
+  animation: lamp-reveal 700ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
+}
+
+@keyframes lamp-reveal {
+  to {
+    --lamp-reach: calc(var(--lamp-far) + var(--lamp-edge));
+  }
 }
 
 :root:active-view-transition *,
 :root:active-view-transition *::before,
 :root:active-view-transition *::after {
   transition: none !important;
-}
-
-@media (max-width: 640px) {
-  body {
-    font-size: 1rem;
-  }
-
-  .eyebrow::before {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -282,6 +296,6 @@ h3 {
   *::before,
   *::after {
     animation: none !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
   }
 }

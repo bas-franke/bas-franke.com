@@ -4,6 +4,7 @@ export default function Day() {
     <>
       <div className="day" aria-hidden="true">
         <div className="day__light day__light--dawn" />
+        <div className="day__light day__light--noon" />
         <div className="day__light day__light--afternoon" />
         <div className="day__light day__light--dusk" />
       </div>

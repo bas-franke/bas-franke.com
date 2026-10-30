@@ -10,17 +10,6 @@
   margin-bottom: clamp(40px, 6vw, 76px);
 }
 
-/* The eyebrow rule draws itself as the heading fades in. */
-.section__head .eyebrow::before {
-  transform: scaleX(0);
-  transform-origin: 0 50%;
-  transition: transform var(--dur) var(--ease);
-}
-
-.section__head.in .eyebrow::before {
-  transform: none;
-}
-
 @media (max-width: 640px) {
   .section {
     padding-top: 80px;

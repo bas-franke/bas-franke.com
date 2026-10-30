@@ -29,13 +29,19 @@
 .work__sun {
   position: relative;
   height: 100%;
-  color: var(--warm);
 }
 
-/* Only the half above the mark's horizon, with that horizon on the top of this box. */
-.work__sun .mark {
-  margin: -19px auto 0;
-  clip-path: inset(0 0 45% 0);
+/* The same disc as .sunpath__sun, centred on the top of this box. */
+.work__sun::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: calc(50% - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sun);
+  box-shadow: 0 0 0 4px var(--warm-soft);
 }
 
 /* The stretch of the rail the sun has already passed. */
@@ -114,7 +120,8 @@
 }
 
 .work__title {
-  font-size: clamp(1.5rem, 2.2vw, 1.85rem);
+  align-self: first baseline;
+  font-size: var(--text-h3);
   line-height: 1.15;
 }
 
@@ -128,7 +135,7 @@
   grid-column: 1;
   margin: 2px 0 0;
   font-family: var(--serif);
-  font-size: clamp(1.15rem, 1.5vw, 1.3rem);
+  font-size: var(--text-lg);
   font-style: italic;
   font-variation-settings: 'opsz' 24;
   color: var(--ink-2);
@@ -138,12 +145,11 @@
 .work__meta {
   grid-column: 2;
   grid-row: 1 / span 2;
+  align-self: first baseline;
   display: grid;
-  align-content: start;
   justify-items: end;
   margin: 0;
-  padding-top: 0.35em;
-  font-size: 0.86rem;
+  font-size: var(--text-sm);
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
@@ -163,7 +169,7 @@
   list-style: none;
   margin: 12px 0 0;
   padding: 0;
-  font-size: 0.86rem;
+  font-size: var(--text-sm);
   color: var(--ink-3);
 }
 
@@ -177,12 +183,16 @@
   padding-top: 0;
 }
 
+/* This row has no padding on top, so its wash starts above the row to clear the title and the logo. */
+.work__item--current .work__link::before {
+  top: -20px;
+}
+
 .work__item--current .work__title {
-  font-size: clamp(2rem, 3.4vw, 2.75rem);
+  font-size: var(--text-h2);
 }
 
 .work__item--current .work__role {
-  font-size: clamp(1.3rem, 2vw, 1.6rem);
   color: var(--ink);
 }
 
@@ -191,7 +201,6 @@
 }
 
 .work__item--current .work__summary {
-  font-size: 1.12rem;
   color: var(--ink);
 }
 
@@ -200,7 +209,7 @@
   margin: 0;
   padding: 20px 0 0 calc(var(--mark-col) + var(--mark-gap));
   border-top: 1px solid var(--line-2);
-  font-size: 0.92rem;
+  font-size: var(--text-sm);
   color: var(--ink-3);
 }
 
@@ -245,13 +254,13 @@
     animation-range: cover 40vh cover calc(100% - 40vh);
   }
 
-  /* Ends with the half-sun resting on the horizon. */
+  /* Ends with the sun, glow and all, resting on the horizon. */
   @keyframes sun-travel {
     from {
       translate: 0 0;
     }
     to {
-      translate: 0 calc(100% - 1px);
+      translate: 0 calc(100% - 9px);
     }
   }
 }
@@ -277,7 +286,6 @@
     display: flex;
     flex-wrap: wrap;
     margin-top: 4px;
-    padding-top: 0;
   }
 
   .work__meta span + span::before {
@@ -287,9 +295,5 @@
 
   .work__summary {
     margin-top: 12px;
-  }
-
-  .work__item--current .work__summary {
-    font-size: 1.05rem;
   }
 }
