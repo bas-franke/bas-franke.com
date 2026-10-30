@@ -1,0 +1,155 @@
+/* Long reads: articles (/article) and strategy write-ups (/writeup).
+   Scoped under .shell so these rules win over the shared styles.css. */
+
+/* ---------- articles ---------- */
+
+.shell .article-page {
+  width: 100%;
+  max-width: 1000px;
+  margin-inline: auto;
+  gap: 16px;
+}
+.shell .article-page h1 {
+  font-size: clamp(1.6rem, 3.4vw, 2.3rem);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  margin: 10px 0 12px;
+  text-wrap: balance;
+}
+.shell .article-page .eyebrow a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+}
+.shell .article-page .article-meta {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.shell .article-page .article-body {
+  max-width: none;
+  padding: 32px 40px 36px;
+}
+.shell .article-page .article-body p,
+.shell .article-page .article-body li {
+  font-size: 1.02rem;
+  line-height: 1.72;
+  max-width: 68ch;
+}
+.shell .article-page .article-body > p:first-child,
+.shell .article-page .article-body .lede {
+  font-family: var(--serif);
+  font-size: 1.2rem;
+  line-height: 1.55;
+  color: var(--ink-2);
+  font-variation-settings: 'opsz' 24;
+}
+.shell .article-page .article-body h2 {
+  font-size: 1.45rem;
+  margin-top: 36px;
+  letter-spacing: -0.01em;
+}
+.shell .article-page .article-body h3 {
+  font-size: 1.12rem;
+  margin-top: 26px;
+}
+.shell .article-page .article-body .table-wrap {
+  margin-inline: -40px;
+  padding-inline: 40px;
+}
+.shell .article-page .article-body table.data {
+  font-size: 0.9rem;
+}
+.shell .article-page .article-body .callout {
+  max-width: 68ch;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+/* ---------- write-ups ---------- */
+
+.shell .writeup .page-head h1 {
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+.shell .writeup .page-head .eyebrow a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+}
+.shell .writeup .lede {
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+.shell .writeup-text p,
+.shell .writeup .card > p {
+  line-height: 1.68;
+}
+.shell .writeup-h {
+  letter-spacing: -0.01em;
+}
+.shell .writeup-picks button {
+  min-height: 36px;
+}
+.shell .writeup-toc li a {
+  display: inline-block;
+  padding: 2px 0;
+}
+.shell .writeup .rank-more summary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .shell .article-page {
+    gap: 12px;
+  }
+  .shell .article-page h1 {
+    margin: 6px 0 10px;
+  }
+  .shell .article-page .article-body {
+    padding: 22px 18px 26px;
+    border-radius: 16px;
+  }
+  .shell .article-page .article-body p,
+  .shell .article-page .article-body li {
+    font-size: 1rem;
+    line-height: 1.68;
+  }
+  .shell .article-page .article-body > p:first-child,
+  .shell .article-page .article-body .lede {
+    font-size: 1.12rem;
+  }
+  .shell .article-page .article-body h2 {
+    font-size: 1.28rem;
+    margin-top: 28px;
+  }
+  .shell .article-page .article-body .table-wrap {
+    margin-inline: -18px;
+    padding-inline: 0;
+  }
+  .shell .article-page .article-body table.data {
+    font-size: 0.82rem;
+  }
+
+  .shell .writeup .lede {
+    font-size: 0.98rem;
+  }
+  .shell .writeup-text p,
+  .shell .writeup .card > p {
+    font-size: 1rem;
+  }
+  .shell .writeup-picks button {
+    min-height: 40px;
+  }
+  .shell .writeup-coin {
+    min-height: 36px;
+  }
+  .shell .writeup .rank-more summary {
+    min-height: 44px;
+  }
+  .shell .writeup-totop {
+    min-height: 44px;
+  }
+}

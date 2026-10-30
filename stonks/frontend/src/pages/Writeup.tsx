@@ -4,6 +4,7 @@ import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
 import { navigate, useLocation } from '../router';
+import './reading.css';
 import type { Writeup, WriteupChart, WriteupCoin, WriteupSection } from '../types';
 
 // A long-form explanation of one strategy (SPEC §8b): /writeup?spec=<spec id>. The content is stored in the database.
