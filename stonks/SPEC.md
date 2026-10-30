@@ -285,7 +285,6 @@ camelCase and numbers (not numeric strings).
 | `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
 | `POST /api/bot/allocate` | `{ target: "BTC"\|"ETH"\|"EUR"\|null, confirmLive? }` | `{ ok, bot, started, startError? }`; moves everything to one coin or euros (switches the bot on), `null` = back to the strategy; 400 live without confirm |
 | `GET /api/hall-of-fame` | | `{ entries: [{ id, addedAt, researchId, bucket, rank, entry }] }`, newest first; `entry` = the research entry as kept (§7 shape, `botReady` = runnable on this server now) |
-| `GET /api/bot/paper-record` | `?strategyId=` | `{ days, fills, firstAt }`: that spec's paper record. Going live, or changing a live strategy, with under 14 days or 5 fills answers 409 `{ error, paperGate:{ days, fills, needDays, needFills } }` unless the body has `skipPaperGate:true`; manual allocation is exempt |
 | `GET /api/tracking` | `?mode=&range=day\|week\|month\|year\|all` | expected vs actual vs hold, gap, slippage, drift alerts (§5b) |
 | `GET /api/health/detail` | | `{ status, checkedAt, bot, components:{ engine, database, bitvavo, clock, decision, candles, lab, alerts, lossGuard, orders, stuckOrders, shadow, process }, events }` (§5b) |
 | `POST /api/bot/test-alert` | `{}` | `{ ok, configured, error? }` |

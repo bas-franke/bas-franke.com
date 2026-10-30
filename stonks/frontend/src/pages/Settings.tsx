@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { refreshDesk } from '../desk';
-import { api, ApiError, paperGateOf, unwrapFamilies, unwrapMarkets } from '../api';
+import { api, ApiError, unwrapFamilies, unwrapMarkets } from '../api';
 import { artUrl, PageBanner } from '../components/art';
-import { ErrorBox, Fold, ModeBadge, Modal, PaperGateNotice, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
+import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { familyLabel, humanize, LOSS_ACTIONS, lossAction, lossLimitText, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
 import { navigate, takeHandoff } from '../router';
 import './settings.css';
-import { DEFAULT_CHASE, DEFAULT_LOSS_LIMIT, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type LossAction, type ManualTarget, type MarketInfo, type PaperGate, type ParamDescription, type StrategySpec } from '../types';
+import { DEFAULT_CHASE, DEFAULT_LOSS_LIMIT, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type LossAction, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
 
 type Draft = Omit<BotSettings, 'enabled'>;
 
@@ -52,8 +52,6 @@ export default function SettingsPage() {
   const [confirmLive, setConfirmLive] = useState(false);
   /** Asking for LIVE before a strategy change that trades real money. */
   const [strategyAsk, setStrategyAsk] = useState(false);
-  /** The paper record the backend refused, with the confirmation to send along if the owner goes on anyway. */
-  const [gate, setGate] = useState<{ record: PaperGate; confirm: boolean } | null>(null);
 
   useEffect(() => {
     if (!ov.data || draft) return;
@@ -129,10 +127,9 @@ export default function SettingsPage() {
     setStrategyAsk(true);
   };
 
-  const save = async ({ confirm, skipGate }: { confirm: boolean; skipGate?: boolean }) => {
+  const save = async ({ confirm }: { confirm: boolean }) => {
     setSaving(true);
     setErrors({});
-    setGate(null);
     try {
       const patch: Parameters<typeof api.updateBot>[0] = {
         mode: draft.mode,
@@ -143,7 +140,6 @@ export default function SettingsPage() {
         ...(draft.chase ? { chase: draft.chase } : {}),
       };
       if (goesLive || liveStrategyChange) patch.confirmLive = confirm;
-      if (skipGate) patch.skipPaperGate = true;
       const res = await api.updateBot(patch);
       refreshDesk();
       const { enabled: _e, ...rest } = res;
@@ -152,9 +148,7 @@ export default function SettingsPage() {
       setConfirmLive(false);
       toast('Saved. The bot uses the new settings from its next look at the market.');
     } catch (e) {
-      const record = paperGateOf(e);
-      if (record) setGate({ record, confirm });
-      else if (e instanceof ApiError) {
+      if (e instanceof ApiError) {
         const fe = e.fieldErrors;
         setErrors(Object.keys(fe).length ? fe : { _: e.message, ...fieldFromMessage(e.message) });
       } else setErrors({ _: (e as Error).message });
@@ -589,23 +583,6 @@ export default function SettingsPage() {
         </div>
       </Modal>
 
-      <Modal
-        open={!!gate}
-        onClose={() => setGate(null)}
-        title="This strategy has too little paper history"
-        actions={
-          <>
-            <button className="btn ghost" onClick={() => setGate(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" disabled={saving} onClick={() => gate && void save({ confirm: gate.confirm, skipGate: true })}>
-              Go live anyway
-            </button>
-          </>
-        }
-      >
-        {gate && <PaperGateNotice gate={gate.record} />}
-      </Modal>
     </div>
   );
 }

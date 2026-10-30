@@ -380,14 +380,6 @@ export interface ResearchPayload {
 
 export type ResearchResponse = ResearchPayload | { empty: true };
 
-/** 409 on PUT /api/bot and POST /api/bot/activate: too little paper history to go live (SPEC §7). */
-export interface PaperGate {
-  days: number;
-  fills: number;
-  needDays: number;
-  needFills: number;
-}
-
 /** GET /api/tracking: expected vs actual vs holding of the strategy a mode runs, [ms, eur] points (SPEC §5b). */
 export interface TrackingData {
   mode: Mode;

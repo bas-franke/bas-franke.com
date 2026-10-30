@@ -10,8 +10,7 @@
 //   ?mock=tickerror  overview reports a failed tick
 //   ?mock=notrack    tracking has no data yet
 //   ?mock=limit10    the stored loss limit is 10 %
-//   ?mock=gated      the paper gate always refuses going live
-// Flags combine with commas: ?mock=live,gated
+// Flags combine with commas: ?mock=live,off
 // Any non-empty password logs in, except "wrong".
 import type { BotSettings, HallEntry } from '../types';
 import { equityPoints, families, fills, healthDetail, initialBot, logs, makeLog, markets, orders, research, researchV2, rng, tracking } from './data';
@@ -27,9 +26,6 @@ if (flags.includes('off')) bot.enabled = false;
 if (flags.includes('live')) bot.mode = 'live';
 if (flags.includes('limit10')) bot.dailyLossLimit = { unit: 'pct', value: 10, action: 'no_buys' };
 let healthCalls = 0;
-const paperGate = { days: 3, fills: 1, needDays: 14, needFills: 5 };
-const gateRefusal = () =>
-  json({ error: `This strategy has ${paperGate.days} of ${paperGate.needDays} days and ${paperGate.fills} of ${paperGate.needFills} fills in paper. Run it in paper first, or skip this check (skipPaperGate: true).`, paperGate }, 409);
 const liveRng = rng(1234);
 
 const json = (data: unknown, status = 200) =>
@@ -114,26 +110,24 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     });
   }
   if (p === '/bot' && method === 'PUT') {
-    const patch = body as Partial<BotSettings> & { confirmLive?: boolean; skipPaperGate?: boolean };
+    const patch = body as Partial<BotSettings> & { confirmLive?: boolean };
     const errors = validate(patch);
     if (Object.keys(errors).length) return json({ error: 'Invalid settings', errors }, 400);
-    const { confirmLive: _c, skipPaperGate: skip, ...rest } = patch;
+    const { confirmLive: _c, ...rest } = patch;
     const strategyChanged = rest.strategy && JSON.stringify(rest.strategy) !== JSON.stringify(bot.strategy);
     const staysLive = bot.mode === 'live' && (rest.mode ?? bot.mode) === 'live';
     if (staysLive && strategyChanged && !patch.confirmLive) return json({ error: 'The bot is in live mode: changing the strategy trades real money. Confirm it first (confirmLive: true).' }, 400);
-    if (flags.includes('gated') && !skip && ((rest.mode === 'live' && bot.mode !== 'live') || (staysLive && strategyChanged))) return gateRefusal();
     bot = { ...bot, ...rest, ...(strategyChanged ? { activeResearch: null } : {}) };
     return json(bot);
   }
   if (p === '/bot/activate' && method === 'POST') {
-    const b = body as { researchId?: number; bucket?: string; rank?: number; start?: boolean; confirmLive?: boolean; skipPaperGate?: boolean };
+    const b = body as { researchId?: number; bucket?: string; rank?: number; start?: boolean; confirmLive?: boolean };
     if (flags.includes('v1')) return json({ error: 'Mock: v1 payload has no id' }, 400);
     if (b.researchId !== researchV2.id) return json({ error: 'The research was updated since this page loaded. Reload it and pick the strategy again.' }, 409);
     const entry = researchV2.buckets?.[b.bucket as 'daily']?.top.find((e) => e.rank === b.rank);
     if (!entry) return json({ error: `There is no number ${b.rank} in the ${b.bucket} list of this research.` }, 400);
     if (!entry.botReady) return json({ error: 'This strategy is still waiting to be ported to the bot.' }, 400);
     if (bot.mode === 'live' && b.confirmLive !== true) return json({ error: 'Live mode: confirm it first (confirmLive: true).' }, 400);
-    if (flags.includes('gated') && bot.mode === 'live' && !b.skipPaperGate) return gateRefusal();
     const activeResearch = { researchId: researchV2.id, bucket: b.bucket!, rank: b.rank!, name: entry.spec.name, activatedAt: new Date().toISOString() };
     bot = { ...bot, strategy: entry.spec, activeResearch, enabled: bot.enabled || b.start === true };
     return json({ ok: true, bot, activeResearch, started: b.start === true });

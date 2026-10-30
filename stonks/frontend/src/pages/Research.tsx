@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { refreshDesk } from '../desk';
-import { api, ApiError, paperGateOf } from '../api';
+import { api, ApiError } from '../api';
 import { artUrl, EmptyState, PageBanner } from '../components/art';
 import { LineChart, Spark, type LineSeries } from '../components/charts';
 import { IconCheck } from '../components/icons';
-import { ErrorBox, PaperGateNotice, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
+import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
 import './research.css';
-import type { Benchmark, BucketName, HallEntry, Overview, PaperGate, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
+import type { Benchmark, BucketName, HallEntry, Overview, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
 
 const RANK_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
 const BENCH_STYLE = [
@@ -524,7 +524,6 @@ function ActivateDialog({
   const [liveText, setLiveText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ msg: string; stale: boolean } | null>(null);
-  const [gate, setGate] = useState<PaperGate | null>(null);
   const bot = overview?.bot;
   const live = bot?.mode === 'live';
   const on = !!bot?.enabled;
@@ -538,7 +537,7 @@ function ActivateDialog({
     setError(null);
     try {
       const which = hallId !== undefined ? { hallOfFameId: hallId } : { researchId, bucket, rank: e.rank };
-      const res = await api.activate({ ...which, start: !on && start, ...(live ? { confirmLive: true } : {}), ...(gate ? { skipPaperGate: true } : {}) });
+      const res = await api.activate({ ...which, start: !on && start, ...(live ? { confirmLive: true } : {}) });
       toast(
         res.started
           ? `Activated. The bot is awake and running ${e.spec.name}.`
@@ -550,9 +549,7 @@ function ActivateDialog({
       );
       onDone();
     } catch (err) {
-      const refused = paperGateOf(err);
-      if (refused) setGate(refused);
-      else setError({ msg: (err as Error).message, stale: err instanceof ApiError && err.status === 409 });
+      setError({ msg: (err as Error).message, stale: err instanceof ApiError && err.status === 409 });
     } finally {
       setBusy(false);
     }
@@ -574,7 +571,7 @@ function ActivateDialog({
             </button>
           ) : (
             <button className={`btn ${live ? 'danger' : 'brass'}`} disabled={busy || !ready} onClick={submit}>
-              {busy ? 'Activating…' : gate ? 'Activate anyway' : live ? 'Activate with real money' : !on && start ? 'Activate and start' : 'Activate'}
+              {busy ? 'Activating…' : live ? 'Activate with real money' : !on && start ? 'Activate and start' : 'Activate'}
             </button>
           )}
         </>
@@ -635,7 +632,6 @@ function ActivateDialog({
           </div>
         </>
       )}
-      {gate && <PaperGateNotice gate={gate} />}
       {error && <div className="callout loss">{error.msg}</div>}
     </Modal>
   );

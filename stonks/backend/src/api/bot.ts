@@ -1,4 +1,4 @@
-import { Router, type Response } from 'express';
+import { Router } from 'express';
 import type { ApiDeps } from './deps.js';
 import { BUCKETS, isBucket, type Bucket } from './research.js';
 import { ConflictError, fail, num, ValidationError } from './util.js';
@@ -8,15 +8,6 @@ import { ConflictError, fail, num, ValidationError } from './util.js';
 /** Keys of settings.bot the dashboard may change. `enabled` only moves through start/stop. */
 const EDITABLE = ['mode', 'strategy', 'maxExposureEur', 'dailyLossLimit', 'fees', 'paperStartEur', 'chase'] as const;
 const MARKETS_TTL_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
-/** What a strategy must have shown in paper before it may trade real money. */
-const NEED_DAYS = 14;
-const NEED_FILLS = 5;
-
-const specId = (spec: unknown) => {
-  const id = (spec as { id?: unknown } | null | undefined)?.id;
-  return typeof id === 'string' ? id.trim() : '';
-};
 
 /** Key order does not matter: the Settings form rebuilds the spec from its fields. */
 const canonical = (v: unknown): unknown => {
@@ -31,39 +22,6 @@ export function botRoutes(deps: ApiDeps) {
   const now = deps.now ?? Date.now;
   let markets: { at: number; list: unknown[] } | undefined;
 
-  /**
-   * A strategy's paper history: days since its first paper order, and fills. `fills` counts order chains, so the
-   * partial fills and reprices of one trade count once.
-   */
-  const paperRecord = async (strategyId: string) => {
-    if (!strategyId) return { days: 0, fills: 0, firstAt: null };
-    const { rows } = await deps.query(
-      `SELECT MIN(o.created_at) AS first_at,
-              COUNT(DISTINCT CASE WHEN f.id IS NOT NULL THEN COALESCE(o.raw->>'chaseRoot', o.id::text) END) AS fills
-       FROM orders o LEFT JOIN fills f ON f.order_id = o.id
-       WHERE o.mode = 'paper' AND o.strategy_id = $1`,
-      [strategyId],
-    );
-    const first = rows[0]?.first_at ? new Date(rows[0].first_at) : null;
-    return { days: first ? Math.floor((now() - first.getTime()) / DAY_MS) : 0, fills: num(rows[0]?.fills) ?? 0, firstAt: first ? first.toISOString() : null };
-  };
-
-  /** Answers 409 and returns true when the strategy has too little paper history to go live (only new live strategies get here). */
-  const paperGateRefused = async (res: Response, spec: unknown, skip: boolean): Promise<boolean> => {
-    const id = specId(spec);
-    if (skip) {
-      await deps.log('warn', 'paper_gate_skipped', `Going live with ${id || 'a strategy without an id'} without the paper record check`, { strategyId: id });
-      return false;
-    }
-    const { days, fills } = await paperRecord(id);
-    if (days >= NEED_DAYS && fills >= NEED_FILLS) return false;
-    res.status(409).json({
-      error: `This strategy has ${days} of ${NEED_DAYS} days and ${fills} of ${NEED_FILLS} fills in paper. Run it in paper first, or skip this check (skipPaperGate: true).`,
-      paperGate: { days, fills, needDays: NEED_DAYS, needFills: NEED_FILLS },
-    });
-    return true;
-  };
-
   r.get('/overview', async (_req, res) => {
     res.json(await deps.getOverview());
   });
@@ -71,13 +29,12 @@ export function botRoutes(deps: ApiDeps) {
   r.put('/bot', async (req, res) => {
     const body = req.body;
     if (typeof body !== 'object' || body === null || Array.isArray(body)) fail('Send the settings to change as an object.');
-    const { confirmLive, skipPaperGate, ...rest } = body as Record<string, unknown>;
+    const { confirmLive, ...rest } = body as Record<string, unknown>;
     if ('enabled' in rest) fail('Use Start / Stop to switch the bot on or off.');
     const unknown = Object.keys(rest).filter((k) => !(EDITABLE as readonly string[]).includes(k));
     if (unknown.length) fail(`Unknown setting: ${unknown.join(', ')}`);
     if (!Object.keys(rest).length) fail('Nothing to change.');
     if (confirmLive !== undefined && typeof confirmLive !== 'boolean') fail('confirmLive must be true or false.');
-    if (skipPaperGate !== undefined && typeof skipPaperGate !== 'boolean') fail('skipPaperGate must be true or false.');
     if (rest.mode !== undefined && rest.mode !== 'paper' && rest.mode !== 'live') fail('mode must be "paper" or "live".');
     const current = await deps.getBotSettings();
     const wasLive = current.mode === 'live';
@@ -97,8 +54,6 @@ export function botRoutes(deps: ApiDeps) {
     if (staysLive && newStrategy && confirmLive !== true) {
       fail('The bot is in live mode: changing the strategy trades real money. Confirm it first (confirmLive: true).');
     }
-    const goesLive = rest.mode === 'live' && !wasLive;
-    if ((goesLive || (staysLive && newStrategy)) && (await paperGateRefused(res, rest.strategy ?? current.strategy, skipPaperGate === true))) return;
     // The settings module logs what changed.
     res.json(await deps.updateBotSettings(rest, { confirmLive: confirmLive === true }));
   });
@@ -116,10 +71,9 @@ export function botRoutes(deps: ApiDeps) {
   r.post('/bot/activate', async (req, res) => {
     const body = req.body;
     if (typeof body !== 'object' || body === null || Array.isArray(body)) fail('Send { researchId, bucket, rank, start }.');
-    const { researchId, bucket, rank, start, confirmLive, hallOfFameId, skipPaperGate } = body as Record<string, unknown>;
+    const { researchId, bucket, rank, start, confirmLive, hallOfFameId } = body as Record<string, unknown>;
     if (start !== undefined && typeof start !== 'boolean') fail('start must be true or false.');
     if (confirmLive !== undefined && typeof confirmLive !== 'boolean') fail('confirmLive must be true or false.');
-    if (skipPaperGate !== undefined && typeof skipPaperGate !== 'boolean') fail('skipPaperGate must be true or false.');
 
     let entry: { spec?: Record<string, unknown>; botReady?: boolean } | undefined;
     // What gets stored as activeResearch: a hall of fame pick is { researchId: hall id, bucket: 'hall', rank: 1 }.
@@ -159,8 +113,6 @@ export function botRoutes(deps: ApiDeps) {
     const current = await deps.getBotSettings();
     if (current.mode === 'live' && confirmLive !== true)
       fail('The bot is in live mode: activating a strategy trades real money. Confirm it first (confirmLive: true).');
-    // Activating the strategy that already runs live changes nothing about what trades.
-    if (current.mode === 'live' && specId(spec) !== specId(current.strategy) && (await paperGateRefused(res, spec, skipPaperGate === true))) return;
 
     const activeResearch = {
       researchId: source.researchId,
@@ -223,12 +175,6 @@ export function botRoutes(deps: ApiDeps) {
       }
     }
     res.json({ ok: true, bot, started, ...(startError ? { startError } : {}) });
-  });
-
-  r.get('/bot/paper-record', async (req, res) => {
-    const id = req.query.strategyId;
-    if (typeof id !== 'string' || !id.trim() || id.length > 200) fail('strategyId must be a strategy id.');
-    res.json(await paperRecord((id as string).trim()));
   });
 
   r.get('/strategies/families', (_req, res) => {
