@@ -42,6 +42,18 @@ function niceTicks(min: number, max: number, count = 4) {
   return { lo, hi, ticks };
 }
 
+/** Round labels for a log axis: powers of ten, with 2 and 5 between them when the range is short. */
+function logTicks(min: number, max: number) {
+  const lo = min * 0.9;
+  const hi = max * 1.1;
+  const first = Math.floor(Math.log10(lo));
+  const last = Math.ceil(Math.log10(hi));
+  const steps = last - first <= 2 ? [1, 2, 5] : [1];
+  const ticks: number[] = [];
+  for (let p = first; p <= last; p++) for (const s of steps) if (s * 10 ** p >= lo && s * 10 ** p <= hi) ticks.push(s * 10 ** p);
+  return { lo, hi, ticks };
+}
+
 const nearest = (pts: [number, number][], x: number) => {
   let lo = 0;
   let hi = pts.length - 1;
@@ -64,6 +76,7 @@ export function LineChart({
   baseline,
   baselineLabel,
   legend = true,
+  log = false,
   ariaLabel,
 }: {
   series: LineSeries[];
@@ -73,6 +86,8 @@ export function LineChart({
   baseline?: number;
   baselineLabel?: string;
   legend?: boolean;
+  /** Log scale: equal heights mean equal growth, for lines that end orders of magnitude apart. Values must be above 0. */
+  log?: boolean;
   ariaLabel: string;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
@@ -97,18 +112,18 @@ export function LineChart({
       ymax = Math.max(ymax, baseline);
     }
     const pad = (ymax - ymin) * 0.06;
-    const { lo, hi, ticks } = niceTicks(ymin >= 0 ? Math.max(0, ymin - pad) : ymin - pad, ymax + pad, height < 200 ? 3 : 4);
+    const { lo, hi, ticks } = log ? logTicks(ymin, ymax) : niceTicks(ymin >= 0 ? Math.max(0, ymin - pad) : ymin - pad, ymax + pad, height < 200 ? 3 : 4);
     const labelW = Math.max(...ticks.map((t) => yFormat(t).length)) * 6.6 + 10;
     const m = { l: labelW, r: 8, t: 10, b: 26 };
     const iw = Math.max(10, width - m.l - m.r);
     const ih = height - m.t - m.b;
     const sx = (x: number) => m.l + ((x - xmin) / (xmax - xmin || 1)) * iw;
-    const sy = (y: number) => m.t + (1 - (y - lo) / (hi - lo || 1)) * ih;
+    const sy = (y: number) => m.t + (1 - (log ? Math.log(y / lo) / Math.log(hi / lo) : (y - lo) / (hi - lo || 1))) * ih;
     const spanDays = (xmax - xmin) / 86400_000;
     const nx = width < 420 ? 3 : 5;
     const xticks = Array.from({ length: nx }, (_, i) => xmin + ((xmax - xmin) * i) / (nx - 1));
     return { m, iw, ih, sx, sy, ticks, xticks, xmin, xmax, spanDays, lo };
-  }, [live, width, height, baseline, yFormat]);
+  }, [live, width, height, baseline, yFormat, log]);
 
   const paths = useMemo(() => {
     if (!geo) return [];
