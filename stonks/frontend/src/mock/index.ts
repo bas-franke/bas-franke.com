@@ -160,6 +160,7 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
   if (p === '/bot/test-alert' && method === 'POST')
     return json(flags.includes('healthwarn') || flags.includes('healthfail') ? { ok: false, configured: false, error: 'Alert mails are not configured.' } : { ok: true, configured: true });
   if (p === '/portfolio-history/clear' && method === 'POST') return json({ ok: true, removed: 1234 });
+  if (p === '/tracking/reset' && method === 'POST') return json({ ok: true, mode: bot.mode });
   // Write-ups: the mixed #1 card gets one; its content comes from public/mock-writeup.json when that file exists (dev only).
   if (p === '/writeups' && method === 'GET') {
     const id = researchV2.buckets?.mixed?.top[0]?.spec.id;

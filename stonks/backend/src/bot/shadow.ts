@@ -16,6 +16,8 @@ import type { Mode } from './store.js';
 
 export const SHADOW_MS = 60_000;
 const STATE_KEY = 'shadow_state';
+/** `{ mode: ms }`: start that mode's figures over from this moment (POST /api/tracking/reset, or clearing the portfolio history). */
+const RESET_KEY = 'tracking_reset';
 const BATCH = 2000;
 const PORTFOLIO_FRESH_MS = 6 * 60_000;
 const DAY_MS = 86_400_000;
@@ -66,6 +68,22 @@ export function startVirtual(strategyId: string, mode: Mode, markets: string[], 
     else holdCash += per; // no price at the start: that share stays in euros
   }
   return { strategyId, mode, markets, since: at, startEur: equityEur, cash: equityEur, qty: {}, holdCash, holdQty, lastBar: -1, lastPrices: {}, decisions: 0, withOrders: 0 };
+}
+
+/**
+ * The same strategy, counted from `at`: the paper copy keeps its position but is scaled to the real equity, so the gap
+ * starts at 0 while it stays in step with the bot. Holding and the counters start over. `lastBar` stays: no decision is replayed.
+ */
+export function restartVirtual(v: Virtual, at: number, equityEur: number, prices: Prices): Virtual {
+  const scale = equityEur / expectedValue(v, prices);
+  const fresh = startVirtual(v.strategyId, v.mode, v.markets, at, equityEur, prices);
+  return {
+    ...fresh,
+    cash: v.cash * scale,
+    qty: Object.fromEntries(Object.entries(v.qty).map(([m, q]) => [m, q * scale])),
+    lastBar: v.lastBar,
+    lastPrices: v.lastPrices,
+  };
 }
 
 const worth = (cash: number, qty: Record<string, number>, prices: Prices, fallback: Prices) =>
@@ -314,8 +332,8 @@ async function strategyFills(q: TrackingQuery, v: Virtual): Promise<Slippage> {
 
 async function latestGap(q: TrackingQuery, v: Virtual): Promise<number | null> {
   const { rows } = await q(
-    `SELECT expected_eur, actual_eur FROM shadow_points WHERE mode = $1 AND strategy_id = $2 AND actual_eur IS NOT NULL ORDER BY ts DESC LIMIT 1`,
-    [v.mode, v.strategyId],
+    `SELECT expected_eur, actual_eur FROM shadow_points WHERE mode = $1 AND strategy_id = $2 AND actual_eur IS NOT NULL AND ts >= to_timestamp($3 / 1000.0) ORDER BY ts DESC LIMIT 1`,
+    [v.mode, v.strategyId, v.since],
   );
   const expected = Number(rows[0]?.expected_eur);
   return expected > 0 ? (Number(rows[0].actual_eur) / expected - 1) * 100 : null;
@@ -384,7 +402,7 @@ export async function runShadow(now = Date.now()): Promise<void> {
   const st = (await getSetting<ShadowState>(STATE_KEY)) ?? emptyState();
   await catchUp(st, s.mode, s.strategy.id, s.fees.maker);
 
-  const v = st.modes[s.mode];
+  let v = st.modes[s.mode];
   if (!v || !s.enabled || v.strategyId !== s.strategy.id) return;
   const live = await allPrices();
   const prices: Prices = {};
@@ -393,7 +411,15 @@ export async function runShadow(now = Date.now()): Promise<void> {
     if (p) prices[m] = p;
   }
   const pf = cachedPortfolio(s.mode);
-  await insertPoint(now, s.mode, v.strategyId, expectedValue(v, prices), pf && now - pf.at < PORTFOLIO_FRESH_MS ? pf.equityEur : null, holdValue(v, prices));
+  const actual = pf && now - pf.at < PORTFOLIO_FRESH_MS ? pf.equityEur : null;
+  const resetAt = (await getSetting<Partial<Record<Mode, number>>>(RESET_KEY))?.[s.mode];
+  // Waits for a fresh portfolio and every price, so it never restarts from a stale value.
+  if (resetAt && resetAt > v.since && actual !== null && v.markets.every((m) => prices[m] > 0) && expectedValue(v, prices) > 0) {
+    v = restartVirtual(v, resetAt, actual, prices);
+    st.modes[s.mode] = v;
+    await setSetting(STATE_KEY, st);
+  }
+  await insertPoint(now, s.mode, v.strategyId, expectedValue(v, prices), actual, holdValue(v, prices));
 
   if (now - lastDriftCheck < DRIFT_CHECK_MS || now - (st.lastDriftAt ?? 0) < DAY_MS) return;
   lastDriftCheck = now;

@@ -182,6 +182,34 @@ describe('runner', () => {
     assert.equal(settings.shadow_state.modes.paper.decisions, 2);
   });
 
+  test('a reset starts the figures over from the real equity and keeps the position', async () => {
+    logRows = [started(1, 'a'), decision(2, T0, { 'BTC-EUR': 1 }, { 'BTC-EUR': 100 }, 1000, [{}])];
+    live = new Map([['BTC-EUR', 120]]);
+    portfolio = undefined;
+    await runShadow(T0 + H);
+    const before = settings.shadow_state.modes.paper;
+    assert.equal(before.decisions, 1);
+
+    settings.tracking_reset = { paper: T0 + 2 * H };
+    await runShadow(T0 + 2 * H); // no fresh portfolio yet: it waits
+    assert.equal(settings.shadow_state.modes.paper.since, before.since);
+
+    portfolio = { at: T0 + 3 * H, equityEur: 900 };
+    await runShadow(T0 + 3 * H);
+    const v = settings.shadow_state.modes.paper;
+    assert.deepEqual([v.since, v.startEur, v.decisions, v.withOrders], [T0 + 2 * H, 900, 0, 0]);
+    assert.ok(Math.abs(expectedValue(v, { 'BTC-EUR': 120 }) - 900) < 1e-6);
+    assert.ok(v.qty['BTC-EUR'] > 0); // still in the coin, like the bot
+    assert.ok(Math.abs(holdValue(v, { 'BTC-EUR': 120 }) - 900) < 1e-6);
+    const point = points.at(-1);
+    assert.ok(Math.abs(point.expected_eur - point.actual_eur) < 1e-6);
+
+    await runShadow(T0 + 3 * H + 60_000); // applied once
+    assert.equal(settings.shadow_state.modes.paper.since, T0 + 2 * H);
+    portfolio = undefined;
+    delete settings.tracking_reset;
+  });
+
   test('a lost state rebuilds the same result from bot_logs', async () => {
     logRows = [started(1, 'a'), decision(2, T0, { 'BTC-EUR': 1 }, { 'BTC-EUR': 100 }, 1000), decision(3, T0 + H, { 'BTC-EUR': 0 }, { 'BTC-EUR': 110 }, 1090)];
     await runShadow(T0 + 3 * H);

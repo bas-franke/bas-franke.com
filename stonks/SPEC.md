@@ -206,7 +206,8 @@ than 6 minutes). It runs beside the trading loop and never places orders or chan
 day|week|month|year|all` returns the portfolio (equity_snapshots + track_points), BTC and ETH as `[ms, eur]` (at most 500
 points each); where no track points exist yet, BTC/ETH come from Bitvavo candles. `all` starts at the first portfolio
 point of the mode. The Overview indexes every line to 100 at the range start. `POST /api/portfolio-history/clear
-{ confirm: "CLEAR" }` deletes that mode's equity_snapshots and track_points (charts only; trading never reads them).
+{ confirm: "CLEAR" }` deletes that mode's equity_snapshots and track_points (charts only; trading never reads them) and restarts
+expected vs actual for that mode (§5b).
 
 ## 5b. Expected vs actual, alerts and health
 
@@ -215,7 +216,9 @@ portfolio that follows those targets by the backtest's rule: fills at the decisi
 starting from the real equity at the strategy's first decision. Tables `shadow_points` and `shadow_decisions`, state in
 `settings.shadow_state`. It ignores `maxExposureEur`. Slippage per fill is the fill price against the decision close, adverse
 positive. `GET /api/tracking` flags a gap worse than -5 % over 30+ days and average slippage over 25 bps across 10+ fills, and the
-runner logs `tracking_drift` once a day while one holds.
+runner logs `tracking_drift` once a day while one holds. `POST /api/tracking/reset { confirm: "RESET" }` sets `settings.tracking_reset`
+`{ mode: ms }`: at its next minute with a fresh portfolio the runner counts gap, slippage, fees and decisions from then, with the paper
+copy's position scaled to the real equity. Nothing is deleted; clearing the portfolio history does the same.
 
 Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`, `MAIL_FROM`, `STONKS_ALERT_EMAIL`): every `error` and the
 warnings `decision_held`, `stale_candles`, `foreign_coin`, `stop_skipped`, `tracking_drift`, one mail per event name per 30 minutes.

@@ -802,6 +802,19 @@ describe('portfolio vs buy and hold', () => {
     assert.deepEqual(sql.filter((q) => q.startsWith('DELETE')), ['DELETE FROM equity_snapshots WHERE mode = $1', 'DELETE FROM track_points WHERE mode = $1']);
     assert.deepEqual(h.calls.slice(n).filter((c) => c.sql.startsWith('DELETE')).map((c) => c.params), [['paper'], ['paper']]);
     assert.ok(h.logs.some((l) => l.event === 'portfolio_history_cleared'));
+    assert.ok(h.calls.slice(n).some((c) => c.sql.includes("'tracking_reset'") && c.params?.[0] === 'paper')); // expected vs actual starts over too
+  });
+
+  test('resetting expected vs actual needs RESET and deletes nothing', async () => {
+    assert.equal((await h.req('POST', '/api/tracking/reset', { json: {}, cookie })).status, 400);
+    assert.equal((await h.req('POST', '/api/tracking/reset', { json: { confirm: 'RESET' } })).status, 401);
+    const n = h.calls.length;
+    const res = await h.req('POST', '/api/tracking/reset', { json: { confirm: 'RESET' }, cookie });
+    assert.equal(res.status, 200);
+    const sql = h.calls.slice(n).map((c) => c.sql);
+    assert.ok(sql.some((q) => q.includes("'tracking_reset'")));
+    assert.equal(sql.some((q) => q.startsWith('DELETE')), false);
+    assert.ok(h.logs.some((l) => l.event === 'tracking_reset'));
   });
 });
 

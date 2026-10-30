@@ -5,6 +5,15 @@ import { enumParam, fail, MODES } from './util.js';
 // Portfolio vs buy and hold BTC / ETH for the Overview (SPEC.md §5a). Purely informative: reads equity_snapshots
 // and track_points (one row a minute), and fills BTC/ETH from Bitvavo candles where no track points exist yet.
 
+/** Expected vs actual starts over from now for that mode (SPEC.md §5b). Deletes nothing: the runner reads this mark and restarts its count. */
+export async function markTrackingReset(deps: ApiDeps, mode: string): Promise<void> {
+  await deps.query(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('tracking_reset', jsonb_build_object($1::text, $2::bigint), now())
+     ON CONFLICT (key) DO UPDATE SET value = settings.value || EXCLUDED.value, updated_at = now()`,
+    [mode, (deps.now ?? Date.now)()],
+  );
+}
+
 export const RANGES = ['day', 'week', 'month', 'year', 'all'] as const;
 const SPAN_MS: Record<Exclude<(typeof RANGES)[number], 'all'>, number> = {
   day: 86_400_000, week: 7 * 86_400_000, month: 30 * 86_400_000, year: 365 * 86_400_000,
@@ -97,6 +106,7 @@ export function trackRoutes(deps: ApiDeps) {
     const mode = (await deps.getBotSettings()).mode;
     const a = await deps.query('DELETE FROM equity_snapshots WHERE mode = $1', [mode]);
     const b = await deps.query('DELETE FROM track_points WHERE mode = $1', [mode]);
+    await markTrackingReset(deps, mode);
     const removed = (a.rowCount ?? 0) + (b.rowCount ?? 0);
     await deps.log('warn', 'portfolio_history_cleared', `Portfolio history of the ${mode} account cleared (${removed} points); charts start again from now`, { mode, removed });
     res.json({ ok: true, mode, removed });

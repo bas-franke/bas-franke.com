@@ -357,15 +357,22 @@ function RecentTradesCard({ o }: { o: Overview }) {
 }
 
 /** How much of the portfolio sits in the currency the strategy trades against (EUR for BTC-EUR), also when that is nothing. */
+/** The share of the portfolio ready to buy with, one chip per currency the strategy trades against, also at 0 %. */
 function QuoteShare({ o }: { o: Overview }) {
-  const quote = (o.bot.strategy?.markets?.[0]?.split('-')[1] ?? 'EUR').toUpperCase();
-  const bal = o.balances.find((b) => b.symbol.toUpperCase() === quote);
-  const value = bal ? num(bal.eurValue) : 0;
-  const share = o.equityEur > 0 ? (value / o.equityEur) * 100 : 0;
+  const markets = o.bot.strategy?.markets ?? [];
+  const quotes = [...new Set(markets.map((m) => m.split('-')[1]?.toUpperCase()).filter(Boolean))];
   return (
-    <span className="chip" title={`Part of the portfolio held in ${quote}, ready to buy with`}>
-      {pct(share, 1)} in {quote} · {eur(value)}
-    </span>
+    <>
+      {(quotes.length ? quotes : ['EUR']).map((quote) => {
+        const bal = o.balances.find((b) => b.symbol.toUpperCase() === quote);
+        const share = o.equityEur > 0 && bal ? (num(bal.eurValue) / o.equityEur) * 100 : 0;
+        return (
+          <span className="chip" key={quote} title={`Part of the portfolio held in ${quote}, ready to buy with`}>
+            {pct(share, 1)} in {quote}
+          </span>
+        );
+      })}
+    </>
   );
 }
 
