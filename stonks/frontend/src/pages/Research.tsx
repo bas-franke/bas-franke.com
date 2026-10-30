@@ -719,7 +719,10 @@ function RankCard({
   // The per-year pair comes from the absolute run, so both numbers cover the same coins and years.
   const yearly = isNum(m.absCagr) ? m.absCagr : m.cagrPct;
   const holdYearly = isNum(m.absCagr) ? m.absHoldCagr : undefined;
-  const ahead = isNum(yearly) && isNum(holdYearly) ? yearly - holdYearly : m.vsBuyHoldPct;
+  // Session cards carry no vsBuyHoldPct: the end of their holding curve gives the same figure (both start at €1,000).
+  const holdEnd = toPts(e.buyHoldEquity).at(-1)?.[1];
+  const vsHold = isNum(m.vsBuyHoldPct) ? m.vsBuyHoldPct : isNum(holdEnd) && isNum(m.returnPct) ? m.returnPct - (holdEnd / 1000 - 1) * 100 : undefined;
+  const ahead = isNum(yearly) && isNum(holdYearly) ? yearly - holdYearly : vsHold;
   return (
     <article id={anchor} className={`card rank-card${active ? ' is-active' : ''}`} style={{ ['--rank-color' as string]: color }}>
       <header className="rank-head">
@@ -765,7 +768,7 @@ function RankCard({
         ) : (
           <Stat label="Return" tip={METRIC_TIPS.ret} value={fx(m.returnPct, (v) => pct(v, 1, true))} cls={m.returnPct >= 0 ? 'gain' : 'loss'} />
         )}
-        <Stat label="vs buy & hold" tip={METRIC_TIPS.vs} value={fx(m.vsBuyHoldPct, (v) => pct(v, 1, true))} cls={m.vsBuyHoldPct >= 0 ? 'gain' : 'loss'} />
+        <Stat label="vs buy & hold" tip={METRIC_TIPS.vs} value={fx(vsHold, (v) => pct(v, 1, true))} cls={isNum(vsHold) ? (vsHold >= 0 ? 'gain' : 'loss') : undefined} />
         <Stat label="€1,000 became" tip={METRIC_TIPS.final} value={fx(m.finalEur, (v) => eur(v, true))} />
         <Stat label="Worst drop" tip={METRIC_TIPS.dd} value={fx(m.maxDrawdownPct, (v) => pct(-Math.abs(v), 1))} />
         {isNum(m.score) && <Stat label="Score" tip="The lab’s ranking score; only comparable within this timeframe." value={score(m.score)} />}
