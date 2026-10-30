@@ -198,31 +198,93 @@
     backdrop-filter: none;
   }
 
+  /* a sheet of the same paper hanging from the bar, one row to a section */
   .nav--open .nav__links {
     position: absolute;
     inset: 100% 0 auto;
-    display: flex;
-    justify-content: space-between;
+    display: grid;
     gap: 0;
-    padding: 0 var(--gutter);
+    padding: 4px var(--gutter) 12px;
     background: var(--paper);
-    border-bottom: 1px solid var(--line);
-    animation: nav-drop 0.22s var(--ease) both;
+    border-bottom: 1px solid color-mix(in srgb, var(--warm) 28%, transparent);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    box-shadow: 0 24px 40px -24px rgb(0 0 0 / 0.5);
+    animation: nav-drop 0.28s var(--ease) both;
   }
 
   @keyframes nav-drop {
     from {
       opacity: 0;
-      translate: 0 -6px;
+      translate: 0 -8px;
     }
   }
 
   .nav__links a {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    /* a row as tall as the bar, which ends below the hero's first line rather than through it */
-    min-height: var(--nav-h);
-    padding: 0 2px;
+    justify-content: space-between;
+    min-height: 64px;
+    border-bottom: 0;
+    font-family: var(--serif);
+    font-size: var(--text-h3);
+    color: var(--ink);
+    animation: nav-row 0.32s var(--ease) both;
+    animation-delay: calc(var(--row, 0) * 36ms);
+  }
+
+  .nav__links a + a,
+  .nav__links a + a:hover,
+  .nav__links a + a[aria-current] {
+    border-top: 1px solid var(--line);
+  }
+
+  .nav__links a:nth-child(2) {
+    --row: 1;
+  }
+
+  .nav__links a:nth-child(3) {
+    --row: 2;
+  }
+
+  .nav__links a:nth-child(4) {
+    --row: 3;
+  }
+
+  @keyframes nav-row {
+    from {
+      opacity: 0;
+      translate: 0 6px;
+    }
+  }
+
+  /* where you are: the sun from the bar's edge, resting on this row */
+  .nav__links a[aria-current] {
+    font-style: italic;
+  }
+
+  .nav__links a[aria-current]::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    margin-right: 3px;
+    border-radius: 50%;
+    background: var(--sun);
+    box-shadow: 0 0 0 3px var(--warm-soft);
+  }
+
+  /* the page steps back; a press on it closes the menu (see useNavMenu) */
+  .nav__scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    background: color-mix(in srgb, var(--night) 42%, transparent);
+    animation: scrim-in 0.28s var(--ease) both;
+  }
+
+  @keyframes scrim-in {
+    from {
+      opacity: 0;
+    }
   }
 
   .nav__right {

@@ -32,6 +32,7 @@ export const nav = {
   top: 'back to top',
   sections: 'Sections',
   menu: 'Menu',
+  close: 'Close',
   links: [
     { id: 'about', label: 'About' },
     { id: 'work', label: 'Work' },

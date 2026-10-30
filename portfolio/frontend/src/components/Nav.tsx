@@ -16,34 +16,37 @@ export default function Nav() {
   const className = ['nav', (scrolled || open) && 'nav--scrolled', open && 'nav--open', night && 'night'].filter(Boolean).join(' ');
 
   return (
-    <header ref={bar} className={className}>
-      <div className="container nav__inner">
-        <a className="nav__brand" href="#top" aria-label={`${site.name}, ${nav.top}`}>
-          <Mark />
-          <span>{site.name}</span>
-        </a>
-        <button
-          ref={button}
-          type="button"
-          className="nav__menu"
-          aria-expanded={open}
-          aria-controls="nav-links"
-          onClick={() => setOpen(!open)}
-        >
-          {nav.menu}
-        </button>
-        <nav ref={links} id="nav-links" className="nav__links" aria-label={nav.sections}>
-          {nav.links.map(({ id, label }) => (
-            <a key={id} href={`#${id}`} aria-current={active === id ? 'true' : undefined} onClick={() => setOpen(false)}>
-              {label}
-            </a>
-          ))}
-        </nav>
-        <div className="nav__right">
-          <ResumeButton variant="nav" />
-          <ThemeToggle />
+    <>
+      <header ref={bar} className={className}>
+        <div className="container nav__inner">
+          <a className="nav__brand" href="#top" aria-label={`${site.name}, ${nav.top}`}>
+            <Mark />
+            <span>{site.name}</span>
+          </a>
+          <button
+            ref={button}
+            type="button"
+            className="nav__menu"
+            aria-expanded={open}
+            aria-controls="nav-links"
+            onClick={() => setOpen(!open)}
+          >
+            {open ? nav.close : nav.menu}
+          </button>
+          <nav ref={links} id="nav-links" className="nav__links" aria-label={nav.sections}>
+            {nav.links.map(({ id, label }) => (
+              <a key={id} href={`#${id}`} aria-current={active === id ? 'true' : undefined} onClick={() => setOpen(false)}>
+                {label}
+              </a>
+            ))}
+          </nav>
+          <div className="nav__right">
+            <ResumeButton variant="nav" />
+            <ThemeToggle />
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+      {open && <div className="nav__scrim" />}
+    </>
   );
 }
