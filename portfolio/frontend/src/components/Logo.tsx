@@ -1,10 +1,8 @@
-/**
- * Company mark from src/art/logos/<slug>.(png|svg|webp|jpg). Renders nothing when the file is missing.
- */
-const logos = import.meta.glob<string>('../art/logos/*.{png,svg,webp,jpg}', { eager: true, import: 'default' });
+/** Company mark from src/art/logos/<slug>.png. Renders nothing when the file is missing. */
+const logos = import.meta.glob<string>('../art/logos/*.png', { eager: true, import: 'default' });
 
 export default function Logo({ slug }: { slug: string }) {
-  const url = ['png', 'svg', 'webp', 'jpg'].map((ext) => logos[`../art/logos/${slug}.${ext}`]).find(Boolean);
+  const url = logos[`../art/logos/${slug}.png`];
   if (!url) return null;
   return <img className="logo" src={url} alt="" width="28" height="28" loading="lazy" decoding="async" draggable={false} />;
 }

@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
-import { artUrl } from './Art';
 import ContactForm from './ContactForm';
 import ResumeButton from './ResumeButton';
+import { artUrl } from '../artwork';
 import { contact, site } from '../content';
 
 export default function Contact() {

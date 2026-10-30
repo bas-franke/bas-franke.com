@@ -1,4 +1,4 @@
-import { artUrl } from '../components/Art';
+import { artUrl } from '../artwork';
 import { useTheme } from './useTheme';
 
 /**
