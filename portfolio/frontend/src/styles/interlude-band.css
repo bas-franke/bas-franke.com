@@ -97,7 +97,7 @@
 
   /* the line takes the full width here, so the pool does too */
   .interlude--band::after {
-    height: 58%;
+    height: 46%;
     background: linear-gradient(
       to top,
       color-mix(in srgb, var(--noon) 94%, transparent) 55%,

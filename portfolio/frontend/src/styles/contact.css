@@ -34,8 +34,10 @@
   pointer-events: none;
 }
 
-/* The painted room (src/art/contact-night.webp), once it exists. */
+/* The room at night: the chair and the lamp stand on the left, the words go on the dark wall beside them. Its edges fade
+   into the night, so the picture has no frame against the sections around it. */
 .contact__art {
+  --fade: linear-gradient(to bottom, transparent, #000 10%, #000 90%, transparent);
   position: absolute;
   z-index: -2;
   inset: 0;
@@ -43,6 +45,8 @@
   height: 100%;
   object-fit: cover;
   object-position: left center;
+  -webkit-mask-image: var(--fade);
+  mask-image: var(--fade);
 }
 
 .contact__grid {
@@ -222,6 +226,58 @@
       opacity: 1;
       scale: 1 1;
     }
+  }
+}
+
+/* room for the whole painting: everything stands in one column on its wall */
+@media (min-width: 1241px) {
+  .contact {
+    padding-block: clamp(96px, 12vh, 128px);
+  }
+
+  .contact__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(40px, 6vh, 56px);
+    max-width: none;
+    padding-left: 48%;
+    padding-right: var(--page-edge);
+  }
+
+  .contact__list {
+    grid-template-columns: max-content max-content;
+    justify-content: start;
+    column-gap: 40px;
+  }
+
+  /* one step down, so the address and the number share a line */
+  .contact__big {
+    font-size: var(--text-lg);
+  }
+
+  .form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 32px;
+  }
+
+  .form__title,
+  .field:has(textarea),
+  .form__actions {
+    grid-column: 1 / -1;
+  }
+}
+
+/* narrower, the painting is a scene above the words, which stand on the plain night */
+@media (max-width: 1240px) {
+  .contact {
+    padding-top: 0;
+  }
+
+  .contact__art {
+    --fade: linear-gradient(to bottom, transparent, #000 12%, #000 76%, transparent);
+    position: relative;
+    display: block;
+    height: clamp(260px, 72vw, 460px);
+    margin-bottom: 16px;
   }
 }
 

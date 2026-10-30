@@ -60,9 +60,9 @@ After each image, tell me its name from this list so I can save it with the righ
 
 ## The day set (October 2026 redesign)
 
-These finish the "one day at the window" story from `DESIGN.md`. The existing morning picture is as orange as the
-evening one, so the day has no arc yet, and Contact has no picture of its own. Attach `hero.webp` and
-`interlude-evening.webp` to the chat as style references, then paste this as one message; reply "next" if it stops.
+These finish the "one day at the window" story from `DESIGN.md`: a cool morning, so the day has an arc, and a picture
+of its own for Contact. All three are in. To redo one, attach `hero.webp` and `interlude-evening.webp` to the chat as
+style references, then paste this as one message; reply "next" if it stops.
 
 ```text
 Using the two attached images as the exact style reference (same illustrator, same soft painted look, same fine grain, same ginger cat), please generate 3 new illustrations for my website, one at a time, each as a separate image. Do not add any text, letters, numbers, logos, watermarks, signatures, frames or borders. No people.
@@ -74,16 +74,16 @@ IMAGE 2, "interlude-morning-dark" (wide landscape, 1536x1024)
 Exactly the same desk, window and composition as image 1, before sunrise at blue hour: the room is dim, deep blue and quiet, one small warm desk lamp lights the notebook and the cup in amber, the laptop is closed. Outside, dark blue rooftops with a few lit windows. The darkest tones close to #16130f.
 
 IMAGE 3, "contact-night" (very wide landscape, 1536x1024; the left part matters most, it will be cropped to 21:9)
-The same cozy home at night. On the LEFT: a soft rounded armchair with a knitted blanket and the little ginger cat asleep on it, a floor lamp casting a warm pool of amber light, a small side table with a cup of tea. The RIGHT 60% of the image is a quiet, almost empty dark wall fading into deep warm shadow with one tall window showing dark blue night and a few distant lights: text will sit on this part, so keep it very calm with no objects. The darkest tones close to #16130f, the wall a very dark warm brown.
+The same cozy home at night. On the LEFT: a soft rounded armchair with a knitted blanket and the little ginger cat asleep on it, a floor lamp casting a warm pool of amber light, a small side table with a cup of tea. The RIGHT half of the image is a quiet, almost empty dark wall fading into deep warm shadow with one tall window at the far right edge showing dark blue night and a few distant lights: text will sit on this wall, so keep it very calm with no objects. The darkest tones close to #16130f, the wall a very dark warm brown.
 
 After each image, tell me its name from this list so I can save it with the right filename, then continue with the next one.
 ```
 
 | File | Where it shows | Ratio | Export at | Target size |
 |------|----------------|-------|-----------|-------------|
-| `src/art/interlude-morning.webp` | Band between About and Experience (replaces the orange one) | 3:2 | 1920×1280 | < 300 KB |
+| `src/art/interlude-morning.webp` | Band between About and Experience | 3:2 | 1920×1280 | < 300 KB |
 | `src/art/interlude-morning-dark.webp` | The same band in dark mode | 3:2 | 1920×1280 | < 300 KB |
-| `src/art/contact-night.webp` | Behind the Contact section | 3:2, shown wide | 1920×1280 | < 300 KB |
+| `src/art/contact-night.webp` | Contact: behind it on wide screens, with the text on its wall from 48% across; above it on narrow ones | 3:2 | 1920×1280 | < 300 KB |
 
 ## Company marks
 
