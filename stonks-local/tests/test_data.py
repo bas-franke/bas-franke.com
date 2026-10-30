@@ -27,6 +27,8 @@ class FakeBitvavo:
         self.listing, self.now, self.gaps = listing, now, gaps or []
         self.starts = starts or {}
         self.calls: list[tuple[str, str, int, int, int]] = []
+        self.market_status: dict[str, str] | None = {}   # for markets(); None = the request fails
+        self.gaps_of: dict[str, tuple[int, int]] = {}     # per market: a ts range without trades
 
     @staticmethod
     def bar(ts: int, step: int) -> list[object]:
@@ -42,10 +44,16 @@ class FakeBitvavo:
         rows = []
         ts = (min(end, self.now) - step) // step * step
         while ts >= lo and len(rows) < limit:
-            if ts + step <= end and not any(a <= ts < b for a, b in self.gaps):
+            quiet = self.gaps_of.get(market, (0, 0))
+            if ts + step <= end and not any(a <= ts < b for a, b in [*self.gaps, quiet]):
                 rows.append(self.bar(ts, step))
             ts -= step
         return rows
+
+    def markets(self) -> list[dict[str, object]]:
+        if self.market_status is None:
+            raise data.BitvavoError("HTTP 500")
+        return [{"market": m, "status": st} for m, st in self.market_status.items()]
 
 
 @pytest.fixture(autouse=True)
@@ -278,3 +286,54 @@ def test_universe_pick_substitutes_by_market_cap():
 def test_universe_top10_reads_file(tmp_store):
     (tmp_store / "universe.json").write_text('{"date": "2026-10-26", "markets": ["BTC-EUR", "ETH-EUR"]}')
     assert universe.top10() == ["BTC-EUR", "ETH-EUR"]
+
+
+# ------------------------------------------------------------------------------------------- live updates
+
+def test_refetch_overwrites_the_newest_stored_bars_and_keeps_the_rest():
+    src = FakeBitvavo()
+    df = data.update_market(src, "BTC-EUR", "1h", now=NOW, progress=lambda s: None)
+    last = int(df.index[-1])
+    src.bar = lambda ts, step: [ts, "1", "2", "0.5", "1.5", "7"]
+    src.calls.clear()
+    got = data.update_market(src, "BTC-EUR", "1h", now=NOW, progress=lambda s: None, refetch=2)
+    assert [c[2] for c in src.calls if c[1] == "1h"] == [last - H]
+    assert list(got.loc[last - H:, "volume"]) == [7.0, 7.0] and got.loc[last - 2 * H, "volume"] == 1.5
+    assert len(got) == len(df)
+
+
+def test_lab_updates_do_not_refetch():
+    src = FakeBitvavo()
+    data.update_market(src, "BTC-EUR", "1h", now=NOW, progress=lambda s: None)
+    src.calls.clear()
+    data.update_market(src, "BTC-EUR", "1h", now=NOW, progress=lambda s: None)
+    assert [c for c in src.calls if c[1] == "1h"] == []
+
+
+def test_refetch_keeps_the_listing_date_so_updates_need_no_probe():
+    src = FakeBitvavo()
+    data.update_market(src, "BTC-EUR", "1h", now=NOW, progress=lambda s: None, refetch=2)
+    src.calls.clear()
+    data.update_market(src, "BTC-EUR", "1h", now=NOW + H, progress=lambda s: None, refetch=2)
+    assert all(c[1] == "1h" for c in src.calls)
+
+
+def test_refetch_passes_through_weekly_and_short_files():
+    src = FakeBitvavo(listing=NOW - 20 * D)
+    data.update_market(src, "BTC-EUR", "1W", now=NOW, progress=lambda s: None, refetch=2)
+    src.calls.clear()
+    data.update_market(src, "BTC-EUR", "1W", now=NOW, progress=lambda s: None, refetch=2)
+    assert {c[1] for c in src.calls} == {"1d"} and len(src.calls) == 1
+    one = FakeBitvavo(listing=NOW - 2 * D)
+    n = len(data.update_market(one, "X-EUR", "1h", now=NOW, progress=lambda s: None, refetch=500))
+    assert len(data.update_market(one, "X-EUR", "1h", now=NOW, progress=lambda s: None, refetch=500)) == n  # file shorter
+
+
+def test_listing_probe_without_candles_means_not_listed():
+    class Nothing(FakeBitvavo):
+        def get_candles(self, *a, **k):
+            return []
+
+    with pytest.raises(data.NotListed):
+        data.update_market(Nothing(), "NOPE-EUR", "1h", now=NOW, progress=lambda s: None)
+    assert issubclass(data.NotListed, data.BitvavoError)  # the lab's handling of it stays the same

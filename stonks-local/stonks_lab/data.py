@@ -285,6 +285,11 @@ class BitvavoError(RuntimeError):
     pass
 
 
+class NotListed(BitvavoError):
+    """Bitvavo has no such market: never listed, or delisted (it then answers error 205 and no longer serves its
+    candles), so there is nothing to wait for, unlike a failed request."""
+
+
 @dataclass
 class BitvavoClient:
     """Public Bitvavo REST client with a polite rate limiter.
@@ -298,6 +303,7 @@ class BitvavoClient:
     reserve: int = 250
     max_retries: int = 8
     timeout: float = 30.0
+    max_sleep: float = 120.0  # longest single pause, for callers on a deadline
     session: requests.Session = field(default_factory=requests.Session)
     requests_made: int = 0
     _last: float = 0.0
@@ -313,7 +319,7 @@ class BitvavoClient:
         reset_at = resp.headers.get("bitvavo-ratelimit-resetat")
         if remaining is not None and reset_at is not None and int(remaining) < self.reserve:
             pause = max(0.0, int(reset_at) / 1000 - time.time()) + 1.0
-            time.sleep(min(pause, 65.0))
+            time.sleep(min(pause, 65.0, self.max_sleep))
 
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         delay = 1.0
@@ -333,11 +339,13 @@ class BitvavoClient:
                     err = BitvavoError(f"HTTP {resp.status_code}: {body}")
                     if resp.status_code == 429:
                         delay = max(delay, 30.0)
+                elif resp.status_code == 400 and '"errorCode":205' in body.replace(" ", "") and "market" in body:
+                    raise NotListed(f"HTTP 400 for {path}: {body}")
                 else:
                     raise BitvavoError(f"HTTP {resp.status_code} for {path} {params}: {body}")
             if attempt == self.max_retries:
                 raise BitvavoError(f"giving up on {path} {params}: {err}") from err
-            time.sleep(delay)
+            time.sleep(min(delay, self.max_sleep))
             delay = min(delay * 2, 120.0)
         raise AssertionError("unreachable")
 
@@ -423,34 +431,40 @@ def listing_start(source: CandleSource, market: str, now: int | None = None) -> 
             break
         first = min(int(r[0]) for r in rows)
     if first is None:
-        raise BitvavoError(f"{market}: no daily candles on Bitvavo")
+        raise NotListed(f"{market}: no daily candles on Bitvavo")
     return first
 
 
 def update_market(source: CandleSource, market: str, interval: str, *, since: int | None = None,
-                  now: int | None = None, progress: Progress = print) -> pd.DataFrame:
+                  now: int | None = None, progress: Progress = print, refetch: int = 0) -> pd.DataFrame:
     """Bring one market+interval file up to date: backfill to ``since`` (or the listing), then fetch newer
-    closed bars. Idempotent; only missing ranges are requested."""
+    closed bars. Idempotent; only missing ranges are requested. ``refetch`` (live signals) also fetches the newest
+    N stored bars again and overwrites them: a bar stored seconds after its close can still change on Bitvavo. It
+    also keeps the listing date in the file, so an update needs no listing probe."""
     step = _check_interval(interval)
     now = now or now_ms()
     path = candle_path(market, interval)
     if interval == "1W":
-        daily = update_market(source, market, "1d", now=now, progress=progress)
+        daily = update_market(source, market, "1d", now=now, progress=progress, refetch=refetch)
         weekly = resample_weekly(daily)
         write_frame(path, weekly, {"derivedFrom": "1d"})
         return weekly
 
-    history_start = listing_start(source, market, now)
+    meta = read_meta(path)
+    known = meta.get("historyStart") if refetch else None
+    history_start = int(known) if known is not None else listing_start(source, market, now)
     floor = max(_floor(history_start, step), _floor(since, step) if since is not None else 0)
     end = _floor(now, step)  # bars opening before this are closed
     current = read_frame(path)
-    meta = read_meta(path)
-    if interval == "1d":
+    if interval == "1d" or refetch:
         meta["historyStart"] = history_start
 
     def save(df: pd.DataFrame) -> None:
         nonlocal current
-        current = merge(current, df)
+        merged = merge(current, df)
+        if refetch and current is not None and merged.equals(current):
+            return  # the re-fetched bars did not change: no need to rewrite the whole file
+        current = merged
         write_frame(path, current, meta)
 
     has = current is not None and not current.empty
@@ -459,9 +473,10 @@ def update_market(source: CandleSource, market: str, interval: str, *, since: in
     backfilled = has and (first <= floor or meta.get("backfilledTo", 1 << 62) <= floor)
 
     # newer bars first (ascending windows so partial saves stay contiguous), then backfill (descending)
-    if last is not None and last + step < end:
+    resume = None if last is None else int(current.index[-min(refetch, len(current))]) if refetch else last + step
+    if resume is not None and resume < end:
         n0 = len(current)
-        fetch_range(source, market, interval, last + step, end, on_chunk=save)
+        fetch_range(source, market, interval, resume, end, on_chunk=save)
         progress(f"  {market} {interval}: +{len(current) - n0} new bars")
     if not backfilled and floor < first:
         n0 = 0 if current is None else len(current)

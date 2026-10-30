@@ -25,6 +25,8 @@ export interface PyFamily {
   title: string;
   summary: string;
   version: number;
+  /** sha256 of the family's source and all it imports: changes when its logic can change, VERSION or not. */
+  codeHash?: string;
   multiMarket: boolean;
   /** Targets depend on where trading started: the bot passes the strategy's start time. */
   anchored: boolean;
@@ -75,8 +77,30 @@ export function setPyCatalog(families: PyFamily[] | null) {
   catalog = families ? new Map(families.map((f) => [f.family, f])) : null;
 }
 
+/**
+ * What the code behind a family or spec hashes to on this deploy (undefined when the catalog has no hash for it). Give
+ * it the spec when you have one: a wrapper runs the family in `params.inner`, which is not part of its own file.
+ */
+export function codeHashOf(subject: string | { family: string; params?: unknown }): string | undefined {
+  const family = typeof subject === 'string' ? subject : subject.family;
+  const own = pyFamilies().get(family)?.codeHash;
+  const inner = typeof subject === 'string' ? undefined : (subject.params as { inner?: { family?: unknown } } | undefined)?.inner;
+  if (!own || typeof inner?.family !== 'string') return own;
+  const wrapped = codeHashOf(inner as { family: string; params?: unknown });
+  return wrapped ? `${own}+${wrapped}` : own;
+}
+
+type LabRunner = (cmd: 'describe' | 'prepare' | 'targets', input: unknown, timeoutMs: number) => Promise<unknown>;
+let labRunner: LabRunner | null = null;
+
+/** Tests: answer lab calls with this instead of starting Python (null = Python again). */
+export function setLabRunner(run: LabRunner | null) {
+  labRunner = run;
+}
+
 /** Runs `python -m stonks_lab.live <cmd>` with `input` as JSON on stdin and returns its JSON answer. */
 export function runLab<T>(cmd: 'describe' | 'prepare' | 'targets', input: unknown, timeoutMs = TIMEOUT_MS): Promise<T> {
+  if (labRunner) return labRunner(cmd, input, timeoutMs) as Promise<T>;
   return new Promise((resolve, reject) => {
     const child = spawn(config.python, ['-m', 'stonks_lab.live', cmd], {
       cwd: config.labDir,
@@ -138,18 +162,51 @@ export type PyTargets = { warming: string[] } | { warming?: undefined; hold: str
 export const targetsPy = (spec: unknown, bar: number, startTime?: number) =>
   runLab<PyTargets>('targets', { spec, bar, ...(startTime !== undefined ? { startTime } : {}) });
 
+export type PyPrepared = { busy: true } | { ready: boolean; failed?: Record<string, string> };
+
+/** Between two tries while the lab's lock is taken: long enough not to start Python for nothing on every tick. */
+export const PREPARE_BUSY_MS = 60_000;
+/** After a failed prepare: 1 minute, doubling up to 30, so an outage neither floods the log nor Bitvavo. */
+export const PREPARE_FAIL_MS = 60_000;
+export const PREPARE_FAIL_MAX_MS = 30 * 60_000;
+
 let preparing: Promise<unknown> | null = null;
+let notBefore = 0;
+let failures = 0;
+let preparedSpec = '';
+
+/** Forgets the pause after earlier prepares. */
+export function resetPrepare() {
+  notBefore = 0;
+  failures = 0;
+}
 
 /**
  * Downloads the candle history `spec` needs in the background (minutes for intraday intervals over many coins).
- * One at a time; the lab also holds a lock, so a second bot process cannot download the same files.
+ * One at a time; the lab also holds a lock, so a second bot process cannot download the same files. `onDone` only
+ * fires for a real outcome: null when everything is there, an Error when something failed. A busy lab says nothing
+ * about this spec, so that stays silent, and the caller's next tick (still warming) calls this again; both wait.
  */
 export function preparePy(spec: unknown, onDone: (err: Error | null) => void) {
-  if (preparing) return;
-  preparing = runLab('prepare', { spec }, 6 * 3600_000).then(
-    () => onDone(null),
-    (err: Error) => onDone(err),
-  ).finally(() => {
+  const key = JSON.stringify(spec);
+  if (key !== preparedSpec) resetPrepare(); // another strategy does not sit out this one's pause
+  preparedSpec = key;
+  if (preparing || Date.now() < notBefore) return;
+  const failed = (err: Error) => {
+    notBefore = Date.now() + Math.min(PREPARE_FAIL_MS * 2 ** failures++, PREPARE_FAIL_MAX_MS);
+    onDone(err);
+  };
+  preparing = runLab<PyPrepared>('prepare', { spec }, 6 * 3600_000).then((answer) => {
+    if ('busy' in answer) {
+      notBefore = Date.now() + PREPARE_BUSY_MS;
+    } else if (answer.ready) {
+      resetPrepare();
+      onDone(null);
+    } else {
+      const what = Object.entries(answer.failed ?? {}).map(([k, v]) => `${k}: ${v}`);
+      failed(new Error(`not complete, tries again later (${what.join('; ').slice(0, 500) || 'no details'})`));
+    }
+  }, failed).finally(() => {
     preparing = null;
   });
 }

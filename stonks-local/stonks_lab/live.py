@@ -13,21 +13,32 @@ just closed: no backtests, scoring, searches or registry. The deploy ships this 
 Backtests see every candle since the listing, and some families depend on all of it (expanding fits, placebo
 draws, state machines), so live decisions use the same history: ``data.py`` keeps it in ``STONKS_DATA_DIR`` on the
 server, ``prepare`` backfills it once per market and interval (1m: the last ``DEFAULT_1M_DAYS`` days, like the lab)
-and ``targets`` only fetches the newest closed bars. Until ``prepare`` has finished, ``targets`` answers
-``{"warming": [...]}`` straight away. Families that read other candles from disk (e.g. daily candles of a coin pool)
-get them the same way on first use. Answers are one JSON object on stdout; failures are ``{"error": "..."}`` with
+and ``targets`` only fetches the newest closed bars, plus the last stored ones again (a bar stored seconds after its
+close can still change). Families that read other candles from disk (e.g. 1h candles of a coin pool) get them the
+same way: ``prepare`` runs the family once, so ``targets`` never has to download history. Until ``prepare`` has
+really got everything, ``targets`` answers ``{"warming": [...]}`` straight away.
+
+``targets`` answers ``{"hold": "<reason>", "t": <ms|null>}`` when it has no trustworthy decision, and the bot then
+keeps its positions: no candles or no targets, an all-NaN row (the backtest's "no decision, keep", see
+``backtest.clean_weights``) or candles it read that are too old. ``prepare`` answers ``{"ready": true}``,
+``{"busy": true}`` (another prepare holds the lock, nothing was checked) or ``{"ready": false, "failed": {...}}``, and
+the next prepare tries what failed again. Answers are one JSON object on stdout; failures are ``{"error": "..."}`` with
 exit code 1.
 """
 from __future__ import annotations
 
+import ast
 import contextlib
+import hashlib
 import importlib
 import io
 import json
 import math
 import os
 import sys
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +48,14 @@ from . import data
 from .families import FAMILIES, Family, discover, normalize_spec, register_family
 
 _PARAM_TYPES = {"int": "int", "float": "number", "bool": "boolean", "choice": "choice"}
-LOCK_STALE_S = 3 * 3600
+# A running prepare touches its lock every minute, however long it takes (python.ts allows it hours), so the lock only
+# goes stale when that process died: a few missed beats are enough.
+LOCK_BEAT_S = 60
+LOCK_STALE_S = 15 * 60
+REFETCH_BARS = 2          # newest stored bars fetched again on every update, see data.update_market
+STALE_GRACE_MS = 5 * data.MINUTE
+TARGETS_BUDGET_S = 60     # ``targets`` stops fetching after this: python.ts kills it at 120 s, and a hold beats a kill
+CORE_MARKETS = ("BTC-EUR", "ETH-EUR")   # never excused as delisted, see _stale
 
 
 def _family(name: str) -> Family:
@@ -88,13 +106,63 @@ def catalog() -> dict:
             summary = ""
         space = fam.param_space()
         out.append({"family": fam.name, "title": fam.title, "summary": summary, "version": fam.version,
-                    "multiMarket": fam.multi_market, "anchored": fam.anchored,
+                    "codeHash": code_hash(fam), "multiMarket": fam.multi_market, "anchored": fam.anchored,
                     "params": [param_info(k, d, defaults.get(k)) for k, d in space.items()],
                     # knobs outside the search space that hold a JSON object, e.g. the lead a wrapper runs
                     # ("inner" of mtf_guard_a24/step_wrap_a24/floor_wrap_a07); the lab checks them in describe
                     "objectParams": [{"name": k, "default": v} for k, v in defaults.items()
                                      if k not in space and isinstance(v, dict)]})
     return {"families": out, "errors": dict(DISCOVERY_ERRORS)}
+
+
+# ------------------------------------------------------------------------------------------------- code hash
+#
+# A family's decisions can change without a VERSION bump when its code or a module it imports changes; ``codeHash`` in
+# the catalog lets the bot notice. It hashes source text (line endings normalised), so every machine gets the same
+# answer. Wrappers run a family named in their params through ``get_family``: that one is not part of the wrapper's
+# hash, see codeHashOf in python.ts.
+
+_LAB_ROOT = Path(__file__).resolve().parent
+_ALWAYS_HASHED = ("data.py", "indicators.py", "families/_base.py", "families/_ta.py")
+_module_imports: dict[Path, list[Path]] = {}
+
+
+def _imports(path: Path) -> list[Path]:
+    """The lab source files ``path`` imports directly."""
+    hit = _module_imports.get(path)
+    if hit is not None:
+        return hit
+    found: list[Path] = []
+    for node in ast.walk(ast.parse(path.read_bytes())):
+        if not isinstance(node, ast.ImportFrom) or node.level < 1:
+            continue
+        base = path.parents[node.level - 1]
+        if node.module:
+            found.append(base.joinpath(*node.module.split(".")).with_suffix(".py"))
+        else:
+            found += [base / f"{a.name}.py" for a in node.names]
+    found = sorted({f for f in found if f.is_file() and f.is_relative_to(_LAB_ROOT)})
+    _module_imports[path] = found
+    return found
+
+
+def code_hash(fam: Family) -> str:
+    """sha256 over the family's file, all it imports from the lab (recursively) and the shared modules."""
+    todo = [p for p in (_LAB_ROOT / n for n in _ALWAYS_HASHED) if p.is_file()]
+    if getattr(fam.module, "__file__", None):
+        todo.append(Path(fam.module.__file__).resolve())
+    seen: set[Path] = set()
+    while todo:
+        f = todo.pop()
+        if f not in seen:
+            seen.add(f)
+            if f.is_relative_to(_LAB_ROOT):
+                todo += _imports(f)
+    h = hashlib.sha256()
+    for f in sorted(seen, key=lambda p: p.as_posix()):
+        name = f.relative_to(_LAB_ROOT).as_posix() if f.is_relative_to(_LAB_ROOT) else f.name
+        h.update(name.encode() + b"\0" + f.read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    return h.hexdigest()
 
 
 def _spec(raw: dict) -> tuple[Family, dict]:
@@ -127,7 +195,8 @@ def _since(interval: str, now: int) -> int | None:
 
 
 def _ready_path() -> Path:
-    return data.DATA_DIR / "live_ready.json"
+    # v2: the first file also listed markets whose download had failed, so everything is checked once more
+    return data.DATA_DIR / "live_ready_v2.json"
 
 
 def _ready() -> set[str]:
@@ -149,18 +218,58 @@ def _keys(fam: Family, spec: dict) -> list[str]:
     return [f"{m} {spec['interval']}" for m in fam.markets_needed(spec)]
 
 
+def _warm_key(fam: Family, spec: dict) -> str:
+    """Ready key of "the family ran once and got all it reads": per spec and per code, as either can read more."""
+    what = {k: spec.get(k) for k in ("markets", "interval", "params", "universe")}
+    digest = hashlib.sha256(json.dumps(what, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    return f"reads {fam.name} {digest} {code_hash(fam)[:16]}"
+
+
 _client: data.BitvavoClient | None = None
+_deadline: float | None = None  # time.monotonic() after which no more candles are fetched (only during ``targets``)
 
 
-def _update(market: str, interval: str) -> None:
-    """Fetches what is missing of one market+interval; an unlisted market just has no candles (as in the lab)."""
+@dataclass
+class Read:
+    """How updating one market+interval went: ``failed`` is the error, ``unlisted`` means Bitvavo has no such market."""
+    failed: str | None = None
+    unlisted: bool = False
+
+
+class _OnDeadline:
+    """The candle source of an update: stops mid-download at the deadline (partial saves stay on disk)."""
+
+    def __init__(self, source: Any):
+        self.source = source
+
+    def get_candles(self, market: str, interval: str, start: int, end: int, limit: int) -> list[list[Any]]:
+        if _deadline is not None and time.monotonic() > _deadline:
+            raise TimeoutError("out of time for this decision")
+        return self.source.get_candles(market, interval, start, end, limit)
+
+
+def _patience(quick: bool) -> None:
+    """``prepare`` may sit out an outage; ``targets`` has to answer within a minute or two, retries included."""
+    global _client
+    _client = _client or data.BitvavoClient()
+    if isinstance(_client, data.BitvavoClient):
+        _client.max_retries, _client.timeout, _client.max_sleep = (1, 15.0, 5.0) if quick else (8, 30.0, 120.0)
+
+
+def _update(market: str, interval: str) -> Read:
+    """Fetches what is missing of one market+interval. An unlisted market has no candles, as in the lab."""
     global _client
     _client = _client or data.BitvavoClient()
     now = data.now_ms()
     try:
-        data.update_market(_client, market, interval, since=_since(interval, now), now=now, progress=lambda *_: None)
-    except Exception as e:  # noqa: BLE001
+        data.update_market(_OnDeadline(_client), market, interval, since=_since(interval, now), now=now,
+                           progress=lambda *_: None, refetch=REFETCH_BARS)
+    except data.NotListed:
+        return Read(unlisted=True)
+    except Exception as e:  # noqa: BLE001 - the caller decides what a failure means
         print(f"live data: {market} {interval}: {type(e).__name__}: {e}", file=sys.stderr)
+        return Read(failed=f"{type(e).__name__}: {e}")
+    return Read()
 
 
 @contextlib.contextmanager
@@ -174,12 +283,80 @@ def _prepare_lock():
     except FileExistsError:
         yield False
         return
+    finished = threading.Event()
+
+    def beat() -> None:
+        while not finished.wait(LOCK_BEAT_S):
+            with contextlib.suppress(OSError):
+                os.utime(p)
+
+    threading.Thread(target=beat, daemon=True).start()
     try:
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)
         yield True
     finally:
+        finished.set()
         p.unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def use_live_data():
+    """Inside it, candles read from disk are brought up to date once before they are read, whoever reads them.
+    Yields ``{(market, interval): Read}`` of everything read so far."""
+    original = data.candle_path
+    reads: dict[tuple[str, str], Read] = {}
+    busy = False
+
+    def candle_path(market: str, interval: str):
+        nonlocal busy
+        if not busy and (market, interval) not in reads:
+            busy = True
+            try:
+                reads[(market, interval)] = _update(market, interval)
+            finally:
+                busy = False
+        return original(market, interval)
+
+    data.candle_path = candle_path
+    try:
+        yield reads
+    finally:
+        data.candle_path = original
+
+
+def _load(fam: Family, spec: dict, end: int) -> dict:
+    candles = {}
+    for key in _keys(fam, spec):
+        m = key.split(" ")[0]
+        try:
+            candles[m] = data.load_candles(m, spec["interval"], end=end)
+        except FileNotFoundError:
+            candles[m] = data.empty_frame()
+    return candles
+
+
+def _no_candles(spec: dict, candles: dict) -> bool:
+    return all(candles[m].empty for m in spec["markets"])
+
+
+def _run(fam: Family, spec: dict, candles: dict, start: int | None):
+    return fam.targets(candles, spec, start_time=int(start)) if start is not None else fam.targets(candles, spec)
+
+
+def _warm(fam: Family, spec: dict) -> str | None:
+    """Runs the family once so that everything it reads downloads here, with no time pressure. Returns its error."""
+    step = data.INTERVAL_MS[spec["interval"]]
+    origin = data.WEEK_ORIGIN_MS if spec["interval"] == "1W" else 0
+    end = (data.now_ms() - origin) // step * step + origin
+    candles = _load(fam, spec, end)
+    if _no_candles(spec, candles):
+        return None
+    try:
+        _run(fam, spec, candles, end - step if fam.anchored else None)
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+    return None
 
 
 def prepare(raw: dict) -> dict:
@@ -187,67 +364,103 @@ def prepare(raw: dict) -> dict:
     with _prepare_lock() as mine:
         if not mine:
             return {"busy": True}
+        _patience(quick=False)
         done = _ready()
-        for key in _keys(fam, spec):
-            if key not in done:
-                m, iv = key.split(" ")
-                _update(m, iv)
-                _mark_ready({key})
-    return {"ready": True}
+        failed: dict[str, str] = {}
+        with use_live_data() as reads:
+            for key in _keys(fam, spec):
+                if key not in done:
+                    m, iv = key.split(" ")
+                    data.candle_path(m, iv)
+                    if reads[(m, iv)].failed:
+                        failed[key] = str(reads[(m, iv)].failed)
+                    else:
+                        _mark_ready({key})
+            warm = _warm_key(fam, spec)
+            if not failed and warm not in done:
+                err = _warm(fam, spec)
+                if err:
+                    failed[fam.name] = err
+                failed |= {f"{m} {iv}": str(r.failed) for (m, iv), r in reads.items() if r.failed}
+                if not failed:
+                    _mark_ready({warm})
+    return {"ready": False, "failed": failed} if failed else {"ready": True}
 
 
-def use_live_data() -> None:
-    """Candles a family reads from disk itself are brought up to date once per process before they are read."""
-    original = data.candle_path
-    fresh: set[tuple[str, str]] = set()
-    busy = False
+def _stale(reads: dict, spec: dict, end: int) -> str | None:
+    """Why the candles read are too old to decide at ``end``, if they are: the newest closed more than one bar + 5 min
+    before it. One missing bar is allowed: Bitvavo omits bars without trades (the engine retries those itself).
 
-    def candle_path(market: str, interval: str):
-        nonlocal busy
-        if not busy and (market, interval) not in fresh:
-            fresh.add((market, interval))
-            busy = True
-            try:
-                _update(market, interval)
-            finally:
-                busy = False
-        return original(market, interval)
-
-    data.candle_path = candle_path
+    The markets the bot trades and BTC and ETH are held to that strictly, an exchange outage shows up there. Other
+    coins only count when their update failed: after a good update the file is what the lab would have, and thin coins
+    go quiet all the time (XTZ-EUR had 723 silences of 2+ hours in the last year, a hold in 1 of every 10 hours).
+    A coin with no candles at all is no reason either: ``prepare`` got all it could, so it is not listed, and the family
+    reads and tolerates that as in the lab. Nor is a delisted or halted coin of a pool, whose file simply ends, in the
+    lab too: Bitvavo answers error 205 for a delisted market, and a failed one is looked up in /markets (it holds only
+    if it still trades or that cannot be checked), so that it cannot hold the bot forever."""
+    core = {*CORE_MARKETS, *spec["markets"]}
+    suspects: dict[str, str] = {}
+    for (market, interval), r in sorted(reads.items()):
+        df = data.read_frame(data.candle_path(market, interval))
+        if df is None or df.empty:
+            continue
+        step = data.INTERVAL_MS[interval]
+        age = end - (int(df.index[-1]) + step)
+        if age <= step + STALE_GRACE_MS:
+            continue
+        why = f"{market} {interval} candles are {age / data.HOUR:.1f} h old" + (f" ({r.failed})" if r.failed else "")
+        if market in core:
+            return why
+        if r.failed:
+            suspects.setdefault(market, why)
+    if not suspects:
+        return None
+    try:
+        status = {m["market"]: m.get("status") for m in _client.markets()}
+    except Exception as e:  # noqa: BLE001
+        return f"{next(iter(suspects.values()))}, and the market list is unavailable ({type(e).__name__}: {e})"
+    return next((why for m, why in suspects.items() if status.get(m) == "trading"), None)
 
 
 def targets(raw: dict) -> dict:
+    global _deadline
     fam, spec = _spec(raw["spec"])
     err = fam.validate(spec)
     if err:
         raise ValueError(err)
-    keys = _keys(fam, spec)
     done = _ready()
-    warming = [k for k in keys if k not in done]
+    warm = _warm_key(fam, spec)
+    warming = [k for k in _keys(fam, spec) if k not in done] or ([warm] if warm not in done else [])
     if warming:
         return {"warming": warming}
-    interval = spec["interval"]
-    bar = int(raw["bar"])
-    end = bar + data.INTERVAL_MS[interval]  # the bot's bar is the newest one decided on, even if another closed since
-    candles = {}
-    for key in keys:
-        m = key.split(" ")[0]
-        _update(m, interval)
-        try:
-            candles[m] = data.load_candles(m, interval, end=end)
-        except FileNotFoundError:
-            candles[m] = data.empty_frame()
-    use_live_data()
+    # the bot's bar is the newest one decided on, even if another closed since
+    end = int(raw["bar"]) + data.INTERVAL_MS[spec["interval"]]
     start = raw.get("startTime")
-    t = fam.targets(candles, spec, start_time=int(start)) if start is not None else fam.targets(candles, spec)
-    if t is None or len(t) == 0:
-        return {"t": None, "weights": {m: 0.0 for m in spec["markets"]}}
+    _patience(quick=True)
+    _deadline = time.monotonic() + TARGETS_BUDGET_S
+    try:
+        with use_live_data() as reads:
+            candles = _load(fam, spec, end)
+            if _no_candles(spec, candles):
+                why = next((f" ({r.failed})" for r in reads.values() if r.failed), "")
+                return {"hold": f"no candles for {', '.join(spec['markets'])}{why}", "t": None}
+            t = _run(fam, spec, candles, start)
+    finally:
+        _deadline = None
+    last = int(t.index[-1]) if t is not None and len(t) else None
+    stale = _stale(reads, spec, end)
+    if stale:
+        return {"hold": stale, "t": last}
+    if last is None:
+        return {"hold": f"{fam.name} gave no targets", "t": None}
     row = t.iloc[-1]
+    if row.isna().all():
+        return {"hold": f"{fam.name} has no decision at this bar", "t": last}  # no decision = keep, see clean_weights
     w = {}
     for m in spec["markets"]:
         v = float(row[m]) if m in t.columns else 0.0
-        w[m] = v if math.isfinite(v) and v > 0 else 0.0  # NaN = no decision yet = out (SPEC §3)
-    return {"t": int(t.index[-1]), "weights": w}
+        w[m] = v if math.isfinite(v) and v > 0 else 0.0  # NaN beside real weights = out (SPEC §3)
+    return {"t": last, "weights": w}
 
 
 def main(argv: list[str]) -> int:
