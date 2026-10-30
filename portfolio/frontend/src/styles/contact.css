@@ -1,44 +1,114 @@
-/* Contact: night, by the lamp. */
+/* Contact: night, by the lamp. A dark panel whatever the site theme; the footer continues it. */
 
 .contact {
+  position: relative;
+  isolation: isolate;
+  overflow-x: clip;
+  padding: clamp(64px, 8vw, 112px) 0 clamp(72px, 9vw, 128px);
+}
+
+/* the lamp, a soft pool behind the invitation; no taller than the section's padding allows, so it never reaches the footer */
+.contact__invite {
+  position: relative;
+}
+
+.contact__invite::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -64px -18%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--warm-soft) 50%, transparent) 15%,
+    color-mix(in srgb, var(--warm-soft) 26%, transparent) 58%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* the painted room (src/art/contact-night.webp), when it exists */
+.contact::after {
+  content: '';
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background: var(--contact-art, none) left center / cover no-repeat;
+  opacity: 0.42;
+  -webkit-mask-image: linear-gradient(to right, #000 25%, transparent 75%), linear-gradient(to bottom, transparent, #000 20%, #000 80%, transparent);
+  mask-image: linear-gradient(to right, #000 25%, transparent 75%), linear-gradient(to bottom, transparent, #000 20%, #000 80%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  pointer-events: none;
+}
+
+.contact__grid {
   display: grid;
-  gap: clamp(40px, 7vw, 120px);
+  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  gap: clamp(48px, 8vw, 128px);
   align-items: start;
 }
 
-.contact--with-form {
-  grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+.contact__invite .section__head {
+  margin-bottom: 28px;
 }
 
 .contact__list {
   list-style: none;
-  margin: 36px 0 0;
+  margin: 32px 0 36px;
   padding: 0;
   display: grid;
-  gap: 28px;
+  gap: 8px;
 }
 
 .contact__list li {
   display: grid;
-  gap: 10px;
+  gap: 2px;
+}
+
+.contact__label {
+  font-size: 0.875rem;
+  color: var(--ink-2);
 }
 
 .contact__big {
   justify-self: start;
   font-family: var(--serif);
-  font-size: clamp(1.5rem, 3vw, 2.3rem);
+  font-size: clamp(1.45rem, 2.5vw, 2rem);
   font-variation-settings: 'opsz' 36;
-  line-height: 1.2;
-  text-decoration: none;
+  line-height: 1.25;
+  /* a 44px tap target; an underline rather than a border, so it stays with the text */
+  padding-block: 8px;
+  text-decoration: underline 1px var(--line);
+  text-underline-offset: 0.22em;
   color: var(--ink);
-  border-bottom: 1px solid var(--line-2);
-  transition: color 0.3s, border-color 0.3s;
+  transition: color 0.3s, text-decoration-color 0.3s;
   overflow-wrap: anywhere;
 }
 
 .contact__big:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--warm);
+  text-decoration-color: var(--warm);
+}
+
+/* the résumé stays secondary here: the one lit button in this panel is Send */
+.btn--quiet {
+  border-color: var(--line-2);
+}
+
+.btn--quiet:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--warm);
+  color: var(--warm);
+}
+
+.form__title {
+  margin-bottom: clamp(20px, 2.4vw, 28px);
+  font-family: var(--serif);
+  font-size: clamp(1.5rem, 2.4vw, 1.9rem);
+  font-style: italic;
+  font-weight: 300;
+  line-height: 1.2;
+  color: var(--ink);
 }
 
 .form {
@@ -47,16 +117,13 @@
 
 .field {
   display: grid;
-  gap: 8px;
-  margin-bottom: 24px;
+  gap: 2px;
+  margin-bottom: 20px;
 }
 
 .field label {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
+  font-size: 0.9rem;
+  color: var(--ink-2);
 }
 
 .field input,
@@ -67,15 +134,27 @@
   border: 0;
   border-bottom: 1px solid var(--line-2);
   border-radius: 0;
-  padding: 10px 0;
+  padding: 8px 0 9px;
   outline: none;
   resize: vertical;
-  transition: border-color 0.3s;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.field input:hover,
+.field textarea:hover {
+  border-color: var(--ink-3);
 }
 
 .field input:focus,
 .field textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--warm);
+  box-shadow: 0 1px 0 var(--warm);
+}
+
+/* only after a first try, so an empty form never starts out in the wrong */
+.form--checked :invalid {
+  border-color: var(--bad);
+  box-shadow: 0 1px 0 var(--bad);
 }
 
 .field--trap {
@@ -89,21 +168,25 @@
 .form__actions {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 14px 20px;
   flex-wrap: wrap;
   margin-top: 8px;
 }
 
-.form__error {
+.form__note {
+  flex-basis: 100%;
   margin: 0;
-  color: var(--bad);
   font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.form__note--error {
+  color: var(--bad);
 }
 
 .form__done {
-  padding: 28px 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
   color: var(--ink-2);
 }
 
@@ -111,15 +194,33 @@
   margin: 0;
 }
 
-.form__done .form__done-title {
-  font-family: var(--serif);
-  font-size: 1.8rem;
-  color: var(--ink);
-  margin-bottom: 6px;
+.form__done .form__title {
+  margin-bottom: 10px;
+  color: var(--warm);
+}
+
+@supports (animation-timeline: view()) {
+  /* the lamp comes up as the panel arrives */
+  .contact__invite::before {
+    animation: lamp-up linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 45%;
+  }
+
+  @keyframes lamp-up {
+    from {
+      opacity: 0.25;
+      scale: 0.72;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+    }
+  }
 }
 
 @media (max-width: 960px) {
-  .contact--with-form {
+  .contact__grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

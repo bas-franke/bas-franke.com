@@ -1,0 +1,204 @@
+/* The day passing behind the page: the ground, and the sun that crosses the top edge.
+   The ground is pre-painted fixed layers whose opacity follows the scroll, so it never repaints. Each layer is tied to
+   the part of the page where its hour starts, whatever the height of the screen. Without scroll-driven animations the
+   layers stay out of sight and the page is plain paper. The last step into the night is not here: it is part of the
+   page itself, in the fireside interlude, so the text there always knows what it stands on. */
+
+.day {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 100lvh;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.day__light {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+.day__light--dawn {
+  background: linear-gradient(to bottom, var(--dawn-1), var(--dawn-2) 45%, var(--paper));
+}
+
+.day__light--afternoon {
+  background: linear-gradient(to bottom, var(--afternoon-1), var(--afternoon-2));
+}
+
+.day__light--dusk {
+  background: linear-gradient(to bottom, var(--dusk-1), var(--dusk-2));
+}
+
+/* A hairline arc along the top edge, low at both ends so it clears the nav. Rather than a motion path the sun is moved by
+   two translates, one per axis, because those stay on the compositor. It runs between the edges of the content. */
+.sunpath {
+  display: none;
+  position: fixed;
+  inset: 0 max(var(--gutter), calc((100% - var(--max)) / 2 + var(--gutter))) auto;
+  --arc: 16px;
+  height: var(--arc);
+  z-index: 60;
+  pointer-events: none;
+}
+
+.sunpath__arc {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+
+.sunpath__x {
+  position: absolute;
+  inset: 0;
+}
+
+.sunpath__y {
+  position: absolute;
+  inset: 0 auto auto 0;
+}
+
+.sunpath__sun,
+.sunpath__moon {
+  position: absolute;
+  inset: -5px auto auto -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.sunpath__sun {
+  background: var(--sun);
+  box-shadow: 0 0 0 4px var(--warm-soft);
+}
+
+/* a crescent: all that shows of the disc is its inset shadow */
+.sunpath__moon {
+  box-shadow: inset -3px -1px 0 0 var(--accent);
+  opacity: 0;
+}
+
+@supports (animation-timeline: view()) {
+  html {
+    timeline-scope: --day-about, --day-evening, --day-skills, --arch;
+  }
+
+  #about {
+    view-timeline: --day-about;
+  }
+
+  .interlude--split {
+    view-timeline: --day-evening;
+  }
+
+  #skills {
+    view-timeline: --day-skills;
+  }
+
+  .day__light {
+    will-change: opacity;
+    animation: day-in linear both;
+  }
+
+  @keyframes day-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .day__light--dawn {
+    animation-name: day-out;
+    animation-timeline: --day-about;
+    animation-range: entry 0% cover 45%;
+  }
+
+  @keyframes day-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  .day__light--afternoon {
+    animation-timeline: --day-evening;
+    animation-range: cover 0% cover 70%;
+  }
+
+  .day__light--dusk {
+    animation-timeline: --day-skills;
+    animation-range: cover 35% cover 100%;
+  }
+
+  .sunpath {
+    display: block;
+  }
+
+  .sunpath__x {
+    animation: sun-across linear both;
+    animation-timeline: scroll(root);
+  }
+
+  @keyframes sun-across {
+    from {
+      translate: 0 0;
+    }
+    to {
+      translate: 100% 0;
+    }
+  }
+
+  /* these two easings are exact quadratics, so the sun stays on the drawn curve */
+  .sunpath__y {
+    animation: sun-arc linear both;
+    animation-timeline: scroll(root);
+  }
+
+  @keyframes sun-arc {
+    0% {
+      translate: 0 calc(var(--arc) * 0.75);
+      animation-timing-function: cubic-bezier(0.333, 0.667, 0.667, 1);
+    }
+    50% {
+      translate: 0 calc(var(--arc) * 0.25);
+      animation-timing-function: cubic-bezier(0.333, 0, 0.667, 0.333);
+    }
+    100% {
+      translate: 0 calc(var(--arc) * 0.75);
+    }
+  }
+
+  .sunpath__sun {
+    animation: day-out linear both;
+    animation-timeline: --arch;
+    animation-range: entry 0% cover 40%;
+  }
+
+  .sunpath__moon {
+    animation: day-in linear both;
+    animation-timeline: --arch;
+    animation-range: cover 30% cover 50%;
+  }
+}
+
+/* flatter on phones, where the logo sits right under the start of the arc */
+@media (max-width: 640px) {
+  .sunpath {
+    --arc: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sunpath {
+    display: none;
+  }
+}

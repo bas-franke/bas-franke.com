@@ -4,24 +4,26 @@ Personal portfolio on the root domain. Vite + React frontend, Node.js + Express 
 
 ## Content, design and artwork
 
+- **Direction:** [DESIGN.md](DESIGN.md) is the brief: one day at the window, from dawn in the hero to night at Contact.
 - **Words:** everything on the page is in [frontend/src/content.ts](frontend/src/content.ts) (intro, about, projects,
   skills, contact). Edit that file; the components only decide how it looks.
-- **Look:** warm paper, soft ink, one lake-blue accent, hairlines instead of boxes, slow reveals. Colours and type live
-  at the top of [frontend/src/styles.css](frontend/src/styles.css). Light and dark mode follow the system setting
-  and can be switched with the toggle in the header.
-- **Artwork:** the hero and every project have an image slot that shows a procedural line drawing until an image
-  exists. The ChatGPT prompts, sizes and filenames are in [ART.md](ART.md); finished files go in `frontend/src/art/`.
+- **Look:** plain CSS in [frontend/src/styles/](frontend/src/styles/), one file per part of the page, imported in order
+  by `index.css`. Colours and type are tokens in [tokens.css](frontend/src/styles/tokens.css). Light and dark mode
+  follow the system setting and can be switched with the toggle in the header.
+- **Artwork:** paintings in `frontend/src/art/`; an interlude or the Contact painting without a file is left out. The
+  ChatGPT prompts, sizes and filenames are in [ART.md](ART.md).
 - **Portrait:** `frontend/src/art/profile.jpg`. Company marks for the experience rows go in `frontend/src/art/logos/<slug>.png`.
-- **Résumé:** the *Download résumé* button in the hero builds a white A4 PDF in the browser from the same
+- **Résumé:** the *Download résumé* button builds a white A4 PDF in the browser from the same
   `content.ts`: the portrait and company marks from `frontend/src/art/`, the jobs on a timeline, the skill tiers
   as chips behind a level meter (`level` in `content.ts`). The layout is [frontend/src/resume.ts](frontend/src/resume.ts),
   which only takes bytes and so also runs under Node; [frontend/src/resumeDownload.ts](frontend/src/resumeDownload.ts)
   fetches the images and triggers the download. pdf-lib is loaded only when clicked.
 
-## Contact form (optional)
+## Contact form
 
-The contact section always shows the e-mail address and phone number. The form only appears once the backend can
-send mail, which it does over SMTP using these variables in `/srv/apps/portfolio/.env`:
+The contact section always shows the e-mail address, the phone number and the form. Once the backend can send mail,
+the form sends through it. Until then the form opens the visitor's own mail app with the message filled in, so these
+variables in `/srv/apps/portfolio/.env` are optional:
 
 | Variable       | Required | Purpose                                                             |
 |----------------|----------|---------------------------------------------------------------------|
@@ -34,8 +36,8 @@ send mail, which it does over SMTP using these variables in `/srv/apps/portfolio
 | `CONTACT_FROM` | no       | Sender address; defaults to `SMTP_USER`                             |
 
 After editing `.env`: `pm2 restart portfolio --update-env`. `GET /api/health` reports `"mail": "configured"` when
-all three required variables are set, and `GET /api/contact` returns `{ "enabled": true }`, which makes the form appear.
-Messages are rate-limited to 5 per IP per hour and a hidden honeypot field drops most bots.
+all three required variables are set, and `GET /api/contact` returns `{ "enabled": true }`, which makes the form send
+directly. Messages are rate-limited to 5 per IP per hour and a hidden honeypot field drops most bots.
 
 ## Run locally
 
@@ -102,7 +104,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ### First deploy
 
 GitHub → **Actions → Deploy portfolio → Run workflow** (or push a change under `portfolio/` to `master`).
-Then open <https://bas-franke.com>; the footer shows **API online** when the backend is reachable.
+Then open <https://bas-franke.com>; <https://bas-franke.com/api/health> answers when the backend is reachable.
 
 ## Troubleshooting
 
@@ -110,7 +112,7 @@ Then open <https://bas-franke.com>; the footer shows **API online** when the bac
 |--------------------------------------|--------------------------------------------------------------|
 | Workflow fails at "Configure SSH"    | `EC2_HOST` secret, security group allows port 22            |
 | Workflow fails at "Upload files"     | Deploy public key is in `~/.ssh/authorized_keys` on EC2      |
-| Site shows 502 / API offline         | `pm2 status`, `pm2 logs portfolio`                           |
+| Site or `/api/health` shows 502      | `pm2 status`, `pm2 logs portfolio`                           |
 | Browser certificate error            | `sudo certbot certificates`, Nginx site is enabled          |
 | `nginx -t` fails on cert path        | Run step 2 (certbot) before enabling the site                |
 

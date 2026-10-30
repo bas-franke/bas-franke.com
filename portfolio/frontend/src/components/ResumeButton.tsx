@@ -3,9 +3,15 @@ import { useState } from 'react';
 type State = 'idle' | 'busy' | 'failed';
 
 interface Props {
-  /** 'primary' is the big hero button, 'nav' the small pill in the header. */
-  variant?: 'primary' | 'nav';
+  /** 'primary' is the big hero button, 'nav' the small pill in the header, 'quiet' the outlined one beside a primary action. */
+  variant?: 'primary' | 'nav' | 'quiet';
 }
+
+const classNames = {
+  primary: 'btn btn--primary',
+  nav: 'btn btn--small btn--nav',
+  quiet: 'btn btn--quiet',
+};
 
 /** Builds the PDF résumé on demand; the PDF code and pdf-lib only load when clicked. */
 export default function ResumeButton({ variant = 'primary' }: Props) {
@@ -25,12 +31,11 @@ export default function ResumeButton({ variant = 'primary' }: Props) {
 
   const idle = variant === 'nav' ? 'Résumé' : 'Download résumé';
   const label = state === 'busy' ? 'Preparing…' : state === 'failed' ? 'Try again' : idle;
-  const className = variant === 'nav' ? 'btn btn--small btn--nav' : 'btn btn--primary';
 
   return (
     <button
       type="button"
-      className={className}
+      className={classNames[variant]}
       onClick={onClick}
       disabled={state === 'busy'}
       aria-live="polite"

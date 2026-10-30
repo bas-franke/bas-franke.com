@@ -1,126 +1,228 @@
-/* Hero: dawn. */
+/* Hero: dawn. The text keeps the page's left edge; the window leans past the container on the right. */
 
 .hero {
+  /* the painting's own average colour, shown until it has loaded */
+  --art-hero: #c99d7b;
+  /* the window takes what the height allows, so the first screen is full at every size without crowding */
+  --window-w: min(38vw, calc((100svh - var(--nav-h) - 88px) * 0.8), 672px);
   position: relative;
   isolation: isolate;
   min-height: 100svh;
   display: grid;
   align-items: center;
   padding-top: var(--nav-h);
-  padding-bottom: 112px;
-  overflow: hidden;
-}
-
-/* a slow, soft patch of light drifting behind the hero */
-.hero::before {
-  content: '';
-  position: absolute;
-  top: -10%;
-  right: -10%;
-  width: 70vw;
-  height: 80vh;
-  background:
-    radial-gradient(closest-side at 40% 45%, var(--warm-soft), transparent 75%),
-    radial-gradient(closest-side at 70% 60%, var(--accent-soft), transparent 80%);
-  filter: blur(40px);
-  animation: drift 32s ease-in-out infinite alternate;
-  pointer-events: none;
-  z-index: -1;
-}
-
-@keyframes drift {
-  from {
-    transform: translate3d(-6%, -2%, 0) scale(1);
-  }
-  to {
-    transform: translate3d(6%, 6%, 0) scale(1.08);
-  }
+  padding-bottom: 24px;
+  overflow-x: clip;
 }
 
 .hero__inner {
+  max-width: none;
+  /* same left edge as a centred .container */
+  padding-left: max(var(--gutter), calc((100% - var(--max)) / 2 + var(--gutter)));
+  padding-right: clamp(20px, 3vw, 48px);
   display: grid;
-  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  gap: clamp(32px, 6vw, 96px);
+  grid-template-columns: minmax(0, 42rem) var(--window-w);
+  gap: clamp(40px, 5vw, 80px);
   align-items: center;
+}
+
+/* h1 sizes itself to this column so its two lines always fit */
+.hero__text {
+  container-type: inline-size;
+}
+
+.hero .eyebrow {
+  font-size: 0.95rem;
+  color: var(--ink-2);
 }
 
 .hero__actions {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 14px 28px;
   flex-wrap: wrap;
   margin-top: 8px;
 }
 
-.hero__art {
+/* Page load: the words arrive first and quickly, then the window, then its light. */
+.hero__text > * {
+  animation: hero-rise 460ms var(--ease) var(--d, 0ms) both;
+}
+
+.hero__text > :nth-child(2) {
+  --d: 50ms;
+}
+
+.hero__text > :nth-child(3) {
+  --d: 100ms;
+}
+
+.hero__text > :nth-child(4) {
+  --d: 150ms;
+}
+
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+  }
+}
+
+.hero__window {
+  position: relative;
+}
+
+/* warm light from the window, on the paper around it */
+.hero__window::before {
+  content: '';
+  position: absolute;
+  inset: -16% -12% -18% -38%;
+  z-index: -1;
+  background: radial-gradient(56% 54% at 62% 50%, var(--warm-soft), transparent);
+  animation: hero-light 1.8s var(--ease) both;
+  pointer-events: none;
+}
+
+/* and the patch it throws across the floor */
+.hero__window::after {
+  content: '';
+  position: absolute;
+  right: 14%;
+  bottom: -9%;
+  width: 96%;
+  height: 12%;
+  z-index: -1;
+  background: linear-gradient(to left, transparent, var(--warm-soft) 45%, transparent);
+  transform: skewX(44deg);
+  filter: blur(22px);
+  animation: hero-light 1.8s var(--ease) 0.3s both;
+  pointer-events: none;
+}
+
+@keyframes hero-light {
+  from {
+    opacity: 0;
+  }
+}
+
+.hero__pane {
   position: relative;
   aspect-ratio: 4 / 5;
-  max-height: 72vh;
-  justify-self: end;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--paper-2);
   overflow: hidden;
-  box-shadow: 0 30px 60px -40px rgba(80, 50, 20, 0.35);
+  isolation: isolate;
+  border-radius: 50% 50% calc(var(--radius) * 2) calc(var(--radius) * 2) / 40% 40% calc(var(--radius) * 2) calc(var(--radius) * 2);
+  box-shadow: 0 36px 70px -44px color-mix(in srgb, var(--warm) 60%, transparent);
+  animation: hero-window 800ms var(--ease) 80ms both;
 }
 
-.scroll-cue {
-  position: absolute;
-  left: 50%;
-  bottom: 22px;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-  text-decoration: none;
-  transition: color 0.3s;
-}
-
-.scroll-cue:hover {
-  color: var(--ink);
-}
-
-.scroll-cue__track {
-  position: relative;
-  width: 1px;
-  height: 72px;
-  background: var(--line-2);
-}
-
-.scroll-cue__dot {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: 8px;
-  height: 8px;
-  margin-left: -4px;
-  border-radius: 50%;
-  background: var(--ink);
-  animation: cue-drop 2.8s var(--ease) infinite;
-}
-
-@keyframes cue-drop {
-  0% {
-    transform: translateY(-4px);
+@keyframes hero-window {
+  from {
     opacity: 0;
+    transform: scale(0.985);
   }
-  15% {
-    opacity: 1;
+}
+
+.hero__scene {
+  --vapor: var(--paper);
+  --glint: var(--paper);
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  background: var(--art-hero);
+  /* only the sky melts into the paper; the sill below is a plain, solid picture */
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%);
+  mask-image: linear-gradient(to bottom, transparent, #000 12%);
+}
+
+:root[data-theme='dark'] .hero {
+  --art-hero: #44302e;
+}
+
+:root[data-theme='dark'] .hero__scene {
+  --vapor: var(--ink);
+  --glint: var(--warm);
+}
+
+.hero__scene img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* the night sits on top of the day, so the crossfade never dips through to the paper */
+.hero__night {
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+
+:root[data-theme='dark'] .hero__night {
+  opacity: 1;
+}
+
+/* Living painting. Both rest at opacity 0, so without motion the painted steam and water are left alone. */
+.steam {
+  position: absolute;
+  left: 30%;
+  top: 53.3%;
+  width: 13.3%;
+  height: 13.7%;
+  overflow: visible;
+  opacity: 0;
+  filter: blur(4px);
+  transform-origin: 40% 100%;
+  will-change: transform, opacity;
+  animation: steam-rise 8s ease-in-out infinite;
+}
+
+.steam + .steam {
+  animation-delay: -4.5s;
+}
+
+.steam path {
+  fill: none;
+  stroke: var(--vapor);
+  stroke-width: 11;
+  stroke-linecap: round;
+}
+
+@keyframes steam-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(12%) scaleX(0.9) skewX(3deg);
   }
-  75% {
-    opacity: 1;
+  35% {
+    opacity: 0.5;
   }
   100% {
-    transform: translateY(68px);
     opacity: 0;
+    transform: translateY(-20%) translateX(7%) scaleX(1.3) skewX(-5deg);
+  }
+}
+
+/* light on the water, over the sun's and the moon's path */
+.glimmer {
+  position: absolute;
+  left: 83.2%;
+  top: 44%;
+  width: 8%;
+  height: 12.4%;
+  opacity: 0;
+  background: repeating-linear-gradient(to bottom, var(--glint) 0 2px, transparent 2px 7px);
+  -webkit-mask-image: radial-gradient(closest-side, #000 15%, transparent);
+  mask-image: radial-gradient(closest-side, #000 15%, transparent);
+  animation: glimmer 6.5s ease-in-out infinite alternate;
+}
+
+@keyframes glimmer {
+  0% {
+    opacity: 0;
+    transform: translateX(-2%);
+  }
+  100% {
+    opacity: 0.4;
+    transform: translateX(3%);
   }
 }
 
@@ -130,13 +232,14 @@
     view-timeline: --hero;
   }
 
+  /* the words stay whole until the hero is nearly half gone, so they read through most of the way out */
   .hero__text {
     animation: hero-text-out linear both;
     animation-timeline: --hero;
-    animation-range: exit 0% exit 100%;
+    animation-range: exit 45% exit 100%;
   }
 
-  .hero__art > .art {
+  .hero__scene {
     animation: hero-art-out linear both;
     animation-timeline: --hero;
     animation-range: exit 0% exit 100%;
@@ -154,78 +257,69 @@
       scale: 1.02;
     }
     to {
-      translate: 0 12%;
-      scale: 1.16;
+      translate: 0 6%;
+      scale: 1.14;
     }
   }
 }
 
 @media (max-width: 960px) {
-  .hero__inner {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .hero {
     min-height: 0;
-    padding-top: calc(var(--nav-h) + 48px);
-    padding-bottom: 96px;
+    padding-top: calc(var(--nav-h) + 40px);
+    padding-bottom: 32px;
   }
 
-  .hero__art {
+  .hero__inner {
+    padding-right: var(--gutter);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+
+  /* a plain 16:10 crop on the cup and the cat, moved inside the same scene so the steam stays on the cup */
+  .hero__pane {
     aspect-ratio: 16 / 10;
-    max-height: none;
-    justify-self: stretch;
-    margin-top: 16px;
+    border-radius: var(--radius);
   }
 
-  .scroll-cue {
-    position: static;
-    transform: none;
-    margin: 36px auto 0;
+  .hero__scene {
+    width: 112%;
+    transform: translate(-10.7%, -42.7%);
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .hero__window::before {
+    inset: -24% -8% -24% -8%;
+  }
+
+  .hero__window::after {
+    right: 18%;
+    bottom: -9%;
+    height: 14%;
   }
 }
 
 @media (max-width: 640px) {
+  .hero {
+    padding-top: calc(var(--nav-h) + 28px);
+  }
+
   .hero .eyebrow {
-    font-size: 0.64rem;
-    letter-spacing: 0.1em;
+    font-size: 0.875rem;
   }
 
   .hero .lead {
     font-size: 1.05rem;
   }
 
-  .hero {
-    padding-top: calc(var(--nav-h) + 32px);
-    padding-bottom: 64px;
-  }
-
-  /* below the text on a phone the picture is just something to scroll past */
-  .hero__art {
-    display: none;
-  }
-
-  .hero__actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-    margin-top: 14px;
-  }
-
-  .hero__actions .btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .hero__actions .link {
-    justify-self: center;
-    margin-top: 10px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .scroll-cue__dot {
-    opacity: 1;
-    transform: translateY(28px);
+  .hero .link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0;
+    border-bottom: 0;
+    text-decoration: underline 1px var(--line-2);
+    text-underline-offset: 6px;
   }
 }

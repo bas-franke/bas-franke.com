@@ -1,7 +1,5 @@
-import type { CSSProperties } from 'react';
-import Art from './Art';
 import Logo from './Logo';
-import Motif from './Motif';
+import Mark from './Mark';
 import { experience, work, type Experience } from '../content';
 
 function Arrow() {
@@ -19,59 +17,73 @@ function Arrow() {
   );
 }
 
-function Row({ item, index }: { item: Experience; index: number }) {
-  const meta = [item.period, item.location].filter(Boolean).join(' · ');
-  const body = (
-    <>
-      <span className="work__index">{String(index + 1).padStart(2, '0')}</span>
+function Job({ item }: { item: Experience }) {
+  return (
+    <div className="work__row">
+      <span className="work__mark">
+        <Logo slug={item.slug} />
+      </span>
       <div className="work__body">
-        <p className="work__kind">
-          <span className="work__num">{String(index + 1).padStart(2, '0')}</span>
-          {item.role}
-        </p>
         <h3 className="work__title">
-          <Logo slug={item.slug} />
-          <span>{item.company}</span>
-          {item.href && <Arrow />}
+          {item.href ? (
+            <a className="work__link" href={item.href} target="_blank" rel="noopener noreferrer">
+              {item.company}
+              <span className="sr-only">{work.newTab}</span>
+              <Arrow />
+            </a>
+          ) : (
+            item.company
+          )}
         </h3>
-        {meta && <p className="work__meta">{meta}</p>}
+        <p className="work__role">{item.role}</p>
+        <p className="work__meta">
+          <span>{item.period}</span>
+          {item.location && <span>{item.location}</span>}
+        </p>
         <p className="work__summary">{item.summary}</p>
-        <ul className="tags" aria-label="Skills used">
+        <ul className="work__tags" aria-label="Skills used">
           {item.tags.map((tag) => (
             <li key={tag}>{tag}</li>
           ))}
         </ul>
       </div>
-      <figure className="work__art">
-        <Art name={`work-${item.slug}`} fallback={<Motif kind={item.motif} />} />
-      </figure>
-    </>
+    </div>
   );
-
-  if (item.href) {
-    return (
-      <a className="work__row" href={item.href} target="_blank" rel="noopener noreferrer">
-        {body}
-      </a>
-    );
-  }
-  return <div className="work__row">{body}</div>;
 }
 
 export default function Work() {
+  const jobs = experience.filter((item) => item.period);
+  const others = experience.filter((item) => !item.period);
+
   return (
     <section id="work" className="section container">
       <div className="section__head" data-reveal>
-        <p className="eyebrow">02 — Experience</p>
-        <h2>{work.heading}</h2>
+        <h2>
+          {work.heading}
+          <br />
+          <em>{work.headingEm}</em>
+        </h2>
       </div>
-      <ol className="work">
-        {experience.map((item, i) => (
-          <li key={item.slug} className="work__item" data-reveal style={{ '--d': `${(i % 3) * 80}ms` } as CSSProperties}>
-            <Row item={item} index={i} />
-          </li>
-        ))}
-      </ol>
+      <div className="work">
+        {/* A hairline down the list; the half-sun of the site mark travels along it as the list scrolls by. */}
+        <div className="work__rail" aria-hidden="true">
+          <div className="work__sun">
+            <Mark size={34} />
+          </div>
+        </div>
+        <ol className="work__list">
+          {jobs.map((item) => (
+            <li key={item.slug} className={item.current ? 'work__item work__item--current' : 'work__item'} data-reveal>
+              <Job item={item} />
+            </li>
+          ))}
+        </ol>
+      </div>
+      {others.map((item) => (
+        <p key={item.slug} className="work__aside" data-reveal>
+          <strong>{item.company}</strong> · {item.role}. {item.summary}
+        </p>
+      ))}
     </section>
   );
 }

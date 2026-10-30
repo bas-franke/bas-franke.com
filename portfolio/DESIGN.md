@@ -31,8 +31,8 @@ page should feel like walking through it, not like a template with pictures drop
 
 - **Colour:** paper, ink, lamplight (`--warm`) and lake blue (`--accent`), all as tokens. The accent colours come from
   the paintings, so new colours are sampled from them too. No pure white, no pure black.
-- **Type:** Newsreader for anything with a voice, Geist for reading. Geist Mono only for tiny labels, because a lot of
-  uppercase mono reads as a developer template rather than a warm room.
+- **Type:** Newsreader for anything with a voice, Geist for reading. No mono and no uppercase labels: they read as a
+  developer template rather than a warm room.
 - **Pictures:** every picture belongs to the same painted world. Soft corners, soft warm shadows, no hard borders.
 - **Layout:** one consistent left edge shared by nav, hero and sections.
 

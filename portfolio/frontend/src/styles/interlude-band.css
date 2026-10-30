@@ -1,0 +1,104 @@
+/* band: a full-width picture between sections. It fades into the paper at the top and bottom, so it reads as part of
+   the page rather than a box on it. Without a picture for this hour the line stands alone (`--bare`). */
+
+.interlude--band {
+  --fade: linear-gradient(to bottom, transparent 7%, #000 22%, #000 58%, transparent 86%);
+  height: clamp(420px, 78vh, 820px);
+  display: flex;
+  align-items: flex-end;
+  overflow: clip;
+}
+
+.interlude--band .interlude__img {
+  position: absolute;
+  inset: -8% 0;
+  z-index: -1;
+  width: 100%;
+  height: 116%;
+  object-fit: cover;
+  background: var(--art-morning);
+  -webkit-mask-image: var(--fade);
+  mask-image: var(--fade);
+}
+
+/* a soft pool of paper behind the line, so it stays readable on any picture */
+.interlude--band::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 62%;
+  z-index: -1;
+  background: radial-gradient(
+    ellipse 64% 84% at 14% 100%,
+    color-mix(in srgb, var(--paper) 94%, transparent) 30%,
+    color-mix(in srgb, var(--paper) 72%, transparent) 60%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+.interlude--band .interlude__text {
+  padding-bottom: clamp(24px, 4vw, 48px);
+}
+
+.interlude--band .interlude__voice {
+  max-width: 26ch;
+  font-size: clamp(1.6rem, 3.4vw, 2.7rem);
+  line-height: 1.2;
+}
+
+/* the line alone, larger, with the first light coming up behind it */
+.interlude--band.interlude--bare {
+  height: auto;
+}
+
+.interlude--band.interlude--bare::after {
+  inset: 0;
+  height: auto;
+  background: radial-gradient(ellipse 52% 50% at 28% 50%, var(--warm-soft), transparent);
+}
+
+.interlude--bare .interlude__text {
+  padding-block: clamp(40px, 7vw, 96px);
+}
+
+.interlude--band.interlude--bare .interlude__voice {
+  max-width: 24ch;
+  font-size: clamp(2rem, 4.8vw, 3.8rem);
+  line-height: 1.14;
+  letter-spacing: -0.015em;
+}
+
+@supports (animation-timeline: view()) {
+  .interlude--band .interlude__img {
+    animation: band-drift linear both;
+    animation-timeline: view();
+  }
+
+  @keyframes band-drift {
+    from {
+      translate: 0 -5%;
+      scale: 1.04;
+    }
+    to {
+      translate: 0 5%;
+      scale: 1.04;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .interlude--band {
+    height: clamp(360px, 70svh, 560px);
+  }
+
+  /* the line takes the full width here, so the pool does too */
+  .interlude--band::after {
+    height: 58%;
+    background: linear-gradient(
+      to top,
+      color-mix(in srgb, var(--paper) 94%, transparent) 55%,
+      transparent
+    );
+  }
+}

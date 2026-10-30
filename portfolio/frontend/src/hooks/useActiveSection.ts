@@ -1,24 +1,24 @@
 import { useEffect, useState } from 'react';
 
-/** Returns the id of the section currently in the upper part of the viewport, or null above the first one. */
+/**
+ * Returns the id of the section at the upper part of the viewport, or null above the first one. The
+ * interlude between two sections already counts as the next one, because that is what it leads to.
+ * Keep `ids` stable between renders.
+ */
 export function useActiveSection(ids: string[]): string | null {
   const [active, setActive] = useState<string | null>(null);
-  const key = ids.join(',');
 
   useEffect(() => {
-    const sections = key
-      .split(',')
+    const sections = ids
       .map((id) => document.getElementById(id))
       .filter((el): el is HTMLElement => el !== null);
     if (!sections.length) return;
 
     const update = () => {
       const marker = window.innerHeight * 0.4;
-      let current: string | null = null;
-      for (const section of sections) {
-        if (section.getBoundingClientRect().top <= marker) current = section.id;
-      }
-      setActive(current);
+      const started = sections[0].getBoundingClientRect().top <= marker;
+      const current = sections.find((section) => section.getBoundingClientRect().bottom > marker);
+      setActive(started ? (current ?? sections[sections.length - 1]).id : null);
     };
 
     update();
@@ -28,7 +28,7 @@ export function useActiveSection(ids: string[]): string | null {
       window.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
     };
-  }, [key]);
+  }, [ids]);
 
   return active;
 }

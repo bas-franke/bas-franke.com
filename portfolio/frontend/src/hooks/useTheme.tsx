@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 
-export type Theme = 'light' | 'dark';
+type Theme = 'light' | 'dark';
 
 interface ThemeApi {
   theme: Theme;
@@ -39,20 +40,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener('change', onChange);
   }, []);
 
-  const toggle = useCallback(() => {
-    setTheme((current) => {
-      const next: Theme = current === 'dark' ? 'light' : 'dark';
-      try {
-        localStorage.setItem('theme', next);
-      } catch {
-        /* private mode: the choice just does not persist */
-      }
-      return next;
-    });
-  }, []);
+  function toggle() {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem('theme', next);
+    } catch {
+      /* private mode: the choice just does not persist */
+    }
+    // the whole page crossfades as one, gradients and paintings included (see base.css)
+    if (document.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.startViewTransition(() => flushSync(() => setTheme(next)));
+    } else {
+      setTheme(next);
+    }
+  }
 
-  const api = useMemo(() => ({ theme, toggle }), [theme, toggle]);
-  return <ThemeContext.Provider value={api}>{children}</ThemeContext.Provider>;
+  return <ThemeContext.Provider value={{ theme, toggle }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): ThemeApi {

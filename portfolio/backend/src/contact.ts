@@ -5,8 +5,8 @@ import nodemailer from 'nodemailer';
  * Contact form endpoint.
  *
  * Mail is sent over SMTP when SMTP_HOST, SMTP_USER and SMTP_PASS are set in /srv/apps/portfolio/.env
- * (see README.md). Without them, GET /api/contact reports { enabled: false } and the frontend hides the
- * form, so visitors only see the plain e-mail address and nothing silently fails.
+ * (see README.md). Without them, GET /api/contact reports { enabled: false } and the frontend falls back
+ * to the visitor's own mail app, with the message filled in.
  */
 
 const env = process.env;
@@ -55,14 +55,14 @@ contactRouter.get('/', (_req, res) => {
 
 contactRouter.post('/', async (req, res) => {
   if (!mailEnabled()) {
-    res.status(503).json({ error: 'The contact form is not set up yet. Please e-mail me directly.' });
+    res.status(503).json({ error: 'The contact form is not set up yet.' });
     return;
   }
 
   const body = (req.body ?? {}) as Record<string, unknown>;
 
-  // Honeypot: the "company" field is invisible to people, so anything in it comes from a bot.
-  if (text(body.company, 10)) {
+  // Honeypot: the "leave_blank" field is invisible to people, so anything in it comes from a bot.
+  if (text(body.leave_blank, 10)) {
     res.json({ ok: true });
     return;
   }
@@ -109,6 +109,6 @@ contactRouter.post('/', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('contact: sending failed', err);
-    res.status(502).json({ error: 'Sending failed on my side. Please e-mail me directly.' });
+    res.status(502).json({ error: 'Sending failed on my side.' });
   }
 });

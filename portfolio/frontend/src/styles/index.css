@@ -1,5 +1,5 @@
-/* Cascade order matters here: tokens and base first, so every part of the page can override them
-   (`.btn--nav` in nav.css hides a `.btn`, at equal specificity). Each file keeps its own rules in the same order:
+/* Cascade order matters here: tokens and base first, so every part of the page can override them.
+   Each file keeps its own rules in the same order:
    base rules, scroll-driven motion, responsive, reduced motion.
 
    Scroll-driven motion sits in `@supports (animation-timeline: view())`; elsewhere the page shows its resting
@@ -8,14 +8,16 @@
 @import './tokens.css';
 @import './base.css';
 @import './reveal.css';
-@import './progress.css';
+@import './daylight.css';
 @import './nav.css';
 @import './hero.css';
-@import './art.css';
 @import './section.css';
 @import './about.css';
 @import './work.css';
 @import './interlude.css';
+@import './interlude-band.css';
+@import './interlude-split.css';
+@import './interlude-arch.css';
 @import './skills.css';
 @import './contact.css';
 @import './footer.css';

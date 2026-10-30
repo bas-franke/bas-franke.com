@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bas Franke · Software engineer</title>
+    <title>Bas Franke · Head of Development</title>
     <meta
       name="description"
-      content="Bas Franke is a full-stack software engineer in the Netherlands with more than twenty years of experience building web platforms, now working with AI-assisted, agentic development."
+      content="Bas Franke is Head of Development at GoHome.io in Amsterdam, a full-stack engineer with more than twenty years of experience building web platforms, now working with AI-assisted, agentic development."
     />
     <meta name="theme-color" content="#f4efe6" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#16130f" media="(prefers-color-scheme: dark)" />
@@ -14,22 +14,21 @@
     <link rel="canonical" href="https://bas-franke.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Bas Franke" />
-    <meta property="og:title" content="Bas Franke · Software engineer" />
+    <meta property="og:title" content="Bas Franke · Head of Development" />
     <meta
       property="og:description"
-      content="Full-stack software engineer, twenty-plus years of web platforms, now building with AI at his side. Software that works, and keeps working."
+      content="Head of Development and full-stack engineer, twenty-plus years of web platforms, now building with AI at his side. Software that works, and keeps working."
     />
     <meta property="og:url" content="https://bas-franke.com/" />
     <meta property="og:image" content="https://bas-franke.com/og.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=Geist:wght@300..600&family=Geist+Mono:wght@400..500&display=swap"
-    />
+    <link rel="preload" href="/src/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- No rel yet: the script below preloads only the painting of the current theme. -->
+    <link id="art-light" href="/src/art/hero.webp" as="image" fetchpriority="high" />
+    <link id="art-dark" href="/src/art/hero-dark.webp" as="image" fetchpriority="high" />
     <script>
-      // Pick the theme before the first paint so there is no flash of the wrong colours.
+      // Pick the theme before the first paint so there is no flash of the wrong colours or a fetch of the wrong painting.
       (function () {
         var theme = null;
         try {
@@ -39,6 +38,7 @@
           theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
         document.documentElement.dataset.theme = theme;
+        document.getElementById('art-' + theme).rel = 'preload';
       })();
     </script>
   </head>

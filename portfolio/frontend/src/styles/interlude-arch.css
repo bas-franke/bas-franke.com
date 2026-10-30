@@ -1,0 +1,167 @@
+/* arch: a window onto the evening, the line split around it. The sky comes down through the sunset first, so the
+   window and the line stand on the night and it runs straight on into Contact. Clipped sideways only, so the sliding
+   words never widen the page but the glow can spill. */
+
+.interlude--arch {
+  --sunset: clamp(180px, 34vh, 340px);
+  margin-top: 0;
+  padding: var(--sunset) 0 24px;
+  overflow-x: clip;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--sunset-1) calc(var(--sunset) * 0.3),
+    var(--sunset-2) calc(var(--sunset) * 0.55),
+    var(--sunset-3) calc(var(--sunset) * 0.78),
+    var(--sunset-4) calc(var(--sunset) * 0.92),
+    var(--night) var(--sunset)
+  );
+}
+
+.interlude__stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: clamp(16px, 3vw, 44px);
+  align-items: center;
+}
+
+/* lamplight spilling out of the window; it dies out before Contact begins */
+.interlude__stage::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: min(1000px, 100vw);
+  height: 130%;
+  translate: -50% -50%;
+  z-index: -1;
+  background: radial-gradient(closest-side, var(--warm-soft), transparent 70%);
+  pointer-events: none;
+}
+
+/* the foot of the window dissolves into the night, so the picture hands over to Contact without an edge */
+.interlude__window {
+  position: relative;
+  width: clamp(220px, 28vw, 380px);
+  aspect-ratio: 3 / 4;
+  border-radius: 999px 999px 0 0;
+  overflow: clip;
+  background: var(--art-fireside);
+  -webkit-mask-image: linear-gradient(to bottom, #000 58%, transparent 94%);
+  mask-image: linear-gradient(to bottom, #000 58%, transparent 94%);
+}
+
+.interlude__window .interlude__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 74% center;
+}
+
+.interlude__half {
+  font-size: clamp(2.4rem, 6.2vw, 5.8rem);
+  line-height: 1;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+.interlude__half--left {
+  --side: -1;
+  text-align: right;
+}
+
+.interlude__half--right {
+  --side: 1;
+  color: var(--warm);
+}
+
+/* the window grows into place and the two halves of the line slide in to meet it */
+@supports (animation-timeline: view()) {
+  .interlude--arch {
+    view-timeline: --arch;
+  }
+
+  .interlude__window {
+    animation: window-grow linear both;
+    animation-timeline: --arch;
+    animation-range: entry 0% cover 50%;
+  }
+
+  @keyframes window-grow {
+    from {
+      scale: 0.92;
+      translate: 0 5%;
+    }
+    to {
+      scale: 1;
+      translate: 0 0;
+    }
+  }
+
+  .interlude__window .interlude__img {
+    animation: window-view linear both;
+    animation-timeline: --arch;
+  }
+
+  @keyframes window-view {
+    from {
+      scale: 1.14;
+    }
+    to {
+      scale: 1.04;
+    }
+  }
+
+  .interlude__stage::before {
+    animation: glow-up linear both;
+    animation-timeline: --arch;
+    animation-range: entry 0% cover 45%;
+  }
+
+  @keyframes glow-up {
+    from {
+      opacity: 0.4;
+      scale: 0.7;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+    }
+  }
+
+  .interlude__half {
+    animation: half-in linear both;
+    animation-timeline: --arch;
+    animation-range: entry 0% cover 45%;
+  }
+
+  @keyframes half-in {
+    from {
+      translate: calc(var(--side) * 8vw) 0;
+      opacity: 0.7;
+    }
+    to {
+      translate: 0 0;
+      opacity: 1;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .interlude__stage {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 18px;
+  }
+
+  .interlude__half,
+  .interlude__half--left {
+    text-align: center;
+    font-size: clamp(2.4rem, 13vw, 3.6rem);
+  }
+
+  .interlude__window {
+    width: min(72vw, 320px);
+  }
+}

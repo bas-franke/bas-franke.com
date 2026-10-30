@@ -2,44 +2,79 @@
 
 .about {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  gap: clamp(32px, 6vw, 96px);
-  align-items: start;
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas:
+    'portrait head'
+    'portrait lead'
+    'portrait text';
+  column-gap: clamp(32px, 6vw, 96px);
 }
 
+.about__head {
+  grid-area: head;
+  margin-bottom: clamp(20px, 2.4vw, 30px);
+}
+
+.about__lead,
+.about__text {
+  --d: 120ms;
+}
+
+.about__lead {
+  grid-area: lead;
+  max-width: 58ch;
+  margin: 0 0 1em;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: clamp(1.3rem, 1.9vw, 1.5rem);
+  line-height: 1.4;
+  font-variation-settings: 'opsz' 24;
+}
+
+/* The photo is a cold evening selfie: graded into the painted world, cropped to the face, never taller than the screen. */
 .portrait {
-  position: relative;
-  margin: 0;
+  --portrait-glow: color-mix(in srgb, var(--warm) 34%, transparent);
+  grid-area: portrait;
+  position: sticky;
+  top: calc(var(--nav-h) + 20px);
+  align-self: start;
+  justify-self: start;
+  width: 100%;
+  max-width: 340px;
+  max-height: calc(100svh - var(--nav-h) - 40px);
   aspect-ratio: 4 / 5;
-  max-width: 440px;
+  margin: 0;
+  overflow: hidden;
+  border-radius: calc(var(--radius) * 2);
+  box-shadow: 0 28px 56px -32px var(--portrait-glow);
 }
 
 .portrait img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center 30%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  filter: saturate(0.82) contrast(1.02);
-  transition: filter 0.5s var(--ease);
-  position: relative;
-  z-index: 1;
+  object-position: 0 0;
+  transform-origin: 10% 22%;
+  scale: 1.24;
+  filter: saturate(0.85) sepia(0.12);
 }
 
 .portrait::after {
   content: '';
   position: absolute;
   inset: 0;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius);
-  translate: 14px 14px;
+  background: linear-gradient(160deg, var(--portrait-glow), transparent 60%);
+  mix-blend-mode: soft-light;
   pointer-events: none;
-  opacity: 0.6;
 }
 
 :root[data-theme='dark'] .portrait img {
-  filter: saturate(0.75) brightness(0.9);
+  filter: saturate(0.85) sepia(0.12) brightness(0.84);
+}
+
+.about__text {
+  grid-area: text;
 }
 
 .about__text p {
@@ -47,49 +82,69 @@
   color: var(--ink-2);
 }
 
-.about__text p:first-child {
-  color: var(--ink);
-  font-size: 1.15rem;
-}
-
+/* The facts sit on a sill of darker paper; a window of morning light crosses it (see the motion below). */
 .facts {
+  --sill-light: rgba(255, 238, 205, 0.72);
+  --pane: linear-gradient(var(--sill-light), var(--sill-light));
+  position: relative;
+  isolation: isolate;
+  /* clip, not hidden: a scroll container here would become the view() scroller and the light would never move */
+  overflow: clip;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px 32px;
-  margin: 40px 0 0;
-  padding-top: 26px;
-  border-top: 1px solid var(--line);
+  gap: 26px 32px;
+  margin: 36px 0 0;
+  padding: clamp(24px, 3vw, 32px);
+  background: var(--paper-2);
+  border-radius: calc(var(--radius) * 1.6);
+}
+
+:root[data-theme='dark'] .facts {
+  --sill-light: rgba(224, 164, 110, 0.12);
+}
+
+.facts::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -22% auto -22% 34%;
+  width: 46%;
+  background:
+    var(--pane) 0 0 / 47% 48% no-repeat,
+    var(--pane) 100% 0 / 47% 48% no-repeat,
+    var(--pane) 0 100% / 47% 48% no-repeat,
+    var(--pane) 100% 100% / 47% 48% no-repeat;
+  filter: blur(7px);
+  transform: skewX(-16deg);
 }
 
 .facts dt {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin-bottom: 4px;
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin-bottom: 2px;
 }
 
 .facts dd {
   margin: 0;
   font-family: var(--serif);
-  font-size: 1.25rem;
+  font-size: 1.3rem;
+  line-height: 1.3;
   font-variation-settings: 'opsz' 24;
 }
 
 @supports (animation-timeline: view()) {
-  .portrait::after {
-    animation: portrait-frame linear both;
+  .facts::before {
+    animation: morning-light linear both;
     animation-timeline: view();
-    animation-range: cover 10% cover 70%;
+    animation-range: entry 20% exit 40%;
   }
 
-  @keyframes portrait-frame {
+  @keyframes morning-light {
     from {
-      translate: -14px -14px;
+      translate: -120% 0;
     }
     to {
-      translate: 14px 14px;
+      translate: 130% 0;
     }
   }
 }
@@ -97,15 +152,26 @@
 @media (max-width: 960px) {
   .about {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas:
+      'head'
+      'lead'
+      'portrait'
+      'text';
   }
 
   .portrait {
-    max-width: 360px;
+    position: relative;
+    top: auto;
+    width: 70%;
+    aspect-ratio: 4 / 3;
+    margin: 12px 0 32px;
   }
 }
 
 @media (max-width: 640px) {
   .facts {
     grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
   }
 }
