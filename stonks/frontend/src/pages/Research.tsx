@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError, paperGateOf } from '../api';
-import { EmptyState } from '../components/art';
+import { artUrl, EmptyState, PageBanner } from '../components/art';
 import { LineChart, Spark, type LineSeries } from '../components/charts';
 import { IconCheck } from '../components/icons';
 import { ErrorBox, PaperGateNotice, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
@@ -65,7 +65,7 @@ export default function ResearchPage() {
       <div className="stack">
         <Head />
         <section className="card">
-          <EmptyState title="No research yet">
+          <EmptyState art="empty-research" title="No research yet">
             The research lab on the home PC hasn’t uploaded its findings. Once it has run a few rounds of backtests, the best strategies for each
             timeframe show up here with plain explanations of how they work.
           </EmptyState>
@@ -77,13 +77,20 @@ export default function ResearchPage() {
 }
 
 const Head = ({ data }: { data?: ResearchPayload }) => (
-  <div className="page-head">
-    <div>
-      <span className="eyebrow">Research</span>
-      <h1>What the lab found</h1>
-    </div>
-    {data && <span className="chip outline">updated {ago(data.generatedAt)}</span>}
-  </div>
+  <PageBanner
+    art="banner-research"
+    eyebrow="Research"
+    title="What the lab found"
+    aside={
+      data && (
+        <>
+          <span className="chip outline">updated {ago(data.generatedAt)}</span>
+          {isNum(data.summary.experiments) && <span className="chip outline">{data.summary.experiments.toLocaleString('en-US')} experiments</span>}
+          <span className="chip outline">{data.summary.families} families</span>
+        </>
+      )
+    }
+  />
 );
 
 /** v1 payloads have no buckets: their `top` is the daily list. */
@@ -641,6 +648,20 @@ const METRIC_TIPS: Record<string, string> = {
   sharpe: 'Return per unit of bumpiness. Above 1 is good, above 2 is excellent; it rewards smooth growth over wild swings.',
 };
 
+/** One figure on a rank card's stat row, always in view. */
+function Stat({ label, tip, value, sub, cls }: { label: string; tip: string; value: string; sub?: string; cls?: string }) {
+  return (
+    <div className="stat">
+      <div className="stat-label">
+        {label}
+        <Tip>{tip}</Tip>
+      </div>
+      <div className={`stat-value ${cls ?? ''}`}>{value}</div>
+      {sub && <div className="tiny muted">{sub}</div>}
+    </div>
+  );
+}
+
 function Metric({ label, tip, value, cls }: { label: string; tip: string; value: string; cls?: string }) {
   return (
     <div className="metric">
@@ -691,6 +712,10 @@ function RankCard({
     [e, color, s.markets],
   );
   const markets = s.markets.length > 3 ? `${s.markets.length} markets` : s.markets.join(', ');
+  // The per-year pair comes from the absolute run, so both numbers cover the same coins and years.
+  const yearly = isNum(m.absCagr) ? m.absCagr : m.cagrPct;
+  const holdYearly = isNum(m.absCagr) ? m.absHoldCagr : undefined;
+  const ahead = isNum(yearly) && isNum(holdYearly) ? yearly - holdYearly : m.vsBuyHoldPct;
   return (
     <article id={anchor} className={`card rank-card${active ? ' is-active' : ''}`} style={{ ['--rank-color' as string]: color }}>
       <header className="rank-head">
@@ -704,6 +729,43 @@ function RankCard({
           </span>
         )}
       </header>
+
+      <div className="rank-verdict">
+        {isNum(ahead) && (
+          <span className={`chip ${ahead >= 0 ? 'gain' : 'loss'}`}>
+            <span aria-hidden="true">{ahead >= 0 ? '▲' : '▼'}</span> {ahead >= 0 ? 'Beat holding' : 'Behind holding'}
+          </span>
+        )}
+        {active && (
+          <span className="chip gain rank-running">
+            <span className="dot" /> running in the bot
+          </span>
+        )}
+        <span className="chip brass">{familyLabel(s.family)}</span>
+        <span className="chip">every {s.interval}</span>
+        <span className="chip outline" title={s.markets.join(', ')}>
+          {markets}
+        </span>
+      </div>
+      <p className="rank-summary">{e.explanation.summary}</p>
+
+      <div className="stat-row">
+        {isNum(yearly) ? (
+          <Stat
+            label="Per year"
+            tip="Average yearly return, next to simply holding the same coins over the same stretch."
+            value={pct(yearly, 0, true)}
+            sub={isNum(holdYearly) ? `vs ${pct(holdYearly, 0, true)} holding` : undefined}
+            cls={isNum(holdYearly) ? (yearly >= holdYearly ? 'gain' : 'loss') : yearly >= 0 ? 'gain' : 'loss'}
+          />
+        ) : (
+          <Stat label="Return" tip={METRIC_TIPS.ret} value={fx(m.returnPct, (v) => pct(v, 1, true))} cls={m.returnPct >= 0 ? 'gain' : 'loss'} />
+        )}
+        <Stat label="vs buy & hold" tip={METRIC_TIPS.vs} value={fx(m.vsBuyHoldPct, (v) => pct(v, 1, true))} cls={m.vsBuyHoldPct >= 0 ? 'gain' : 'loss'} />
+        <Stat label="€1,000 became" tip={METRIC_TIPS.final} value={fx(m.finalEur, (v) => eur(v, true))} />
+        <Stat label="Worst drop" tip={METRIC_TIPS.dd} value={fx(m.maxDrawdownPct, (v) => pct(-Math.abs(v), 1))} />
+        {isNum(m.score) && <Stat label="Score" tip="The lab’s ranking score; only comparable within this timeframe." value={score(m.score)} />}
+      </div>
 
       <LineChart
         series={series}
@@ -763,11 +825,6 @@ function RankCard({
         <summary>Details</summary>
         <div className="rank-more-body">
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            <span className="chip brass">{familyLabel(s.family)}</span>
-            <span className="chip">every {s.interval}</span>
-            <span className="chip outline" title={s.markets.join(', ')}>
-              {markets}
-            </span>
             {e.botReady ? (
               <span className="chip gain">
                 <IconCheck width={13} /> bot-ready
@@ -775,26 +832,10 @@ function RankCard({
             ) : (
               <span className="chip outline muted">not yet runnable</span>
             )}
-            {isNum(m.score) && (
-              <span className="chip outline" title="The lab's ranking score; only comparable within this timeframe">
-                score {score(m.score)}
-              </span>
-            )}
-            {active && (
-              <span className="chip gain">
-                <span className="dot" /> running in the bot
-              </span>
-            )}
             {origin && <span className="chip outline">{origin}</span>}
           </div>
-          <p className="notes" style={{ fontStyle: 'normal', color: 'var(--ink)', fontSize: '1.05rem' }}>
-            {e.explanation.summary}
-          </p>
           <div className="metrics">
-            <Metric label="€1,000 became" tip={METRIC_TIPS.final} value={fx(m.finalEur, (v) => eur(v, true))} />
             <Metric label="Return" tip={METRIC_TIPS.ret} value={fx(m.returnPct, (v) => pct(v, 1, true))} cls={m.returnPct >= 0 ? 'gain' : 'loss'} />
-            <Metric label="vs buy & hold" tip={METRIC_TIPS.vs} value={fx(m.vsBuyHoldPct, (v) => pct(v, 1, true))} cls={m.vsBuyHoldPct >= 0 ? 'gain' : 'loss'} />
-            <Metric label="Worst drop" tip={METRIC_TIPS.dd} value={fx(m.maxDrawdownPct, (v) => pct(-Math.abs(v), 1))} />
             <Metric label="Win rate" tip={METRIC_TIPS.win} value={fx(m.winRatePct, (v) => pct(v, 0))} />
             <Metric label="Trades" tip={METRIC_TIPS.trades} value={fx(m.trades, (v) => v.toLocaleString('en-US'))} />
             <Metric label="Fees paid" tip={METRIC_TIPS.fees} value={fx(m.feesEur, (v) => eur(v, true))} />
@@ -982,7 +1023,8 @@ function HallOfFame({
   };
   return (
     <div id="bucket-panel" role="tabpanel" aria-labelledby="tab-hall" className="stack" style={{ gap: 12 }}>
-      <section className="card quiet bucket-intro">
+      <section className="card quiet bucket-intro hall-intro">
+        <img className="hall-art" src={artUrl('banner-hall')} alt="" />
         <h2>Hall of fame</h2>
         <Fold title="What this is">
           <p className="notes">

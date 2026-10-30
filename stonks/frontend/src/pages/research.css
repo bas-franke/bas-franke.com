@@ -11,15 +11,10 @@
   gap: var(--rp-gap) !important;
 }
 
-/* ---------- page head ---------- */
+/* ---------- page banner ---------- */
 
-.shell .research-page .page-head {
-  align-items: center;
-  margin: 6px 0 2px;
-}
-.shell .research-page .page-head h1 {
-  font-size: clamp(1.45rem, 2.4vw, 1.9rem);
-  letter-spacing: -0.01em;
+.shell .research-page .page-banner {
+  margin-bottom: 0;
 }
 
 /* ---------- folds (About the lab, About this tab, Details) ---------- */
@@ -111,11 +106,11 @@
 }
 .shell .research-page .bucket-tabs #tab-hall[aria-selected='true'] {
   background: var(--brass);
-  color: #fffaf0;
+  color: #18223a;
 }
 .shell .research-page .bucket-tabs #tab-hall[aria-selected='true'] .count {
-  background: rgba(255, 250, 240, 0.25);
-  color: #fffaf0;
+  background: rgba(24, 34, 58, 0.14);
+  color: #18223a;
 }
 
 /* ---------- session intro ---------- */
@@ -171,6 +166,84 @@
   height: 32px;
   font-size: 1rem;
 }
+.shell .research-page .rank-verdict {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.shell .research-page .rank-verdict .chip span[aria-hidden] {
+  font-size: 0.8em;
+}
+.shell .research-page .rank-running {
+  outline: 1px solid color-mix(in srgb, var(--gain) 60%, transparent);
+}
+.shell .research-page .rank-summary {
+  max-width: 76ch;
+  color: var(--ink-2);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+/* The figures that decide it, as one ruled strip like a quote board. */
+.shell .research-page .stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  border-block: 1px solid var(--line);
+}
+.shell .research-page .stat {
+  flex: 1 1 128px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-left: 1px solid var(--line);
+}
+.shell .research-page .stat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+.shell .research-page .stat-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.shell .research-page .stat-value {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 1.22rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.shell .research-page .stat-value.gain {
+  color: var(--gain-ink);
+}
+.shell .research-page .stat-value.loss {
+  color: var(--loss-ink);
+}
+
+/* Details holds the rest of the figures; they wrap evenly whatever their number. */
+.shell .research-page .metrics {
+  display: flex;
+  flex-wrap: wrap;
+}
+.shell .research-page .metric {
+  flex: 1 1 130px;
+  border-radius: 0;
+}
+.shell .research-page .metric:first-child {
+  border-top-left-radius: 13px;
+  border-bottom-left-radius: 13px;
+}
+.shell .research-page .metric:last-child {
+  border-top-right-radius: 13px;
+  border-bottom-right-radius: 13px;
+}
+
 .shell .research-page .rank-actions {
   align-items: center;
   gap: 8px;
@@ -205,6 +278,28 @@
 }
 
 /* ---------- hall of fame ---------- */
+
+.shell .research-page .hall-intro {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  min-height: 112px;
+  align-content: center;
+}
+.shell .research-page .hall-intro > :not(.hall-art) {
+  max-width: 62%;
+}
+.shell .research-page .hall-art {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: -1;
+  width: 50%;
+  height: 100%;
+  object-fit: cover;
+  filter: var(--hero-art);
+  mask-image: linear-gradient(90deg, transparent, #000 52%);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 52%);
+}
 
 .shell .research-page .hall-item {
   display: grid;
@@ -266,9 +361,6 @@
 @media (max-width: 760px) {
   .shell .research-page {
     --rp-gap: 12px;
-  }
-  .shell .research-page .page-head {
-    margin-top: 2px;
   }
   .shell .research-page .research-about,
   .shell .research-page .bucket-intro {
@@ -370,6 +462,25 @@
     min-height: 44px;
   }
 
+  .shell .research-page .stat {
+    flex: 1 1 40%;
+    padding: 8px 12px;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+  .shell .research-page .stat:first-child,
+  .shell .research-page .stat:nth-child(2) {
+    border-top: 0;
+  }
+  .shell .research-page .stat:nth-child(odd) {
+    padding-left: 0;
+  }
+  .shell .research-page .stat:nth-child(even) {
+    border-left: 1px solid var(--line);
+  }
+  .shell .research-page .hall-intro > :not(.hall-art) {
+    max-width: 78%;
+  }
   .shell .research-page .metric {
     padding: 10px 12px;
   }
