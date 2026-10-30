@@ -14,7 +14,14 @@ const pick = <T,>(...v: T[]) => v.find((x) => x !== undefined && x !== null);
 const feeText = (fee: unknown, currency?: string | null) =>
   fee === undefined || fee === null ? '–' : !currency || currency === 'EUR' ? eur(fee) : `${amount(fee)} ${currency}`;
 
-const statusChip = (s: string) => {
+/**
+ * Bitvavo reports "canceled" when the bot cancels the leftover of an order that already (almost) filled, for example
+ * when the chase gives up on a dust remainder. What counts for the owner is what was traded, so those read as filled.
+ */
+const statusChip = (s: string, filledFrac?: number) => {
+  const closed = /cancel|expired/i.test(s);
+  if (closed && filledFrac !== undefined && filledFrac >= 0.995) return <span className="chip gain" title={`Bitvavo: ${s} (the tiny rest was cancelled)`}>filled</span>;
+  if (closed && filledFrac !== undefined && filledFrac > 0) return <span className="chip brass" title={`Bitvavo: ${s}`}>partly filled</span>;
   const k = s.toLowerCase();
   const open = ['new', 'open', 'pending', 'awaitingtrigger'].includes(k) || k.includes('partial');
   const cls = k === 'filled' ? 'gain' : open ? 'brass' : k.includes('reject') || k.includes('error') ? 'loss' : '';
@@ -170,12 +177,12 @@ function OrdersTable({ rows }: { rows: Order[] }) {
                 {amount(amt)}
               </td>
               <td data-label="Filled" className="r">
-                {Number.isFinite(filled) ? (amt ? `${Math.round((filled / amt) * 100)}%` : amount(filled)) : '–'}
+                {Number.isFinite(filled) ? (amt ? `${Math.floor((filled / amt) * 1000) / 10}%` : amount(filled)) : '–'}
               </td>
               <td data-label="Fee" className="r">
                 {feeText(fee, o.feeCurrency)}
               </td>
-              <td data-label="Status">{statusChip(o.status)}</td>
+              <td data-label="Status">{statusChip(o.status, amt && Number.isFinite(filled) ? filled / amt : undefined)}</td>
             </tr>
           );
         })}
