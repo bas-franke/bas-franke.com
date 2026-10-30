@@ -16,14 +16,14 @@ The registry stopped at 10-27; Sessions 4-12 ran outside it (`out/_sN_*`, scored
 | 7 | real | s7_ladder: laddered dips sized by speed of fall | 57.9 | misses the big rallies (mountain 43) |
 | 8 | real | s8_btcbull: bitcoin's trend as bull switch | 62.9 | a coin crashing while bitcoin looks fine |
 | 9 | real | s9_cyclebull: overheated ceiling | 64.6 | loses 4 points with all settings nudged; 2023+ windows ~58 vs ~64 before; average worst drop 54 % |
-| 10 | real | s10_bearbreadth: bear mode + breadth bull | 66.2 | sharp settings still; dipvote, macdvote and most of 50 lanes added nothing |
+| 10 | real | s10_bearbreadth: bear mode + breadth bull | 66.2 | each new layer now adds only 1-2 points (64.6 to 66.2) |
 | 11 | real | no new books: #1 of 6-10 on 29 coins | s9 53.5, s10 52.7 (hold 44.5) | on the 19 unseen coins s9 scores 47.7 (hold 44.1): beat holding on 18 of 19, median coin +28 %/yr vs -27 %. Honest yardstick: far under the +90 % on the 10 tuned coins |
 | 12 | real | pair_sleeve: BTC+ETH from one wallet | not comparable (pair score) | see below |
 
 Session 12 audit:
 - **Shared wallet (`pair_sleeve`).** 50/50, yearly vs holding: s10 +97.6 vs +46.9, s9 +92.8, s7 +66.2; last 12 months s10 +57 vs -35. Worst drop 48 % vs 77 %. ETH alone +115.8 / 52 % worst drop, BTC alone +73.2 / 50 %. A shared wallet loses 0-4 points against two separate half wallets (trims when one coin pulls ahead). Two coins barely cut the worst drop: both crash together (book correlation 0.6).
 - **Split is mostly noise.** More ETH gains ~4 points per 10 % share on the switched books, nearly all from 2021; 30/70 beat 50/50 in 3-5 of 8 calendar years, mean gap about one standard error. Keep 50/50.
-- **Dead band.** A quarter step at 50 % share is 12.5 % of equity, far over the 2 % band, so no signal is lost; but 30-44 % of fills are drift trims, ~11 % of fees. A 5 % band adds only 0-0.7 points. EUR 5 minimum is not binding at EUR 1000.
+- **Dead band.** A quarter step at 50 % share is 12.5 % of equity, far over the 2 % band, so no signal is lost; but 30-44 % of fills are drift trims, ~11 % of fees. A 5 % band changes the yearly return by -0.1 to +0.7 points. EUR 5 minimum is not binding at EUR 1000.
 - **Loss guard (`out/guard_results.json`).** No action changes the worst drop. `stop` costs 4-15 points a year (3-day restart); `no_buys` 0.7-2.8 at 10 %, 0-0.7 at 15 %, 0-0.3 at 20 %. Recommended: `no_buys` at 15 %, ~1 trigger day a year on a sleeve.
 - **Fees.** Session tabs: 1-3 and stoploss real, 4-5 flat 0.05 %, 6-12 real; timeframe tabs real. Absolute scores are real-fee everywhere: S4/S5 window scores fall 1.4-3.8 points.
 - **CAGR bug, not fixed.** `metrics.years` counts bars, not calendar time; 15m history has gaps (ETH 4.6 %), so published yearly figures run high: s9 ETH +117.8 on the card, +109.8 on calendar time; hold +47.7 vs +45.0. Session 12 uses calendar time.
