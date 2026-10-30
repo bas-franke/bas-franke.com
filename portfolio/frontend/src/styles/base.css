@@ -247,10 +247,10 @@ h3 {
 
 /* The lamp changes the theme: the new page spreads from it on a soft edge over a still picture of the old one, so
    gradients and paintings keep time with the text and nothing shows double (see themeChange.ts). */
-@property --lamp-reach {
-  syntax: '<length>';
+@property --lamp-lit {
+  syntax: '<number>';
   inherits: false;
-  initial-value: 0px;
+  initial-value: 0;
 }
 
 ::view-transition-old(root),
@@ -264,6 +264,7 @@ h3 {
 
 ::view-transition-new(root) {
   --lamp-edge: 120px;
+  --lamp-reach: calc(var(--lamp-lit) * (var(--lamp-far) + var(--lamp-edge)));
   --lamp-light: radial-gradient(
     circle at var(--lamp-x) var(--lamp-y),
     #000 calc(var(--lamp-reach) - var(--lamp-edge)),
@@ -275,9 +276,10 @@ h3 {
   animation: lamp-reveal 700ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
 }
 
+/* a plain number: Firefox jumps between keyframes that hold a var() instead of tweening them */
 @keyframes lamp-reveal {
   to {
-    --lamp-reach: calc(var(--lamp-far) + var(--lamp-edge));
+    --lamp-lit: 1;
   }
 }
 
