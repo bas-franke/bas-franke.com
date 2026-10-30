@@ -85,6 +85,17 @@ orders; differences smaller than €5 or 2 % of equity are ignored (no churn).
   best ask (sell), post-only, unless it already sits there; once the first order of the chain is `marketAfterMin` old the
   rest goes out as a market order. Chased orders ignore `timeoutBars`/`fallback`. Backtests do not model the chase
   (they keep the limit-at-close + `timeoutBars` rule), so live fills are more certain and sometimes taker-priced.
+  Only specs with the default execution (5 bps, 1 bar, cancel) follow the book (`followsBook`). A spec tuned to anything
+  else rests at close∓offset with its own timeout and fallback, as researched; manual moves and stranded sells always chase.
+- **Retries (live bot and paper):** each bar's plan is kept in `bot_state.decision`. A planned market and side with no
+  working order (rejected, `canceledPostOnly`, crash before placing, a chase that ended unfilled) is placed again while the
+  bar lasts: 60 s apart, 5 attempts including the first (`order_retry`, then the error `order_retries_exhausted`). Only
+  what was planned is retried, so a rotation's buy still waits for the next decision, as in the backtest.
+- Sizing values holdings and equity at the same close, like the backtest. Before placing, the bot reads the book and logs
+  `thin_book` when the spread is over 30 bps or an order is over 20 % of the depth within 25 bps; that never blocks an order.
+- **Paper fills** come from Bitvavo's public trades after the order's own `activeFrom`: a limit fills up to 25 % of the
+  volume traded strictly through its price (the rest keeps resting), and a post-only order that would cross ends as
+  `canceledPostOnly` instead of being repriced, so paper is stricter than live there.
 - The live bot sizes every buy (limit ones too) to leave the **taker** fee plus 0.1 % of the
   cash free, because Bitvavo reserves the taker fee on open buy orders and refuses one that does not fit (code 216);
   backtests keep the maker-fee sizing, a difference of ~0.2 % of one buy.
@@ -140,8 +151,8 @@ Family details both sides implement (the docstrings in `stonks_lab/families/*.py
   "mode": "paper",               // "paper" (simulated orders on live prices) or "live" (real Bitvavo orders)
   "strategy": { /* strategy spec, §2 */ },
   "maxExposureEur": null,        // null = may use the whole portfolio
-  "dailyLossLimit": { "unit": "pct", "value": 10 },  // loss over the last 24 h (realized + unrealized) that switches the
-                                 // bot off: "pct" = % of the equity 24 h ago, "eur" = euros
+  "dailyLossLimit": { "unit": "pct", "value": 15, "action": "no_buys" },  // loss over the last 24 h (realized + unrealized):
+                                 // "pct" = % of the equity 24 h ago, "eur" = euros; action "alert" | "no_buys" | "stop"
   "fees": { "maker": 0.0015, "taker": 0.0025 },
   "paperStartEur": 1000,
   "activeResearch": null,        // set by POST /api/bot/activate (§8); reset to null when the strategy is changed by hand
@@ -154,14 +165,30 @@ Family details both sides implement (the docstrings in `stonks_lab/families/*.py
 
 Loss guard (rolling 24 h): every tick the bot compares equity with its equity 24 h earlier (samples every 5 minutes in
 `bot_state`; right after switching on, the window starts then). When `equity24hAgo - equityNow ≥ limit` (a `pct` limit
-is that % of `equity24hAgo`) it cancels its open orders, sets `enabled: false`, logs an `error` event `daily_loss_limit`
-and stays off until the owner turns it on again, which restarts the window. Deposits/withdrawals are not trades: equity
+is that % of `equity24hAgo`) it logs one `error` event `daily_loss_limit` per trip and acts on `action`:
+- `no_buys` (default): stays on, cancels open buys and withholds new ones; sells, stops and exits go on. Ends by itself
+  (`guard_cleared`) once the loss is back under the limit. Withheld buys stay planned, so they go out if that happens in the same bar.
+- `alert`: only reports it and keeps trading.
+- `stop`: cancels its orders and sets `enabled: false` until the owner turns it on again. The position stays held with nothing
+  managing it, which is why it is no longer the default: it cost 4-15 points a year on the books tested.
+
+Backtests of the 15 % `no_buys` default cost 0-0.7 points a year; no action lowered the worst drop, which builds over weeks,
+so the guard is a fault brake and not a drawdown tool (`stonks-local/FINDINGS.md`). A limit stored earlier keeps its value and only
+gains the default action. No fresh numbers for 5 minutes logs the error `guard_blind`. Equity 0 never trips; a coin without a
+ticker keeps its last known price, also across restarts. Deposits/withdrawals are not trades: equity
 changes not explained by fills (beyond max(€2, 0.5 % of equity)) shift the baseline by their EUR value (logged as
 `warn`), so real losses still count. Settings stored before this had `dailyLossLimitEur`: the old default €100 became
 10 %, any other amount stays a euro limit. The Overview's "today" figure still counts from 00:00 Europe/Amsterdam.
 
-In live mode the bot treats the whole Bitvavo account as its portfolio (owner's choice): coins the strategy doesn't want
-are sold. `maxExposureEur` caps how much EUR it puts into coins.
+In live mode the bot treats the whole Bitvavo account as its portfolio (owner's choice): BTC or ETH the strategy doesn't
+want is sold at the next decision. Any other coin is left alone and reported once per strategy (`foreign_coin`).
+`maxExposureEur` caps how much EUR it puts into coins.
+
+Orders Bitvavo can't find for 10 minutes become status `unknown` (`order_unknown`): they stop blocking their side and are
+rechecked every 5 minutes for 3 days through the order and then the trade history (`order_unknown_found`, `order_unknown_fills`),
+so no fill is lost. Database calls time out after 30 s; a tick stuck for 5 minutes exits the process so PM2 restarts it
+(`tick_stuck`). Shutdown waits up to 25 s for a running tick (`kill_timeout` 30 s). The clock resyncs hourly and on Bitvavo's
+timestamp errors. `PUT /api/bot` with a strategy change while live needs `confirmLive`, like activate.
 
 The bot only ever touches orders it created (its `clientOrderId`s start with the prefix `stonks-`) and never withdraws.
 
@@ -174,6 +201,23 @@ day|week|month|year|all` returns the portfolio (equity_snapshots + track_points)
 points each); where no track points exist yet, BTC/ETH come from Bitvavo candles. `all` starts at the first portfolio
 point of the mode. The Overview indexes every line to 100 at the range start. `POST /api/portfolio-history/clear
 { confirm: "CLEAR" }` deletes that mode's equity_snapshots and track_points (charts only; trading never reads them).
+
+## 5b. Expected vs actual, alerts and health
+
+A runner beside the trading loop (`bot/shadow.ts`, no orders, no settings) reads the `decision` rows and keeps a virtual
+portfolio that follows those targets by the backtest's rule: fills at the decision bar's close, maker fee, the €5 / 2 % dead-band,
+starting from the real equity at the strategy's first decision. Tables `shadow_points` and `shadow_decisions`, state in
+`settings.shadow_state`. It ignores `maxExposureEur`. Slippage per fill is the fill price against the decision close, adverse
+positive. `GET /api/tracking` flags a gap worse than -5 % over 30+ days and average slippage over 25 bps across 10+ fills, and the
+runner logs `tracking_drift` once a day while one holds.
+
+Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`, `MAIL_FROM`, `STONKS_ALERT_EMAIL`): every `error` and the
+warnings `decision_held`, `stale_candles`, `foreign_coin`, `stop_skipped`, `tracking_drift`, one mail per event name per 30 minutes.
+Unconfigured it does nothing. `POST /api/bot/test-alert` sends one.
+
+`GET /api/health` stays public and has no amounts; `status` is `ok` or `degraded` (tick older than 120 s while on, last tick failed, or
+no database, which also answers 503). The status page checks it. `GET /api/health/detail` (logged in) reports each part with
+`ok|warn|fail|unknown`, and the dashboard's Health page shows it; `unknown` does not count toward the overall status.
 
 ## 6. Parity between Python and TypeScript
 
@@ -199,10 +243,20 @@ For a spec whose family has no TypeScript port at its version, the bot runs the 
   1m keeps the last 400 days like the lab) and that bar waits for it (`history_loading` / `history_ready` events);
   after that each decision only fetches the newest closed bars and decides at exactly the bar the bot is on.
 - **Per decision**: `python -m stonks_lab.live targets` gets `{ spec, bar, startTime? }` and answers the weights at
-  `bar`; NaN = out (0). Anchored families (`ANCHORED = True`) get the strategy's start time like `dca_dip`. The bot
+  `bar`; a NaN market in a row = out (0). `{ hold, t? }` means there is no trustworthy decision, so every position stays and
+  no order goes out: an all-NaN row (the backtest's "no decision"), no history, or a needed candle that is stale. The bot retries
+  until the grace period, then logs `decision_held`. An all-zero answer with `t: null` counts as a hold too. Spec markets, BTC and
+  ETH count as stale when they lag; another pool coin only when its update failed, since quiet coins have gaps. Anchored families (`ANCHORED = True`) get the strategy's start time like `dca_dip`. The bot
   clamps to `risk.maxWeight` and applies risk exits and execution exactly as for TypeScript families.
 - **Version bumps**: a deployed lab change that bumps the running family's `VERSION` makes the stored strategy invalid,
   so the bot switches itself off (`settings_invalid`) instead of trading changed logic; activate the new research.
+- **History**: only what really downloaded counts as ready (`live_ready_v2.json`), and `prepare` also runs the family once, so
+  the candles it reads itself are warm before `targets` is asked, keyed by code hash. Each update refetches the last 2 stored
+  bars, because a bar saved seconds after its close can be provisional. The prepare lock goes stale after 15 minutes (60 s
+  heartbeat); a busy prepare is not "ready", it waits 60 s, and failures back off 1-30 minutes.
+- **Same-version changes**: `catalog.json` holds a `codeHash` per family (its file, sibling imports, shared helpers, a wrapper's
+  `inner`). The bot stores it when a strategy starts and logs the error `family_code_changed` once if it differs, but keeps
+  trading. `universe` is not applied by `live.py`; it would matter only if the bot traded more than BTC and ETH.
 - `botReady` in `GET /api/research` is decided by the backend (`isRunnable`: TypeScript port or lab catalog at that
   version), not by the lab's flag.
 
@@ -225,6 +279,10 @@ camelCase and numbers (not numeric strings).
 | `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
 | `POST /api/bot/allocate` | `{ target: "BTC"\|"ETH"\|"EUR"\|null, confirmLive? }` | `{ ok, bot, started, startError? }`; moves everything to one coin or euros (switches the bot on), `null` = back to the strategy; 400 live without confirm |
 | `GET /api/hall-of-fame` | | `{ entries: [{ id, addedAt, researchId, bucket, rank, entry }] }`, newest first; `entry` = the research entry as kept (§7 shape, `botReady` = runnable on this server now) |
+| `GET /api/bot/paper-record` | `?strategyId=` | `{ days, fills, firstAt }`: that spec's paper record. Going live, or changing a live strategy, with under 14 days or 5 fills answers 409 `{ error, paperGate:{ days, fills, needDays, needFills } }` unless the body has `skipPaperGate:true`; manual allocation is exempt |
+| `GET /api/tracking` | `?mode=&range=day\|week\|month\|year\|all` | expected vs actual vs hold, gap, slippage, drift alerts (§5b) |
+| `GET /api/health/detail` | | `{ status, checkedAt, bot, components:{ engine, database, bitvavo, clock, decision, candles, lab, alerts, lossGuard, orders, stuckOrders, shadow, process }, events }` (§5b) |
+| `POST /api/bot/test-alert` | `{}` | `{ ok, configured, error? }` |
 | `POST /api/hall-of-fame` | `{ researchId, bucket, rank }` | `{ ok, id }`; copies that entry from that stored snapshot; 409 when the same spec is already kept |
 | `DELETE /api/hall-of-fame/:id` | `{}` | `{ ok }`; only the owner removes entries, nothing else ever does |
 | `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot` (stop also cancels the bot's open orders) |
