@@ -41,8 +41,11 @@ export interface PlanInput {
   /** Free EUR that buys may use. */
   cashAvailableEur: number;
   holdings: Record<string, Holding>;
-  /** Price used to size and price orders, normally the close of the decision bar. */
+  /** Price used to size orders and value holdings, normally the close of the decision bar. */
   prices: Record<string, number>;
+  /** Live best bid/ask per market from Bitvavo's order book: limit buys go out at the bid and sells at the ask.
+   * Without it (or for a market missing from it) limit orders use the price with the strategy's offset. */
+  book?: Record<string, { bid: number; ask: number }>;
   rules: Record<string, MarketRules>;
   maxExposureEur: number | null;
   /** EUR value of coins that are not in the strategy's markets (they count toward maxExposureEur). */
@@ -116,7 +119,9 @@ export function planOrders(input: PlanInput): PlanResult {
       continue;
     }
     const qty = fullExit ? h.available : Math.min(h.available, -diff / price);
-    const p = limit ? Number(roundPrice(price * (1 + offset), rules, 'up')) : price;
+    const ask = input.book?.[m]?.ask;
+    const priceStr = ask && ask > 0 ? roundPrice(ask, rules, 'up') : roundPrice(price * (1 + offset), rules, 'up');
+    const p = limit ? Number(priceStr) : price;
     const amount = roundAmount(qty, rules.quantityDecimals);
     const problem = sizeProblem(rules, Number(amount), p);
     if (problem) {
@@ -128,7 +133,7 @@ export function planOrders(input: PlanInput): PlanResult {
       side: 'sell',
       orderType: limit ? 'limit' : 'market',
       amount,
-      price: limit ? roundPrice(price * (1 + offset), rules, 'up') : undefined,
+      price: limit ? priceStr : undefined,
       postOnly: limit && spec.execution.postOnly,
       reason: fullExit ? 'target 0: exit position' : `rebalance to ${(targetEur[m] / equityEur * 100).toFixed(1)} % of equity`,
       valueEur: Number(amount) * p,
@@ -146,7 +151,8 @@ export function planOrders(input: PlanInput): PlanResult {
     const price = input.prices[b.market];
     const eur = b.eur * scale;
     if (limit) {
-      const priceStr = roundPrice(price * (1 - offset), rules, 'down');
+      const bid = input.book?.[b.market]?.bid;
+      const priceStr = bid && bid > 0 ? roundPrice(bid, rules, 'down') : roundPrice(price * (1 - offset), rules, 'down');
       const amount = roundAmount(eur / Number(priceStr), rules.quantityDecimals);
       const problem = sizeProblem(rules, Number(amount), Number(priceStr));
       if (problem) {

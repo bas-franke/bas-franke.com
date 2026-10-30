@@ -48,6 +48,18 @@ test('executor: full buy is a post-only limit 5 bps under the close, sized to ca
   assert.ok(Number(o.amount) * 49975 * 1.0025 <= 1000);
 });
 
+test('executor: with the live order book, limit buys go out at the best bid and sells at the best ask', () => {
+  const book = { 'BTC-EUR': { bid: 50_120.4, ask: 50_131.6 } };
+  const buy = planOrders(input({ book })).orders[0];
+  assert.equal(buy.price, '50120.00'); // the bid, rounded down to the tick (never over it)
+  assert.equal(buy.amount, (Math.floor((1000 / 1.0035 / 50120) * 1e8) / 1e8).toFixed(8));
+  const sell = planOrders(input({ book, targets: { 'BTC-EUR': 0 }, holdings: { 'BTC-EUR': { total: 0.01, available: 0.01 } }, cashAvailableEur: 500 })).orders[0];
+  assert.equal(sell.side, 'sell');
+  assert.equal(sell.price, '50132.00'); // the ask, rounded up
+  // a market missing from the book falls back to the close with the offset
+  assert.equal(planOrders(input({ book: {} })).orders[0].price, '49975.00');
+});
+
 test('executor: churn threshold of max(€5, 2 % of equity), but target 0 always exits the whole free position', () => {
   // Holding 0.0196 BTC = €980 of €1000 equity: diff €20 = 2 % -> trades; €19 does not.
   const at = (btcQty: number, cash: number) =>

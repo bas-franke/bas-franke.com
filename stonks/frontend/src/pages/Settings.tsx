@@ -275,69 +275,22 @@ export default function SettingsPage() {
                 ]}
               />
             </Field>
-            {s.execution.orderType === 'limit' && (
-              <>
-                <Field
-                  label="Limit offset"
-                  error={err('strategy.execution.limitOffsetBps')}
-                  hint="Buy this far under the close, sell this far over it. 100 bps = 1%."
-                >
-                  <Affix suffix="bps">
-                    <input
-                      className="input"
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={s.execution.limitOffsetBps}
-                      onChange={(e) => setExec('limitOffsetBps', Number(e.target.value))}
-                      aria-invalid={!!err('strategy.execution.limitOffsetBps')}
-                    />
-                  </Affix>
-                </Field>
-                {!chase.enabled && (<>
-                <Field label="Give up after" error={err('strategy.execution.timeoutBars')} hint="Candles an unfilled order may wait.">
-                  <Affix suffix="bars">
-                    <input
-                      className="input"
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={s.execution.timeoutBars}
-                      onChange={(e) => setExec('timeoutBars', Number(e.target.value))}
-                    />
-                  </Affix>
-                </Field>
-                <Field label="Then" hint="Skip the trade, or pay taker to get it done.">
-                  <select className="input" value={s.execution.fallback} onChange={(e) => setExec('fallback', e.target.value as 'cancel' | 'market')}>
-                    <option value="cancel">Cancel it</option>
-                    <option value="market">Fill at market</option>
-                  </select>
-                </Field>
-                </>)}
-              </>
-            )}
           </div>
           {s.execution.orderType === 'limit' && (
             <div className="stack" style={{ gap: 12, marginTop: 16 }}>
-              <label className="check">
-                <input type="checkbox" checked={chase.enabled} onChange={(e) => setChase({ enabled: e.target.checked })} />
-                Follow the order book: move an unfilled order to the best price, then finish at market
-              </label>
-              {chase.enabled && (
-                <div className="form-grid">
-                  <Field label="Re-price every" error={err('chase.repriceSec')} hint="An unfilled order moves to the best bid (buy) or ask (sell).">
-                    <Affix suffix="s">
-                      <input className="input" type="number" min={15} max={3600} step={5} value={chase.repriceSec} onChange={(e) => setChase({ repriceSec: Number(e.target.value) })} />
-                    </Affix>
-                  </Field>
-                  <Field label="Market order after" error={err('chase.marketAfterMin')} hint="Whatever is still unfilled then goes at market (taker fee).">
-                    <Affix suffix="min">
-                      <input className="input" type="number" min={1} max={1440} step={1} value={chase.marketAfterMin} onChange={(e) => setChase({ marketAfterMin: Number(e.target.value) })} />
-                    </Affix>
-                  </Field>
-                </div>
-              )}
-              {chase.enabled && <p className="small soft" style={{ margin: 0 }}>Applies to every strategy and to Move everything; “give up after” is not used while this is on.</p>}
+              <p className="small soft" style={{ margin: 0 }}>Limit orders go out at the best bid (buy) or ask (sell) on Bitvavo's live order book and follow it until they fill; whatever is still open then goes at market. Applies to every strategy and to Move everything.</p>
+              <div className="form-grid">
+                <Field label="Re-price every" error={err('chase.repriceSec')} hint="An unfilled order moves to the best bid (buy) or ask (sell).">
+                  <Affix suffix="s">
+                    <input className="input" type="number" min={15} max={3600} step={5} value={chase.repriceSec} onChange={(e) => setChase({ repriceSec: Number(e.target.value) })} />
+                  </Affix>
+                </Field>
+                <Field label="Market order after" error={err('chase.marketAfterMin')} hint="Whatever is still unfilled then goes at market (taker fee).">
+                  <Affix suffix="min">
+                    <input className="input" type="number" min={1} max={1440} step={1} value={chase.marketAfterMin} onChange={(e) => setChase({ marketAfterMin: Number(e.target.value) })} />
+                  </Affix>
+                </Field>
+              </div>
             </div>
           )}
           {s.execution.orderType === 'limit' && (
@@ -611,9 +564,7 @@ function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSe
             )}
           </div>
           <p className="small soft" style={{ margin: 0 }}>
-            {bot.chase?.enabled === false
-              ? 'Uses limit orders only (maker fee 0.15 %): one at the best price every minute until it fills,'
-              : `Uses limit orders at the best price (maker fee 0.15 %), re-priced every ${bot.chase?.repriceSec ?? 30} s; whatever is still unfilled after ${bot.chase?.marketAfterMin ?? 10} min goes at market,`}{' '}
+            {`Uses limit orders at the best price (maker fee 0.15 %), re-priced every ${bot.chase?.repriceSec ?? 30} s; whatever is still unfilled after ${bot.chase?.marketAfterMin ?? 10} min goes at market,`}{' '}
             selling first and buying with the euros that frees up. Switches the bot on if it is off. {live ? <b>The bot is in live mode: this trades real money.</b> : 'The bot is in paper mode: practice money only.'}
           </p>
           {error && <div className="callout loss">{error}</div>}

@@ -17,10 +17,10 @@ export interface BotSettings {
   /** The research strategy the owner activated (SPEC §8); null once the strategy is changed any other way. */
   activeResearch: ActiveResearch | null;
   /** "Move everything" from Settings: while set, the bot holds all of it in this coin (or euros) instead of following
-   * the strategy, with post-only limit orders re-placed every minute until filled. null = follow the strategy. */
+   * the strategy, with post-only limit orders that follow the order book (chase). null = follow the strategy. */
   manual: ManualAllocation | null;
-  /** Limit orders follow the order book: re-placed at the best bid/ask every `repriceSec` while unfilled, and the
-   * unfilled rest goes out as a market order after `marketAfterMin` (instead of waiting a whole bar). */
+  /** Limit orders always follow the order book: re-placed at the best bid/ask every `repriceSec` while unfilled, and
+   * the unfilled rest goes out as a market order after `marketAfterMin`. */
   chase: ChaseSettings;
 }
 
@@ -28,11 +28,10 @@ export type { LossLimit };
 export const DEFAULT_LOSS_LIMIT: LossLimit = { unit: 'pct', value: 10 };
 
 export interface ChaseSettings {
-  enabled: boolean;
   repriceSec: number;
   marketAfterMin: number;
 }
-export const DEFAULT_CHASE: ChaseSettings = { enabled: true, repriceSec: 30, marketAfterMin: 10 };
+export const DEFAULT_CHASE: ChaseSettings = { repriceSec: 30, marketAfterMin: 10 };
 
 export const MANUAL_TARGETS = ['BTC', 'ETH', 'EUR'] as const;
 export interface ManualAllocation {
@@ -81,14 +80,14 @@ export function defaultBotSettings(): BotSettings {
 
 function checkChase(v: unknown): ChaseSettings {
   if (v === undefined || v === null) return { ...DEFAULT_CHASE };
-  if (!isObj(v)) throw new SettingsError('chase must be { enabled, repriceSec, marketAfterMin }');
+  if (!isObj(v)) throw new SettingsError('chase must be { repriceSec, marketAfterMin }');
+  // The chase is always on; an `enabled` left over in stored settings is dropped.
   const c = { ...DEFAULT_CHASE, ...v };
-  if (typeof c.enabled !== 'boolean') throw new SettingsError('chase.enabled must be true or false');
   if (typeof c.repriceSec !== 'number' || !Number.isInteger(c.repriceSec) || c.repriceSec < 15 || c.repriceSec > 3600)
     throw new SettingsError('chase.repriceSec must be a whole number of seconds from 15 to 3600');
   if (typeof c.marketAfterMin !== 'number' || !Number.isFinite(c.marketAfterMin) || c.marketAfterMin < 1 || c.marketAfterMin > 1440)
     throw new SettingsError('chase.marketAfterMin must be 1 to 1440 minutes');
-  return { enabled: c.enabled, repriceSec: c.repriceSec, marketAfterMin: c.marketAfterMin };
+  return { repriceSec: c.repriceSec, marketAfterMin: c.marketAfterMin };
 }
 
 function checkLossLimit(v: unknown): LossLimit {

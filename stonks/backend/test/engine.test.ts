@@ -265,7 +265,7 @@ function chased(id: number, over: Partial<OrderRow> & { since: number; active: n
   const o = order(id, 'paper');
   return { ...o, price: 399, amount: 1, ...over, meta: { ...o.meta, activeFrom: over.active, chaseSince: over.since } } as OrderRow;
 }
-const CHASE = { enabled: true, repriceSec: 30, marketAfterMin: 10 };
+const CHASE = { repriceSec: 30, marketAfterMin: 10 };
 
 test('chase: a limit buy left behind by the book is re-placed at the best bid after 30 s, keeping the chain', async (t) => {
   reset(ema, false);
@@ -322,9 +322,11 @@ test('chase: after 10 minutes the unfilled rest of a buy goes out at market, siz
   assert.equal(placed[0].ctx.chase, undefined);
 });
 
-test('chase on: new limit orders from a decision carry the chase start instead of a bar timeout', async (t) => {
+test('chase: new limit orders from a decision start at the live best bid and carry the chase start, no bar timeout', async (t) => {
   reset(ema);
-  botSettings.chase = CHASE;
+  // even with an old stored `enabled: false`, limit orders follow the book
+  botSettings.chase = { ...CHASE, enabled: false };
+  book = { bid: 412.3, ask: 413 };
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-27T15:30:00Z') + stray * 120_000 });
   const lim = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 } });
   botSettings.strategy = lim;
@@ -334,4 +336,5 @@ test('chase on: new limit orders from a decision carry the chase start instead o
   assert.equal(placed[0].ctx.expiresAt, null);
   assert.equal(placed[0].ctx.chase.root, null);
   assert.ok(placed[0].ctx.chase.since > 0);
+  assert.equal(Number(placed[0].intent.price), 412.3);
 });

@@ -279,7 +279,7 @@ export function explainStrategy(specInput: StrategySpec): string {
   parts.push(
     e.orderType === 'market'
       ? 'Orders are market orders, which fill immediately but pay the higher taker fee.'
-      : `Orders are limit orders ${e.limitOffsetBps ? `${e.limitOffsetBps / 100} % better than the last close` : 'at the last close'}${e.postOnly ? ' that only ever pay the lower maker fee' : ''}; an order that has not filled after ${e.timeoutBars} candle${e.timeoutBars === 1 ? '' : 's'} is ${e.fallback === 'market' ? 'replaced by a market order' : 'cancelled'}.`,
+      : `Orders are limit orders at the best bid (buy) or ask (sell) on Bitvavo's live order book${e.postOnly ? ' that only ever pay the lower maker fee' : ''}; an unfilled order moves along with the book until it fills, and whatever is still open after a few minutes goes at market.`,
   );
   return parts.join(' ');
 }

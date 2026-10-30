@@ -54,12 +54,12 @@ export interface BotSettings {
   chase?: ChaseSettings;
 }
 
+/** Limit orders always follow Bitvavo's order book (the backend ignores an old `enabled`). */
 export interface ChaseSettings {
-  enabled: boolean;
   repriceSec: number;
   marketAfterMin: number;
 }
-export const DEFAULT_CHASE: ChaseSettings = { enabled: true, repriceSec: 30, marketAfterMin: 10 };
+export const DEFAULT_CHASE: ChaseSettings = { repriceSec: 30, marketAfterMin: 10 };
 
 /** A research entry the owner keeps forever (GET /api/hall-of-fame): a copy, independent of newer research. */
 export interface HallEntry {

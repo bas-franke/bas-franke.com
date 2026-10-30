@@ -14,7 +14,7 @@ export interface PlaceContext {
   fallback: 'cancel' | 'market';
   barTime?: number;
   fees: { maker: number; taker: number };
-  /** Limit orders that follow the order book (settings.chase): start of the chain and its first order's id. */
+  /** Limit orders that follow the order book (settings.chase, every limit order): start of the chain and its first order's id. */
   chase?: { since: number; root: number | null };
 }
 

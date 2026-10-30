@@ -43,7 +43,7 @@ const emptyMode = (): ModeState => ({ locks: {}, trail: {} });
 export const MANUAL_MARKETS = ['BTC-EUR', 'ETH-EUR'];
 
 /** The stand-in strategy the bot runs while a manual allocation is set: decides every minute, post-only limit
- * orders at the best price that stays maker, unfilled ones cancelled after a minute and placed again. */
+ * orders at the best bid/ask that follow the book (handleChase) like every other limit order. */
 export function manualSpec(m: ManualAllocation): StrategySpec {
   const where = m.target === 'EUR' ? 'euros' : m.target;
   return {
@@ -435,14 +435,13 @@ async function handleTimeouts(s: BotSettings, broker: Broker, now: number, still
 const CHASE_SUFFIX = / \((repriced|rest at market)\)$/;
 
 /**
- * Order-book chase (settings.chase): a limit order still unfilled `repriceSec` after it was placed is cancelled and
+ * Order-book chase (settings.chase, always on): a limit order still unfilled `repriceSec` after it was placed is cancelled and
  * placed again for the unfilled rest at the best bid (buy) or best ask (sell), post-only as before, unless it is already
  * there. Once the first order of the chain is `marketAfterMin` old, the rest goes out as a market order. Buys are
  * capped to the free cash (taker fee and margin kept free, as in planOrders).
  */
 async function handleChase(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean): Promise<number> {
   const c = s.chase;
-  if (!c?.enabled) return 0;
   let placed = 0;
   for (const o of await openOrders(s.mode)) {
     if (o.orderType !== 'limit' || o.meta.chaseSince === undefined || o.status === 'pending' || !stillValid()) continue;
@@ -653,8 +652,20 @@ async function placeTargets(
   for (const o of await openOrders(s.mode)) (openSides[o.market] ??= []).push(o.side);
   const otherCoinsEur = pf.equityEur - pf.cashEur - strategyCoins;
 
+  // Limit orders start at the live best bid (buy) / ask (sell) on Bitvavo's book, not at the candle close.
+  const book: Record<string, { bid: number; ask: number }> = {};
+  if (spec.execution.orderType === 'limit') {
+    for (const m of spec.markets) {
+      try {
+        book[m] = await bestBidAsk(m);
+      } catch (err) {
+        await log('warn', 'no_book', `${m}: reading the order book failed (${errText(err)}); pricing from the last close`);
+      }
+    }
+  }
+
   const plan = planOrders({
-    spec, targets: w, equityEur: pf.equityEur, cashAvailableEur: pf.cashAvailableEur, holdings, prices, rules,
+    spec, targets: w, equityEur: pf.equityEur, cashAvailableEur: pf.cashAvailableEur, holdings, prices, book, rules,
     maxExposureEur: s.maxExposureEur, otherCoinsEur, openSides, fees: s.fees,
   });
   await log('info', 'decision', `Bar ${new Date(bar).toISOString()}: targets ${fmtWeights(w)}; ${plan.orders.length ? plan.orders.map((o) => `${o.side} ${o.market} €${o.valueEur.toFixed(2)}`).join(', ') : 'no orders'}`, {
@@ -669,9 +680,8 @@ async function placeTargets(
   const expiresAt = bar + INTERVAL_MS[spec.interval] * (1 + spec.execution.timeoutBars);
   for (const intent of plan.orders) {
     if (!stillValid()) break;
-    // With the order-book chase on, limit orders are re-priced and finally sent at market by handleChase instead of
-    // waiting `timeoutBars` bars.
-    const chase = s.chase?.enabled && intent.orderType === 'limit';
+    // Limit orders always follow the order book: handleChase re-prices them and finally sends the rest at market.
+    const chase = intent.orderType === 'limit';
     await broker.place(intent, chase
       ? { strategyId: spec.id, expiresAt: null, fallback: 'cancel', barTime: bar, fees: s.fees, chase: { since: Date.now(), root: null } }
       : { strategyId: spec.id, expiresAt, fallback: spec.execution.fallback, barTime: bar, fees: s.fees });
