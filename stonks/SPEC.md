@@ -90,7 +90,12 @@ orders; differences smaller than €5 or 2 % of equity are ignored (no churn).
 - **Retries (live bot and paper):** each bar's plan is kept in `bot_state.decision`. A planned market and side with no
   working order (rejected, `canceledPostOnly`, crash before placing, a chase that ended unfilled) is placed again while the
   bar lasts: 60 s apart, 5 attempts including the first (`order_retry`, then the error `order_retries_exhausted`). Only
-  what was planned is retried, so a rotation's buy still waits for the next decision, as in the backtest.
+  what was planned is retried, so a rotation's buy still waits for the next decision, as in the backtest. A decision also
+  cancels working orders it no longer wants, inside the dead-band too, as the backtest does.
+- **Late data:** a hold or a late candle is never decided on the old candle. Past the grace period the bot alerts once
+  (`decision_held`, `stale_candles`) and keeps retrying each minute until the bar ends (`bar_undecided` if it never could). The one
+  exception: a newer candle with none at this bar means the market had no trades, so it decides (`bar_no_trades`). A lab
+  history download that blocks decisions past the grace logs the error `history_blocking`.
 - Sizing values holdings and equity at the same close, like the backtest. Before placing, the bot reads the book and logs
   `thin_book` when the spread is over 30 bps or an order is over 20 % of the depth within 25 bps; that never blocks an order.
 - **Paper fills** come from Bitvavo's public trades after the order's own `activeFrom`: a limit fills up to 25 % of the
@@ -168,6 +173,7 @@ Loss guard (rolling 24 h): every tick the bot compares equity with its equity 24
 is that % of `equity24hAgo`) it logs one `error` event `daily_loss_limit` per trip and acts on `action`:
 - `no_buys` (default): stays on, cancels open buys and withholds new ones; sells, stops and exits go on. Ends by itself
   (`guard_cleared`) once the loss is back under the limit. Withheld buys stay planned, so they go out if that happens in the same bar.
+  Manual moves are exempt: the owner asked for them.
 - `alert`: only reports it and keeps trading.
 - `stop`: cancels its orders and sets `enabled: false` until the owner turns it on again. The position stays held with nothing
   managing it, which is why it is no longer the default: it cost 4-15 points a year on the books tested.
@@ -274,7 +280,7 @@ camelCase and numbers (not numeric strings).
 | `POST /api/auth/login` | `{ password }` | `{ ok:true }` + cookie; 401 wrong; 429 after 10 tries / 10 min per IP |
 | `POST /api/auth/logout` | | `{ ok:true }` |
 | `GET /api/auth/me` | | `{ loggedIn:true }` or 401 |
-| `GET /api/overview` | | `{ bot: settings.bot, running:bool, lastTickAt, bitvavo:{connected, error?}, balances:[{symbol, available, inOrder, eurValue}], equityEur, todayPnlEur, last24hPnlEur, lossWindowSince, dailyLossLimit, dailyLossLimitEur (the limit in euros now), openOrders:n, strategyExplanation, activeResearch }` |
+| `GET /api/overview` | | `{ bot: settings.bot, running:bool, lastTickAt, bitvavo:{connected, error?}, balances:[{symbol, available, inOrder, eurValue}], equityEur, todayPnlEur, last24hPnlEur, lossWindowSince, dailyLossLimit, dailyLossLimitEur (the limit in euros now), openOrders:n, lastTickError, strategyExplanation, activeResearch }` |
 | `PUT /api/bot` | partial `settings.bot` | updated `settings.bot`; switching `mode` to `live` needs `{ confirmLive:true }`; validated |
 | `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
 | `POST /api/bot/allocate` | `{ target: "BTC"\|"ETH"\|"EUR"\|null, confirmLive? }` | `{ ok, bot, started, startError? }`; moves everything to one coin or euros (switches the bot on), `null` = back to the strategy; 400 live without confirm |
@@ -285,7 +291,7 @@ camelCase and numbers (not numeric strings).
 | `POST /api/bot/test-alert` | `{}` | `{ ok, configured, error? }` |
 | `POST /api/hall-of-fame` | `{ researchId, bucket, rank }` | `{ ok, id }`; copies that entry from that stored snapshot; 409 when the same spec is already kept |
 | `DELETE /api/hall-of-fame/:id` | `{}` | `{ ok }`; only the owner removes entries, nothing else ever does |
-| `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot` (stop also cancels the bot's open orders) |
+| `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot`; stop writes `enabled:false` first, so it answers at once even during a slow tick, and the bot's open orders are cancelled on the next tick |
 | `GET /api/orders` | `?mode=&market=&limit=&before=` | `{ orders:[...] }` newest first |
 | `GET /api/fills` | same | `{ fills:[...] }` |
 | `GET /api/equity` | `?mode=&days=` | `{ mode, points:[{ts,totalEur,cashEur}] }` (≤ 1500 points; optional `buyHold:[{ts,totalEur}]`) |
