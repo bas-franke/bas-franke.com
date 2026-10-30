@@ -31,7 +31,10 @@ export default function OverviewPage() {
           <>
             <div>
               <div className="soft small">Everything together is worth</div>
-              <div className="hero-num">{eur(o.equityEur)}</div>
+              <div className="row" style={{ alignItems: 'baseline', gap: 12 }}>
+                <div className="hero-num">{eur(o.equityEur)}</div>
+                <QuoteShare o={o} />
+              </div>
             </div>
             <div className="row">
               {o.todayPnlEur !== null && (
@@ -233,6 +236,19 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
         )}
       </Modal>
     </section>
+  );
+}
+
+/** How much of the portfolio sits in the currency the strategy trades against (EUR for BTC-EUR), also when that is nothing. */
+function QuoteShare({ o }: { o: Overview }) {
+  const quote = (o.bot.strategy?.markets?.[0]?.split('-')[1] ?? 'EUR').toUpperCase();
+  const bal = o.balances.find((b) => b.symbol.toUpperCase() === quote);
+  const value = bal ? num(bal.eurValue) : 0;
+  const share = o.equityEur > 0 ? (value / o.equityEur) * 100 : 0;
+  return (
+    <span className="chip" title={`Part of the portfolio held in ${quote}, ready to buy with`}>
+      {pct(share, 1)} in {quote} · {eur(value)}
+    </span>
   );
 }
 
