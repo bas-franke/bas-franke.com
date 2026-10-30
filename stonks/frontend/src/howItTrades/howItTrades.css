@@ -1,0 +1,321 @@
+/* The article "How the bot trades": folding sections and its charts. Scoped under .shell to win over the shared styles. */
+
+.shell .article-page .article-body .hit-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 22px 0 8px;
+}
+.shell .hit-tiles > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.shell .hit-tiles b {
+  font-family: var(--serif);
+  font-size: 1.9rem;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+/* ---------- sections ---------- */
+
+.shell .hit-list {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.shell .hit-sec {
+  border-bottom: 1px solid var(--line);
+}
+.shell .hit-sec summary {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 2px;
+  cursor: pointer;
+  list-style: none;
+}
+.shell .hit-sec summary::-webkit-details-marker {
+  display: none;
+}
+.shell .hit-sec summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  justify-self: center;
+  border-right: 2px solid var(--ink-3);
+  border-bottom: 2px solid var(--ink-3);
+  transform: rotate(45deg);
+  transition: transform 0.18s ease;
+}
+.shell .hit-sec[open] summary::after {
+  transform: rotate(-135deg);
+}
+.shell .hit-sec summary:hover .hit-sec-title {
+  color: var(--brass-ink);
+}
+.shell .hit-sec summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.shell .hit-sec-n {
+  font-family: var(--serif);
+  font-size: 1.3rem;
+  color: var(--brass-ink);
+  text-align: center;
+}
+.shell .hit-sec-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.shell .hit-sec-title {
+  font-family: var(--serif);
+  font-size: 1.16rem;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.shell .hit-sec-teaser {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+}
+.shell .hit-sec-tag {
+  white-space: nowrap;
+}
+.shell .hit-sec-body {
+  padding: 2px 0 26px;
+}
+
+/* ---------- one example ---------- */
+
+.shell .hit-fig {
+  margin: 20px 0;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.shell .hit-fig figcaption {
+  font-family: var(--serif);
+  font-size: 1.08rem;
+}
+.shell .hit-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 2px;
+  padding: 0;
+  list-style: none;
+}
+.shell .article-page .article-body .hit-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: none;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.shell .hit-key {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+}
+.shell .hit-key.line {
+  height: 2px;
+  background: var(--ink);
+}
+.shell .hit-key.strip {
+  background: var(--s1);
+  opacity: 0.55;
+}
+.shell .hit-key.band {
+  background: var(--brass);
+  opacity: 0.3;
+}
+.shell .hit-key.band.hot {
+  background: var(--loss);
+  opacity: 0.35;
+}
+
+.shell .hit-chart {
+  position: relative;
+  width: 100%;
+  touch-action: pan-y;
+}
+.shell .hit-chart svg {
+  display: block;
+}
+.shell .hit-band {
+  fill: var(--brass);
+  opacity: 0.13;
+}
+.shell .hit-band.hot {
+  fill: var(--loss);
+  opacity: 0.2;
+}
+.shell .hit-grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.shell .hit-tick {
+  fill: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.shell .hit-line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.shell .hit-strip {
+  fill: var(--s1);
+  opacity: 0.5;
+}
+.shell .hit-mark.buy {
+  fill: var(--gain);
+  stroke: var(--surface-2);
+  stroke-width: 1;
+}
+.shell .hit-mark.sell {
+  fill: var(--loss);
+  stroke: var(--surface-2);
+  stroke-width: 1;
+}
+.shell .hit-stem {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+}
+.shell .hit-badge {
+  stroke: var(--surface-2);
+  stroke-width: 2;
+}
+.shell .hit-badge.buy {
+  fill: var(--gain-ink);
+}
+.shell .hit-badge.sell {
+  fill: var(--loss-ink);
+}
+.shell .hit-badge-n {
+  fill: var(--surface);
+  font-size: 10.5px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.shell .hit-cross {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.shell .hit-dot {
+  fill: var(--ink);
+  stroke: var(--surface-2);
+  stroke-width: 2;
+}
+.shell .hit-tip {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.shell .hit-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.shell .article-page .article-body .hit-notes li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  max-width: none;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+.shell .hit-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 50%;
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.shell .hit-num.buy {
+  background: var(--gain-ink);
+}
+.shell .hit-num.sell {
+  background: var(--loss-ink);
+}
+
+.shell .hit-result {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.shell .hit-result > div {
+  display: flex;
+  flex-direction: column;
+}
+.shell .hit-result b {
+  font-family: var(--serif);
+  font-size: 1.3rem;
+  font-weight: 500;
+}
+.shell .article-page .article-body .hit-scale-note {
+  margin: 8px 0 0;
+}
+.shell .article-page .article-body .hit-foot {
+  margin-top: 20px;
+  font-size: 0.86rem;
+}
+
+@media (max-width: 760px) {
+  .shell .hit-sec summary {
+    grid-template-columns: 24px minmax(0, 1fr) 16px;
+    gap: 8px;
+    padding: 14px 0;
+  }
+  .shell .hit-sec-tag {
+    display: none;
+  }
+  .shell .hit-sec-title {
+    font-size: 1.06rem;
+  }
+  .shell .hit-fig {
+    margin-inline: -8px;
+    padding: 14px 10px 12px;
+  }
+  .shell .hit-tiles > div {
+    padding: 10px 10px;
+  }
+  .shell .hit-tiles b {
+    font-size: 1.5rem;
+  }
+  .shell .article-page .article-body .hit-notes li {
+    font-size: 0.92rem;
+  }
+}

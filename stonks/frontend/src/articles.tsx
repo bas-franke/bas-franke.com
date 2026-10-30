@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { HowItTrades } from './howItTrades/article';
 
 // Long reads shown as cards on the Overview page and opened at /article?slug=<slug>. The content lives in code:
 // add an entry here (newest first) and it shows up on the homepage.
@@ -398,6 +399,15 @@ function AllCoins() {
 }
 
 export const ARTICLES: Article[] = [
+  {
+    slug: 'how-the-bot-trades',
+    title: 'How the bot trades, in plain language',
+    blurb: 'When it buys, when it sells, and when it stays out: real market moments with charts of every trade, from the biggest earners to the times it goes wrong.',
+    date: '2026-10-30',
+    minutes: 12,
+    tag: 'How it works',
+    body: HowItTrades,
+  },
   {
     slug: 'twenty-nine-coins',
     title: 'Tested on 29 coins: why the cycle bull wins',
