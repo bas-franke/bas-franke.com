@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { refreshDesk } from '../desk';
 import { api, ApiError, paperGateOf, unwrapFamilies, unwrapMarkets } from '../api';
 import { artUrl, PageBanner } from '../components/art';
 import { ErrorBox, Fold, ModeBadge, Modal, PaperGateNotice, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
@@ -144,6 +145,7 @@ export default function SettingsPage() {
       if (goesLive || liveStrategyChange) patch.confirmLive = confirm;
       if (skipGate) patch.skipPaperGate = true;
       const res = await api.updateBot(patch);
+      refreshDesk();
       const { enabled: _e, ...rest } = res;
       setSaved(rest);
       setDraft(structuredClone(rest));
@@ -637,6 +639,7 @@ function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSe
     setError(null);
     try {
       const res = await api.allocate({ target, ...(live && target ? { confirmLive: true } : {}) });
+      refreshDesk();
       onDone(res.bot);
       if (!target) toast('Back to the strategy. It decides again at its next candle.');
       else if (res.startError) setError(`Saved, but the bot could not start: ${res.startError}`);

@@ -87,7 +87,7 @@ function Actions({ onLogout }: { onLogout: () => void }) {
 }
 
 const Brand = () => (
-  <NavLink path="/" className="brand">
+  <NavLink path="/" className="brand" title="Stonks">
     <img src="/icon-64.png" alt="" width={34} height={34} />
     <span className="brand-name">Stonks</span>
   </NavLink>
@@ -140,7 +140,8 @@ export const TopBar = ({ onLogout }: { onLogout: () => void }) => (
 const Mover = ({ change }: { change: number | null }) =>
   change === null ? null : (
     <span className={`tick-move ${change >= 0 ? 'up' : 'down'}`}>
-      <span aria-hidden="true">{change >= 0 ? '▲' : '▼'}</span> {pct(Math.abs(change), 1)}
+      <span aria-hidden="true">{change >= 0 ? '▲' : '▼'}</span>
+      <span className="sr-only">{change >= 0 ? 'up' : 'down'}</span> {pct(Math.abs(change), 1)}
     </span>
   );
 

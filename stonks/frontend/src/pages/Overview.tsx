@@ -6,7 +6,7 @@ import { DailyBars, LineChart, type LineSeries } from '../components/charts';
 import { IconHealth } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { ago, amount, dateOnly, eur, familyLabel, humanize, lossAction, lossLimitText, num, pct, signedEur, toDate } from '../format';
-import { botMood, todayPct } from '../desk';
+import { botMood, refreshDesk, todayPct } from '../desk';
 import { guardOf, useHealth, useHealthFeed } from '../health';
 import { navigate } from '../router';
 import './overview.css';
@@ -61,7 +61,13 @@ export default function OverviewPage() {
 
       {o && (
         <div className="control-row">
-          <BotCard o={o} onChange={ov.reload} />
+          <BotCard
+            o={o}
+            onChange={() => {
+              ov.reload();
+              refreshDesk();
+            }}
+          />
           <LossCard o={o} />
         </div>
       )}

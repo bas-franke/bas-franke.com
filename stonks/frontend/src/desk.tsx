@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { api } from './api';
 import type { Mood } from './components/art';
 import { useAsync, useVisibleInterval } from './components/ui';
@@ -9,11 +9,19 @@ import type { CompareData, Overview } from './types';
 const DeskCtx = createContext<{ overview?: Overview; day?: CompareData }>({});
 export const useDesk = () => useContext(DeskCtx);
 
+/** Call after anything that changes the bot, so the rail and the ticker don't wait for their next poll. */
+export const refreshDesk = () => window.dispatchEvent(new Event('stonks:desk'));
+
 export function DeskProvider({ children }: { children: ReactNode }) {
   const ov = useAsync(() => api.overview(), []);
   useVisibleInterval(() => ov.reload(), 30_000);
   const day = useAsync(() => api.compare('day'), [ov.data?.bot.mode]);
   useVisibleInterval(() => day.reload(), 60_000);
+  useEffect(() => {
+    const again = () => ov.reload();
+    window.addEventListener('stonks:desk', again);
+    return () => window.removeEventListener('stonks:desk', again);
+  }, [ov.reload]);
   return <DeskCtx.Provider value={{ overview: ov.data, day: day.data }}>{children}</DeskCtx.Provider>;
 }
 

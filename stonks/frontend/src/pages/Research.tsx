@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { refreshDesk } from '../desk';
 import { api, ApiError, paperGateOf } from '../api';
 import { artUrl, EmptyState, PageBanner } from '../components/art';
 import { LineChart, Spark, type LineSeries } from '../components/charts';
@@ -73,7 +74,10 @@ export default function ResearchPage() {
       </div>
     );
   }
-  return <Research data={r.data as ResearchPayload} overview={ov.data} onActivated={ov.reload} onReload={r.reload} />;
+  return <Research data={r.data as ResearchPayload} overview={ov.data} onActivated={() => {
+        ov.reload();
+        refreshDesk();
+      }} onReload={r.reload} />;
 }
 
 const Head = ({ data }: { data?: ResearchPayload }) => (

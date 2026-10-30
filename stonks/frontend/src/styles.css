@@ -1640,17 +1640,16 @@ dialog.modal[open] {
 }
 
 
-/* Phones: tooltips span the screen width just under their "?" so they never run off the edge. */
+/* Phones: tooltips are a full-width card just above the tab bar, wherever the page has scrolled to. */
 @media (max-width: 760px) {
   .tip > [role='tooltip'],
   .tip.align-left > [role='tooltip'] {
     position: fixed;
     left: 16px;
     right: 16px;
-    bottom: auto;
+    bottom: calc(92px + env(safe-area-inset-bottom));
     width: auto;
     max-width: none;
-    margin-top: 24px;
     transform: none !important;
   }
 }
