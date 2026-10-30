@@ -78,6 +78,7 @@ export default function OverviewPage() {
           <div className="stack">
             <StrategyCard o={o} />
             <BalancesCard o={o} />
+            <RecentTradesCard o={o} />
           </div>
         </div>
       )}
@@ -235,6 +236,104 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
           <div className="callout brass">Paper mode: orders are simulated on live prices. No real money moves.</div>
         )}
       </Modal>
+    </section>
+  );
+}
+
+const RECENT_TRADES = 5;
+
+/**
+ * The newest filled orders. The percentage is how the trade did: a buy against today's price, a sell against the
+ * buy before it in the same coin. A cancelled order whose tiny rest went unfilled counts as filled (see Trades).
+ */
+function RecentTradesCard({ o }: { o: Overview }) {
+  const orders = useAsync(
+    () => Promise.all([api.orders({ mode: o.bot.mode, limit: 100 }), api.fills({ mode: o.bot.mode, limit: 300 })]).then(([a, b]) => ({ list: a.orders, fills: b.fills })),
+    [o.bot.mode],
+  );
+  useVisibleInterval(() => orders.reload(), 60_000);
+  const rows = useMemo(() => {
+    // Euros and coins actually traded per order, from its fills (market orders carry no price of their own).
+    const traded = new Map<string, { q: number; a: number }>();
+    for (const f of orders.data?.fills ?? []) {
+      if (f.orderId === undefined) continue;
+      const t = traded.get(String(f.orderId)) ?? { q: 0, a: 0 };
+      t.q += num(f.price) * num(f.amount);
+      t.a += num(f.amount);
+      traded.set(String(f.orderId), t);
+    }
+    const filledOf = (x: (typeof list)[number]) => num(x.filledAmount ?? x.filled) || traded.get(String(x.id))?.a || 0;
+    const list = orders.data?.list ?? [];
+    const done = list.filter((x) => {
+      const amt = num(x.amount);
+      return x.status === 'filled' || (/cancel|expired/i.test(x.status) && amt > 0 && filledOf(x) / amt >= 0.995);
+    });
+    const avg = (x: (typeof list)[number]) => {
+      const t = traded.get(String(x.id));
+      if (t && t.a > 0) return t.q / t.a;
+      const f = filledOf(x);
+      const q = num(x.filledQuote);
+      return f > 0 && q > 0 ? q / f : num(x.price);
+    };
+    const now = new Map(o.balances.map((b) => [b.symbol.toUpperCase(), num(b.eurValue) / (num(b.available) + num(b.inOrder) || 1)]));
+    // `done` is newest first: the buy a sell closes is the next older buy in the same market.
+    return done.slice(0, RECENT_TRADES).map((x, i) => {
+      const p = avg(x);
+      let ref: number | undefined;
+      if (x.side === 'buy') ref = now.get(x.market.split('-')[0].toUpperCase());
+      else {
+        const buy = done.slice(i + 1).find((y) => y.side === 'buy' && y.market === x.market);
+        ref = buy ? avg(buy) : undefined;
+      }
+      const change = ref && p ? (x.side === 'buy' ? (ref / p - 1) * 100 : (p / ref - 1) * 100) : null;
+      const value = num(x.filledQuote) || traded.get(String(x.id))?.q || filledOf(x) * p;
+      return { x, value: Number.isFinite(value) && value > 0 ? value : null, change: change !== null && Number.isFinite(change) ? change : null };
+    });
+  }, [orders.data, o.balances]);
+
+  return (
+    <section className="card" aria-labelledby="recent-h">
+      <div className="card-head">
+        <span className="eyebrow" id="recent-h">
+          Latest trades
+        </span>
+        <Tip>Only orders that filled. A buy shows how its coin did since; a sell shows its result against the buy before it.</Tip>
+        <span className="spacer" />
+        <a
+          className="small"
+          href="/trades"
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            navigate('/trades');
+          }}
+        >
+          All trades →
+        </a>
+      </div>
+      {orders.error ? (
+        <ErrorBox error={orders.error} onRetry={orders.reload} />
+      ) : !orders.data ? (
+        <Skeleton h={120} />
+      ) : rows.length === 0 ? (
+        <p className="small muted">No filled trades yet.</p>
+      ) : (
+        <ul className="recent-trades">
+          {rows.map(({ x, value, change }) => (
+            <li key={String(x.id)}>
+              <span className={`side ${x.side}`}>{x.side}</span>
+              <span className="recent-what">
+                <b>{x.market.split('-')[0]}</b>
+                <span className="tiny muted">{ago(x.createdAt ?? x.created_at)}</span>
+              </span>
+              <span className="tnum recent-value">{value === null ? '–' : eur(value)}</span>
+              <span className={`chip tnum ${change === null ? '' : change >= 0 ? 'gain' : 'loss'}`} title={x.side === 'buy' ? 'Since the buy' : 'Against the buy before it'}>
+                {change === null ? '–' : pct(change, 1, true)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
