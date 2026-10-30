@@ -1866,7 +1866,7 @@ dialog.modal[open] {
 
 /* Strategy write-up page */
 html:has(.writeup) {
-  scroll-padding-top: calc(var(--sticky-top) + 16px);
+  scroll-padding-top: calc(var(--sticky-top) + 72px);
 }
 .writeup p {
   line-height: 1.6;
@@ -1893,54 +1893,6 @@ html:has(.writeup) {
 .writeup-example .rank-more summary,
 .writeup-board .rank-more summary {
   padding: 12px 0 10px;
-}
-.writeup-toc {
-  padding: 4px 16px;
-}
-.writeup-toc summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 0;
-  cursor: pointer;
-  list-style: none;
-}
-.writeup-toc summary::-webkit-details-marker {
-  display: none;
-}
-.writeup-toc summary::after {
-  content: '▾';
-  margin-left: auto;
-  color: var(--ink-3);
-  transition: transform 0.2s;
-}
-.writeup-toc details:not([open]) summary::after {
-  transform: rotate(-90deg);
-}
-.writeup-toc .count {
-  font-size: 0.75rem;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-.writeup-toc ol {
-  margin: 0 0 12px;
-  padding-left: 22px;
-  display: grid;
-  gap: 2px;
-}
-.writeup-toc li {
-  padding: 4px 0;
-}
-.writeup-toc li a {
-  margin-right: 8px;
-}
-.writeup-toc li .chip {
-  font-size: 0.7rem;
-  padding: 1px 8px;
-  vertical-align: 1px;
 }
 .writeup-totop {
   position: fixed;

@@ -55,88 +55,86 @@ export default function WriteupPage() {
       />
       {w.error && <ErrorBox error={w.error} onRetry={w.reload} />}
       {!w.data && !w.error && <Skeleton h={400} />}
-      {w.data && <Toc doc={w.data} />}
-      {w.data?.sections.map((s, i) =>
-        hasCoinBoard(w.data!) && s.key?.startsWith('coin-') ? null : <Section key={i} s={s} n={i} />,
-      )}
-      {w.data && <ToTop />}
+      {w.data && <Sections doc={w.data} />}
     </div>
   );
 }
 
 const hasCoinBoard = (doc: Writeup) => doc.sections.some((s) => (s.coins?.length ?? 0) > 0);
 
-function Toc({ doc }: { doc: Writeup }) {
+/** Coin charts and the compare graph lead; everything else follows folded, in the write-up's own order. */
+function Sections({ doc }: { doc: Writeup }) {
   const board = hasCoinBoard(doc);
-  const examples = doc.sections.filter((s) => s.type === 'example' && !(board && s.key?.startsWith('coin-')));
-  // Open on wide screens; on a phone the list would fill the first screen, so it starts folded.
-  const [open] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
-  if (!examples.length && !board) return null;
+  const listed = doc.sections.map((s, n) => ({ s, n })).filter(({ s }) => !(board && s.key?.startsWith('coin-')));
+  const ordered = [...listed.filter(({ s }) => s.coins?.length), ...listed.filter(({ s }) => !s.coins?.length)];
+  const jumps = [
+    ...(board
+      ? [
+          { id: 'coin-charts', label: 'Coin charts' },
+          { id: 'compare-research', label: 'Compare' },
+          { id: 'coin-numbers', label: 'Every coin' },
+        ]
+      : []),
+    ...ordered.filter(({ s }) => !s.coins?.length && s.title && (s.type !== 'heading' || s.body)).map(({ s, n }) => ({ id: anchorOf(s, n), label: s.title! })),
+  ];
+  return (
+    <>
+      <PageJumps jumps={jumps} />
+      {ordered.map(({ s, n }) => (
+        <div key={n} id={anchorOf(s, n)} data-fold className="writeup-anchor">
+          <Section s={s} n={n} />
+        </div>
+      ))}
+      <ToTop />
+    </>
+  );
+}
+
+const anchorOf = (s: WriteupSection, n: number) => (s.type === 'example' && s.key ? `ex-${s.key}` : `sec-${n}`);
+
+/** Sticky row of links to every part of the page; a link opens the part it lands on. */
+function PageJumps({ jumps }: { jumps: { id: string; label: string }[] }) {
+  if (jumps.length < 2) return null;
   const jump = (e: MouseEvent<HTMLAnchorElement>, id: string) => {
     e.preventDefault();
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const el = document.getElementById(id);
+    if (el?.hasAttribute('data-fold')) el.querySelector('details')?.setAttribute('open', '');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     history.replaceState(history.state, '', `#${id}`);
   };
   return (
-    <nav className="card quiet writeup-toc" id="writeup-toc" aria-label="Examples">
-      <details open={open}>
-        <summary>
-          <span className="eyebrow">Examples in this write-up</span>
-          <span className="count">{examples.length + (board ? 2 : 0)}</span>
-        </summary>
-        <ol>
-          {examples.map((s) => (
-            <li key={s.key}>
-              <a href={`#ex-${s.key}`} onClick={(e) => jump(e, `ex-${s.key}`)}>
-                {s.title}
-              </a>
-              <span className={`chip ${s.trades ? 'brass' : 'outline'}`}>{s.trades ? 'trades' : 'no trade'}</span>
-            </li>
-          ))}
-          {board && (
-            <li>
-              <a href="#coin-board" onClick={(e) => jump(e, 'coin-board')}>
-                Every coin, strategy against holding
-              </a>
-            </li>
-          )}
-          {board && (
-            <li>
-              <a href="#compare-research" onClick={(e) => jump(e, 'compare-research')}>
-                Compare a coin with other research
-              </a>
-            </li>
-          )}
-        </ol>
-      </details>
+    <nav className="writeup-jumps" aria-label="On this page">
+      {jumps.map((j) => (
+        <a key={j.id} href={`#${j.id}`} onClick={(e) => jump(e, j.id)}>
+          {j.label}
+        </a>
+      ))}
     </nav>
   );
 }
 
-/** Floating button back to the list of examples, shown once the reader has scrolled past it. */
+/** Floating button back to the top, shown once the reader has scrolled down. */
 function ToTop() {
   const [shown, setShown] = useState(false);
   const frame = useRef(0);
   useEffect(() => {
     const check = () => {
       cancelAnimationFrame(frame.current);
-      frame.current = requestAnimationFrame(() => {
-        const toc = document.getElementById('writeup-toc');
-        setShown(toc ? toc.getBoundingClientRect().bottom < 0 : window.scrollY > 900);
-      });
+      frame.current = requestAnimationFrame(() => setShown(window.scrollY > 900));
     };
     check();
     window.addEventListener('scroll', check, { passive: true });
     return () => (window.removeEventListener('scroll', check), cancelAnimationFrame(frame.current));
   }, []);
-  const go = () => {
-    const toc = document.getElementById('writeup-toc');
-    toc?.querySelector('details')?.setAttribute('open', '');
-    toc?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
   return (
-    <button type="button" className={`writeup-totop${shown ? ' is-shown' : ''}`} onClick={go} aria-hidden={!shown} tabIndex={shown ? 0 : -1}>
-      ↑ Examples
+    <button
+      type="button"
+      className={`writeup-totop${shown ? ' is-shown' : ''}`}
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      aria-hidden={!shown}
+      tabIndex={shown ? 0 : -1}
+    >
+      ↑ Top
     </button>
   );
 }
@@ -155,7 +153,8 @@ function Paragraphs({ text }: { text?: string }) {
 function CoinTable({ s }: { s: WriteupSection }) {
   const specId = useLocation().query.get('spec') ?? '';
   const coins = s.coins ?? [];
-  const [coinId, setCoinId] = useState(coins[0]?.id ?? '');
+  // Ether first: it is the coin every card's euro figures use.
+  const [coinId, setCoinId] = useState((coins.find((c) => c.id === 'ETH') ?? coins[0])?.id ?? '');
   const coin = coins.find((c) => c.id === coinId) ?? coins[0];
   const [rangeId, setRangeId] = useState(coin?.ranges[0]?.id ?? 'year');
   const range = coin?.ranges.find((r) => r.id === rangeId) ?? coin?.ranges[0];
@@ -166,10 +165,9 @@ function CoinTable({ s }: { s: WriteupSection }) {
     setCoinId(id);
     document.getElementById('coin-charts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
-  return (
-    <section className="card" id={coins.length ? 'coin-board' : undefined}>
-      <h2>{s.title}</h2>
-      {coins.length > 0 && <p className="small soft writeup-hint">Tap a coin to see its charts below.</p>}
+  const table = (
+    <>
+      {coins.length > 0 && <p className="small soft writeup-hint">Tap a coin to see its charts.</p>}
       {s.compact && s.compact.length < (s.head ?? []).length && (
         <button type="button" className="chip outline writeup-cols" aria-pressed={all} onClick={() => setAll((v) => !v)}>
           {all ? 'Show fewer columns' : 'Show all columns'}
@@ -206,8 +204,23 @@ function CoinTable({ s }: { s: WriteupSection }) {
         </table>
       </div>
       {s.body && <p className="tiny muted writeup-hint">{s.body}</p>}
+    </>
+  );
+  if (!coins.length) {
+    return (
+      <section className="card quiet writeup-fold">
+        <Fold title={s.title || 'Table'}>{table}</Fold>
+      </section>
+    );
+  }
+  return (
+    <section className="card" id="coin-board">
+      <h2>{s.title}</h2>
       {coin && range && <CoinCharts coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} />}
-      {coin && specId && <CompareResearch specId={specId} coin={coin} />}
+      {coin && specId && <CompareResearch specId={specId} coin={coin} coins={coins} onCoin={setCoinId} />}
+      <div className="writeup-numbers" id="coin-numbers" data-fold>
+        <Fold title={`Every coin, the numbers (${coins.length})`}>{table}</Fold>
+      </div>
     </section>
   );
 }
@@ -267,9 +280,16 @@ function CoinCharts({
     return out;
   }, [coin, range]);
   const gap = range.strategy - range.hold;
+  // On a phone the coins are one scrolling row: keep the picked coin in view when it is picked from elsewhere.
+  const coinRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = coinRow.current;
+    const on = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (row && on) row.scrollTo({ left: on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2, behavior: 'smooth' });
+  }, [coin.id]);
   return (
     <div className="writeup-board" id="coin-charts">
-      <div className="writeup-picks" role="group" aria-label="Coin">
+      <div className="writeup-picks" role="group" aria-label="Coin" ref={coinRow}>
         {coins.map((c) => (
           <button key={c.id} type="button" className={`chip ${c.id === coin.id ? 'brass' : 'outline'}`} aria-pressed={c.id === coin.id} onClick={() => onCoin(c.id)}>
             {c.id}
@@ -297,19 +317,22 @@ function CoinCharts({
           <b className={gap >= 0 ? 'gain' : 'loss'}>{eur(Math.abs(gap))}</b>
         </div>
       </div>
-      <Fold title="How to read the lines">
-        <p className="small soft">
-          The first chart starts both lines at 100, so coins can be compared. The price chart starts both lines at this coin’s first close, so holding tracks the coin. The lower chart is the strategy minus holding, in euros.
-          {range.fees !== undefined ? ` Fees in this stretch ${eur(range.fees)}.` : ''}
-          {range.trips !== undefined ? ` ${range.trips} full exits.` : ''}
-          {range.exposure !== undefined && range.exposure !== null ? ` In the market ${Math.round(range.exposure)}% of the time.` : ''}
-        </p>
-      </Fold>
-      <div className="writeup-charts">
-        {charts.map((c, i) => (
-          <Chart key={`${coin.id}-${range.id}-${i}`} c={c} />
-        ))}
-      </div>
+      {charts[0] && <Chart key={`${coin.id}-${range.id}-0`} c={charts[0]} />}
+      {charts.length > 1 && (
+        <Fold title={`More ${coin.id} charts`}>
+          <div className="writeup-charts">
+            {charts.slice(1).map((c, i) => (
+              <Chart key={`${coin.id}-${range.id}-${i + 1}`} c={c} />
+            ))}
+          </div>
+          <p className="small soft">
+            The first chart starts both lines at 100, so coins can be compared. The price chart starts both lines at this coin’s first close, so holding tracks the coin. The lower chart is the strategy minus holding, in euros.
+            {range.fees !== undefined ? ` Fees in this stretch ${eur(range.fees)}.` : ''}
+            {range.trips !== undefined ? ` ${range.trips} full exits.` : ''}
+            {range.exposure !== undefined && range.exposure !== null ? ` In the market ${Math.round(range.exposure)}% of the time.` : ''}
+          </p>
+        </Fold>
+      )}
     </div>
   );
 }

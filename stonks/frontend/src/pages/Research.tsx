@@ -206,6 +206,76 @@ function Research({
     <div className="stack research-page" style={{ gap: 12 }}>
       <Head data={data} />
 
+      <div className="bucket-tabs" role="tablist" aria-label="Sessions">
+        {/* Hall of fame first; the page still opens on the newest session unless a link asks for the hall. */}
+        <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)} title="Hall of fame">
+          ★ HOF
+          <span className="count">{hall.data?.length ?? 0}</span>
+        </button>
+        {sessions.map((b) => (
+          <button
+            key={b}
+            type="button"
+            role="tab"
+            id={`tab-${b}`}
+            aria-selected={!hallView && b === tab}
+            aria-controls="bucket-panel"
+            onClick={() => choose(b)}
+          >
+            {bucketTitle(b)}
+            <span className="count">{buckets[b as BucketName]!.top.length}</span>
+          </button>
+        ))}
+      </div>
+
+      {hallView && (
+        <HallOfFame
+          hall={hall}
+          writeups={writeups.data}
+          active={active}
+          activeKey={activeKey}
+          onActivate={(h) => setPick({ e: h.entry, bucket: 'hall', hallId: h.id })}
+        />
+      )}
+
+
+      {!hallView && bucket && (
+      <div id="bucket-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="stack" style={{ gap: 12 }}>
+        <BucketIntro name={tab} b={bucket} />
+        {(tab === 'session4' || tab === 'session5') && (
+          <div className="callout brass">
+            Sessions 4 and 5 were ranked at a flat 0.05 % fee, below Bitvavo’s 0.15/0.25 %. Their euro figures and session scores use it; the absolute
+            score uses real fees.
+          </div>
+        )}
+
+        {top.length > 0 && <Compare top={top} benches={benches} />}
+
+        {top.length === 0 ? (
+          <section className="card">
+            <EmptyState title={`Nothing made the cut for ${bucketTitle(tab).toLowerCase()} trading yet`}>
+              {bucket.notes || 'No strategy in this session beat buying and holding after fees, so there is nothing worth running here yet.'}
+            </EmptyState>
+          </section>
+        ) : (
+          top.map((e, i) => (
+            <RankCard
+              key={e.spec.id}
+              e={e}
+              color={RANK_COLORS[i]}
+              anchor={`card-${tab}-${e.rank}`}
+              active={(!!active && active.researchId === data.id && active.bucket === tab && active.rank === e.rank) || activeKey === JSON.stringify(e.spec)}
+              onActivate={data.id !== undefined ? () => setPick({ e, bucket: tab }) : undefined}
+              inHall={hallKeys.has(JSON.stringify(e.spec))}
+              hasWriteup={!!writeups.data?.has(e.spec.id)}
+              bucket={tab}
+              onAddToHall={data.id !== undefined && hall.data ? () => void addToHall(e) : undefined}
+            />
+          ))
+        )}
+      </div>
+      )}
+
       <section className="card quiet research-about">
         <Fold title="About the lab">
           <p>
@@ -254,76 +324,6 @@ function Research({
           setTimeout(() => document.getElementById(`card-${b}-${rank}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
         }}
       />
-
-      <div className="bucket-tabs" role="tablist" aria-label="Sessions">
-        {/* Hall of fame first; the page still opens on the newest session unless a link asks for the hall. */}
-        <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)} title="Hall of fame">
-          ★ HOF
-          <span className="count">{hall.data?.length ?? 0}</span>
-        </button>
-        {sessions.map((b) => (
-          <button
-            key={b}
-            type="button"
-            role="tab"
-            id={`tab-${b}`}
-            aria-selected={!hallView && b === tab}
-            aria-controls="bucket-panel"
-            onClick={() => choose(b)}
-          >
-            {bucketTitle(b)}
-            <span className="count">{buckets[b as BucketName]!.top.length}</span>
-          </button>
-        ))}
-      </div>
-
-      {hallView && (
-        <HallOfFame
-          hall={hall}
-          writeups={writeups.data}
-          active={active}
-          activeKey={activeKey}
-          onActivate={(h) => setPick({ e: h.entry, bucket: 'hall', hallId: h.id })}
-        />
-      )}
-
-
-      {!hallView && bucket && (
-      <div id="bucket-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="stack" style={{ gap: 12 }}>
-        <BucketIntro name={tab} b={bucket} />
-        {(tab === 'session4' || tab === 'session5') && (
-          <div className="callout brass">
-            Sessions 4 and 5 were ranked at a flat 0.05 % fee, below Bitvavo’s 0.15/0.25 %. Their euro figures and session scores use it; the absolute
-            score uses real fees.
-          </div>
-        )}
-
-        {top.length === 0 ? (
-          <section className="card">
-            <EmptyState title={`Nothing made the cut for ${bucketTitle(tab).toLowerCase()} trading yet`}>
-              {bucket.notes || 'No strategy in this session beat buying and holding after fees, so there is nothing worth running here yet.'}
-            </EmptyState>
-          </section>
-        ) : (
-          top.map((e, i) => (
-            <RankCard
-              key={e.spec.id}
-              e={e}
-              color={RANK_COLORS[i]}
-              anchor={`card-${tab}-${e.rank}`}
-              active={(!!active && active.researchId === data.id && active.bucket === tab && active.rank === e.rank) || activeKey === JSON.stringify(e.spec)}
-              onActivate={data.id !== undefined ? () => setPick({ e, bucket: tab }) : undefined}
-              inHall={hallKeys.has(JSON.stringify(e.spec))}
-              hasWriteup={!!writeups.data?.has(e.spec.id)}
-              bucket={tab}
-              onAddToHall={data.id !== undefined && hall.data ? () => void addToHall(e) : undefined}
-            />
-          ))
-        )}
-
-        {top.length > 0 && <Compare top={top} benches={benches} />}
-      </div>
-      )}
 
       {pick && data.id !== undefined && (
         <ActivateDialog
@@ -750,8 +750,6 @@ function RankCard({
           {markets}
         </span>
       </div>
-      <p className="rank-summary">{e.explanation.summary}</p>
-
       <div className="stat-row">
         {isNum(yearly) ? (
           <Stat
@@ -779,11 +777,12 @@ function RankCard({
         baseline={1000}
         baselineLabel="€1,000 start"
       />
+      <p className="rank-summary">{e.explanation.summary}</p>
 
       <footer className="row rank-actions">
         {hasWriteup && (
           <button className="btn small" onClick={() => navigate(`/writeup?spec=${encodeURIComponent(s.id)}${bucket ? `&bucket=${encodeURIComponent(bucket)}` : ''}`)}>
-            Read the full write-up
+            Every coin and compare
           </button>
         )}
         {inHall ? (
@@ -1096,7 +1095,7 @@ function Compare({ top, benches }: { top: ResearchEntry[]; benches: Benchmark[] 
       <div className="card-head">
         <h2 style={{ marginRight: 'auto' }}>{top.length > 1 ? `All ${top.length} side by side` : 'Next to buy and hold'}</h2>
       </div>
-      <LineChart series={series} height={180} ariaLabel="These strategies and the buy-and-hold benchmarks" yFormat={euroAxis} tipFormat={(v) => eur(v, true)} baseline={1000} />
+      <LineChart series={series} height={240} log ariaLabel="These strategies and the buy-and-hold benchmarks" yFormat={euroAxis} tipFormat={(v) => eur(v, true)} baseline={1000} />
       <Fold title="The numbers">
       <p className="small soft">
         €1,000 in each, over the test period. The dashed and dotted lines are the yardsticks: simply buying and holding.

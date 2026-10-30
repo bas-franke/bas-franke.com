@@ -765,7 +765,7 @@ function ClearHistory({ mode }: { mode: string }) {
       <Section id="history" kicker="Danger zone" title="Portfolio history" intro="What the Overview charts draw your portfolio from.">
         <div className="stack" style={{ gap: 10 }}>
           <p className="small soft" style={{ margin: 0 }}>
-            Clearing removes the recorded values of your {mode} portfolio, so “All” and “How it’s going” start again from now. Trades, orders, logs and
+            Clearing removes the recorded values of your {mode} portfolio, so the “All” view starts again from now. Trades, orders, logs and
             the bot’s settings stay as they are, and the bot keeps trading exactly the same.
           </p>
           <div>

@@ -75,7 +75,7 @@ const euroAxis = (v: number) => `€${Math.round(v).toLocaleString('en-US')}`;
 const sessionNo = (b: string) => Number(/^session(\d+)$/.exec(b)?.[1] ?? -1);
 
 /** This research on one coin against any other research on that same coin. Lives under the coin charts of a write-up. */
-export function CompareResearch({ specId, coin }: { specId: string; coin: WriteupCoin }) {
+export function CompareResearch({ specId, coin, coins, onCoin }: { specId: string; coin: WriteupCoin; coins: WriteupCoin[]; onCoin: (id: string) => void }) {
   const coinId = coinOf(coin.id);
   const research = useAsync(() => api.research(), []);
   const writeups = useAsync(() => api.writeups().then((r) => new Set(r.writeups.map((w) => w.specId))), []);
@@ -152,12 +152,22 @@ export function CompareResearch({ specId, coin }: { specId: string; coin: Writeu
 
   return (
     <div className="compare-research" id="compare-research">
-      <h3>Compare {coinId} with other research</h3>
-      <p className="small soft writeup-hint">Tap a coin above to switch. Every line uses that coin, from the first day they all share.</p>
+      <h3>Compare with other research</h3>
+      <p className="small soft writeup-hint">Every line trades the same coin, from the first day they all share.</p>
       {research.error || writeups.error ? (
         <p className="small soft">The other research could not be loaded.</p>
       ) : (
         <div className="compare-pick">
+          <div className="field">
+            <label htmlFor="compare-coin">Coin</label>
+            <select id="compare-coin" className="input" value={coin.id} onChange={(ev) => onCoin(ev.target.value)}>
+              {coins.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.id}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="field">
             <label htmlFor="compare-from">Research</label>
             <select

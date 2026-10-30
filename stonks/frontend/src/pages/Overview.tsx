@@ -2,15 +2,15 @@ import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { ARTICLES } from '../articles';
 import { artUrl, CatArt, Coin, HeroBanner } from '../components/art';
-import { DailyBars, LineChart, type LineSeries } from '../components/charts';
+import { LineChart, type LineSeries } from '../components/charts';
 import { IconHealth } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { ago, amount, dateOnly, eur, familyLabel, humanize, lossAction, lossLimitText, num, pct, signedEur, toDate } from '../format';
+import { ago, amount, dateOnly, eur, familyLabel, humanize, lossAction, lossLimitText, num, pct, signedEur } from '../format';
 import { botMood, refreshDesk, todayPct } from '../desk';
 import { guardOf, useHealth, useHealthFeed } from '../health';
 import { navigate } from '../router';
 import './overview.css';
-import type { CompareRange, EquityPoint, LossAction, Overview } from '../types';
+import type { CompareRange, LossAction, Overview } from '../types';
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -77,7 +77,6 @@ export default function OverviewPage() {
           <div className="stack">
             <CompareCard mode={o.bot.mode} />
             <TrackingCard mode={o.bot.mode} />
-            <EquityCard mode={o.bot.mode} />
           </div>
           <div className="stack">
             <RecentTradesCard o={o} />
@@ -425,19 +424,6 @@ function LossCard({ o }: { o: Overview }) {
   );
 }
 
-function dailyPnl(points: EquityPoint[]) {
-  const byDay = new Map<string, number>();
-  for (const p of points) {
-    const d = toDate(p.ts);
-    if (!d) continue;
-    byDay.set(d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' }), num(p.totalEur));
-  }
-  const days = [...byDay.entries()];
-  const out: { day: string; value: number }[] = [];
-  for (let i = 1; i < days.length; i++) out.push({ day: days[i][0], value: days[i][1] - days[i - 1][1] });
-  return out;
-}
-
 const COMPARE_RANGES: { value: CompareRange; label: string }[] = [
   { value: 'day', label: 'Day' },
   { value: 'week', label: 'Week' },
@@ -652,79 +638,6 @@ function TrackingCard({ mode }: { mode: string }) {
             the close it was decided on; positive means worse than that close. Expected ignores your max-in-coins setting.
           </p>
         </Fold>
-      )}
-    </section>
-  );
-}
-
-function EquityCard({ mode }: { mode: string }) {
-  const [days, setDays] = useState<'7' | '30' | '90'>('30');
-  const eq = useAsync(() => api.equity({ mode, days: Number(days) + 1 }), [mode, days]);
-  const pts = eq.data?.points ?? [];
-  const bh = (eq.data as { buyHold?: EquityPoint[] } | undefined)?.buyHold;
-  const series = useMemo(() => {
-    const s: LineSeries[] = [
-      {
-        name: 'Your portfolio',
-        color: 'var(--ink)',
-        area: true,
-        points: pts.map((p) => [toDate(p.ts)!.getTime(), num(p.totalEur)] as [number, number]),
-      },
-    ];
-    if (bh?.length)
-      s.push({
-        name: 'If you had just held',
-        color: 'var(--brass)',
-        points: bh.map((p) => [toDate(p.ts)!.getTime(), num(p.totalEur)] as [number, number]),
-        dash: '5 5',
-      });
-    return s;
-  }, [pts, bh]);
-  const bars = useMemo(() => dailyPnl(pts), [pts]);
-  const first = pts[0] ? num(pts[0].totalEur) : 0;
-  const last = pts.length ? num(pts[pts.length - 1].totalEur) : 0;
-
-  return (
-    <section className="card">
-      <div className="card-head has-seg">
-        <h2>How it’s going</h2>
-        <Segmented
-          label="Period"
-          value={days}
-          onChange={setDays}
-          options={[
-            { value: '7', label: '7 days' },
-            { value: '30', label: '30 days' },
-            { value: '90', label: '90 days' },
-          ]}
-        />
-      </div>
-      {eq.error && <ErrorBox error={eq.error} onRetry={eq.reload} />}
-      {!eq.data && !eq.error && <Skeleton h={240} />}
-      {eq.data && pts.length < 2 && (
-        <p className="soft small" style={{ padding: '30px 0' }}>
-          No history yet. Once the bot has been running a little while, its value shows up here.
-        </p>
-      )}
-      {pts.length >= 2 && (
-        <>
-          <p className="small soft" style={{ marginBottom: 12 }}>
-            {last >= first ? 'Up' : 'Down'} <b className={last >= first ? 'gain' : 'loss'}>{signedEur(last - first)}</b> over these {days} days
-            ({mode === 'live' ? 'live' : 'paper'} account).
-          </p>
-          <LineChart
-            series={series}
-            height={160}
-            ariaLabel={`Portfolio value over the last ${days} days`}
-            yFormat={(v) => `€${Math.round(v).toLocaleString('en-US')}`}
-            tipFormat={(v) => eur(v)}
-          />
-          {bars.length > 1 && (
-            <Fold title="Result per day">
-              <DailyBars days={bars} format={signedEur} />
-            </Fold>
-          )}
-        </>
       )}
     </section>
   );

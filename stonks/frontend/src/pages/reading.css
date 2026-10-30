@@ -111,10 +111,6 @@
 .shell .writeup-picks button {
   min-height: 36px;
 }
-.shell .writeup-toc li a {
-  display: inline-block;
-  padding: 2px 0;
-}
 .shell .writeup .rank-more summary {
   min-height: 40px;
   display: flex;
@@ -188,7 +184,7 @@
 }
 .compare-research .compare-pick {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(0, 2.4fr) auto;
+  grid-template-columns: minmax(90px, 0.7fr) minmax(120px, 1fr) minmax(0, 2.4fr) auto;
   gap: 10px;
   align-items: end;
   margin: 10px 0 12px;
@@ -217,8 +213,77 @@
   gap: 8px;
   align-items: center;
 }
-@media (max-width: 620px) {
+@media (max-width: 760px) {
   .compare-research .compare-pick {
+    grid-template-columns: 1fr 1fr;
+  }
+  .compare-research .compare-pick .field:nth-child(3),
+  .compare-research .compare-pick .btn {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Sticky links to every part of a research page */
+.shell .writeup-jumps {
+  position: sticky;
+  top: calc(var(--sticky-top) + 6px);
+  z-index: 6;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-2) 90%, transparent);
+  backdrop-filter: blur(10px);
+}
+.shell .writeup-jumps::-webkit-scrollbar {
+  display: none;
+}
+.shell .writeup-jumps a {
+  flex: none;
+  max-width: 240px;
+  overflow: hidden;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell .writeup-jumps a:hover,
+.shell .writeup-jumps a:focus-visible {
+  background: var(--surface);
+  color: var(--ink);
+}
+.shell .writeup-numbers {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.shell .writeup #coin-charts .chart {
+  margin-top: 4px;
+}
+@media (max-width: 760px) {
+  /* Long euro figures: one label and value per line instead of three squeezed columns. */
+  .shell .writeup-compare {
     grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .shell .writeup-compare > div {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .shell .writeup-jumps {
+    top: 6px;
+  }
+  .shell .writeup-jumps a {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
   }
 }
