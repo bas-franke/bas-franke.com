@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { ARTICLES } from '../articles';
-import { artUrl, CatArt, Coin, HeroBanner } from '../components/art';
+import { artUrl, CatArt, HeroBanner } from '../components/art';
 import { LineChart, type LineSeries } from '../components/charts';
 import { IconHealth } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { ago, amount, dateOnly, eur, familyLabel, humanize, lossAction, lossLimitText, num, pct, signedEur } from '../format';
+import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, num, pct, signedEur } from '../format';
 import { botMood, refreshDesk, todayPct } from '../desk';
 import { guardOf, useHealth, useHealthFeed } from '../health';
 import { navigate } from '../router';
@@ -79,7 +79,6 @@ export default function OverviewPage() {
           </div>
           <div className="stack">
             <RecentTradesCard o={o} />
-            <BalancesCard o={o} />
             <StrategyCard o={o} />
           </div>
         </div>
@@ -657,38 +656,6 @@ function StrategyCard({ o }: { o: Overview }) {
           <dd>{o.bot.maxExposureEur === null ? 'whole portfolio' : eur(o.bot.maxExposureEur, true)}</dd>
         </dl>
       </Fold>
-    </section>
-  );
-}
-
-function BalancesCard({ o }: { o: Overview }) {
-  const rows = [...o.balances].sort((a, b) => num(b.eurValue) - num(a.eurValue));
-  const total = rows.reduce((s, b) => s + num(b.eurValue), 0) || 1;
-  return (
-    <section className="card">
-      <div className="card-head">
-        <span className="eyebrow">What’s in the {o.bot.mode === 'live' ? 'account' : 'paper wallet'}</span>
-      </div>
-      {rows.length === 0 && <p className="soft small">No balances yet.</p>}
-      {rows.map((b) => (
-        <div className="balance-row" key={b.symbol}>
-          <Coin symbol={b.symbol} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 500 }}>{b.symbol === 'EUR' ? 'Euros' : b.symbol}</div>
-            <div className="tiny muted tnum">
-              {b.symbol === 'EUR' ? eur(b.available) : amount(b.available)} available
-              {num(b.inOrder) > 0 ? ` · ${b.symbol === 'EUR' ? eur(b.inOrder) : amount(b.inOrder)} in orders` : ''}
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div className="tnum" style={{ fontWeight: 500 }}>{eur(b.eurValue)}</div>
-            <div className="tiny muted tnum">{Math.round((num(b.eurValue) / total) * 100)}%</div>
-          </div>
-        </div>
-      ))}
-      <p className="tiny muted" style={{ marginTop: 10 }}>
-        Fees: {humanize('maker')} {(o.bot.fees.maker * 100).toFixed(2)}% · taker {(o.bot.fees.taker * 100).toFixed(2)}%
-      </p>
     </section>
   );
 }

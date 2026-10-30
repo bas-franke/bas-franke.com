@@ -2,20 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { refreshDesk } from '../desk';
 import { api, ApiError } from '../api';
 import { artUrl, EmptyState, PageBanner } from '../components/art';
-import { LineChart, Spark, type LineSeries } from '../components/charts';
+import { LineChart, type LineSeries } from '../components/charts';
 import { IconCheck } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
 import './research.css';
-import type { Benchmark, BucketName, HallEntry, Overview, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
+import type { BucketName, HallEntry, Overview, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
 
 const RANK_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
-const BENCH_STYLE = [
-  { color: 'var(--ink-2)', dash: '7 5' },
-  { color: 'var(--ink-3)', dash: '1 5' },
-  { color: 'var(--ink-3)', dash: '12 4 2 4' },
-];
 
 /** Labels for buckets that can still be named from the hall of fame (older research). */
 const BUCKET_TITLES: Record<string, string> = { minute: 'Minute', hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', mixed: 'Mixed', custom: 'Custom', stoploss: 'Stoploss' };
@@ -158,11 +153,6 @@ function Research({
   };
   const bucket = tab ? buckets[tab as BucketName] : undefined;
   const top = bucket ? [...bucket.top].sort((a, b) => a.rank - b.rank).slice(0, 5) : [];
-  const benches = bucket
-    ? [bucket.benchmark ?? (data.buckets ? null : data.benchmark), ...(tab === 'daily' || !data.buckets ? (data.benchmarks ?? []) : [])].filter(
-        (b): b is Benchmark => !!b,
-      )
-    : [];
   const active = overview ? (overview.activeResearch ?? overview.bot.activeResearch ?? null) : null;
   // The running strategy's spec, so a session card and its hall of fame copy both show as active,
   // whichever of the two it was activated from.
@@ -248,8 +238,6 @@ function Research({
             score uses real fees.
           </div>
         )}
-
-        {top.length > 0 && <Compare top={top} benches={benches} />}
 
         {top.length === 0 ? (
           <section className="card">
@@ -1070,117 +1058,5 @@ function HallOfFame({
         ))
       )}
     </div>
-  );
-}
-
-function Compare({ top, benches }: { top: ResearchEntry[]; benches: Benchmark[] }) {
-  const series: LineSeries[] = useMemo(
-    () => [
-      ...top.map((e, i) => ({ name: `#${e.rank} ${familyLabel(e.spec.family)}`, color: RANK_COLORS[i], points: toPts(e.equity) })),
-      ...benches.map((b, i) => ({ name: b.name, ...BENCH_STYLE[i % BENCH_STYLE.length], width: 1.6, points: toPts(b.equity) })),
-    ],
-    [top, benches],
-  );
-  const maxDd = (s: Series) => {
-    let peak = -Infinity;
-    let dd = 0;
-    for (const [, v] of s) {
-      peak = Math.max(peak, Number(v));
-      dd = Math.max(dd, (peak - Number(v)) / peak);
-    }
-    return dd * 100;
-  };
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h2 style={{ marginRight: 'auto' }}>{top.length > 1 ? `All ${top.length} side by side` : 'Next to buy and hold'}</h2>
-      </div>
-      <LineChart series={series} height={240} log ariaLabel="These strategies and the buy-and-hold benchmarks" yFormat={euroAxis} tipFormat={(v) => eur(v, true)} baseline={1000} />
-      <Fold title="The numbers">
-      <p className="small soft">
-        €1,000 in each, over the test period. The dashed and dotted lines are the yardsticks: simply buying and holding.
-      </p>
-      <div className="table-wrap">
-        <table className="data cards">
-          <thead>
-            <tr>
-              <th>Strategy</th>
-              <th className="r">€1,000 became</th>
-              <th className="r">Return</th>
-              <th className="r">Worst drop</th>
-              <th className="r">Sharpe</th>
-              <th className="r">Trades</th>
-              <th className="hide-sm">Shape</th>
-            </tr>
-          </thead>
-          <tbody>
-            {top.map((e, i) => (
-              <tr key={e.spec.id}>
-                <td className="full">
-                  <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
-                    <span className="swatch" style={{ color: RANK_COLORS[i] }} />
-                    <b>#{e.rank}</b> <span style={{ minWidth: 0 }}>{e.spec.name}</span>
-                  </span>
-                </td>
-                <td data-label="€1,000 became" className="r">
-                  {fx(e.metrics.finalEur, (v) => eur(v, true))}
-                </td>
-                <td data-label="Return" className={`r ${e.metrics.returnPct >= 0 ? 'gain' : 'loss'}`}>
-                  {fx(e.metrics.returnPct, (v) => pct(v, 1, true))}
-                </td>
-                <td data-label="Worst drop" className="r">
-                  {fx(e.metrics.maxDrawdownPct, (v) => pct(-Math.abs(v), 1))}
-                </td>
-                <td data-label="Sharpe" className="r">
-                  {fx(e.metrics.sharpe, (v) => v.toFixed(2))}
-                </td>
-                <td data-label="Trades" className="r">
-                  {fx(e.metrics.trades, String)}
-                </td>
-                <td className="hide-sm">
-                  <Spark points={toPts(e.equity)} color={RANK_COLORS[i]} />
-                </td>
-              </tr>
-            ))}
-            {benches.map((b, i) => {
-              const pts = toPts(b.equity);
-              const final = pts.length ? pts[pts.length - 1][1] : 1000 * (1 + b.returnPct / 100);
-              return (
-                <tr key={b.name} style={{ background: 'var(--surface-2)' }}>
-                  <td className="full">
-                    <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
-                      <span className={`swatch ${BENCH_STYLE[i % 3].dash.startsWith('1 ') ? 'dotted' : 'dashed'}`} style={{ color: BENCH_STYLE[i % 3].color }} />
-                      <span className="soft">{b.name}</span>
-                      <span className="chip" style={{ padding: '0 8px' }}>
-                        yardstick
-                      </span>
-                    </span>
-                  </td>
-                  <td data-label="€1,000 became" className="r">
-                    {eur(final, true)}
-                  </td>
-                  <td data-label="Return" className={`r ${b.returnPct >= 0 ? 'gain' : 'loss'}`}>
-                    {pct(b.returnPct, 1, true)}
-                  </td>
-                  <td data-label="Worst drop" className="r">
-                    {pct(-Math.abs(b.maxDrawdownPct ?? maxDd(b.equity)), 1)}
-                  </td>
-                  <td data-label="Sharpe" className="r muted">
-                    –
-                  </td>
-                  <td data-label="Trades" className="r muted">
-                    1
-                  </td>
-                  <td className="hide-sm">
-                    <Spark points={pts} color={BENCH_STYLE[i % 3].color} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      </Fold>
-    </section>
   );
 }

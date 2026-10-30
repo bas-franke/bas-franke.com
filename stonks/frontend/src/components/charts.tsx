@@ -65,8 +65,12 @@ const nearest = (pts: [number, number][], x: number) => {
   return Math.abs(pts[lo][0] - x) <= Math.abs(pts[hi][0] - x) ? lo : hi;
 };
 
-const shortDate = (ms: number, spanDays: number) =>
-  new Date(ms).toLocaleDateString('en-GB', spanDays > 400 ? { month: 'short', year: '2-digit' } : spanDays > 3 ? { day: 'numeric', month: 'short' } : { hour: '2-digit', minute: '2-digit' });
+const shortDate = (ms: number, spanDays: number) => {
+  const d = new Date(ms);
+  // toLocaleDateString always writes the date too, so a time needs toLocaleTimeString.
+  if (spanDays <= 2) return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('en-GB', spanDays > 400 ? { month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' });
+};
 
 export function LineChart({
   series,
@@ -120,7 +124,8 @@ export function LineChart({
     const sx = (x: number) => m.l + ((x - xmin) / (xmax - xmin || 1)) * iw;
     const sy = (y: number) => m.t + (1 - (log ? Math.log(y / lo) / Math.log(hi / lo) : (y - lo) / (hi - lo || 1))) * ih;
     const spanDays = (xmax - xmin) / 86400_000;
-    const nx = width < 420 ? 3 : 5;
+    // As many dates as fit: never let two labels touch, whatever the chart's width.
+    const nx = Math.max(2, Math.min(5, Math.floor(iw / (shortDate(xmin, spanDays).length * 7 + 24)) + 1));
     const xticks = Array.from({ length: nx }, (_, i) => xmin + ((xmax - xmin) * i) / (nx - 1));
     return { m, iw, ih, sx, sy, ticks, xticks, xmin, xmax, spanDays, lo };
   }, [live, width, height, baseline, yFormat, log]);
