@@ -4,34 +4,19 @@ import ThemeToggle from './ThemeToggle';
 import ResumeButton from './ResumeButton';
 import { nav, site } from '../content';
 import { useActiveSection } from '../hooks/useActiveSection';
+import { useNavScroll } from '../hooks/useNavScroll';
+import { watchScroll } from '../hooks/watchScroll';
 
 const ids = nav.links.map(({ id }) => id);
 
-/** The night reaches the bar while the first night part of the page is still this far down the screen, on the sunset. */
-const NIGHTFALL = 0.25;
-
 export default function Nav() {
   const active = useActiveSection(ids);
-  const [scrolled, setScrolled] = useState(false);
-  const [night, setNight] = useState(false);
+  const { scrolled, night } = useNavScroll();
   const [open, setOpen] = useState(false);
   const menu = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    const dusk = document.querySelector('.interlude__stage, #contact');
-    const update = () => {
-      setScrolled(window.scrollY > 12);
-      setNight(dusk !== null && dusk.getBoundingClientRect().top < window.innerHeight * NIGHTFALL);
-      setOpen(false);
-    };
-    update();
-    window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-    };
-  }, []);
+  // the menu is a shortcut: once the page moves, the visitor has gone on without it
+  useEffect(() => watchScroll(() => setOpen(false)), []);
 
   function onKeyDown(event: KeyboardEvent) {
     if (event.key === 'Escape' && open) {
