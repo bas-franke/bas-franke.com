@@ -179,28 +179,28 @@
 }
 
 /* The job he holds now reads first: larger, in full ink. */
-.work__item--current .work__row {
+.work__current .work__row {
   padding-top: 0;
 }
 
 /* This row has no padding on top, so its wash starts above the row to clear the title and the logo. */
-.work__item--current .work__link::before {
+.work__current .work__link::before {
   top: -20px;
 }
 
-.work__item--current .work__title {
+.work__current .work__title {
   font-size: var(--text-h2);
 }
 
-.work__item--current .work__role {
+.work__current .work__role {
   color: var(--ink);
 }
 
-.work__item--current .work__meta {
+.work__current .work__meta {
   color: var(--ink-2);
 }
 
-.work__item--current .work__summary {
+.work__current .work__summary {
   color: var(--ink);
 }
 
@@ -254,7 +254,7 @@
     animation-range: cover 40vh cover calc(100% - 40vh);
   }
 
-  /* Ends with the sun, glow and all, resting on the horizon. */
+  /* Ends with the sun, its 5px radius and 4px glow, resting on the horizon. */
   @keyframes sun-travel {
     from {
       translate: 0 0;

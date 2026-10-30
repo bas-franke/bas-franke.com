@@ -3,12 +3,12 @@ import { skills } from '../content';
 
 export default function Skills() {
   return (
-    <section id="skills" className="section skills">
+    <section id="skills" className="section section--lit skills">
       <div className="window-light" aria-hidden="true" />
       <div className="container">
-        <div className="section__head" data-reveal>
-          <h2>{skills.approach}</h2>
-        </div>
+        <h2 className="section__heading" data-reveal>
+          {skills.approach}
+        </h2>
         <ul className="principles" data-reveal>
           {skills.principles.map((p, i) => (
             <li className="principle" key={p.title} style={{ '--i': i } as CSSProperties}>

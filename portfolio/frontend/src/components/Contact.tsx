@@ -10,9 +10,9 @@ export default function Contact() {
       {art && <img className="contact__art" src={art} alt="" loading="lazy" decoding="async" />}
       <div className="container contact__grid">
         <div>
-          <div className="section__head" data-reveal>
-            <h2>{contact.heading}</h2>
-          </div>
+          <h2 className="section__heading" data-reveal>
+            {contact.heading}
+          </h2>
           <div data-reveal>
             <p className="lead">{contact.lead}</p>
             <ul className="contact__list">

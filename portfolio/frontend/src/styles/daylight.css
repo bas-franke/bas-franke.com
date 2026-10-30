@@ -37,10 +37,10 @@
 /* A hairline arc along the top edge, low at both ends so it clears the nav. Rather than a motion path the sun is moved by
    two translates, one per axis, because those stay on the compositor. It runs between the edges of the content. */
 .sunpath {
+  --arc: 12px;
   display: none;
   position: fixed;
   inset: 6px var(--page-edge) auto;
-  --arc: 12px;
   height: var(--arc);
   z-index: 60;
   pointer-events: none;
@@ -167,7 +167,8 @@
     }
   }
 
-  /* these two easings are exact quadratics, so the sun stays on the drawn curve */
+  /* The curve in Day.tsx starts and ends 3/4 of the way down its box and peaks 1/4 of the way down. These two easings
+     are exact quadratics, so the sun stays on it. */
   .sunpath__y {
     animation: sun-arc linear both;
     animation-timeline: scroll(root);

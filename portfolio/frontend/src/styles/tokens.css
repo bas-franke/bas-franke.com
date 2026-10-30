@@ -2,7 +2,6 @@
 
 :root {
   --paper: #f4efe6;
-  --paper-2: #ebe4d8;
   --ink: #221e1a;
   --ink-2: #514a42;
   --ink-3: #665d52;
@@ -63,7 +62,6 @@
 
 :root[data-theme='dark'] {
   --paper: #16130f;
-  --paper-2: #1e1a15;
   --ink: #eee5d6;
   --ink-2: #bfb4a3;
   --ink-3: #93897b;

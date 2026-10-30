@@ -6,10 +6,6 @@
   --light-skew: -32deg;
   --col-gap: clamp(32px, 6vw, 96px);
   --cols: minmax(0, 6fr) minmax(0, 5fr);
-  position: relative;
-  isolation: isolate;
-  /* clip, not hidden: see .about */
-  overflow: clip;
 }
 
 /* About's window, hours later: the sun is low, so the panes lie long and slanted across the wall. */
@@ -21,7 +17,7 @@
   width: min(64vw, 900px);
 }
 
-.skills .section__head {
+.skills .section__heading {
   margin-bottom: clamp(16px, 2.6vh, 28px);
 }
 
@@ -46,15 +42,12 @@
 .principle h3 {
   font-size: var(--text-h3);
   line-height: 1.16;
-  text-wrap: balance;
 }
 
 .principle p {
   margin: 0;
   max-width: 48ch;
-  font-size: var(--text-body);
   line-height: 1.5;
-  text-wrap: pretty;
   color: var(--ink-2);
 }
 

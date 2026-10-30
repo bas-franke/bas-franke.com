@@ -1,33 +1,9 @@
 /* About: morning. */
 
-/* A window's light on the wall: four soft panes. Skills has the same window later in the day. Each section sets
-   --light, --light-blur and --light-skew, and where the panes fall. */
-.window-light {
-  --pane: linear-gradient(var(--light), var(--light));
-  position: absolute;
-  background:
-    var(--pane) 0 0 / 47% 48% no-repeat,
-    var(--pane) 100% 0 / 47% 48% no-repeat,
-    var(--pane) 0 100% / 47% 48% no-repeat,
-    var(--pane) 100% 100% / 47% 48% no-repeat;
-  filter: blur(var(--light-blur));
-  transform: skewX(var(--light-skew));
-  pointer-events: none;
-}
-
-/* No sun at night: the dark theme is the hero's moonlit evening all the way down. */
-:root[data-theme='dark'] .window-light {
-  display: none;
-}
-
 .about {
   --light: color-mix(in srgb, var(--sun) 14%, transparent);
   --light-blur: 14px;
   --light-skew: -16deg;
-  position: relative;
-  isolation: isolate;
-  /* clip, not hidden: a scroll container here would become the view() scroller and the light would never move */
-  overflow: clip;
   /* a jump from the nav lands on the statement, with the whole section in view */
   scroll-margin-top: calc(32px - var(--section-gap));
 }
@@ -62,9 +38,7 @@
   grid-area: statement;
   max-width: none;
   margin-bottom: clamp(32px, 4vh, 48px);
-  font-size: var(--text-h2);
   line-height: 1.16;
-  text-wrap: balance;
 }
 
 /* The photo is a cold evening selfie: graded into the painted world, cropped to the face. Short screens shrink it, so
@@ -145,7 +119,6 @@
 .facts dd {
   margin: 0;
   font-family: var(--serif);
-  font-size: var(--text-body);
   line-height: 1.4;
 }
 

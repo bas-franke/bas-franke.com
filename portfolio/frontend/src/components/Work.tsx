@@ -56,13 +56,11 @@ export default function Work() {
 
   return (
     <section id="work" className="section container">
-      <div className="section__head" data-reveal>
-        <h2>
-          {work.heading}
-          <br />
-          <em>{work.headingEm}</em>
-        </h2>
-      </div>
+      <h2 className="section__heading" data-reveal>
+        {work.heading}
+        <br />
+        <em>{work.headingEm}</em>
+      </h2>
       <div className="work">
         {/* A hairline down the list; the sun of the page's top arc travels along it as the list scrolls by. */}
         <div className="work__rail" aria-hidden="true">
@@ -70,7 +68,7 @@ export default function Work() {
         </div>
         <ol className="work__list">
           {jobs.map((item) => (
-            <li key={item.slug} className={item.current ? 'work__item work__item--current' : 'work__item'} data-reveal>
+            <li key={item.slug} className={item.current ? 'work__current' : undefined} data-reveal>
               <Job item={item} />
             </li>
           ))}

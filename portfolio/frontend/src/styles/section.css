@@ -1,13 +1,38 @@
-/* What every section shares: its spacing and heading. */
+/* What the sections share: their spacing and heading, and the window whose light falls on some of them. */
 
 .section {
   padding-top: var(--section-gap);
 }
 
-.section__head {
-  display: grid;
-  gap: 18px;
+.section__heading {
   margin-bottom: clamp(40px, 6vw, 76px);
+}
+
+.section--lit {
+  position: relative;
+  isolation: isolate;
+  /* clip, not hidden: a scroll container here would become the view() scroller and the light would never move */
+  overflow: clip;
+}
+
+/* A window's light on the wall: four soft panes. Each section sets --light, --light-blur and --light-skew, and where
+   the panes fall. */
+.window-light {
+  --pane: linear-gradient(var(--light), var(--light));
+  position: absolute;
+  background:
+    var(--pane) 0 0 / 47% 48% no-repeat,
+    var(--pane) 100% 0 / 47% 48% no-repeat,
+    var(--pane) 0 100% / 47% 48% no-repeat,
+    var(--pane) 100% 100% / 47% 48% no-repeat;
+  filter: blur(var(--light-blur));
+  transform: skewX(var(--light-skew));
+  pointer-events: none;
+}
+
+/* No sun at night: the dark theme is the hero's moonlit evening all the way down. */
+:root[data-theme='dark'] .window-light {
+  display: none;
 }
 
 @media (max-width: 640px) {

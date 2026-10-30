@@ -4,7 +4,7 @@ import { about } from '../content';
 
 export default function About() {
   return (
-    <section id="about" className="section about">
+    <section id="about" className="section section--lit about">
       <div className="window-light" aria-hidden="true" />
       <div className="container about__inner">
         <h2 className="about__statement" data-reveal>
