@@ -34,8 +34,8 @@ Session 12 audit:
 
 Layers multiply s9_cyclebull's target by 0..1 (`families/_s13_core.py`, `h.trim_check`), so the main strategy stays. Harness `out/_s13_harness.py`, lead check `out/_s13_verify.py`, publish `out/_s13_publish.py`. Start: ETH drop 51.6, 10-coin 53.6, ETH +109.8 vs hold +45.0, 10 coins +88.3 vs +21.2, 19 unseen coins drop 64.7.
 
-- **Bar.** Flat size cuts cost ~0.55 score per drop point, so rank = score - 0.5 x (drop - 52.6) gives them nothing; 17 of 20 beat 63.74.
-- **Winners.** timestop: ETH drop 34.0 (nudged median 34.0, worst 40.3), ETH +110.1, 10 coins +88.9, unseen 65.1. parabola: 33.0 (35.4, 40.3), +113.5, +86.6, unseen 64.1, BTC +69.9 falls to +60.9. breadth, equitybrake, lockgain: ETH 40.3; equitybrake is the only one that clearly helps unseen coins (60.0, 10 of 10 coins' mean 50.3).
+- **Bar.** Flat size cuts cost ~0.55 score per drop point, so rank = score - 0.5 x (drop - 52.6) gives them nothing; 18 of 20 beat 63.74 on their own numbers (posstop and dayshock did not).
+- **Winners.** timestop: ETH drop 34.0 (nudged median 34.0, worst 40.3), ETH +110.1, 10 coins +88.9, unseen 65.1. parabola: 33.0 (35.4, 40.3), +113.5, +86.6, unseen 64.1, BTC +69.9 falls to +60.9. breadth, equitybrake, lockgain: ETH 40.3; equitybrake is the only one that clearly helps unseen coins (60.0; 10-coin drop 50.3).
 - **What works.** Stopping the second leg of a crash. Most layers reach ETH 33-34 by fixing two episodes: March 2020 and May 2021. 34 is a floor: Sep 2020 and the 2024-26 bleeds set it. Buys-only and latched caps beat selling and quick release.
 - **It does not generalize well.** ETH gains are large, but crash caps did nothing or worse on the 19 unseen coins (crashcap 67.4, aftershock 67.3, combo 68.2 vs 64.7). Treat the ETH figure as fitted to two events. May 2021 is a cliff: slightly other settings return ETH 40.3.
 - **Dead ends.** Position stops and fast shock exits sell the lows (shocks mean-revert). Long-trend dip filters lower nothing: dips in downtrends pay. Losing streaks do not predict losses. Slow bleeds stayed unsolved; volumealarm alone improved all 7 ETH episodes but costs 1.8 score.
