@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { PageBanner } from '../components/art';
 import { ErrorBox, Skeleton } from '../components/ui';
+import './notes.css';
 
 const DRAFT_KEY = 'stonks-notes-draft';
 const MAX = 50_000;
@@ -162,20 +164,21 @@ export default function NotesPage() {
 
   return (
     <div className="notes-page">
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">Notes</span>
-          <h1>Scratch pad</h1>
-        </div>
-        <div className="notes-status" aria-live="polite">
-          {label && <span className={phase === 'error' ? 'loss small' : 'muted small'}>{label}</span>}
-          {phase === 'error' && (
-            <button className="btn small" type="button" onClick={() => (known.current ? flush() : setAttempt((n) => n + 1))}>
-              Try again
-            </button>
-          )}
-        </div>
-      </div>
+      <PageBanner
+        art="banner-notes"
+        eyebrow="Notes"
+        title="Scratch pad"
+        aside={
+          <div className="notes-status" aria-live="polite">
+            {label && <span className={phase === 'error' ? 'loss small' : 'muted small'}>{label}</span>}
+            {phase === 'error' && (
+              <button className="btn small" type="button" onClick={() => (known.current ? flush() : setAttempt((n) => n + 1))}>
+                Try again
+              </button>
+            )}
+          </div>
+        }
+      />
       <label className="sr-only" htmlFor="notes">
         Notes
       </label>

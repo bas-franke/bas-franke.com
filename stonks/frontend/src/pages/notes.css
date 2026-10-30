@@ -1,0 +1,78 @@
+/* Notes: a compact banner over a lined paper pad that fills the window. The window-filling rules sit in styles.css.
+   Loads before styles.css, so rules are scoped under .notes-page to win. */
+
+.notes-page .page-banner {
+  flex: none;
+  min-height: 84px;
+  margin-bottom: 12px;
+}
+.notes-page .page-banner-copy {
+  grid-template-columns: auto auto;
+  justify-content: start;
+  align-items: center;
+  gap: 2px 18px;
+  max-width: 70%;
+  padding: 12px 22px;
+}
+.notes-page .page-banner-copy .eyebrow {
+  grid-column: 1 / -1;
+}
+.notes-page .page-banner-aside {
+  margin-top: 0;
+}
+.notes-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+
+/* The ruled lines and margin scroll with the text. Line height and rule spacing must stay equal. */
+.notes-page .notes-input {
+  --rule: 28px;
+  --margin: 46px;
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* 16px keeps iOS from zooming the page when the box is focused. */
+  font-size: 16px;
+  line-height: var(--rule);
+  padding: var(--rule) 22px var(--rule) calc(var(--margin) + 16px);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  touch-action: pan-y;
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(90deg, transparent calc(var(--margin) - 1px), color-mix(in srgb, var(--loss) 40%, transparent) calc(var(--margin) - 1px), color-mix(in srgb, var(--loss) 40%, transparent) var(--margin), transparent var(--margin)),
+    repeating-linear-gradient(180deg, transparent 0, transparent calc(var(--rule) - 1px), var(--line) calc(var(--rule) - 1px), var(--line) var(--rule));
+  background-attachment: local;
+}
+.notes-input::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+@media (min-width: 761px) {
+  .stage:has(.notes-page) > main {
+    padding-bottom: 20px;
+  }
+}
+@media (max-width: 760px) {
+  .notes-page .page-banner {
+    min-height: 72px;
+    margin-bottom: 10px;
+  }
+  .notes-page .page-banner-copy {
+    max-width: 78%;
+    padding: 10px 14px;
+  }
+  .notes-page .notes-input {
+    --margin: 26px;
+    padding-right: 14px;
+  }
+}

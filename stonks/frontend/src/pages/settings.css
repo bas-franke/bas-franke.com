@@ -14,7 +14,118 @@
 }
 
 .shell .settings-page > .card {
-  padding: 0 24px;
+  padding: 4px 24px;
+}
+.shell .settings-page > .card + .card {
+  margin-top: 18px;
+}
+.settings-notice {
+  margin-bottom: 14px;
+}
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* ---------- jump row ---------- */
+
+.jump-nav {
+  position: sticky;
+  top: calc(var(--sticky-top) + 8px);
+  z-index: 15;
+  display: flex;
+  gap: 2px;
+  align-self: flex-start;
+  max-width: 100%;
+  margin-bottom: 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.jump-nav::-webkit-scrollbar {
+  display: none;
+}
+.jump-nav button {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.18s,
+    color 0.18s;
+}
+.jump-nav button:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.jump-nav button[aria-current='true'] {
+  background: var(--ink);
+  color: var(--surface);
+}
+.jump-nav button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ---------- sections ---------- */
+
+.shell .settings-page .settings-section {
+  scroll-margin-top: calc(var(--sticky-top) + 62px);
+}
+.shell .settings-page .settings-section:focus {
+  outline: 0;
+}
+.section-spot {
+  display: block;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.shell .settings-page .settings-section .intro .eyebrow {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* Move everything acts now, past the save button; history is for good. Neither reads as an ordinary setting. */
+.shell .settings-page .override-card {
+  border-color: color-mix(in srgb, var(--brass) 45%, var(--line));
+}
+.shell .settings-page .override-card .intro .eyebrow {
+  color: var(--brass-ink);
+}
+.shell .settings-page .danger-card {
+  border-color: color-mix(in srgb, var(--loss) 40%, var(--line));
+  background: color-mix(in srgb, var(--loss-soft) 35%, var(--surface));
+}
+.shell .settings-page .danger-card .intro .eyebrow {
+  color: var(--loss-ink);
+}
+.modal-art {
+  display: block;
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 12px;
+  filter: var(--hero-art);
 }
 .shell .settings-page .settings-section {
   grid-template-columns: 220px minmax(0, 1fr);
@@ -34,7 +145,7 @@
 @media (min-width: 961px) {
   .shell .settings-page .settings-section .intro {
     position: sticky;
-    top: 16px;
+    top: calc(var(--sticky-top) + 70px);
     align-self: start;
   }
 }
@@ -108,11 +219,30 @@
 }
 
 @media (max-width: 760px) {
-  .shell .settings-page .page-head {
-    margin: 6px 0 16px;
-  }
   .shell .settings-page > .card {
-    padding: 0 16px;
+    padding: 2px 16px;
+  }
+
+  /* Jump row: one full-bleed row you swipe. */
+  .jump-nav {
+    top: 0;
+    align-self: stretch;
+    max-width: none;
+    margin: 0 -16px 12px;
+    padding: 6px 16px;
+    border-width: 1px 0;
+    border-radius: 0;
+    background: var(--bg);
+    box-shadow: none;
+    gap: 6px;
+  }
+  .jump-nav button {
+    min-height: 44px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .jump-nav button[aria-current='true'] {
+    border-color: var(--ink);
   }
   .shell .settings-page .settings-section {
     padding: 20px 0;

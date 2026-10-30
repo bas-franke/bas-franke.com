@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError, paperGateOf, unwrapFamilies, unwrapMarkets } from '../api';
+import { artUrl, PageBanner } from '../components/art';
 import { ErrorBox, Fold, ModeBadge, Modal, PaperGateNotice, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { familyLabel, humanize, LOSS_ACTIONS, lossAction, lossLimitText, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
@@ -180,33 +181,34 @@ export default function SettingsPage() {
 
   return (
     <div className="stack settings-page" style={{ gap: 0 }}>
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">Settings</span>
-          <h1>How the bot behaves</h1>
-          <p className="lede">Nothing changes until you press save. A running bot picks up new settings at its next check.</p>
-        </div>
-        <ModeBadge mode={saved.mode} />
-      </div>
+      <PageBanner
+        art="banner-settings"
+        eyebrow="Settings"
+        title="How the bot behaves"
+        lede="Nothing changes until you press save. A running bot picks up new settings at its next check."
+        aside={<ModeBadge mode={saved.mode} />}
+      />
 
       {handoff && (
-        <div className="callout brass" style={{ marginBottom: 18 }}>
+        <div className="callout brass settings-notice">
           Prefilled with research pick #{handoff.rank}, <b>{handoff.spec.name}</b>. Look it over, then save to use it.
+        </div>
+      )}
+      {saved.manual && (
+        <div className="callout brass settings-notice">
+          The bot is holding <b>everything in {WHERE[saved.manual.target]}</b>, so the strategy below waits until you go back to it under{' '}
+          <button type="button" className="link-btn" onClick={() => jumpTo('move')}>
+            Move everything
+          </button>
+          .
         </div>
       )}
       {fam.error && <ErrorBox error={fam.error} onRetry={fam.reload} />}
 
-      <MoveEverything
-        bot={{ ...saved, enabled: ov.data?.bot.enabled ?? false }}
-        onDone={(bot) => {
-          setSaved((x) => (x ? { ...x, manual: bot.manual ?? null } : x));
-          setDraft((x) => (x ? { ...x, manual: bot.manual ?? null } : x));
-          ov.reload();
-        }}
-      />
+      <JumpNav />
 
-      <div className="card" style={{ paddingTop: 4, paddingBottom: 4 }}>
-        <Section title="Strategy" intro="Which algorithm runs, on which market, and how often it looks.">
+      <div className="card">
+        <Section id="strategy" title="Strategy" intro="Which algorithm runs, on which market, and how often it looks.">
           <div className="form-grid">
             <Field label="Algorithm" error={err('strategy.family')}>
               <select className="input" value={s.family} onChange={(e) => pickFamily(e.target.value)}>
@@ -289,7 +291,7 @@ export default function SettingsPage() {
           )}
         </Section>
 
-        <Section title="Placing orders" intro="Limit orders rest on the book and pay the lower maker fee; market orders fill at once and pay taker.">
+        <Section id="orders" title="Placing orders" intro="Limit orders rest on the book and pay the lower maker fee; market orders fill at once and pay taker.">
           <div className="form-grid">
             <Field label="Order type">
               <Segmented
@@ -328,7 +330,7 @@ export default function SettingsPage() {
           )}
         </Section>
 
-        <Section title="Risk" intro="Guard rails. Leave a stop empty to switch it off.">
+        <Section id="risk" title="Risk" intro="Guard rails. Leave a stop empty to switch it off.">
           <div className="form-grid">
             <Field
               label="Max in coins"
@@ -425,7 +427,7 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-        <Section title="Fees" intro="Your Bitvavo fee tier. Every backtest and the paper wallet use the same numbers.">
+        <Section id="fees" title="Fees" intro="Your Bitvavo fee tier. Every backtest and the paper wallet use the same numbers.">
           <dl className="kv" style={{ maxWidth: 360 }}>
             <dt>
               Maker <span className="tiny">(limit orders that wait)</span>
@@ -438,7 +440,7 @@ export default function SettingsPage() {
           </dl>
         </Section>
 
-        <Section title="Paper or live" intro="Paper simulates orders on live prices. Live places real orders with real money.">
+        <Section id="mode" title="Paper or live" intro="Paper simulates orders on live prices. Live places real orders with real money.">
           <div className="stack" style={{ gap: 16 }}>
             <Segmented
               label="Mode"
@@ -479,6 +481,15 @@ export default function SettingsPage() {
           </div>
         </Section>
       </div>
+
+      <MoveEverything
+        bot={{ ...saved, enabled: ov.data?.bot.enabled ?? false }}
+        onDone={(bot) => {
+          setSaved((x) => (x ? { ...x, manual: bot.manual ?? null } : x));
+          setDraft((x) => (x ? { ...x, manual: bot.manual ?? null } : x));
+          ov.reload();
+        }}
+      />
 
       <ClearHistory mode={saved.mode} />
 
@@ -528,6 +539,7 @@ export default function SettingsPage() {
           </>
         }
       >
+        {artUrl('modal-live') && <img className="modal-art" src={artUrl('modal-live')} alt="" />}
         <div className="callout loss">
           In live mode the bot places <b>real orders</b> on your Bitvavo account with <b>real euros</b>. It can lose money. Once it has lost{' '}
           {lossLimitText(lossLimit)} in 24 hours, {guardAction.then}.
@@ -640,8 +652,10 @@ function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSe
   const press = (t: ManualTarget) => (live ? setAsk(t) : void run(t));
 
   return (
-    <div className="card" style={{ paddingTop: 4, paddingBottom: 4, marginBottom: 18 }}>
+    <div className="card override-card">
       <Section
+        id="move"
+        kicker="Manual override"
         title="Move everything"
         intro="Put the whole portfolio into one coin or into euros, right now. The bot then holds it there instead of following the strategy."
       >
@@ -767,8 +781,8 @@ function ClearHistory({ mode }: { mode: string }) {
     }
   };
   return (
-    <div className="card" style={{ paddingTop: 4, paddingBottom: 4, marginTop: 18 }}>
-      <Section title="Portfolio history" intro="What the Overview charts draw your portfolio from.">
+    <div className="card danger-card">
+      <Section id="history" kicker="Danger zone" title="Portfolio history" intro="What the Overview charts draw your portfolio from.">
         <div className="stack" style={{ gap: 10 }}>
           <p className="small soft" style={{ margin: 0 }}>
             Clearing removes the recorded values of your {mode} portfolio, so “All” and “How it’s going” start again from now. Trades, orders, logs and
@@ -811,15 +825,82 @@ function ClearHistory({ mode }: { mode: string }) {
   );
 }
 
-function Section({ title, intro, children }: { title: string; intro: string; children: ReactNode }) {
+function Section({ id, kicker, title, intro, children }: { id: string; kicker?: string; title: string; intro: string; children: ReactNode }) {
+  const spot = artUrl(`spot-${id}`);
   return (
-    <section className="settings-section">
+    <section className="settings-section" id={`set-${id}`} tabIndex={-1}>
       <div className="intro">
+        {spot && <img className="section-spot" src={spot} width={56} height={56} alt="" />}
+        {kicker && <span className="eyebrow">{kicker}</span>}
         <h3>{title}</h3>
         <p>{intro}</p>
       </div>
       <div style={{ minWidth: 0 }}>{children}</div>
     </section>
+  );
+}
+
+const JUMPS = [
+  { id: 'strategy', label: 'Strategy' },
+  { id: 'orders', label: 'Placing orders' },
+  { id: 'risk', label: 'Risk' },
+  { id: 'fees', label: 'Fees' },
+  { id: 'mode', label: 'Paper or live' },
+  { id: 'move', label: 'Move everything' },
+  { id: 'history', label: 'Portfolio history' },
+];
+
+function jumpTo(id: string) {
+  const el = document.getElementById(`set-${id}`);
+  if (!el) return;
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: 'start' });
+  el.focus({ preventScroll: true });
+}
+
+/** The page is long: a sticky row of its sections, with the one you are reading marked. A swipeable row on phones. */
+function JumpNav() {
+  const [here, setHere] = useState(JUMPS[0].id);
+  const row = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const seen = new Set<string>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) e.isIntersecting ? seen.add(e.target.id) : seen.delete(e.target.id);
+        const reading = [...JUMPS].reverse().find((j) => seen.has(`set-${j.id}`));
+        if (reading) setHere(reading.id);
+      },
+      { rootMargin: '-130px 0px -55% 0px' },
+    );
+    JUMPS.forEach((j) => {
+      const el = document.getElementById(`set-${j.id}`);
+      if (el) io.observe(el);
+    });
+    return () => io.disconnect();
+  }, []);
+  // Keep the marked chip in view when the row scrolls sideways.
+  useEffect(() => {
+    const r = row.current;
+    const el = r?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!r || !el || r.scrollWidth <= r.clientWidth) return;
+    r.scrollTo({ left: el.offsetLeft - (r.clientWidth - el.offsetWidth) / 2, behavior: 'smooth' });
+  }, [here]);
+  return (
+    <nav className="jump-nav" aria-label="Settings sections" ref={row}>
+      {JUMPS.map((j) => (
+        <button
+          key={j.id}
+          type="button"
+          aria-current={here === j.id ? 'true' : undefined}
+          onClick={() => {
+            setHere(j.id);
+            jumpTo(j.id);
+          }}
+        >
+          {j.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 

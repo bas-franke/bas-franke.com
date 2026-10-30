@@ -255,35 +255,6 @@ body:has(.notes-page) {
   overflow: hidden;
   touch-action: pan-y;
 }
-.notes-page .page-head {
-  flex: none;
-  margin-top: 8px;
-}
-.notes-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-}
-.notes-input {
-  flex: 1;
-  min-height: 0;
-  resize: none;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  line-height: 1.55;
-  /* 16px keeps iOS from zooming the page when the box is focused. */
-  font-size: 16px;
-  padding: 16px 18px;
-  touch-action: pan-y;
-}
-.notes-input::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
 .eyebrow {
   font-size: 0.72rem;
   font-weight: 600;
