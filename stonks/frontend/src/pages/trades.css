@@ -1,0 +1,248 @@
+/* Trades: orders and fills. Table on desktop, compact cards on phones. */
+
+.trades-page .trades-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+.trades-page .trades-filters .segmented:nth-child(2) {
+  margin-left: auto;
+}
+.trades-page .trades-market {
+  width: auto;
+  min-width: 170px;
+  min-height: 40px;
+  border-radius: 999px;
+  padding-left: 16px;
+  font-size: 0.88rem;
+  background-color: var(--surface);
+}
+
+.trades-page .trades-card {
+  padding: 6px 24px;
+}
+.trades-page .trades-pad {
+  padding: 16px 0;
+}
+.trades-page .trades-more {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0 12px;
+}
+.trades-page .trades-end {
+  text-align: center;
+  padding: 14px 0 10px;
+}
+
+/* ---------- table (desktop) ---------- */
+
+.trades-page .trades-table th {
+  padding-top: 14px;
+  padding-bottom: 10px;
+}
+.trades-page .trades-table td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.trades-page .trades-table .c-when {
+  color: var(--ink-2);
+  font-size: 0.84rem;
+}
+.trades-page .trades-table .c-market {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.trades-page .trade-live {
+  margin-left: 8px;
+  padding: 0 7px;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+.trades-page .trades-table .c-type {
+  color: var(--ink-2);
+  text-transform: capitalize;
+}
+.trades-page .trades-table .c-price,
+.trades-page .trades-table .c-amount,
+.trades-page .trades-table .c-value {
+  white-space: nowrap;
+}
+.trades-page .trades-table .c-value {
+  font-weight: 600;
+}
+.trades-page .trades-table .c-fee {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.trades-page .filled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+.trades-page .filled .pct {
+  min-width: 3.4em;
+  text-align: right;
+}
+.trades-page .fillbar {
+  position: relative;
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+  flex: none;
+}
+.trades-page .fillbar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink-3);
+}
+.trades-page .fillbar i.part {
+  background: var(--brass);
+}
+.trades-page .fillbar i.full {
+  background: var(--gain);
+}
+
+/* ---------- phones: each row becomes a small card ---------- */
+
+@media (max-width: 760px) {
+  .trades-page .trades-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 10px;
+  }
+  .trades-page .trades-filters .segmented {
+    display: flex;
+    width: 100%;
+    margin: 0;
+  }
+  .trades-page .trades-filters .segmented button {
+    flex: 1 1 0;
+    min-height: 40px;
+    padding: 6px 8px;
+    font-size: 0.9rem;
+  }
+  .trades-page .trades-market {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: 46px;
+    font-size: 0.95rem;
+  }
+
+  .trades-page .trades-card {
+    padding: 2px 16px;
+  }
+
+  .trades-page table.data.cards.trades-table tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 12px;
+    padding: 14px 16px 13px;
+  }
+  /* invisible line breaks between the three lines of a card */
+  .trades-page table.data.cards.trades-table tr::before,
+  .trades-page table.data.cards.trades-table tr::after {
+    content: '';
+    flex-basis: 100%;
+    height: 0;
+  }
+  .trades-page table.data.cards.trades-table tr::before {
+    order: 3;
+  }
+  .trades-page table.data.cards.trades-table tr::after {
+    order: 6;
+  }
+  .trades-page table.data.cards.trades-table td {
+    width: auto;
+  }
+  .trades-page table.data.cards.trades-table td::before {
+    display: none;
+  }
+
+  /* line 1: market, side, status */
+  .trades-page table.data.cards.trades-table .c-market {
+    order: 0;
+    font-size: 1rem;
+  }
+  .trades-page table.data.cards.trades-table .c-side {
+    order: 1;
+    margin-right: auto;
+    font-size: 0.9rem;
+  }
+  .trades-page table.data.cards.trades-table .c-status {
+    order: 2;
+  }
+
+  /* line 2: the numbers, labelled */
+  .trades-page table.data.cards.trades-table .c-price,
+  .trades-page table.data.cards.trades-table .c-amount,
+  .trades-page table.data.cards.trades-table .c-filled,
+  .trades-page table.data.cards.trades-table .c-value {
+    order: 4;
+    flex: 1 1 0;
+    min-width: 0;
+    margin-top: 10px;
+    font-size: 0.92rem;
+    overflow-wrap: anywhere;
+  }
+  .trades-page table.data.cards.trades-table .c-amount {
+    order: 4;
+  }
+  .trades-page table.data.cards.trades-table .c-price {
+    order: 5;
+  }
+  .trades-page table.data.cards.trades-table .c-filled,
+  .trades-page table.data.cards.trades-table .c-value {
+    order: 5;
+    text-align: right !important;
+  }
+  .trades-page table.data.cards.trades-table .c-price,
+  .trades-page table.data.cards.trades-table .c-amount,
+  .trades-page table.data.cards.trades-table .c-filled,
+  .trades-page table.data.cards.trades-table .c-value,
+  .trades-page table.data.cards.trades-table .c-fee {
+    white-space: normal;
+  }
+  .trades-page table.data.cards.trades-table .c-price::before,
+  .trades-page table.data.cards.trades-table .c-amount::before,
+  .trades-page table.data.cards.trades-table .c-filled::before,
+  .trades-page table.data.cards.trades-table .c-value::before {
+    display: block;
+    margin-bottom: 1px;
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .trades-page table.data.cards.trades-table .c-filled .filled {
+    display: flex;
+  }
+
+  /* line 3: when and fee, quiet */
+  .trades-page table.data.cards.trades-table .c-when,
+  .trades-page table.data.cards.trades-table .c-fee {
+    order: 7;
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: var(--ink-3);
+  }
+  .trades-page table.data.cards.trades-table .c-when {
+    margin-right: auto;
+  }
+  .trades-page table.data.cards.trades-table .c-fee::before {
+    display: inline;
+    content: 'Fee ';
+    font-size: inherit;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+}

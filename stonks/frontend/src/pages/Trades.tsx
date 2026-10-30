@@ -4,6 +4,7 @@ import { EmptyState } from '../components/art';
 import { ErrorBox, Segmented, Skeleton, useAsync } from '../components/ui';
 import { amount, dateTime, eur, num, price } from '../format';
 import type { Fill, Order } from '../types';
+import './trades.css';
 
 const PAGE = 50;
 type Tab = 'orders' | 'fills';
@@ -28,6 +29,15 @@ const statusChip = (s: string, filledFrac?: number) => {
   const label = k === 'new' ? 'open' : s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
   return <span className={`chip ${cls}`}>{label}</span>;
 };
+
+/** A thin bar with the filled share of an order, next to the percentage. */
+const FillBar = ({ frac }: { frac: number }) => (
+  <span className="fillbar" aria-hidden="true">
+    <i style={{ width: `${Math.max(0, Math.min(1, frac)) * 100}%` }} className={frac >= 0.995 ? 'full' : frac > 0 ? 'part' : ''} />
+  </span>
+);
+
+const LiveTag = () => <span className="chip live trade-live">live</span>;
 
 export default function TradesPage() {
   const [tab, setTab] = useState<Tab>('orders');
@@ -58,7 +68,7 @@ export default function TradesPage() {
   }, [load]);
 
   return (
-    <div className="stack">
+    <div className="stack trades-page">
       <div className="page-head">
         <div>
           <span className="eyebrow">Trades</span>
@@ -67,7 +77,7 @@ export default function TradesPage() {
         </div>
       </div>
 
-      <div className="row">
+      <div className="trades-filters">
         <Segmented<Tab>
           label="Show"
           value={tab}
@@ -77,7 +87,6 @@ export default function TradesPage() {
             { value: 'fills', label: 'Fills' },
           ]}
         />
-        <span className="spacer" />
         <Segmented
           label="Mode"
           value={mode}
@@ -88,7 +97,7 @@ export default function TradesPage() {
             { value: 'live', label: 'Live' },
           ]}
         />
-        <select className="input" style={{ width: 'auto', minWidth: 150 }} value={market} onChange={(e) => setMarket(e.target.value)} aria-label="Market">
+        <select className="input trades-market" value={market} onChange={(e) => setMarket(e.target.value)} aria-label="Market">
           <option value="">All markets</option>
           {(markets.data ?? []).map((m) => (
             <option key={m.market} value={m.market}>
@@ -98,14 +107,14 @@ export default function TradesPage() {
         </select>
       </div>
 
-      <section className="card" style={{ padding: '8px 24px' }}>
+      <section className="card trades-card">
         {state.error && (
-          <div style={{ padding: '14px 0' }}>
+          <div className="trades-pad">
             <ErrorBox error={state.error} onRetry={() => load()} />
           </div>
         )}
         {state.loading && rows.length === 0 && (
-          <div className="stack" style={{ padding: '16px 0', gap: 12 }}>
+          <div className="stack trades-pad" style={{ gap: 12 }}>
             {[0, 1, 2, 3, 4].map((i) => (
               <Skeleton key={i} h={22} />
             ))}
@@ -124,13 +133,13 @@ export default function TradesPage() {
           </div>
         )}
         {rows.length > 0 && !state.done && (
-          <div className="row" style={{ justifyContent: 'center', padding: '14px 0 10px' }}>
+          <div className="trades-more">
             <button className="btn" disabled={state.loading} onClick={() => load(rows[rows.length - 1].id)}>
               {state.loading ? 'Loading…' : 'Load more'}
             </button>
           </div>
         )}
-        {rows.length > 0 && state.done && <p className="tiny muted" style={{ textAlign: 'center', padding: '12px 0' }}>That’s everything.</p>}
+        {rows.length > 0 && state.done && <p className="tiny muted trades-end">That’s everything.</p>}
       </section>
     </div>
   );
@@ -138,7 +147,7 @@ export default function TradesPage() {
 
 function OrdersTable({ rows }: { rows: Order[] }) {
   return (
-    <table className="data cards">
+    <table className="data cards trades-table orders">
       <thead>
         <tr>
           <th>When</th>
@@ -159,30 +168,43 @@ function OrdersTable({ rows }: { rows: Order[] }) {
           const fee = pick(o.feeEur, o.feePaid, o.fee);
           return (
             <tr key={String(o.id)} title={o.reason ?? undefined}>
-              <td data-label="When" className="nowrap">
+              <td data-label="When" className="nowrap c-when">
                 {dateTime(pick(o.createdAt, o.created_at))}
-                {o.mode === 'live' && <span className="chip live" style={{ marginLeft: 8, padding: '0 7px' }}>live</span>}
               </td>
-              <td data-label="Market">{o.market}</td>
-              <td data-label="Side">
+              <td data-label="Market" className="c-market">
+                {o.market}
+                {o.mode === 'live' && <LiveTag />}
+              </td>
+              <td data-label="Side" className="c-side">
                 <span className={`side ${o.side}`}>{o.side}</span>
               </td>
-              <td data-label="Type" className="hide-sm">
+              <td data-label="Type" className="hide-sm c-type">
                 {pick(o.type, o.orderType) ?? '–'}
               </td>
-              <td data-label="Price" className="r">
+              <td data-label="Price" className="r c-price">
                 {o.price === null || o.price === undefined ? <span className="muted">market</span> : price(o.price)}
               </td>
-              <td data-label="Amount" className="r">
+              <td data-label="Amount" className="r c-amount">
                 {amount(amt)}
               </td>
-              <td data-label="Filled" className="r">
-                {Number.isFinite(filled) ? (amt ? `${Math.floor((filled / amt) * 1000) / 10}%` : amount(filled)) : '–'}
+              <td data-label="Filled" className="r c-filled">
+                {Number.isFinite(filled) ? (
+                  amt ? (
+                    <span className="filled">
+                      <FillBar frac={filled / amt} />
+                      <span className="pct">{`${Math.floor((filled / amt) * 1000) / 10}%`}</span>
+                    </span>
+                  ) : (
+                    amount(filled)
+                  )
+                ) : (
+                  '–'
+                )}
               </td>
-              <td data-label="Fee" className="r">
+              <td data-label="Fee" className="r c-fee">
                 {feeText(fee, o.feeCurrency)}
               </td>
-              <td data-label="Status">{statusChip(o.status, amt && Number.isFinite(filled) ? filled / amt : undefined)}</td>
+              <td data-label="Status" className="c-status">{statusChip(o.status, amt && Number.isFinite(filled) ? filled / amt : undefined)}</td>
             </tr>
           );
         })}
@@ -193,7 +215,7 @@ function OrdersTable({ rows }: { rows: Order[] }) {
 
 function FillsTable({ rows }: { rows: Fill[] }) {
   return (
-    <table className="data cards">
+    <table className="data cards trades-table fills">
       <thead>
         <tr>
           <th>When</th>
@@ -212,27 +234,29 @@ function FillsTable({ rows }: { rows: Fill[] }) {
           const liq = f.liquidity ?? (f.taker === undefined ? undefined : f.taker ? 'taker' : 'maker');
           return (
             <tr key={String(f.id)}>
-              <td data-label="When" className="nowrap">
+              <td data-label="When" className="nowrap c-when">
                 {dateTime(pick(f.executedAt, f.ts, f.createdAt, f.created_at))}
-                {f.mode === 'live' && <span className="chip live" style={{ marginLeft: 8, padding: '0 7px' }}>live</span>}
               </td>
-              <td data-label="Market">{f.market}</td>
-              <td data-label="Side">
+              <td data-label="Market" className="c-market">
+                {f.market}
+                {f.mode === 'live' && <LiveTag />}
+              </td>
+              <td data-label="Side" className="c-side">
                 <span className={`side ${f.side}`}>{f.side}</span>
               </td>
-              <td data-label="Price" className="r">
+              <td data-label="Price" className="r c-price">
                 {price(f.price)}
               </td>
-              <td data-label="Amount" className="r">
+              <td data-label="Amount" className="r c-amount">
                 {amount(f.amount)}
               </td>
-              <td data-label="Value" className="r">
+              <td data-label="Value" className="r c-value">
                 {eur(num(f.price) * num(f.amount))}
               </td>
-              <td data-label="Fee" className="r">
+              <td data-label="Fee" className="r c-fee">
                 {feeText(fee, f.feeCurrency)}
               </td>
-              <td data-label="Liquidity">{liq ? <span className={`chip ${liq === 'maker' ? 'gain' : 'brass'}`}>{liq}</span> : '–'}</td>
+              <td data-label="Liquidity" className="c-status">{liq ? <span className={`chip ${liq === 'maker' ? 'gain' : 'brass'}`}>{liq}</span> : '–'}</td>
             </tr>
           );
         })}
