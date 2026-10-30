@@ -141,8 +141,10 @@ export function CompareResearch({ specId, coin }: { specId: string; coin: Writeu
     const end = Math.min(...lines.map((l) => l.equity[l.equity.length - 1][0]));
     const rows = lines.map((l) => ({ ...l, equity: rebase(l.equity, start, end), holdEquity: rebase(l.holdEquity, start, end) })).filter((l) => l.equity.length > 1);
     const series: LineSeries[] = rows.map((r) => ({ name: r.label, color: r.color, points: r.equity, width: r.key === 'self' ? 2.4 : 1.8 }));
-    if (hold && rows[0]?.holdEquity.length) series.push({ name: `Holding ${coinId}`, color: 'var(--ink-3)', dash: '6 5', points: rows[0].holdEquity, width: 1.6 });
-    return { rows, series, start, end };
+    // Holding the coin is one line: take the curve whose samples reach closest to the end.
+    const holdCurve = rows.map((r) => r.holdEquity).reduce<Pts>((best, c) => (c.length && (!best.length || c[c.length - 1][0] > best[best.length - 1][0]) ? c : best), []);
+    if (hold && holdCurve.length) series.push({ name: `Holding ${coinId}`, color: 'var(--ink-3)', dash: '6 5', points: holdCurve, width: 1.6 });
+    return { rows, series, start, end, holdYearly: yearly(holdCurve, end - start) };
   }, [coin, coinId, others, loaded, hold]);
 
   const waiting = others.filter((o) => !(o.id in loaded));
@@ -243,7 +245,7 @@ export function CompareResearch({ specId, coin }: { specId: string; coin: Writeu
               <tbody>
                 {view.rows.map((r) => {
                   const y = yearly(r.equity, view.end - view.start);
-                  const h = yearly(r.holdEquity, view.end - view.start);
+                  const h = view.holdYearly;
                   return (
                     <tr key={r.key}>
                       <td className="full">
