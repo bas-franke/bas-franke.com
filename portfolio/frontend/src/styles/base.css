@@ -246,7 +246,7 @@ h3 {
 }
 
 /* The lamp changes the theme: the new page spreads from it on a soft edge over a still picture of the old one, so
-   gradients and paintings keep time with the text and nothing shows double (see useTheme). */
+   gradients and paintings keep time with the text and nothing shows double (see themeChange.ts). */
 @property --lamp-reach {
   syntax: '<length>';
   inherits: false;
