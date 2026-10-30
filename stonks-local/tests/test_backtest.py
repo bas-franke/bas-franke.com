@@ -98,7 +98,7 @@ def test_stop_loss_against_lows_exits_as_market_and_stands_down():
     sides = [(t["side"], t["reason"], t["time"]) for t in r.trades]
     assert sides[0] == ("buy", "signal", T0 + H4)
     assert sides[1] == ("sell", "stop_loss", T0 + 2 * H4)
-    entry = 100.05 * (1 + TAKER)  # average entry includes the buy fee
+    entry = 100.05  # the plain fill price, fees excluded, like the bot's replayPosition
     assert abs(r.trades[1]["price"] - entry * 0.9 * (1 - SLIP)) < 1e-9
     assert sides[2] == ("buy", "signal", T0 + 6 * H4)
     assert len(sides) == 3
@@ -117,7 +117,7 @@ def test_trailing_stop_and_take_profit():
     # peak after bar 2 = 120 -> stop 108; bar 3 low 107 triggers, open 119 > 108 so fill at 108*(1-slip)
     assert r.trades[1]["reason"] == "trailing_stop" and abs(r.trades[1]["price"] - 108 * (1 - SLIP)) < 1e-9
     r = run(rows, [1] * 5, execution=MARKET, risk={"takeProfitPct": 0.15})
-    tp = 100.05 * (1 + TAKER) * 1.15
+    tp = 100.05 * 1.15
     assert r.trades[1]["reason"] == "take_profit" and r.trades[1]["liquidity"] == "taker"
     assert abs(r.trades[1]["price"] - tp * (1 - SLIP)) < 1e-9 and r.trades[1]["time"] == T0 + 2 * H4
 

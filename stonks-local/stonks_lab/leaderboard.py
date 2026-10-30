@@ -20,8 +20,8 @@ from . import registry as reg
 PLACEBO_FAMILY = "placebo_timing"      # random in/out timing: the luck benchmark (findings #475/#476/#482)
 # Diagnostic reruns of other families at other close hours: picking the best hour is luck (finding #673).
 DIAGNOSTIC_FAMILIES = {"phase_shift", "hourcheck_a19", "hour_bag_a13", "hour_check_a21", "hourshift_a14", "weekend_hour_a21",
-                       "wick_hours_a22"}
-EXCLUDED_FAMILIES = {"buy_hold", "buy_and_hold", "hold", "benchmark", PLACEBO_FAMILY, *DIAGNOSTIC_FAMILIES}
+                       "wick_hours_a22", "clock_a13", "delay_a13"}
+EXCLUDED_FAMILIES = {"buy_hold", "buy_and_hold", "hold", "benchmark", PLACEBO_FAMILY, "placebo_dip_a05", *DIAGNOSTIC_FAMILIES}
 LUCK_EXPOSURE_BAND = 15.0              # placebo runs within this many exposure points count as "similar exposure"
 MARKET_NAMES = {"BTC-EUR": "BTC", "ETH-EUR": "ETH"}
 

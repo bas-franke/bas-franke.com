@@ -7,7 +7,7 @@ Timeline of one bar t (bars are [open, high, low, close] with ts = open time):
 2. Resting limit orders: a buy at p fills when low[t] < p, a sell when high[t] > p (strictly: touching is not
    enough), at p, maker fee. Sells before buys. postOnly limits always rest (the engine prices them away from the
    last close, so they can never be marketable when placed).
-3. Risk exits on every open position, like the bot's stopHit: the average entry includes the EUR buy fees.
+3. Risk exits on every open position, like the bot's stopHit: the average entry is the plain fill price, fees excluded.
    stopLossPct (entry*(1-x)) and trailingStopPct (peak*(1-x), peak = highest of the entry fill and the highs of
    the bars since, excluding bar t) trigger when low[t] <= the stop and sell everything as a market order at
    min(open[t], stop)*(1-5 bps), taker (for a position opened during this bar: stop*(1-5 bps)). takeProfitPct
@@ -247,9 +247,10 @@ def _simulate(W, index, O, H, L, C, CF, markets, i0, i1, start_eur, fees, risk, 
         if u <= 0:
             peak[j] = px
             basis[j] = 0.0
+            avg[j] = 0.0
         units[j] = u + q
         basis[j] += eur + fee
-        avg[j] = basis[j] / units[j]  # average entry incl. the EUR fee, like the bot's replayPosition
+        avg[j] = (avg[j] * u + eur) / units[j]  # average fill price, fees excluded, like the bot's replayPosition
         trades.append({"time": ts[t], "market": markets[j], "side": "buy", "price": px, "amount": q, "eur": eur,
                        "fee": fee, "liquidity": liq, "reason": reason, "pnl": 0.0, "closed": False})
 
