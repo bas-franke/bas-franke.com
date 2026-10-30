@@ -278,9 +278,9 @@ export default function SettingsPage() {
           </div>
           {s.execution.orderType === 'limit' && (
             <div className="stack" style={{ gap: 12, marginTop: 16 }}>
-              <p className="small soft" style={{ margin: 0 }}>Limit orders go out at the best bid (buy) or ask (sell) on Bitvavo's live order book and follow it until they fill; whatever is still open then goes at market. Applies to every strategy and to Move everything.</p>
+              <p className="small soft" style={{ margin: 0 }}>Limit orders go out one step above the best bid (buy) or below the best ask (sell) on Bitvavo's live order book, first in line without crossing it, and follow it until they fill; whatever is still open then goes at market. Applies to every strategy and to Move everything.</p>
               <div className="form-grid">
-                <Field label="Re-price every" error={err('chase.repriceSec')} hint="An unfilled order moves to the best bid (buy) or ask (sell).">
+                <Field label="Re-price every" error={err('chase.repriceSec')} hint="An order someone got ahead of moves back to the front of the book.">
                   <Affix suffix="s">
                     <input className="input" type="number" min={15} max={3600} step={5} value={chase.repriceSec} onChange={(e) => setChase({ repriceSec: Number(e.target.value) })} />
                   </Affix>

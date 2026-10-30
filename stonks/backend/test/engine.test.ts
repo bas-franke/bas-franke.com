@@ -267,7 +267,7 @@ function chased(id: number, over: Partial<OrderRow> & { since: number; active: n
 }
 const CHASE = { repriceSec: 30, marketAfterMin: 10 };
 
-test('chase: a limit buy left behind by the book is re-placed at the best bid after 30 s, keeping the chain', async (t) => {
+test('chase: a limit buy left behind by the book is re-placed one tick over the best bid after 30 s, keeping the chain', async (t) => {
   reset(ema, false);
   botSettings.enabled = true;
   botSettings.chase = CHASE;
@@ -282,14 +282,14 @@ test('chase: a limit buy left behind by the book is re-placed at the best bid af
   assert.deepEqual(cancelled.map((c) => c.id), [41]);
   assert.equal(placed.length, 1);
   assert.equal(placed[0].intent.orderType, 'limit');
-  assert.equal(placed[0].intent.price, '400.50');
+  assert.equal(placed[0].intent.price, '400.51');
   assert.equal(placed[0].intent.amount, '1.00000000');
   assert.match(placed[0].intent.reason, /\(repriced\)$/);
   assert.deepEqual(placed[0].ctx.chase, { since: now - 40_000, root: 41 });
   assert.equal(placed[0].ctx.expiresAt, null);
 });
 
-test('chase: an order already at the best price keeps its place; younger than 30 s is left alone', async (t) => {
+test('chase: an order that is itself the best bid keeps its place; younger than 30 s is left alone', async (t) => {
   reset(ema, false);
   botSettings.enabled = true;
   botSettings.chase = CHASE;
@@ -322,7 +322,7 @@ test('chase: after 10 minutes the unfilled rest of a buy goes out at market, siz
   assert.equal(placed[0].ctx.chase, undefined);
 });
 
-test('chase: new limit orders from a decision start at the live best bid and carry the chase start, no bar timeout', async (t) => {
+test('chase: new limit orders from a decision start one tick over the live best bid and carry the chase start, no bar timeout', async (t) => {
   reset(ema);
   // even with an old stored `enabled: false`, limit orders follow the book
   botSettings.chase = { ...CHASE, enabled: false };
@@ -336,5 +336,5 @@ test('chase: new limit orders from a decision start at the live best bid and car
   assert.equal(placed[0].ctx.expiresAt, null);
   assert.equal(placed[0].ctx.chase.root, null);
   assert.ok(placed[0].ctx.chase.since > 0);
-  assert.equal(Number(placed[0].intent.price), 412.3);
+  assert.equal(Number(placed[0].intent.price), 412.31);
 });

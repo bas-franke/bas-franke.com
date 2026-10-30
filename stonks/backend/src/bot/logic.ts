@@ -43,7 +43,7 @@ export interface PlanInput {
   holdings: Record<string, Holding>;
   /** Price used to size orders and value holdings, normally the close of the decision bar. */
   prices: Record<string, number>;
-  /** Live best bid/ask per market from Bitvavo's order book: limit buys go out at the bid and sells at the ask.
+  /** Live best bid/ask per market from Bitvavo's order book: limit orders go out one tick inside it (makerPrice).
    * Without it (or for a market missing from it) limit orders use the price with the strategy's offset. */
   book?: Record<string, { bid: number; ask: number }>;
   rules: Record<string, MarketRules>;
@@ -119,8 +119,8 @@ export function planOrders(input: PlanInput): PlanResult {
       continue;
     }
     const qty = fullExit ? h.available : Math.min(h.available, -diff / price);
-    const ask = input.book?.[m]?.ask;
-    const priceStr = ask && ask > 0 ? roundPrice(ask, rules, 'up') : roundPrice(price * (1 + offset), rules, 'up');
+    const book = input.book?.[m];
+    const priceStr = book && book.bid > 0 && book.ask > 0 ? makerPrice('sell', book, rules) : roundPrice(price * (1 + offset), rules, 'up');
     const p = limit ? Number(priceStr) : price;
     const amount = roundAmount(qty, rules.quantityDecimals);
     const problem = sizeProblem(rules, Number(amount), p);
@@ -151,8 +151,8 @@ export function planOrders(input: PlanInput): PlanResult {
     const price = input.prices[b.market];
     const eur = b.eur * scale;
     if (limit) {
-      const bid = input.book?.[b.market]?.bid;
-      const priceStr = bid && bid > 0 ? roundPrice(bid, rules, 'down') : roundPrice(price * (1 - offset), rules, 'down');
+      const book = input.book?.[b.market];
+      const priceStr = book && book.bid > 0 && book.ask > 0 ? makerPrice('buy', book, rules) : roundPrice(price * (1 - offset), rules, 'down');
       const amount = roundAmount(eur / Number(priceStr), rules.quantityDecimals);
       const problem = sizeProblem(rules, Number(amount), Number(priceStr));
       if (problem) {
@@ -193,6 +193,25 @@ export function postOnlyPrice(side: 'buy' | 'sell', price: string, book: { bid: 
     return roundPrice(target, rules, 'up');
   }
   return price;
+}
+
+/**
+ * Price that puts a limit order first in line without taking liquidity: one tick over the best bid (buy) or under the
+ * best ask (sell). Guards: when the spread is a single tick, that price would cross the book, so the order joins the
+ * best bid/ask instead; and when `own` (the price of the bot's own working order) is already the best bid/ask, the
+ * book's top is that order itself, so its price is kept and the bot never outbids itself.
+ */
+export function makerPrice(side: 'buy' | 'sell', book: { bid: number; ask: number }, rules: MarketRules, own?: number | null): string {
+  if (side === 'buy') {
+    if (own && own >= book.bid) return roundPrice(own, rules, 'nearest');
+    const tick = tickOf(rules, book.bid);
+    const better = book.bid + tick;
+    return better < book.ask - tick / 1000 ? roundPrice(better, rules, 'nearest') : roundPrice(book.bid, rules, 'down');
+  }
+  if (own && own <= book.ask) return roundPrice(own, rules, 'nearest');
+  const tick = tickOf(rules, book.ask);
+  const better = book.ask - tick;
+  return better > book.bid + tick / 1000 ? roundPrice(better, rules, 'nearest') : roundPrice(book.ask, rules, 'up');
 }
 
 /** Whether a resting paper limit order fills given the lowest/highest trade price seen while it was active. */

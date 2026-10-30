@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { bitvavo, roundAmount, roundPrice, roundQuote, sizeProblem, type MarketRules } from '../bitvavo/index.js';
+import { bitvavo, roundAmount, roundQuote, sizeProblem, type MarketRules } from '../bitvavo/index.js';
 import { query } from '../db.js';
 import { errText, log } from '../log.js';
 import { getBotSettings, getSetting, onSettingsChange, setSetting, updateBotSettings, type BotSettings, type ManualAllocation } from '../settings.js';
@@ -7,7 +7,7 @@ import { INTERVAL_MS, validateSpec, type Candle, type StrategySpec } from '../st
 import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython } from '../strategies/runtime.js';
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
-import { BUY_CASH_MARGIN, checkDay, limitInEur, MARKET_SLIPPAGE, WINDOW_MS, windowBaseline, type LossLimit, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
+import { BUY_CASH_MARGIN, checkDay, limitInEur, makerPrice, MARKET_SLIPPAGE, WINDOW_MS, windowBaseline, type LossLimit, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
 import { allPrices, bestBidAsk, closedCandles, eurPrice, marketRules } from './marketData.js';
 import { getWallet, PaperBroker, resetPaperWallet } from './paper.js';
 import { fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
@@ -436,8 +436,8 @@ const CHASE_SUFFIX = / \((repriced|rest at market)\)$/;
 
 /**
  * Order-book chase (settings.chase, always on): a limit order still unfilled `repriceSec` after it was placed is cancelled and
- * placed again for the unfilled rest at the best bid (buy) or best ask (sell), post-only as before, unless it is already
- * there. Once the first order of the chain is `marketAfterMin` old, the rest goes out as a market order. Buys are
+ * placed again for the unfilled rest one tick inside the best bid (buy) or best ask (sell) (makerPrice), post-only as
+ * before, unless it already leads the book. Once the first order of the chain is `marketAfterMin` old, the rest goes out as a market order. Buys are
  * capped to the free cash (taker fee and margin kept free, as in planOrders).
  */
 async function handleChase(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean): Promise<number> {
@@ -450,8 +450,8 @@ async function handleChase(s: BotSettings, broker: Broker, now: number, stillVal
     const rules = (await marketRules()).get(o.market);
     if (!rules) continue;
     const book = await bestBidAsk(o.market);
-    const target = o.side === 'buy' ? roundPrice(book.bid, rules, 'down') : roundPrice(book.ask, rules, 'up');
-    if (!toMarket && Number(target) === o.price) continue; // still at the best price: keep its place in the queue
+    const target = makerPrice(o.side, book, rules, o.price);
+    if (!toMarket && Number(target) === o.price) continue; // still leads the book: keep its place in the queue
     const why = toMarket ? `not filled within ${c.marketAfterMin} min: the rest goes at market` : `repricing to the order book (${target})`;
     if (!(await broker.cancel(o, why))) continue;
     const { rows } = await query('SELECT amount, filled_amount FROM orders WHERE id = $1', [o.id]);
@@ -484,7 +484,7 @@ async function handleChase(s: BotSettings, broker: Broker, now: number, stillVal
     }
     await log('info', toMarket ? 'chase_market' : 'chase_reprice', toMarket
       ? `${o.market}: ${o.side} not filled within ${c.marketAfterMin} min; sending the rest (${intent.amount ?? `€${intent.amountQuote}`}) at market`
-      : `${o.market}: ${o.side} ${intent.amount} moved from ${o.price} to ${target} (best ${o.side === 'buy' ? 'bid' : 'ask'})`,
+      : `${o.market}: ${o.side} ${intent.amount} moved from ${o.price} to ${target} (book ${book.bid} / ${book.ask})`,
       { orderId: o.id, root: o.meta.chaseRoot ?? o.id, book });
     const row = await broker.place(intent, {
       strategyId: o.strategyId, expiresAt: null, fallback: 'cancel', barTime: o.meta.barTime, fees: s.fees,
@@ -652,7 +652,7 @@ async function placeTargets(
   for (const o of await openOrders(s.mode)) (openSides[o.market] ??= []).push(o.side);
   const otherCoinsEur = pf.equityEur - pf.cashEur - strategyCoins;
 
-  // Limit orders start at the live best bid (buy) / ask (sell) on Bitvavo's book, not at the candle close.
+  // Limit orders start one tick inside the live best bid (buy) / ask (sell) on Bitvavo's book, not at the candle close.
   const book: Record<string, { bid: number; ask: number }> = {};
   if (spec.execution.orderType === 'limit') {
     for (const m of spec.markets) {

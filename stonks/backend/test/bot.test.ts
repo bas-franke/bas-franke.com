@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { parseMarketRules } from '../src/bitvavo/precision.js';
 import {
   cashDelta,
+  makerPrice,
   checkDay,
   paperLimitFills,
   paperMarketPrice,
@@ -48,14 +49,14 @@ test('executor: full buy is a post-only limit 5 bps under the close, sized to ca
   assert.ok(Number(o.amount) * 49975 * 1.0025 <= 1000);
 });
 
-test('executor: with the live order book, limit buys go out at the best bid and sells at the best ask', () => {
-  const book = { 'BTC-EUR': { bid: 50_120.4, ask: 50_131.6 } };
+test('executor: with the live order book, limit buys go one tick over the best bid and sells one tick under the ask', () => {
+  const book = { 'BTC-EUR': { bid: 50_120, ask: 50_132 } };
   const buy = planOrders(input({ book })).orders[0];
-  assert.equal(buy.price, '50120.00'); // the bid, rounded down to the tick (never over it)
-  assert.equal(buy.amount, (Math.floor((1000 / 1.0035 / 50120) * 1e8) / 1e8).toFixed(8));
+  assert.equal(buy.price, '50121.00');
+  assert.equal(buy.amount, (Math.floor((1000 / 1.0035 / 50121) * 1e8) / 1e8).toFixed(8));
   const sell = planOrders(input({ book, targets: { 'BTC-EUR': 0 }, holdings: { 'BTC-EUR': { total: 0.01, available: 0.01 } }, cashAvailableEur: 500 })).orders[0];
   assert.equal(sell.side, 'sell');
-  assert.equal(sell.price, '50132.00'); // the ask, rounded up
+  assert.equal(sell.price, '50131.00');
   // a market missing from the book falls back to the close with the offset
   assert.equal(planOrders(input({ book: {} })).orders[0].price, '49975.00');
 });
@@ -279,4 +280,25 @@ test('bar timing: decide only on closed bars, weekly bars start on Monday', () =
   assert.equal(barOpen(Date.parse('2026-11-01T23:00:00Z'), '1W'), 1792972800000);
   assert.equal(lastClosedBar(t, '1d'), Date.parse('2026-10-25T00:00:00Z'));
   assert.ok(H > 0);
+});
+
+test('makerPrice: one tick inside the book, never crossing it, never outbidding its own order', () => {
+  const wide = { bid: 100, ask: 105 };
+  assert.equal(makerPrice('buy', wide, btc), '101.00');
+  assert.equal(makerPrice('sell', wide, btc), '104.00');
+  // a two-tick spread: both sides may step in, and still stay under / over the other side
+  assert.equal(makerPrice('buy', { bid: 100, ask: 102 }, btc), '101.00');
+  assert.equal(makerPrice('sell', { bid: 100, ask: 102 }, btc), '101.00');
+  // a one-tick spread: stepping in would cross, so it joins the best bid / ask
+  const tight = { bid: 100, ask: 101 };
+  assert.equal(makerPrice('buy', tight, btc), '100.00');
+  assert.equal(makerPrice('sell', tight, btc), '101.00');
+  // own order already at the top of the book: keep it, do not outbid ourselves
+  assert.equal(makerPrice('buy', wide, btc, 100), '100.00');
+  assert.equal(makerPrice('sell', wide, btc, 105), '105.00');
+  // someone else got ahead: step one tick over / under them again
+  assert.equal(makerPrice('buy', { bid: 102, ask: 105 }, btc, 101), '103.00');
+  assert.equal(makerPrice('sell', { bid: 100, ask: 103 }, btc, 104), '102.00');
+  // finer ticks follow the market's tick size
+  assert.equal(makerPrice('buy', { bid: 2500.1, ask: 2500.5 }, eth), '2500.11');
 });
