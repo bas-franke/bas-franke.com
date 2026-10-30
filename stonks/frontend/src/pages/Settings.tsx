@@ -4,6 +4,7 @@ import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, u
 import { familyLabel, humanize, lossLimitText, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
 import { navigate, takeHandoff } from '../router';
+import './settings.css';
 import { DEFAULT_CHASE, DEFAULT_LOSS_LIMIT, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
 
 type Draft = Omit<BotSettings, 'enabled'>;
@@ -152,7 +153,7 @@ export default function SettingsPage() {
   );
 
   return (
-    <div className="stack" style={{ gap: 0 }}>
+    <div className="stack settings-page" style={{ gap: 0 }}>
       <div className="page-head">
         <div>
           <span className="eyebrow">Settings</span>
@@ -330,7 +331,7 @@ export default function SettingsPage() {
                   : 'Lose this much over any 24 hours and the bot switches itself off.'
               }
             >
-              <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+              <div className="row loss-limit" style={{ gap: 8, flexWrap: 'nowrap' }}>
                 <Segmented
                   label="Max loss in"
                   value={lossLimit.unit}
@@ -551,7 +552,7 @@ function MoveEverything({ bot, onDone }: { bot: BotSettings; onDone: (bot: BotSe
               running <b>{bot.strategy.name}</b>.
             </div>
           )}
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <div className="row move-targets" style={{ gap: 8, flexWrap: 'wrap' }}>
             {(['ETH', 'BTC', 'EUR'] as const).map((t) => (
               <button key={t} className={`btn ${current === t ? 'primary' : 'ghost'}`} disabled={!!busy || current === t} onClick={() => press(t)}>
                 {busy === t ? 'Moving…' : t === 'EUR' ? 'All to euros' : `All in ${t}`}

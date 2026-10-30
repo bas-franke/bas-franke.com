@@ -1,0 +1,202 @@
+/* Settings page. Scoped under .shell .settings-page so it wins over the shared styles.css. */
+
+.shell .settings-page > .card {
+  padding: 0 24px;
+}
+.shell .settings-page .settings-section {
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+  padding: 24px 0;
+}
+.shell .settings-page .settings-section .intro h3 {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.shell .settings-page .settings-section .intro p {
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+@media (min-width: 961px) {
+  .shell .settings-page .settings-section .intro {
+    position: sticky;
+    top: 16px;
+    align-self: start;
+  }
+}
+.shell .settings-page .form-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px 20px;
+}
+.shell .settings-page .input,
+.shell .settings-page select.input {
+  min-height: 42px;
+}
+.shell .settings-page .field .hint {
+  line-height: 1.45;
+}
+.shell .settings-page .segmented button {
+  min-height: 34px;
+}
+.shell .settings-page .check {
+  min-height: 40px;
+  line-height: 1.35;
+}
+.shell .settings-page .check input {
+  flex: none;
+}
+
+/* Move everything: three equal target buttons that look like buttons, not links. */
+.shell .settings-page .move-targets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 150px));
+  gap: 8px;
+}
+.shell .settings-page .move-targets .btn {
+  min-height: 44px;
+}
+.shell .settings-page .move-targets .btn.ghost {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+.shell .settings-page .move-targets .btn.ghost:hover:not(:disabled) {
+  border-color: var(--brass);
+  background: var(--brass-soft);
+}
+.shell .settings-page .move-targets .btn:last-child:nth-child(4) {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.shell .settings-page .order-activity a {
+  color: var(--brass-ink);
+  font-weight: 500;
+}
+
+.shell .settings-page .settings-section .kv {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+/* Confirm dialogs (live mode, move everything, clear history). */
+.shell .settings-page dialog.modal .input {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+@media (max-width: 960px) {
+  .shell .settings-page .settings-section {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  .shell .settings-page .page-head {
+    margin: 6px 0 16px;
+  }
+  .shell .settings-page > .card {
+    padding: 0 16px;
+  }
+  .shell .settings-page .settings-section {
+    padding: 20px 0;
+    gap: 12px;
+  }
+  .shell .settings-page .settings-section .intro p {
+    margin-bottom: 0;
+  }
+  .shell .settings-page .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  /* 16px text keeps iOS from zooming in on focus; 46px is a comfortable thumb target. */
+  .shell .settings-page .input,
+  .shell .settings-page select.input,
+  .shell .settings-page textarea.input {
+    min-height: 46px;
+    font-size: 16px;
+  }
+  .shell .settings-page .field > .label,
+  .shell .settings-page .field > label {
+    font-size: 0.88rem;
+  }
+  .shell .settings-page .segmented {
+    display: flex;
+    width: 100%;
+  }
+  .shell .settings-page .segmented button {
+    flex: 1 1 0;
+    min-height: 40px;
+    font-size: 0.9rem;
+  }
+  .shell .settings-page .loss-limit .segmented {
+    width: auto;
+    flex: none;
+  }
+  .shell .settings-page .loss-limit .segmented button {
+    min-width: 44px;
+  }
+  .shell .settings-page .loss-limit .input-affix {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .shell .settings-page .check {
+    min-height: 44px;
+    align-items: flex-start;
+    padding-top: 10px;
+  }
+  .shell .settings-page .check input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+  }
+  .shell .settings-page .move-targets {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .shell .settings-page .move-targets .btn {
+    padding-inline: 8px;
+    white-space: normal;
+    line-height: 1.2;
+    text-align: center;
+  }
+  .shell .settings-page .move-targets .btn:last-child:nth-child(4) {
+    justify-self: stretch;
+  }
+  .shell .settings-page .params .chip {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+  .shell .settings-page .settings-section .kv {
+    max-width: none !important;
+  }
+  .shell .settings-page .settings-section .btn.small {
+    min-height: 44px;
+    padding-inline: 18px;
+  }
+  .shell .settings-page .save-bar {
+    padding: 10px 10px 10px 16px;
+    flex-wrap: wrap;
+  }
+  .shell .settings-page .save-bar .btn {
+    min-height: 44px;
+  }
+
+  .shell .settings-page dialog.modal {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    padding: 20px 16px 16px;
+    overflow-y: auto;
+  }
+  .shell .settings-page dialog.modal .actions {
+    flex-wrap: nowrap;
+  }
+  .shell .settings-page dialog.modal .actions .btn {
+    flex: 1 1 0;
+    min-height: 46px;
+    white-space: normal;
+    line-height: 1.2;
+  }
+}

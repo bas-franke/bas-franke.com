@@ -6,6 +6,7 @@ import { IconCheck } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
+import './research.css';
 import type { Benchmark, BucketName, HallEntry, Overview, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
 
 const RANK_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
