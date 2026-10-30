@@ -344,3 +344,16 @@ test('daily loss guard: zero equity leaves the window alone and never trips', ()
   assert.equal(zero.flowEur, 0);
   assert.deepEqual(zero.state.lastHoldings, { BTC: 1 });
 });
+
+test('executor: a decision cancels working orders its target no longer wants, like the backtest', () => {
+  // target 0, nothing held: the buy has no reason left
+  assert.deepEqual(planOrders(input({ targets: { 'BTC-EUR': 0 }, openSides: { 'BTC-EUR': ['buy'] } })).cancelMarkets, ['BTC-EUR']);
+  // on target within the dead-band: a working sell or buy goes too
+  const held = { holdings: { 'BTC-EUR': { total: 0.02, available: 0.02 } }, cashAvailableEur: 0 };
+  assert.deepEqual(planOrders(input({ ...held, openSides: { 'BTC-EUR': ['sell'] } })).cancelMarkets, ['BTC-EUR']);
+  assert.deepEqual(planOrders(input({ ...held, openSides: { 'BTC-EUR': ['buy'] } })).cancelMarkets, ['BTC-EUR']);
+  // target 0 with the whole position in a working sell: that exit stays
+  assert.deepEqual(planOrders(input({ targets: { 'BTC-EUR': 0 }, holdings: { 'BTC-EUR': { total: 0.00002, available: 0 } }, openSides: { 'BTC-EUR': ['sell'] } })).cancelMarkets, []);
+  // a retry never cancels what it does not place
+  assert.deepEqual(planOrders(input({ targets: { 'BTC-EUR': 0 }, openSides: { 'BTC-EUR': ['buy'] }, only: [{ market: 'BTC-EUR', side: 'buy' }] })).cancelMarkets, []);
+});

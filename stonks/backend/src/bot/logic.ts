@@ -116,7 +116,13 @@ export function planOrders(input: PlanInput): PlanResult {
     const current = h.total * price;
     const diff = targetEur[m] - current;
     const fullExit = targetEur[m] === 0 && h.available > 0;
-    if (!fullExit && Math.abs(diff) < threshold) continue;
+    if (!fullExit && Math.abs(diff) < threshold) {
+      // Nothing to do here, so a working order no longer has a reason (like the backtest): a buy after an OUT decision
+      // or a finished rebalance goes, and only an exit of what is left may stay.
+      const keep = targetEur[m] === 0 && h.total > 0 ? 'sell' : null;
+      if (!input.only && (input.openSides[m] ?? []).some((s) => s !== keep)) result.cancelMarkets.push(m);
+      continue;
+    }
     const side: 'buy' | 'sell' = fullExit || diff < 0 ? 'sell' : 'buy';
     const allowed = input.only?.find((p) => p.market === m && p.side === side);
     if (input.only && !allowed) continue;

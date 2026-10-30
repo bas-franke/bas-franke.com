@@ -125,7 +125,8 @@ export async function enableTrading(): Promise<BotSettings> {
   if (s.mode === 'live' && !bitvavo.hasKeys)
     throw new SettingsError('Live trading needs BITVAVO_API_KEY and BITVAVO_API_SECRET on the server.');
   if (s.enabled) return s;
-  const after = await withLock(() => updateBotSettings({ enabled: true }));
+  // Not behind the bot lock: a hung tick must not hang the dashboard or a move to euros; the tick reacts to the change.
+  const after = await updateBotSettings({ enabled: true });
   await log(s.mode === 'live' ? 'warn' : 'info', 'bot_started', `Bot switched on in ${s.mode} mode running ${s.strategy.name}`);
   kick();
   return after;

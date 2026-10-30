@@ -42,6 +42,8 @@ let positions: Record<string, Array<Record<string, unknown>>> = {};
 let depth: { bids: Array<[number, number]>; asks: Array<[number, number]> } | null = null;
 /** While set, a tick hangs on its first read. */
 let hangSettings: Promise<void> | null = null;
+/** What barWasEmpty answers. */
+let emptyBar = false;
 let clockSyncs = 0;
 let unknownChecks = 0;
 /** Bitvavo has not confirmed the cancel yet: the order stays open in the DB until a later sync. */
@@ -145,6 +147,7 @@ mock.module('../src/bot/marketData.js', {
       return tickers;
     },
     bestBidAsk: async () => book,
+    barWasEmpty: async () => emptyBar,
     bookDepth: async () => {
       if (!depth) throw new Error('book: network error');
       return depth;
@@ -213,6 +216,7 @@ function reset(spec: StrategySpec, enabled = true, mode: 'paper' | 'live' = 'pap
   placeResult = null;
   positions = {};
   depth = null;
+  emptyBar = false;
   book = { bid: 400, ask: 401 };
   candleFailures = 0;
   candleLag = 0;
@@ -272,7 +276,7 @@ test('a late candle is retried instead of deciding on the previous bar', async (
   assert.equal(placed.length, 1, 'decided once the candle is there');
 });
 
-test('a candle that never arrives is decided on the newest one after the grace period', async (t) => {
+test('a candle that stays away is never decided on the old one: one alert, asked each minute, decided when it comes', async (t) => {
   reset(ema);
   // 10 s after a bar closes: its candle may simply not be published yet.
   const step = INTERVAL_MS[ema.interval];
@@ -281,9 +285,55 @@ test('a candle that never arrives is decided on the newest one after the grace p
   candleLag = 1;
   await tick();
   assert.equal(placed.length, 0);
+  const late = t0 + staleGraceMs(ema.interval) + 1_000;
+  t.mock.timers.setTime(late);
+  await tick();
+  assert.equal(placed.length, 0, 'no decision on the old candle');
+  assert.equal(logged('stale_candles').length, 1);
+  const calls = candleCalls;
+  t.mock.timers.setTime(late + 30_000);
+  await tick();
+  assert.equal(candleCalls, calls, 'once a minute past the grace');
+  t.mock.timers.setTime(late + 61_000);
+  await tick();
+  assert.equal(candleCalls, calls + 1);
+  assert.equal(logged('stale_candles').length, 1, 'one alert per bar');
+  candleLag = 0;
+  t.mock.timers.setTime(late + 20 * 60_000);
+  await tick();
+  assert.equal(placed.length, 1, 'still this bar, on its own candle');
+  assert.equal(logged('bar_undecided').length, 0);
+});
+
+test('a bar that ends undecided is logged and the next bar decides as normal', async (t) => {
+  reset(ema);
+  const step = INTERVAL_MS[ema.interval];
+  const t0 = Math.ceil((Date.parse('2026-10-26T15:30:00Z') + stray * 120_000) / step) * step + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  candleLag = 1;
+  await tick();
+  candleLag = 0;
+  t.mock.timers.setTime(t0 + step);
+  await tick();
+  assert.equal(logged('bar_undecided').length, 1);
+  assert.equal(logged('bar_undecided')[0].data.bar, t0 - 10_000 - step);
+  assert.equal(placed.length, 1);
+});
+
+test('a market with no trades in the bar is decided on its newest candle after the grace period', async (t) => {
+  reset(ema);
+  const step = INTERVAL_MS[ema.interval];
+  const t0 = Math.ceil((Date.parse('2026-10-26T18:30:00Z') + stray * 120_000) / step) * step + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  candleLag = 1;
+  emptyBar = true; // Bitvavo shows a newer candle and none at this bar
+  await tick();
+  assert.equal(placed.length, 0, 'inside the grace it may still be late');
   t.mock.timers.setTime(t0 + staleGraceMs(ema.interval) + 1_000);
   await tick();
-  assert.equal(placed.length, 1, 'after the grace period it decides anyway');
+  assert.equal(placed.length, 1);
+  assert.equal(logged('stale_candles').length, 0);
+  assert.equal(logged('bar_no_trades').length, 1);
 });
 
 test('switching off during a tick stops the orders that tick had not placed yet', async (t) => {
@@ -472,7 +522,7 @@ test('lab code that changes without a VERSION bump is reported once and trading 
   labHash = undefined;
 });
 
-test('hold: the lab cannot decide: nothing is placed, it asks again, and after the grace period the bar is given up', async (t) => {
+test('hold: the lab cannot decide: nothing is placed, one alert after the grace, and an exit known at minute 6 still goes out', async (t) => {
   reset(lab);
   const t0 = barStart(Date.parse('2026-10-28T10:30:00Z') + stray * 120_000) + 10_000;
   t.mock.timers.enable({ apis: ['Date'], now: t0 });
@@ -488,6 +538,54 @@ test('hold: the lab cannot decide: nothing is placed, it asks again, and after t
   assert.match(logged('decision_held')[0].message, /candle store is behind/);
   await tick();
   assert.equal(logged('decision_held').length, 1, 'once per bar');
+  held = { BTC: 2 };
+  labAnswer = { t: lastBar(t0), weights: { 'BTC-EUR': 0 } };
+  t.mock.timers.setTime(t0 + staleGraceMs('1h') + 62_000);
+  await tick();
+  assert.deepEqual(placed.map((p) => p.intent.side), ['sell']);
+});
+
+test('late candle past the grace: the lab\'s old-bar weights are not traded, the real bar is', async (t) => {
+  reset(lab);
+  held = { BTC: 2 };
+  const t0 = barStart(Date.parse('2026-10-28T11:30:00Z') + stray * 120_000) + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 + staleGraceMs('1h') + 1000 });
+  labAnswer = { t: lastBar(t0) - INTERVAL_MS['1h'], weights: { 'BTC-EUR': 1 } };
+  await tick();
+  assert.equal(logged('stale_candles').length, 1);
+  assert.equal(placed.length, 0);
+  labAnswer = { t: lastBar(t0), weights: { 'BTC-EUR': 0 } };
+  t.mock.timers.setTime(t0 + 20 * 60_000);
+  await tick();
+  assert.deepEqual(placed.map((p) => p.intent.side), ['sell']);
+});
+
+test('warming past the grace alerts once per bar (history_blocking)', async (t) => {
+  reset(lab);
+  const t0 = barStart(Date.parse('2026-10-28T13:30:00Z') + stray * 120_000) + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  labAnswer = { warming: ['BTC-EUR 1h'] };
+  await tick();
+  assert.equal(logged('history_blocking').length, 0);
+  t.mock.timers.setTime(t0 + staleGraceMs('1h') + 1_000);
+  await tick();
+  t.mock.timers.setTime(t0 + staleGraceMs('1h') + 62_000);
+  await tick();
+  assert.equal(logged('history_blocking').length, 1);
+  assert.equal(logged('history_blocking')[0].level, 'error');
+  assert.equal(placed.length, 0);
+});
+
+test('family_code_changed only concerns lab code: TypeScript ports and manual moves never raise it', async (t) => {
+  reset(ema);
+  const now = midBar('2026-11-20T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  running(ema, now, { codeHash: 'older' });
+  await tick();
+  assert.equal(logged('family_code_changed').length, 0);
+  botSettings.manual = { target: 'EUR', setAt: '2026-11-20T10:00:00Z' };
+  await tick();
+  assert.equal(logged('family_code_changed').length, 0);
 });
 
 test('hold: a hold that clears within the grace period decides the bar normally', async (t) => {
@@ -857,6 +955,63 @@ test('stop: dust left after the exit is not an unfilled exit', async (t) => {
   assert.equal(logged('stop_skipped').length, 0);
 });
 
+test('an OUT decision cancels the working buy, and a chase leftover is not placed against it', async (t) => {
+  reset(lab);
+  botSettings.chase = CHASE;
+  const now = midBar('2026-11-16T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const base = order(120, 'paper');
+  orders = [{ ...base, strategyId: lab.id, price: 390, meta: { ...base.meta, activeFrom: now, chaseSince: now } }];
+  labAnswer = { t: lastBar(now), weights: { 'BTC-EUR': 0 } };
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.deepEqual(cancelled.map((c) => c.id), [120]);
+  assert.equal(placed.length, 0);
+  // a chase cancel that closes only now: its rest stays out
+  orders.push({ ...order(121, 'paper', 'canceled'), strategyId: lab.id, price: 390, meta: { ...base.meta, activeFrom: now, chaseSince: now, chaseCancelAt: now } });
+  t.mock.timers.setTime(now + 15_000);
+  await tick();
+  assert.equal(placed.length, 0);
+});
+
+test('switchOff writes enabled: false at once behind a hung tick; the cancels follow on the next tick', async () => {
+  reset(ema);
+  orders = [order(130, 'paper')];
+  let release = () => undefined as void;
+  hangSettings = new Promise<void>((r) => (release = r));
+  const hung = tick();
+  await new Promise((r) => setTimeout(r, 5));
+  hangSettings = null;
+  await outside(() => switchOff('stopped from dashboard'));
+  assert.equal(botSettings.enabled, false, 'answered without the lock');
+  assert.equal(cancelled.length, 0);
+  release();
+  await hung;
+  await tick();
+  assert.deepEqual(cancelled.map((c) => c.id), [130]);
+});
+
+test('a manual move is exempt from no_buys: its buys go out and its open buy stays', async (t) => {
+  reset(ema);
+  botSettings.dailyLossLimit = { unit: 'eur', value: 100, action: 'no_buys' };
+  botSettings.manual = { target: 'BTC', setAt: '2026-11-17T12:00:00Z' };
+  const now = midBar('2026-11-17T12:00:30Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  await tick();
+  placed.length = 0;
+  const st = stateOf();
+  st.guard = { since: now, action: 'no_buys', lossEur: 200, limitEur: 100 };
+  st.day.samples = [{ t: now - 60_000, eq: 1300, flow: 0 }];
+  st.lastDecidedBar = 0;
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.ok(engine.lastGuardState.paper, 'the guard is active');
+  assert.ok(placed.some((p) => p.intent.side === 'buy' && p.intent.market === 'BTC-EUR'));
+  orders = [order(131, 'paper')];
+  await tick();
+  assert.deepEqual(cancelled, []);
+});
+
 // ---- decision data, sizing, depth ----
 test('decision log: bar, targets, close prices, equity, strategy and mode; sized on closes for coins and equity alike', async (t) => {
   const half = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 }, risk: { maxWeight: 0.5 }, execution: { orderType: 'market' } });
@@ -928,8 +1083,10 @@ test('watchdog: a tick stuck over 5 minutes exits the process; drain waits for t
   hangSettings = gate;
   const running_ = tick();
   assert.equal(engine.watchdog(started + 60_000, (c) => exits.push(c)), false);
-  assert.equal(engine.watchdog(started + engine.TICK_STUCK_MS + 1, (c) => exits.push(c)), true);
-  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(engine.watchdog(started + engine.TICK_STUCK_MS + 1, (c) => exits.push(c), 40), true);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(exits, [], 'the mail gets its full wait');
+  await new Promise((r) => setTimeout(r, 60));
   assert.deepEqual(exits, [1]);
   // drain: resolves only when the tick is done
   let drained = false;

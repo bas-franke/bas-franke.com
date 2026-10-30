@@ -9,7 +9,7 @@ import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython,
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
 import { bookCheck, BUY_CASH_MARGIN, checkDay, followsBook, limitInEur, makerPrice, MARKET_SLIPPAGE, WINDOW_MS, windowBaseline, type LossAction, type LossLimit, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent, type PlanInput } from './logic.js';
-import { allPrices, bestBidAsk, bookDepth, closedCandles, eurPrice, marketRules } from './marketData.js';
+import { allPrices, barWasEmpty, bestBidAsk, bookDepth, closedCandles, eurPrice, marketRules } from './marketData.js';
 import { getWallet, PaperBroker, resetPaperWallet } from './paper.js';
 import { chaseLeftovers, fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
 import { amsterdamDay, barOpen, lastClosedBar } from './time.js';
@@ -34,6 +34,10 @@ const GUARD_BLIND_MS = 5 * 60_000;
 /** A tick running this long is stuck: the process restarts (PM2) instead of trading on nothing. */
 export const TICK_STUCK_MS = 5 * 60_000;
 const WATCHDOG_EVERY_MS = 30_000;
+/** Time the tick_stuck mail gets to leave (its fetch is fire and forget) before the process exits. */
+const STUCK_EXIT_WAIT_MS = 3000;
+/** A bar without a decision past the grace period is asked about this often until it ends. */
+const UNDECIDED_RETRY_MS = 60_000;
 /** How long `drain` waits for a running tick. */
 const DRAIN_WAIT_MS = 25_000;
 /** How often a stop exit that cannot go out is reported. */
@@ -68,6 +72,8 @@ interface ModeState {
   day?: DayState;
   /** Open time of the last bar a decision was made on (never decide twice on one bar). */
   lastDecidedBar?: number;
+  /** The bar waiting for its decision: `nextAt` paces the asking past the grace period, `alerted` = the owner was told. */
+  undecided?: { bar: number; nextAt: number; alerted: boolean };
   decision?: BarDecision;
   guard?: GuardState;
   /** Last known EUR price per held coin, so one without a ticker keeps its value across restarts. */
@@ -264,17 +270,20 @@ export async function cancelAll(mode: Mode, reason: string): Promise<number> {
   return n;
 }
 
-/** Switches the bot off (used by the loss guard and the API): cancels open orders first. */
+/**
+ * Switches the bot off (used by the loss guard and the API). Never waits for the bot lock: a stop must answer at once
+ * even behind a hung tick and hold through a restart, so `enabled: false` is written first. The open orders go on the
+ * next tick (the settings reaction, or cancelStray after a restart); only inside a tick are they cancelled right here.
+ */
 export async function switchOff(reason: string, level: 'info' | 'warn' | 'error' = 'info'): Promise<BotSettings> {
   // A running tick holds the lock; this makes it stop placing orders now instead of finishing its plan first.
   status.settingsVersion++;
-  return withLock(async () => {
-    const s = await getBotSettings();
-    const cancelled = (await cancelAll('paper', reason)) + (await cancelAll('live', reason));
-    const after = s.enabled ? await updateBotSettings({ enabled: false }) : s;
-    await log(level, 'bot_stopped', `Bot switched off: ${reason}${cancelled ? ` (${cancelled} open order${cancelled === 1 ? '' : 's'} cancelled)` : ''}`);
-    return after;
-  });
+  const s = await getBotSettings();
+  const after = s.enabled ? await updateBotSettings({ enabled: false }) : s;
+  const cancelled = inLock.getStore() ? (await cancelAll('paper', reason)) + (await cancelAll('live', reason)) : 0;
+  await log(level, 'bot_stopped', `Bot switched off: ${reason}${cancelled ? ` (${cancelled} open order${cancelled === 1 ? '' : 's'} cancelled)` : ''}`);
+  kick();
+  return after;
 }
 
 // ---------- loop ----------
@@ -323,13 +332,14 @@ export async function drain(): Promise<void> {
 }
 
 /** Exits (PM2 restarts the process) when a tick has been running too long. Returns true when it did. */
-export function watchdog(now = Date.now(), exit: (code: number) => void = (code) => process.exit(code)): boolean {
+export function watchdog(now = Date.now(), exit: (code: number) => void = (code) => process.exit(code), waitMs = STUCK_EXIT_WAIT_MS): boolean {
   if (tickStartedAt === null || now - tickStartedAt < TICK_STUCK_MS) return false;
   const minutes = ((now - tickStartedAt) / 60_000).toFixed(1);
   tickStartedAt = null;
-  // The log goes to the database, which may be the very thing that hangs.
-  const done = () => exit(1);
-  void Promise.race([log('error', 'tick_stuck', `A bot tick has been running for ${minutes} min; restarting the process`), new Promise((r) => setTimeout(r, 3000))]).then(done, done);
+  // Not awaited: the log goes to the database, which may be the very thing that hangs, and the mail it starts is fire
+  // and forget. The full wait is what lets that mail leave.
+  void log('error', 'tick_stuck', `A bot tick has been running for ${minutes} min; restarting the process`);
+  setTimeout(() => exit(1), waitMs);
   return true;
 }
 
@@ -365,6 +375,9 @@ async function runTick(): Promise<void> {
     running = null;
   }
 }
+
+/** Only a spec that runs as lab code has a hash to compare: TypeScript ports and manual moves do not run it. */
+const labCodeHash = (spec: StrategySpec) => (runsInPython(spec) ? codeHashOf(spec) : undefined);
 
 async function tickBody() {
   await runPending();
@@ -406,12 +419,12 @@ async function tickBody() {
   const ms = st[s.mode];
   const key = JSON.stringify(s.strategy);
   if (ms.strategyKey !== key) {
-    st[s.mode] = { ...nextStrategy(ms), strategyKey: key, strategyStart: now, codeHash: codeHashOf(s.strategy) };
+    st[s.mode] = { ...nextStrategy(ms), strategyKey: key, strategyStart: now, codeHash: labCodeHash(s.strategy) };
     await saveState(st);
     await log('info', 'strategy_started', `Running ${s.strategy.name} (${s.strategy.id}) in ${s.mode} mode`, { strategy: s.strategy });
     return tickBody2(s, broker, st, version, now);
   }
-  const code = codeHashOf(s.strategy);
+  const code = labCodeHash(s.strategy);
   if (code && code !== ms.codeHash) {
     // The first check after this was added has nothing to compare with; it only records the hash.
     if (ms.codeHash) await log('error', 'family_code_changed', `${s.strategy.name}: the lab code behind it changed without a VERSION bump. The bot keeps trading it, but it is no longer exactly the code the research tested`, { family: s.strategy.family, before: ms.codeHash, after: code });
@@ -443,12 +456,12 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
   const stopped = view ? await lossGuard(s, broker, st, view, !pf, now) : false;
   if (failure) throw failure;
   if (stopped || !pf) return;
-  const blockBuys = !!ms.guard && s.dailyLossLimit.action === 'no_buys';
+  const blockBuys = guardBlocksBuys(s, ms);
 
   const stillValid = () => status.settingsVersion === version;
 
   fills += await handleTimeouts(s, broker, now, stillValid, blockBuys);
-  fills += await handleChase(s, broker, now, stillValid, blockBuys);
+  fills += await handleChase(s, broker, ms, now, stillValid, blockBuys);
   fills += await handleStops(s, broker, ms, pf, stillValid);
 
   const bar = lastClosedBar(now, s.strategy.interval);
@@ -459,11 +472,22 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
     const markDecided = async (decision?: BarDecision) => {
       ms.lastDecidedBar = bar;
       ms.decision = decision;
+      ms.undecided = undefined;
       await saveState(st);
     };
-    if (fills) pf = await portfolio(s);
-    await decide(s, broker, ms, bar, pf, stillValid, markDecided, blockBuys);
-    fills += await broker.sync(s.fees);
+    if (ms.undecided && ms.undecided.bar < bar) {
+      await log('warn', 'bar_undecided', `The ${new Date(ms.undecided.bar).toISOString()} bar ended without a decision; positions stayed as they were and the next bar decides as normal`, { bar: ms.undecided.bar });
+      ms.undecided = undefined;
+    }
+    if (!ms.undecided) {
+      ms.undecided = { bar, nextAt: 0, alerted: false };
+      await saveState(st); // a tick that fails from here on still leaves a trace of this bar
+    }
+    if (now >= ms.undecided.nextAt) {
+      if (fills) pf = await portfolio(s);
+      await decide(s, broker, ms, bar, pf, stillValid, markDecided, blockBuys);
+      fills += await broker.sync(s.fees);
+    }
   } else if (stillValid() && ms.decision && !ms.decision.done && ms.decision.bar === bar && now >= ms.decision.nextAt) {
     if (fills) pf = await portfolio(s);
     const placed = await retryDecision(s, broker, ms, ms.decision, pf, now, stillValid, blockBuys);
@@ -477,6 +501,9 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
   }
   await saveState(st);
 }
+
+/** `no_buys` holds back the strategy; a manual move is the owner's own explicit order and goes through. */
+const guardBlocksBuys = (s: BotSettings, ms: ModeState) => !!ms.guard && s.dailyLossLimit.action === 'no_buys' && !s.manual;
 
 type GuardView = Pick<PortfolioView, 'equityEur' | 'quantities' | 'priceOf'>;
 
@@ -537,7 +564,7 @@ async function lossGuard(s: BotSettings, broker: Broker, st: BotState, pf: Guard
     return true;
   }
   // Every tick while it lasts: a cancel Bitvavo did not confirm is simply tried again.
-  if (ms.guard && limit.action === 'no_buys')
+  if (guardBlocksBuys(s, ms))
     for (const o of await openOrders(s.mode))
       if (o.side === 'buy') await broker.cancel(o, 'loss guard: no new buys').catch((err) => log('error', 'cancel_failed', `Cancelling order ${o.id} failed: ${errText(err)}`));
   return false;
@@ -639,7 +666,7 @@ const CHASE_SUFFIX = / \((repriced|rest at market)\)$/;
  * the rest goes out as a market order. Buys are capped to the free cash (taker fee and margin kept free, as in
  * planOrders). A cancel Bitvavo has not confirmed yet is continued on a later tick, once sync has closed the order.
  */
-async function handleChase(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean, blockBuys: boolean): Promise<number> {
+async function handleChase(s: BotSettings, broker: Broker, ms: ModeState, now: number, stillValid: () => boolean, blockBuys: boolean): Promise<number> {
   const c = s.chase;
   let placed = 0;
   for (const o of await openOrders(s.mode)) {
@@ -658,7 +685,7 @@ async function handleChase(s: BotSettings, broker: Broker, now: number, stillVal
   }
   for (const o of await chaseLeftovers(s.mode, now - CHASE_LEFTOVER_MS)) {
     if (!stillValid()) break;
-    if (o.strategyId !== s.strategy.id || (blockBuys && o.side === 'buy') || (await openOrders(s.mode, o.market)).some((x) => x.side === o.side)) {
+    if (o.strategyId !== s.strategy.id || (o.side === 'buy' && (blockBuys || ms.decision?.weights[o.market] === 0)) || (await openOrders(s.mode, o.market)).some((x) => x.side === o.side)) {
       await updateOrder(o.id, {}, { chaseDone: true }); // the strategy moved on, or a newer order already works
       continue;
     }
@@ -785,6 +812,19 @@ const isNativeDca = (spec: StrategySpec) => spec.family === 'dca_dip' && !runsIn
 /** How long the bot keeps retrying a bar whose candle has not arrived: half a bar, at most 5 minutes. */
 export const staleGraceMs = (interval: StrategySpec['interval']) => Math.min(INTERVAL_MS[interval] / 2, 5 * 60_000);
 
+/**
+ * The bar stays undecided, positions as they are. Inside the grace period the next tick asks again; past it the owner
+ * hears once (`alert`) and it is asked once a minute until the bar ends: an exit that becomes known late still goes out.
+ */
+async function stayUndecided(ms: ModeState, bar: number, interval: StrategySpec['interval'], alert: () => Promise<void>) {
+  if (Date.now() - (bar + INTERVAL_MS[interval]) < staleGraceMs(interval)) return;
+  const u = (ms.undecided ??= { bar, nextAt: 0, alerted: false });
+  u.nextAt = Date.now() + UNDECIDED_RETRY_MS;
+  if (u.alerted) return;
+  u.alerted = true;
+  await alert();
+}
+
 /** Bar whose late candle was last reported, so "retrying" is logged once per bar. */
 let lateBar: number | null = null;
 
@@ -818,8 +858,7 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
   const candles = await loadCandles(spec, ms, bar);
   const missing = spec.markets.filter((m) => !candles[m]?.length);
   if (missing.length === spec.markets.length) {
-    await markDecided();
-    await log('warn', 'no_candles', `No candles for ${missing.join(', ')}; skipping this bar`);
+    await stayUndecided(ms, bar, spec.interval, () => log('warn', 'decision_held', `${spec.name}: no candles for ${missing.join(', ')}; every position stays as it is and the bot keeps asking until the bar ends`, { bar, reason: 'no candles' }));
     return;
   }
   const state = isAnchored(spec) && ms.strategyStart ? { startTime: barOpen(ms.strategyStart, spec.interval) } : undefined;
@@ -839,20 +878,18 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
         kick();
       }
     });
+    await stayUndecided(ms, bar, spec.interval, () => log('error', 'history_blocking', `${spec.name}: still downloading its candle history, so the ${new Date(bar).toISOString()} bar has no decision; every position stays as it is`, { bar, markets: decision.warming }));
     return;
   }
   if (decision.hold !== undefined) {
-    // The family cannot decide right now: keep every position and ask again on the next ticks, up to the same grace
-    // period as a late candle; then this bar is given up (still without touching anything).
-    if (Date.now() - (bar + INTERVAL_MS[spec.interval]) < staleGraceMs(spec.interval)) return;
-    await markDecided();
-    await log('warn', 'decision_held', `${spec.name}: no decision on the ${new Date(bar).toISOString()} bar (${decision.hold}); every position stays as it is`, { bar, reason: decision.hold, t: decision.t });
+    // The family cannot decide right now: keep every position and ask again until the bar ends.
+    await stayUndecided(ms, bar, spec.interval, () => log('warn', 'decision_held', `${spec.name}: no decision yet on the ${new Date(bar).toISOString()} bar (${decision.hold}); every position stays as it is and the bot keeps asking until the bar ends`, { bar, reason: decision.hold, t: decision.t }));
     return;
   }
   if (decision.t !== null && decision.t < bar) {
     // The bar that just closed is not in the candles yet (Bitvavo is late, or the fetch failed): deciding now would
-    // act on the previous bar's signal and then never revisit this bar. Retry on the next ticks; only after a grace
-    // period (a market with no trades has no candle at all) decide on what there is, and say so.
+    // act on the previous bar's signal. Keep asking until the bar ends. The one exception, past the grace period: a
+    // market with no trades has no candle at all, which shows as a newer candle with none at this bar.
     const lateMs = Date.now() - (bar + INTERVAL_MS[spec.interval]);
     if (lateMs < staleGraceMs(spec.interval)) {
       if (lateBar !== bar) {
@@ -861,7 +898,14 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
       }
       return;
     }
-    await log('warn', 'stale_candles', `${spec.name}: the ${new Date(bar).toISOString()} candle never arrived; deciding on the newest one there is (${new Date(decision.t).toISOString()})`, { bar, newest: decision.t });
+    const lagging = Object.keys(candles).filter((m) => (candles[m].at(-1)?.[0] ?? -1) < bar);
+    const noTrades = lagging.length > 0 && (await Promise.all(lagging.map((m) => barWasEmpty(m, spec.interval, bar).catch(() => false)))).every(Boolean);
+    if (!noTrades) {
+      const newest = decision.t;
+      await stayUndecided(ms, bar, spec.interval, () => log('warn', 'stale_candles', `${spec.name}: the ${new Date(bar).toISOString()} candle has not arrived (newest is ${new Date(newest).toISOString()}); no decision on the old candle, the bot keeps asking until the bar ends`, { bar, newest }));
+      return;
+    }
+    await log('info', 'bar_no_trades', `${spec.name}: nothing traded on ${lagging.join(', ')} in the ${new Date(bar).toISOString()} bar; deciding on the newest candle there is`, { bar, newest: decision.t, markets: lagging });
   }
   const prices: Record<string, number> = {};
   for (const m of spec.markets) {

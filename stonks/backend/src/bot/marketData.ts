@@ -102,6 +102,12 @@ export async function closedCandles(market: string, interval: Interval, lastBar:
   return [...out.values()].sort((a, b) => a[0] - b[0]).slice(-want);
 }
 
+/** True when Bitvavo has a newer candle but none at `bar`: nothing traded in that bar (not a late candle). */
+export async function barWasEmpty(market: string, interval: Interval, bar: number): Promise<boolean> {
+  const times = (await bitvavo.candles(market, interval, { start: bar, limit: 3 })).map((c) => Number(c[0]));
+  return !times.includes(bar) && times.some((t) => t > bar);
+}
+
 /** 1-minute candles from `from` (inclusive) up to now, including the one still forming. Used by the paper broker. */
 export async function minuteCandlesSince(market: string, from: number): Promise<Candle[]> {
   const raw = await bitvavo.candles(market, '1m', { start: from, limit: 1440 });
