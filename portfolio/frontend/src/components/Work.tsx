@@ -41,7 +41,7 @@ function Job({ item }: { item: Experience }) {
           {item.location && <span>{item.location}</span>}
         </p>
         <p className="work__summary">{item.summary}</p>
-        <ul className="work__tags" aria-label="Skills used">
+        <ul className="work__tags" aria-label={work.tagsLabel}>
           {item.tags.map((tag) => (
             <li key={tag}>{tag}</li>
           ))}

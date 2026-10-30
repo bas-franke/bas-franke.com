@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import portrait from '../art/profile.jpg';
-import { about, site } from '../content';
+import { about } from '../content';
 
 export default function About() {
   const [lead, ...rest] = about.paragraphs;
@@ -14,7 +14,7 @@ export default function About() {
         {lead}
       </p>
       <figure className="portrait" data-reveal>
-        <img src={portrait} alt={`Portrait of ${site.name}`} width="960" height="960" loading="lazy" decoding="async" />
+        <img src={portrait} alt={about.portraitAlt} width="960" height="960" loading="lazy" decoding="async" />
       </figure>
       <div className="about__text" data-reveal>
         {rest.map((text) => (

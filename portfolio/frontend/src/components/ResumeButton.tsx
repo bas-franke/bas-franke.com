@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { resume } from '../content';
 
 type State = 'idle' | 'busy' | 'failed';
+
+const copy = resume.button;
 
 interface Props {
   /** 'primary' is the big hero button, 'nav' the small pill in the header, 'quiet' the outlined one beside a primary action. */
@@ -29,8 +32,8 @@ export default function ResumeButton({ variant = 'primary' }: Props) {
     }
   }
 
-  const idle = variant === 'nav' ? 'Résumé' : 'Download résumé';
-  const label = state === 'busy' ? 'Preparing…' : state === 'failed' ? 'Try again' : idle;
+  const idle = variant === 'nav' ? copy.short : copy.download;
+  const label = state === 'busy' ? copy.busy : state === 'failed' ? copy.failed : idle;
 
   return (
     <button
@@ -39,7 +42,7 @@ export default function ResumeButton({ variant = 'primary' }: Props) {
       onClick={onClick}
       disabled={state === 'busy'}
       aria-live="polite"
-      title="Download my résumé as a PDF"
+      title={copy.hint}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <path d="M8 2v8m0 0 3.5-3.5M8 10 4.5 6.5M3 13h10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />

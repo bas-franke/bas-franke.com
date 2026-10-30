@@ -94,7 +94,7 @@ export default function ContactForm() {
   }
 
   return (
-    <form className={`form ${status === 'idle' ? '' : 'form--checked'}`.trim()} onSubmit={submit} noValidate>
+    <form className={status === 'idle' ? 'form' : 'form form--checked'} onSubmit={submit} noValidate>
       <h3 className="form__title">{copy.title}</h3>
       <div className="field">
         <label htmlFor="c-name">{copy.name}</label>

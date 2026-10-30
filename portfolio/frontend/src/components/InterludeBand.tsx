@@ -5,7 +5,7 @@ import { useInterludeArt } from '../hooks/useInterludeArt';
 export default function InterludeBand({ name, line, alt, nightPainting }: InterludeProps) {
   const url = useInterludeArt(name, nightPainting);
   return (
-    <figure className={`interlude interlude--band ${url ? '' : 'interlude--bare'}`.trim()}>
+    <figure className={url ? 'interlude interlude--band' : 'interlude interlude--band interlude--bare'}>
       {url && <InterludeImage src={url} alt={alt} />}
       <figcaption className="container interlude__text" data-reveal>
         <p className="interlude__voice">{line}</p>

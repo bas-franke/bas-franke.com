@@ -63,12 +63,14 @@ export const about = {
     ['Experience', '20+ years'],
     ['Working with', 'AI-assisted development'],
   ] as [string, string][],
+  portraitAlt: `Portrait of ${site.name}`,
 };
 
 export const work = {
   heading: 'Where I’ve worked,',
   headingEm: 'and what I built there.',
   newTab: '(opens in a new tab)',
+  tagsLabel: 'Skills used',
 };
 
 export const experience: Experience[] = [
@@ -247,6 +249,13 @@ export const contact = {
 /** The PDF résumé (see src/resume.ts) is built from this plus the sections above. */
 export const resume = {
   fileName: 'Bas-Franke-Resume.pdf',
+  button: {
+    download: 'Download résumé',
+    short: 'Résumé',
+    busy: 'Preparing…',
+    failed: 'Try again',
+    hint: 'Download my résumé as a PDF',
+  },
   title: 'Head of Development · Full-stack software engineer',
   summary:
     'Full-stack software engineer and engineering lead with more than twenty years of experience designing, building and running web platforms: the trading platforms of two online brokers, a loyalty platform used by thousands of businesses, procure-to-pay analytics, and today the rental platform GoHome.io as Head of Development. Comfortable owning the whole stack, from database and API to interface and infrastructure, and working with AI-assisted, agentic development to deliver more with the same care.',
