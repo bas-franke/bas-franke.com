@@ -3,7 +3,6 @@
 :root {
   --paper: #f4efe6;
   --paper-2: #ebe4d8;
-  --paper-3: #e1d8c9;
   --ink: #221e1a;
   --ink-2: #514a42;
   --ink-3: #665d52;
@@ -30,6 +29,7 @@
   --sunset-4: #2f2026;
   --night: #1b120b;
   /* what a picture shows until it has loaded: its own average colour */
+  --art-hero: #c99d7b;
   --art-morning: #dcbb9a;
   --art-evening: #736467;
   --art-fireside: #925d40;
@@ -41,8 +41,12 @@
   --dur: 520ms;
   --gutter: clamp(20px, 5vw, 72px);
   --max: 1240px;
+  /* the left edge of a centred .container, for what runs wider than one */
+  --page-edge: max(var(--gutter), (100% - var(--max)) / 2 + var(--gutter));
+  --section-gap: clamp(96px, 12vw, 168px);
   --nav-h: 72px;
   --radius: 10px;
+  --radius-lg: calc(var(--radius) * 2);
 
   color-scheme: light;
 }
@@ -50,7 +54,6 @@
 :root[data-theme='dark'] {
   --paper: #16130f;
   --paper-2: #1e1a15;
-  --paper-3: #27221b;
   --ink: #eee5d6;
   --ink-2: #bfb4a3;
   --ink-3: #93897b;
@@ -70,6 +73,7 @@
   --sunset-2: #4a2b26;
   --sunset-3: #352024;
   --sunset-4: #201513;
+  --art-hero: #44302e;
   --art-morning: #2a1d17;
   color-scheme: dark;
 }

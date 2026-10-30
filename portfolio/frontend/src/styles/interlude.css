@@ -3,7 +3,13 @@
 .interlude {
   position: relative;
   isolation: isolate;
-  margin: clamp(96px, 12vw, 168px) 0 0;
+  margin: var(--section-gap) 0 0;
+}
+
+.interlude__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* the one line every interlude speaks */

@@ -20,7 +20,6 @@ export interface Experience {
 
 export const site = {
   name: 'Bas Franke',
-  role: 'Software engineer',
   location: 'Amsterdam, the Netherlands',
   email: 'bas.franke.89@gmail.com',
   phone: '06 208 388 09',

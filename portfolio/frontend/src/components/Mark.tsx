@@ -1,4 +1,4 @@
-/** The site mark: a stone-coloured sun resting on a horizon line. Same drawing as favicon.svg. */
+/** The site mark: a sun resting on a horizon line. Same drawing as favicon.svg. */
 export default function Mark({ size = 26 }: { size?: number }) {
   return (
     <svg className="mark" width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">

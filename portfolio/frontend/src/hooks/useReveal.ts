@@ -10,7 +10,7 @@ export function useRevealAll() {
   useEffect(() => {
     const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'));
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduce || !('IntersectionObserver' in window)) {
+    if (reduce) {
       elements.forEach((el) => el.classList.add('in'));
       return;
     }

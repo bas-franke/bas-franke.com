@@ -1,7 +1,7 @@
 /* What every section shares: its spacing and heading. */
 
 .section {
-  padding-top: clamp(96px, 12vw, 168px);
+  padding-top: var(--section-gap);
 }
 
 .section__head {

@@ -9,6 +9,7 @@
   height: var(--nav-h);
   border-bottom: 1px solid transparent;
   color: var(--ink);
+  /* the bar stays see-through under .night too, until .nav--scrolled gives it a ground */
   background: transparent;
   transition: background-color var(--fade) var(--ease), border-color var(--fade) var(--ease), color var(--fade) var(--ease);
 }
@@ -91,7 +92,7 @@
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  border: 1px solid transparent;
+  border: 0;
   background: transparent;
   color: var(--ink-2);
   cursor: pointer;
@@ -115,7 +116,7 @@
   stroke-linejoin: round;
 }
 
-.lamp .lamp__shade {
+.lamp__shade {
   transition: fill 0.5s var(--ease), stroke 0.5s var(--ease);
 }
 
@@ -140,7 +141,7 @@
   translate: 0 2px;
 }
 
-:root[data-theme='dark'] .lamp .lamp__shade {
+:root[data-theme='dark'] .lamp__shade {
   fill: var(--warm);
   stroke: var(--warm);
 }

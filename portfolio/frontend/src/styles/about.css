@@ -46,7 +46,7 @@
   aspect-ratio: 4 / 5;
   margin: 0;
   overflow: hidden;
-  border-radius: calc(var(--radius) * 2);
+  border-radius: var(--radius-lg);
   box-shadow: 0 28px 56px -32px var(--portrait-glow);
 }
 

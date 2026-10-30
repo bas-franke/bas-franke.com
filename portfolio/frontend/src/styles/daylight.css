@@ -35,7 +35,7 @@
 .sunpath {
   display: none;
   position: fixed;
-  inset: 0 max(var(--gutter), calc((100% - var(--max)) / 2 + var(--gutter))) auto;
+  inset: 0 var(--page-edge) auto;
   --arc: 16px;
   height: var(--arc);
   z-index: 60;

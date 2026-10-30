@@ -34,7 +34,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = () => {
-      if (!savedTheme()) setTheme(query.matches ? 'dark' : 'light');
+      if (!savedTheme()) setTheme(systemTheme());
     };
     query.addEventListener('change', onChange);
     return () => query.removeEventListener('change', onChange);
