@@ -200,7 +200,7 @@ describe('bot routes', () => {
     const ok = await put({ dailyLossLimit: { unit: 'eur', value: 50 } });
     assert.equal(ok.status, 200);
     assert.equal(((await ok.json()) as any).dailyLossLimit.value, 50);
-    const goLive = await put({ mode: 'live', confirmLive: true });
+    const goLive = await put({ mode: 'live', confirmLive: true, skipPaperGate: true });
     assert.equal(goLive.status, 200);
     assert.equal(h.settings.mode, 'live');
     assert.equal('confirmLive' in h.settings, false);
@@ -514,7 +514,7 @@ describe('POST /api/bot/activate', () => {
     }
     assert.equal(JSON.stringify(h.settings.strategy), before);
     assert.equal(started, 1);
-    const ok = await activate({ researchId: 2, bucket: 'daily', rank: 1, start: true, confirmLive: true });
+    const ok = await activate({ researchId: 2, bucket: 'daily', rank: 1, start: true, confirmLive: true, skipPaperGate: true });
     assert.equal(ok.status, 200);
     assert.equal(((await ok.json()) as any).started, true);
     assert.equal(started, 2);
@@ -590,6 +590,145 @@ describe('POST /api/bot/allocate', () => {
     assert.equal((h.settings.manual as any).target, 'BTC');
     for (const bad of [{ target: 'SOL' }, { target: 'ETH', confirmLive: 'yes' }, [], {}]) assert.equal((await allocate(bad)).status, 400);
     Object.assign(h.settings, { mode: 'paper', manual: null, enabled: false });
+  });
+});
+
+describe('going live: strategy confirmation and paper gate', () => {
+  const NOW = Date.parse('2026-10-30T12:00:00Z');
+  const DAY = 24 * 3600_000;
+  const spec = (id: string, slow = 48) => ({ id, name: id, family: 'ema_cross', params: { fast: 12, slow } });
+  const passed = { first_at: new Date(NOW - 14 * DAY), fills: '5' };
+  let h: Harness;
+  let cookie: string;
+  /** What the paper record query answers. */
+  const record = [{ first_at: null as Date | null, fills: '0' }];
+  const setRecord = (r: { first_at: Date | null; fills: string }) => (record[0] = r);
+  before(async () => {
+    h = await startHarness({ now: () => NOW }, { orders: record });
+    cookie = await h.login();
+    assert.equal((await h.req('POST', '/api/research', { json: researchPayloadV2(), cookie })).status, 200);
+  });
+  after(() => h.close());
+  const put = (json: unknown) => h.req('PUT', '/api/bot', { json, cookie });
+  const activate = (json: unknown) => h.req('POST', '/api/bot/activate', { json, cookie });
+  const paperWith = (id: string) => Object.assign(h.settings, { mode: 'paper', strategy: spec(id) });
+  const liveWith = (id: string) => Object.assign(h.settings, { mode: 'live', strategy: spec(id) });
+
+  test('paper-record: days, fills and first order of a spec id', async () => {
+    const res = await h.req('GET', '/api/bot/paper-record?strategyId=abc', { cookie });
+    assert.deepEqual(await res.json(), { days: 0, fills: 0, firstAt: null });
+    assert.deepEqual(h.calls.at(-1)!.params, ['abc']);
+    assert.match(h.calls.at(-1)!.sql, /o\.mode = 'paper' AND o\.strategy_id = \$1/);
+    setRecord({ first_at: new Date(NOW - 3.5 * DAY), fills: '2' });
+    const some = await h.req('GET', '/api/bot/paper-record?strategyId=abc', { cookie });
+    assert.deepEqual(await some.json(), { days: 3, fills: 2, firstAt: new Date(NOW - 3.5 * DAY).toISOString() });
+    assert.equal((await h.req('GET', '/api/bot/paper-record', { cookie })).status, 400);
+    assert.equal((await h.req('GET', '/api/bot/paper-record?strategyId=a&strategyId=b', { cookie })).status, 400);
+    assert.equal((await h.req('GET', '/api/bot/paper-record?strategyId=abc')).status, 401);
+  });
+
+  test('switching to live needs both the days and the fills', async () => {
+    paperWith('s1');
+    for (const [r, days, fills] of [
+      [{ first_at: null, fills: '0' }, 0, 0],
+      [{ first_at: new Date(NOW - 20 * DAY), fills: '4' }, 20, 4],
+      [{ first_at: new Date(NOW - 13.9 * DAY), fills: '9' }, 13, 9],
+    ] as const) {
+      setRecord(r);
+      const res = await put({ mode: 'live', confirmLive: true });
+      assert.equal(res.status, 409);
+      const body = (await res.json()) as any;
+      assert.deepEqual(body.paperGate, { days, fills, needDays: 14, needFills: 5 });
+      assert.equal(typeof body.error, 'string');
+      assert.equal(h.settings.mode, 'paper');
+    }
+    assert.equal(h.calls.at(-1)!.params[0], 's1');
+    setRecord(passed);
+    assert.equal((await put({ mode: 'live', confirmLive: true })).status, 200);
+    assert.equal(h.settings.mode, 'live');
+  });
+
+  test('skipPaperGate goes live anyway and is logged; it is no setting and must be a boolean', async () => {
+    paperWith('s1');
+    setRecord({ first_at: null, fills: '0' });
+    assert.equal((await put({ mode: 'live', confirmLive: true, skipPaperGate: 'yes' })).status, 400);
+    assert.equal((await put({ mode: 'live', confirmLive: true, skipPaperGate: true })).status, 200);
+    assert.equal('skipPaperGate' in h.settings, false);
+    assert.ok(h.logs.some((l) => l.event === 'paper_gate_skipped' && l.level === 'warn'));
+  });
+
+  test('confirmLive comes before the gate', async () => {
+    paperWith('s1');
+    const res = await put({ mode: 'live' });
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as any).error, /confirmLive/);
+  });
+
+  test('a new strategy while live needs confirmLive and the paper record', async () => {
+    liveWith('s1');
+    setRecord({ first_at: null, fills: '0' });
+    const unconfirmed = await put({ strategy: spec('s2') });
+    assert.equal(unconfirmed.status, 400);
+    assert.match(((await unconfirmed.json()) as any).error, /confirmLive/);
+    const gated = await put({ strategy: spec('s2'), confirmLive: true });
+    assert.equal(gated.status, 409);
+    assert.equal((h.settings.strategy as any).id, 's1');
+    assert.equal(h.calls.at(-1)!.params[0], 's2');
+    setRecord(passed);
+    assert.equal((await put({ strategy: spec('s2'), confirmLive: true })).status, 200);
+    assert.equal((h.settings.strategy as any).id, 's2');
+  });
+
+  test('same id with other params is a change too, and needs the confirmation', async () => {
+    liveWith('s1');
+    assert.equal((await put({ strategy: spec('s1', 50) })).status, 400);
+  });
+
+  test('a running live bot is untouched: saving the form, other settings, leaving live', async () => {
+    liveWith('s1');
+    setRecord({ first_at: null, fills: '0' });
+    const reordered = { params: { slow: 48, fast: 12 }, family: 'ema_cross', name: 's1', id: 's1' };
+    assert.equal((await put({ mode: 'live', strategy: reordered, dailyLossLimit: { unit: 'eur', value: 60 } })).status, 200);
+    assert.equal((await put({ dailyLossLimit: { unit: 'eur', value: 70 } })).status, 200);
+    assert.equal((await put({ mode: 'paper', strategy: spec('s9') })).status, 200);
+    assert.equal(h.settings.mode, 'paper');
+  });
+
+  test('paper mode changes the strategy freely', async () => {
+    paperWith('s1');
+    assert.equal((await put({ strategy: spec('s2') })).status, 200);
+  });
+
+  test('activating while live is gated; in paper or for the running strategy it is not', async () => {
+    setRecord({ first_at: null, fills: '0' });
+    paperWith('s1');
+    assert.equal((await activate({ researchId: 1, bucket: 'daily', rank: 1 })).status, 200);
+
+    liveWith('s1');
+    const body = { researchId: 1, bucket: 'daily', rank: 2, confirmLive: true };
+    const gated = await activate(body);
+    assert.equal(gated.status, 409);
+    assert.deepEqual(((await gated.json()) as any).paperGate, { days: 0, fills: 0, needDays: 14, needFills: 5 });
+    assert.equal((h.settings.strategy as any).id, 's1');
+    assert.equal(h.calls.at(-1)!.params[0], 'ema_cross-btc-4h-1');
+
+    assert.equal((await activate({ ...body, skipPaperGate: 'yes' })).status, 400);
+    assert.equal((await activate({ ...body, skipPaperGate: true })).status, 200);
+    assert.equal((h.settings.strategy as any).id, 'ema_cross-btc-4h-1');
+    assert.equal((await activate(body)).status, 200); // already running live
+    setRecord(passed);
+    assert.equal((await activate({ researchId: 1, bucket: 'daily', rank: 3, confirmLive: true })).status, 200);
+    Object.assign(h.settings, { mode: 'paper' });
+  });
+
+  test('manual allocation is exempt', async () => {
+    liveWith('s1');
+    setRecord({ first_at: null, fills: '0' });
+    const calls = h.calls.length;
+    assert.equal((await h.req('POST', '/api/bot/allocate', { json: { target: 'ETH', confirmLive: true }, cookie })).status, 200);
+    assert.equal((await h.req('POST', '/api/bot/allocate', { json: { target: null }, cookie })).status, 200);
+    assert.equal(h.calls.length, calls);
+    Object.assign(h.settings, { mode: 'paper', enabled: false });
   });
 });
 
