@@ -59,6 +59,21 @@
     transition: scale 1.2s var(--ease);
   }
 
+  /* frosted glass over the sky, with a soft glare across it, clearing towards the sill so the cat stays sharp */
+  .menu::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      linear-gradient(115deg, rgb(255 255 255 / 0.2), transparent 38%, transparent 62%, rgb(255 255 255 / 0.08)),
+      color-mix(in srgb, var(--paper) 24%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(1.35);
+    backdrop-filter: blur(18px) saturate(1.35);
+    -webkit-mask-image: linear-gradient(to bottom, #000 56%, transparent 78%);
+    mask-image: linear-gradient(to bottom, #000 56%, transparent 78%);
+  }
+
   .menu__links {
     display: grid;
     width: 100%;
@@ -111,6 +126,11 @@
 @media (max-width: 760px) and (max-height: 560px) {
   .menu__painting {
     object-position: 100% 12%;
+  }
+
+  .menu::after {
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
   .menu__links a {

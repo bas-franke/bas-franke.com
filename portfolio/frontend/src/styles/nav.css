@@ -151,7 +151,7 @@
   transform: none;
 }
 
-/* One row: name, lamp, the two lines. The sections and the résumé are in the menu (menu.css). */
+/* One row: the two lines, name, lamp. The sections and the résumé are in the menu (menu.css). */
 @media (max-width: 760px) {
   :root {
     --nav-h: 64px;
@@ -173,7 +173,7 @@
 
   .nav__right {
     gap: 0;
-    margin-right: -10px;
+    margin: 0 -10px 0 auto;
   }
 
   .theme {
@@ -195,6 +195,8 @@
     justify-content: center;
     width: 44px;
     height: 44px;
+    /* the lines themselves start on the page's left edge */
+    margin-left: -14px;
     border: 0;
     background: transparent;
     color: var(--ink-2);
