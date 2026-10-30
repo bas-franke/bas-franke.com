@@ -488,7 +488,7 @@ export default function SettingsPage() {
       />
 
       <ClearHistory mode={saved.mode} />
-      <ClearTradesAndLogs mode={saved.mode} />
+      <ClearTradesAndLogs />
 
       {(dirty || errors._) && (
         <div className="save-bar">
@@ -806,8 +806,8 @@ function ClearHistory({ mode }: { mode: string }) {
   );
 }
 
-/** Settings > "Clear trades and logs": deletes the mode's trades and every log line after typing CLEAR. The server refuses while a coin is held. */
-function ClearTradesAndLogs({ mode }: { mode: string }) {
+/** Settings > "Clear trades and logs": deletes every trade and log line, live and paper, after typing CLEAR. The server refuses while a coin is held. */
+function ClearTradesAndLogs() {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
@@ -833,7 +833,7 @@ function ClearTradesAndLogs({ mode }: { mode: string }) {
       <Section id="trades" kicker="Danger zone" title="Trades and logs" intro="The bot's own record of what it did.">
         <div className="stack" style={{ gap: 10 }}>
           <p className="small soft" style={{ margin: 0 }}>
-            Clearing deletes the trades and orders of your {mode} account and every log line, and the expected vs actual numbers start again from now. It only works while the bot
+            Clearing deletes all trades and orders, live and paper, and every log line, and the expected vs actual numbers start again from now. It only works while the bot
             holds no coin and no orders are working. Your balance at Bitvavo stays as it is.
           </p>
           <div>
@@ -859,7 +859,7 @@ function ClearTradesAndLogs({ mode }: { mode: string }) {
         }
       >
         <div className="callout loss">
-          This deletes the <b>{mode}</b> trades and orders and all logs for good. It can’t be undone. If you need them for tax, export your history from Bitvavo first.
+          This deletes all <b>live and paper</b> trades and orders and all logs for good. It can’t be undone. If you need them for tax, export your history from Bitvavo first.
         </div>
         {error && <div className="callout loss">{error}</div>}
         <div className="field">

@@ -126,16 +126,16 @@ export function trackRoutes(deps: ApiDeps) {
     const held = (balances ?? []).filter((b) => b.symbol.toUpperCase() !== 'EUR' && (num(b.eurValue) ?? 0) >= POSITION_MIN_EUR);
     if (held.length) throw new ConflictError(`The bot still holds ${held.map((b) => b.symbol).join(', ')}. Clear this once it is out of the position.`);
     const { rows } = await deps.query(
-      `SELECT count(*) AS n FROM orders WHERE mode = $1 AND (status = ANY($2) OR status = 'unknown' OR updated_at > now() - interval '15 minutes')`,
-      [mode, OPEN_STATUSES],
+      `SELECT count(*) AS n FROM orders WHERE status = ANY($1) OR status = 'unknown' OR updated_at > now() - interval '15 minutes'`,
+      [OPEN_STATUSES],
     );
     if (Number(rows[0]?.n ?? 0) > 0) throw new ConflictError('Orders are working or ended in the last 15 minutes. Try again once they have settled.');
-    const a = await deps.query('DELETE FROM fills WHERE mode = $1', [mode]);
-    const b = await deps.query('DELETE FROM orders WHERE mode = $1', [mode]);
+    const a = await deps.query('DELETE FROM fills');
+    const b = await deps.query('DELETE FROM orders');
     const c = await deps.query('DELETE FROM bot_logs');
-    await markTrackingReset(deps, mode);
+    for (const m of MODES) await markTrackingReset(deps, m);
     const removed = { fills: a.rowCount ?? 0, orders: b.rowCount ?? 0, logs: c.rowCount ?? 0 };
-    await deps.log('warn', 'trades_and_logs_cleared', `Trades of the ${mode} account and all logs cleared`, { mode, ...removed });
+    await deps.log('warn', 'trades_and_logs_cleared', 'All trades and logs cleared, live and paper', { mode, ...removed });
     res.json({ ok: true, mode, removed });
   });
 

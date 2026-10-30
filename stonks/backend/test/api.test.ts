@@ -856,8 +856,8 @@ describe('clearing trades and logs', () => {
   test('clears fills, then orders, then logs, restarts tracking and leaves one line', async () => {
     const n = h.calls.length;
     assert.equal((await clear({ confirm: 'CLEAR' })).status, 200);
-    assert.deepEqual(deletes(n).map((c) => c.sql), ['DELETE FROM fills WHERE mode = $1', 'DELETE FROM orders WHERE mode = $1', 'DELETE FROM bot_logs']);
-    assert.ok(h.calls.slice(n).some((c) => c.sql.includes("'tracking_reset'")));
+    assert.deepEqual(deletes(n).map((c) => c.sql), ['DELETE FROM fills', 'DELETE FROM orders', 'DELETE FROM bot_logs']);
+    assert.deepEqual(h.calls.slice(n).filter((c) => c.sql.includes("'tracking_reset'")).map((c) => c.params?.[0]), ['paper', 'live']); // both modes
     assert.ok(h.logs.some((l) => l.event === 'trades_and_logs_cleared'));
   });
 });
