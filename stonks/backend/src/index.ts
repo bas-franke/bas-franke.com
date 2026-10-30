@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { api } from './api/index.js';
+import { drain } from './bot/engine.js';
 import { botHealth, startBot, stopBot } from './bot/index.js';
 import { config } from './config.js';
 import { dbConfigured, dbReady, migrate } from './db.js';
@@ -47,14 +48,20 @@ async function main() {
   });
   if (config.botLoop && dbConfigured()) startBot();
 
-  const shutdown = (signal: string) => {
+  let stopping = false;
+  const shutdown = async (signal: string) => {
+    if (stopping) return;
+    stopping = true;
     console.log(`${signal} received, shutting down`);
     stopBot();
+    // PM2 kills at kill_timeout (30 s); drain gives a running tick up to 25 s.
+    setTimeout(() => process.exit(0), 28_000).unref();
+    await drain().catch((err) => console.error('drain failed', err));
     server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 5000).unref();
+    setTimeout(() => process.exit(0), 2000).unref();
   };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('unhandledRejection', (reason) => {
     void log('error', 'unhandled_rejection', `Unhandled promise rejection: ${errText(reason)}`);
   });

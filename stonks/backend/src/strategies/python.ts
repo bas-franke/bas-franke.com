@@ -98,9 +98,26 @@ export function setLabRunner(run: LabRunner | null) {
   labRunner = run;
 }
 
+/** The newest lab calls, for the Health page. Kept in memory: a restart starts empty. */
+export const labStats = {
+  lastCall: null as { at: number; cmd: string; ms: number } | null,
+  lastFailure: null as { at: number; cmd: string; error: string } | null,
+};
+
 /** Runs `python -m stonks_lab.live <cmd>` with `input` as JSON on stdin and returns its JSON answer. */
-export function runLab<T>(cmd: 'describe' | 'prepare' | 'targets', input: unknown, timeoutMs = TIMEOUT_MS): Promise<T> {
-  if (labRunner) return labRunner(cmd, input, timeoutMs) as Promise<T>;
+export async function runLab<T>(cmd: 'describe' | 'prepare' | 'targets', input: unknown, timeoutMs = TIMEOUT_MS): Promise<T> {
+  const started = Date.now();
+  try {
+    return await (labRunner ? (labRunner(cmd, input, timeoutMs) as Promise<T>) : spawnLab<T>(cmd, input, timeoutMs));
+  } catch (err) {
+    labStats.lastFailure = { at: Date.now(), cmd, error: err instanceof Error ? err.message : String(err) };
+    throw err;
+  } finally {
+    labStats.lastCall = { at: started, cmd, ms: Date.now() - started };
+  }
+}
+
+function spawnLab<T>(cmd: string, input: unknown, timeoutMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const child = spawn(config.python, ['-m', 'stonks_lab.live', cmd], {
       cwd: config.labDir,

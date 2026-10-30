@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, describe, mock, test } from 'node:test';
 import { alertsConfigured, notifyLog, resetAlerts, scrub, sendTestAlert, shouldAlert } from '../src/bot/alerts.js';
-import { healthVerdict } from '../src/bot/index.js';
+import { healthVerdict } from '../src/bot/health.js';
 import { errText, log } from '../src/log.js';
 import { startHarness } from './helpers/api-harness.js';
 

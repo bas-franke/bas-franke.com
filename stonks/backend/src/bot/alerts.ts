@@ -35,6 +35,9 @@ export function scrub(text: string): string {
   return out.replace(/postgres(ql)?:\/\/\S+/gi, '[hidden]').replace(/\bSG\.[\w-]+\.[\w-]+/g, '[hidden]');
 }
 
+/** For the Health page. Kept in memory: a restart starts empty. */
+export const alertStats = { lastSentAt: null as number | null, lastError: null as string | null };
+
 async function deliver(subject: string, text: string): Promise<{ ok: boolean; error?: string }> {
   const { key, from, to } = settings();
   try {
@@ -49,15 +52,21 @@ async function deliver(subject: string, text: string): Promise<{ ok: boolean; er
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (res.ok) return { ok: true };
-    const error = `SendGrid answered ${res.status}`;
-    console.error(`[stonks] alert mail failed: ${error}`);
-    return { ok: false, error };
+    if (res.ok) {
+      alertStats.lastSentAt = Date.now();
+      alertStats.lastError = null;
+      return { ok: true };
+    }
+    return failed(`SendGrid answered ${res.status}`);
   } catch (err) {
-    const error = scrub(err instanceof Error ? err.message : String(err));
-    console.error(`[stonks] alert mail failed: ${error}`);
-    return { ok: false, error };
+    return failed(scrub(err instanceof Error ? err.message : String(err)));
   }
+}
+
+function failed(error: string) {
+  alertStats.lastError = error;
+  console.error(`[stonks] alert mail failed: ${error}`);
+  return { ok: false, error };
 }
 
 const seen = new Map<string, { at: number; suppressed: number }>();

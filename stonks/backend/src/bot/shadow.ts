@@ -328,6 +328,16 @@ async function driftOf(q: TrackingQuery, v: Virtual, now: number) {
   return { gapPct, slippage, alerts: driftAlerts(gapPct, daysSince(v, now), slippage) };
 }
 
+/** For the Health page: the newest point of the mode's strategy, and its gap, slippage and flags. */
+export async function shadowHealth(q: TrackingQuery, mode: Mode, now = Date.now()) {
+  const state = (await q('SELECT value FROM settings WHERE key = $1', [STATE_KEY])).rows[0]?.value as ShadowState | undefined;
+  const v = state?.modes?.[mode];
+  if (!v) return null;
+  const { rows } = await q('SELECT max(ts) AS last FROM shadow_points WHERE mode = $1 AND strategy_id = $2', [mode, v.strategyId]);
+  const last = rows[0]?.last ? ms(rows[0].last) : null;
+  return { strategyId: v.strategyId, since: v.since, lastPointAt: last, ...(await driftOf(q, v, now)) };
+}
+
 /** The strategy that mode runs now: its points, the gap since its start, slippage and any decay flags. */
 export async function trackingReport(q: TrackingQuery, mode: Mode, range: TrackingRange, now = Date.now()) {
   const state = (await q('SELECT value FROM settings WHERE key = $1', [STATE_KEY])).rows[0]?.value as ShadowState | undefined;

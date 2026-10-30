@@ -38,6 +38,8 @@ export interface ApiDeps {
   priceHistory?: (market: string, from: number, to: number) => Promise<[number, number][]>;
   /** Expected vs actual of the strategy a mode runs (GET /api/tracking). */
   tracking?: (mode: 'paper' | 'live', range: 'day' | 'week' | 'month' | 'year' | 'all') => Promise<unknown>;
+  /** One verdict per part of the bot (GET /api/health/detail). */
+  healthDetail?: () => Promise<unknown>;
   /** Sends one test mail (POST /api/bot/test-alert). */
   sendTestAlert?: () => Promise<{ ok: boolean; configured: boolean; error?: string }>;
   maxLoginAttempts?: number;

@@ -15,6 +15,11 @@ export function trackingRoutes(deps: ApiDeps) {
     res.json(await deps.tracking!(mode, range));
   });
 
+  r.get('/health/detail', async (_req, res) => {
+    if (!deps.healthDetail) fail('Health detail is not available.');
+    res.json(await deps.healthDetail!());
+  });
+
   r.post('/bot/test-alert', async (_req, res) => {
     if (!deps.sendTestAlert) fail('Alerts are not available.');
     const result = await deps.sendTestAlert!();
