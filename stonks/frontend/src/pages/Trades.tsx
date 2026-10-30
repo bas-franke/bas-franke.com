@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, unwrapMarkets } from '../api';
-import { EmptyState } from '../components/art';
+import { Coin, EmptyState, PageBanner } from '../components/art';
 import { ErrorBox, Segmented, Skeleton, useAsync } from '../components/ui';
 import { amount, dateTime, eur, num, price } from '../format';
 import type { Fill, Order } from '../types';
@@ -45,6 +45,48 @@ const FillBar = ({ frac }: { frac: number }) => (
 
 const LiveTag = () => <span className="chip live trade-live">live</span>;
 
+const Market = ({ market, live }: { market: string; live: boolean }) => (
+  <span className="trade-market">
+    <Coin symbol={market.split('-')[0]} />
+    {market}
+    {live && <LiveTag />}
+  </span>
+);
+
+/** Counts what is loaded right now, nothing more: older rows may still be behind Load more. */
+function Summary({ tab, rows, complete }: { tab: Tab; rows: (Order | Fill)[]; complete: boolean }) {
+  const buys = rows.filter((r) => r.side === 'buy').length;
+  let fees = 0;
+  let otherFees = false;
+  for (const r of rows) {
+    const fee = pick(r.feeEur, (r as Order).feePaid, r.fee);
+    if (fee === undefined || fee === null) continue;
+    if (!r.feeCurrency || r.feeCurrency === 'EUR') fees += num(fee) || 0;
+    else otherFees = true;
+  }
+  const noun = tab === 'orders' ? 'orders' : 'fills';
+  return (
+    <dl className="trades-summary">
+      <div>
+        <dt>{complete ? `All ${noun}` : `Latest ${noun} loaded`}</dt>
+        <dd>{rows.length}</dd>
+      </div>
+      <div>
+        <dt>Buys</dt>
+        <dd className="gain">{buys}</dd>
+      </div>
+      <div>
+        <dt>Sells</dt>
+        <dd className="loss">{rows.length - buys}</dd>
+      </div>
+      <div>
+        <dt>{`Fees${otherFees ? ' in EUR' : ''} of these ${rows.length}`}</dt>
+        <dd>{eur(fees)}</dd>
+      </div>
+    </dl>
+  );
+}
+
 export default function TradesPage() {
   const [tab, setTab] = useState<Tab>('orders');
   const [mode, setMode] = useState<'' | 'paper' | 'live'>('');
@@ -75,15 +117,22 @@ export default function TradesPage() {
 
   return (
     <div className="stack trades-page">
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">Trades</span>
-          <h1>Every order, every fill</h1>
-          <p className="lede">What the bot asked for (orders) and what actually happened on the exchange (fills), newest first.</p>
-        </div>
-      </div>
+      <PageBanner
+        art="banner-trades"
+        eyebrow="Trades"
+        title="Every order, every fill"
+        lede="What the bot asked for (orders) and what actually happened on the exchange (fills), newest first."
+      />
 
       <div className="trades-filters">
+        <select className="input trades-market" value={market} onChange={(e) => setMarket(e.target.value)} aria-label="Market">
+          <option value="">All markets</option>
+          {(markets.data ?? []).map((m) => (
+            <option key={m.market} value={m.market}>
+              {m.market}
+            </option>
+          ))}
+        </select>
         <Segmented<Tab>
           label="Show"
           value={tab}
@@ -103,14 +152,6 @@ export default function TradesPage() {
             { value: 'live', label: 'Live' },
           ]}
         />
-        <select className="input trades-market" value={market} onChange={(e) => setMarket(e.target.value)} aria-label="Market">
-          <option value="">All markets</option>
-          {(markets.data ?? []).map((m) => (
-            <option key={m.market} value={m.market}>
-              {m.market}
-            </option>
-          ))}
-        </select>
       </div>
 
       <section className="card trades-card">
@@ -127,12 +168,13 @@ export default function TradesPage() {
           </div>
         )}
         {!state.loading && !state.error && rows.length === 0 && (
-          <EmptyState title={tab === 'orders' ? 'No orders yet' : 'No fills yet'}>
+          <EmptyState art="empty-trades" title={tab === 'orders' ? 'No orders yet' : 'No fills yet'}>
             {mode || market
               ? 'Nothing matches these filters.'
               : 'Once the bot is switched on and the strategy asks for a trade, it will show up here.'}
           </EmptyState>
         )}
+        {rows.length > 0 && <Summary tab={tab} rows={rows} complete={state.done} />}
         {rows.length > 0 && (
           <div className="table-wrap">
             {tab === 'orders' ? <OrdersTable rows={rows as Order[]} /> : <FillsTable rows={rows as Fill[]} />}
@@ -178,8 +220,7 @@ function OrdersTable({ rows }: { rows: Order[] }) {
                 {dateTime(pick(o.createdAt, o.created_at))}
               </td>
               <td data-label="Market" className="c-market">
-                {o.market}
-                {o.mode === 'live' && <LiveTag />}
+                <Market market={o.market} live={o.mode === 'live'} />
               </td>
               <td data-label="Side" className="c-side">
                 <span className={`side ${o.side}`}>{o.side}</span>
@@ -244,8 +285,7 @@ function FillsTable({ rows }: { rows: Fill[] }) {
                 {dateTime(pick(f.executedAt, f.ts, f.createdAt, f.created_at))}
               </td>
               <td data-label="Market" className="c-market">
-                {f.market}
-                {f.mode === 'live' && <LiveTag />}
+                <Market market={f.market} live={f.mode === 'live'} />
               </td>
               <td data-label="Side" className="c-side">
                 <span className={`side ${f.side}`}>{f.side}</span>

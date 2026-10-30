@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { EmptyState, PageBanner } from '../components/art';
 import { IconPause, IconPlay } from '../components/icons';
 import { ErrorBox, Segmented, Skeleton, useVisibleInterval } from '../components/ui';
 import { dateOnly, timeOnly } from '../format';
@@ -87,13 +88,12 @@ export default function LogsPage() {
   let lastDay = '';
   return (
     <div className="stack logs-page">
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">Logs</span>
-          <h1>The bot’s diary</h1>
-          <p className="lede">Everything it notices and does, as it happens. New lines appear every few seconds while this page is open. “Orders only” shows each decision and what happened to every order it placed.</p>
-        </div>
-      </div>
+      <PageBanner
+        art="banner-logs"
+        eyebrow="Logs"
+        title="The bot’s diary"
+        lede="Everything it notices and does, as it happens. New lines appear every few seconds while this page is open. “Orders only” shows each decision and what happened to every order it placed."
+      />
       <div className="logs-filters">
         <Segmented<View>
           label="Show"
@@ -136,9 +136,9 @@ export default function LogsPage() {
           </div>
         )}
         {loaded && shown.length === 0 && (
-          <p className="soft small logs-empty">
+          <EmptyState art="empty-logs" title="Nothing on this page yet">
             {view === 'orders' ? 'No order activity in the latest lines yet.' : `Nothing logged yet${level ? ' at this level' : ''}.`}
-          </p>
+          </EmptyState>
         )}
         <div className="log-list">
           {shown.map((l) => {
@@ -149,7 +149,7 @@ export default function LogsPage() {
             return (
               <div key={l.id}>
                 {header && (
-                  <div className="eyebrow log-day">{day}</div>
+                  <div className="log-day">{day}</div>
                 )}
                 <div className={`log-row lv-${l.level}${fresh.has(l.id) ? ' new' : ''}`}>
                   <span className="ts">{timeOnly(l.ts)}</span>
