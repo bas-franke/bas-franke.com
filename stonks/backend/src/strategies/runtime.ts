@@ -189,8 +189,18 @@ export function candlePlan(spec: AnySpec): { markets: string[]; bars: number } {
   return { markets: dataMarkets(spec), bars: warmupBars(spec) };
 }
 
-/** `t`: open time of the newest candle the decision used (null when there were none), so a late candle can be caught. */
-export type Decision = { weights: Weights; t: number | null; warming?: undefined } | { warming: string[] };
+/**
+ * `t`: open time of the newest candle the decision used (null when there were none), so a late candle can be caught.
+ * `hold`: no decision can be made now (the reason says why): keep every position, place nothing, ask again next tick.
+ */
+export type Decision =
+  | { weights: Weights; t: number | null; warming?: undefined; hold?: undefined }
+  | { warming: string[]; hold?: undefined }
+  | { hold: string; t: number | null; warming?: undefined };
+
+/** Weights that come from no candle at all are not a signal to sell: all-zero weights with `t: null` are a hold. */
+const holdIfNoData = (weights: Weights, t: number | null): Decision =>
+  t === null && Object.values(weights).every((w) => !(w > 0)) ? { hold: 'no candle data', t: null } : { weights, t };
 
 /**
  * Target weights at `bar` (open time of the last closed bar), from the candles of `candlePlan`. `{ warming }` means
@@ -200,11 +210,12 @@ export async function decide(spec: AnySpec, bar: number, candles: CandlesByMarke
   if (!runsInPython(spec)) {
     // The oldest "newest candle" over the markets: one market lagging is enough to call the decision stale.
     const newest = Object.values(candles).filter((cs) => cs?.length).map((cs) => cs[cs.length - 1][0]);
-    return { weights: targets(candles, spec, state), t: newest.length ? Math.min(...newest) : null };
+    return holdIfNoData(targets(candles, spec, state), newest.length ? Math.min(...newest) : null);
   }
   const r = await targetsPy(spec, bar, state?.startTime);
   if (r.warming) return { warming: r.warming };
-  return { weights: clamp(r.weights, spec), t: r.t };
+  if (r.hold !== undefined) return { hold: r.hold, t: r.t ?? null };
+  return holdIfNoData(clamp(r.weights, spec), r.t);
 }
 
 /** Starts the lab's one-time history download for `spec` in the background (no-op for TypeScript families). */

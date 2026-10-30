@@ -28,6 +28,9 @@ let candleCalls = 0;
 /** Bars the newest candle lags behind the bar asked for (a late Bitvavo candle). */
 let candleLag = 0;
 let onPlace: (() => void) | null = null;
+/** The account the fake brokers report. */
+let cash = 1000;
+let held: Record<string, number> = {};
 /** Bitvavo has not confirmed the cancel yet: the order stays open in the DB until a later sync. */
 let cancelUnconfirmed = false;
 
@@ -43,7 +46,7 @@ function makeCandles(n: number, lastBar: number, rising = true): Candle[] {
 class FakeBroker {
   constructor(readonly mode: 'paper' | 'live') {}
   async balances() {
-    return [{ symbol: 'EUR', available: 1000, inOrder: 0 }];
+    return [{ symbol: 'EUR', available: cash, inOrder: 0 }, ...Object.entries(held).map(([symbol, available]) => ({ symbol, available, inOrder: 0 }))];
   }
   async place(intent: OrderIntent, ctx?: unknown) {
     placed.push({ mode: this.mode, intent, ctx });
@@ -121,11 +124,26 @@ mock.module('../src/bot/marketData.js', {
 const fakeClient = { hasKeys: true, balance: async () => [], syncTime: async () => 0, ordersOpen: async () => [] };
 mock.module('../src/bitvavo/index.js', { exports: { ...realClient, ...precision, bitvavo: fakeClient } });
 mock.module('../src/db.js', { exports: { query: async () => ({ rows: [] }) } });
-mock.module('../src/log.js', { exports: { log: async () => undefined, errText: (e: unknown) => (e instanceof Error ? e.message : String(e)) } });
+// A lab family whose answer the tests script (SPEC §6b).
+let labAnswer: unknown = { t: null, weights: {} };
+const labFamily = { family: 'moon_core', title: 'Moon', summary: '', version: 1, multiMarket: true, anchored: false, params: [] };
+mock.module('../src/strategies/python.js', {
+  exports: {
+    pyFamilies: () => new Map([['moon_core', labFamily]]),
+    targetsPy: async () => labAnswer,
+    cachedExplanation: () => undefined,
+    describePy: async () => ({ error: null, markets: [], anchored: false, explanation: '' }),
+    preparePy: () => undefined,
+  },
+});
+const logs: Array<{ level: string; event: string; message: string; data?: any }> = [];
+const logged = (event: string) => logs.filter((l) => l.event === event);
+mock.module('../src/log.js', { exports: { log: async (level: string, event: string, message: string, data?: unknown) => void logs.push({ level, event, message, data }), errText: (e: unknown) => (e instanceof Error ? e.message : String(e)) } });
 
 /** Runs code outside the tick's async context, like an API request arriving while a tick runs. */
 const outside = AsyncLocalStorage.snapshot();
 const engine = await import('../src/bot/engine.js');
+const { barOpen } = await import('../src/bot/time.js');
 const { tick, status, switchOff, start, stop, staleGraceMs } = engine;
 
 const ema = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 }, execution: { orderType: 'market' } });
@@ -136,6 +154,10 @@ function reset(spec: StrategySpec, enabled = true, mode: 'paper' | 'live' = 'pap
   orders = [];
   placed.length = 0;
   cancelled.length = 0;
+  logs.length = 0;
+  labAnswer = { t: null, weights: {} };
+  cash = 1000;
+  held = {};
   candleFailures = 0;
   candleLag = 0;
   candleCalls = 0;
@@ -371,4 +393,54 @@ test('chase: new limit orders from a decision start one tick over the live best 
   assert.equal(placed[0].ctx.chase.root, null);
   assert.ok(placed[0].ctx.chase.since > 0);
   assert.equal(Number(placed[0].intent.price), 412.31);
+});
+
+// ---- hold contract (SPEC §6b) ----
+const lab = { ...validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', execution: { orderType: 'market' } }), family: 'moon_core', familyVersion: 1 } as StrategySpec;
+const lastBar = (now: number) => barOpen(now - 5_000, '1h') - INTERVAL_MS['1h'];
+const barStart = (ms: number) => Math.ceil(ms / INTERVAL_MS['1h']) * INTERVAL_MS['1h'];
+
+test('hold: the lab cannot decide: nothing is placed, it asks again, and after the grace period the bar is given up', async (t) => {
+  reset(lab);
+  const t0 = barStart(Date.parse('2026-10-28T10:30:00Z') + stray * 120_000) + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  labAnswer = { hold: 'candle store is behind' };
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(placed.length, 0);
+  assert.equal(logged('decision_held').length, 0, 'still retrying');
+  t.mock.timers.setTime(t0 + staleGraceMs('1h') + 1_000);
+  await tick();
+  assert.equal(placed.length, 0);
+  assert.equal(logged('decision_held').length, 1);
+  assert.match(logged('decision_held')[0].message, /candle store is behind/);
+  await tick();
+  assert.equal(logged('decision_held').length, 1, 'once per bar');
+});
+
+test('hold: a hold that clears within the grace period decides the bar normally', async (t) => {
+  reset(lab);
+  const t0 = barStart(Date.parse('2026-10-28T12:30:00Z') + stray * 120_000) + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  labAnswer = { hold: 'busy', t: null };
+  await tick();
+  assert.equal(placed.length, 0);
+  labAnswer = { t: lastBar(t0), weights: { 'BTC-EUR': 1 } };
+  await tick();
+  assert.equal(placed.length, 1);
+});
+
+test('hold: { t: null } with zero weights never sells', async (t) => {
+  reset(lab);
+  held = { BTC: 1 };
+  const t0 = barStart(Date.parse('2026-10-28T14:30:00Z') + stray * 120_000) + 10_000;
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  labAnswer = { t: null, weights: { 'BTC-EUR': 0 } };
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(placed.length, 0);
+  t.mock.timers.setTime(t0 + staleGraceMs('1h') + 1_000);
+  await tick();
+  assert.equal(placed.length, 0);
+  assert.equal(logged('decision_held').length, 1);
 });

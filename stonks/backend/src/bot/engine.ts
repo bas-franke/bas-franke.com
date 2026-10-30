@@ -627,6 +627,14 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
     });
     return;
   }
+  if (decision.hold !== undefined) {
+    // The family cannot decide right now: keep every position and ask again on the next ticks, up to the same grace
+    // period as a late candle; then this bar is given up (still without touching anything).
+    if (Date.now() - (bar + INTERVAL_MS[spec.interval]) < staleGraceMs(spec.interval)) return;
+    await markDecided();
+    await log('warn', 'decision_held', `${spec.name}: no decision on the ${new Date(bar).toISOString()} bar (${decision.hold}); every position stays as it is`, { bar, reason: decision.hold, t: decision.t });
+    return;
+  }
   if (decision.t !== null && decision.t < bar) {
     // The bar that just closed is not in the candles yet (Bitvavo is late, or the fetch failed): deciding now would
     // act on the previous bar's signal and then never revisit this bar. Retry on the next ticks; only after a grace

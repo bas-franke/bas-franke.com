@@ -129,7 +129,7 @@ export async function describePy(spec: unknown): Promise<PyDescription> {
 /** The cached explanation of a spec `describePy` has seen, if any. */
 export const cachedExplanation = (spec: unknown) => described.get(JSON.stringify(spec))?.explanation;
 
-export type PyTargets = { warming: string[] } | { warming?: undefined; t: number | null; weights: Weights };
+export type PyTargets = { warming: string[] } | { warming?: undefined; hold: string; t?: number | null } | { warming?: undefined; hold?: undefined; t: number | null; weights: Weights };
 
 /**
  * Target weights decided at `bar` (open time of the last closed bar). The lab reads its own full candle history

@@ -111,3 +111,9 @@ test('the real lab runs a family the bot has no port of', { skip: !haveLab && 'n
   const bad = rt.checkSpec({ family: 'ema_cross', familyVersion: 1, markets: ['BTC-EUR'], interval: '1d', params: { fast: 50, slow: 20 } });
   await assert.rejects(bad, /fast must be smaller than slow/);
 });
+
+test('a hold from the lab, or no candle data at all, is never a zero-weight decision', async () => {
+  // TypeScript families: no candles at all means t null and weights 0, which must not read as "sell everything"
+  const spec = rt.validateAnySpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 } });
+  assert.deepEqual(await rt.decide(spec, Date.UTC(2026, 9, 1), {}), { hold: 'no candle data', t: null });
+});
