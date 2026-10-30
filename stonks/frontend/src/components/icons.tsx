@@ -48,6 +48,11 @@ export const IconHealth = (p: P) => (
     <path d="M7.500 12.500h2.500l1.300-2.300 1.700 4 1.200-1.700h2.300" />
   </svg>
 );
+export const IconMore = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} {...p}>
+    <path d="M5 7h14M5 12h14M5 17h14" />
+  </svg>
+);
 export const IconSun = (p: P) => (
   <svg viewBox="0 0 24 24" {...base} {...p}>
     <circle cx="12" cy="12" r="4" />

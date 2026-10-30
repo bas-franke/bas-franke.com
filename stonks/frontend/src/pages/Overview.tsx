@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { ARTICLES } from '../articles';
-import { HeroBanner, SleepingCatArt } from '../components/art';
+import { artUrl, CatArt, Coin, HeroBanner } from '../components/art';
 import { DailyBars, LineChart, type LineSeries } from '../components/charts';
-import { IconHealth, WatchingCat } from '../components/icons';
+import { IconHealth } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { ago, amount, dateOnly, eur, familyLabel, humanize, lossAction, lossLimitText, num, pct, signedEur, toDate } from '../format';
+import { botMood, todayPct } from '../desk';
 import { guardOf, useHealth, useHealthFeed } from '../health';
 import { navigate } from '../router';
 import './overview.css';
@@ -20,10 +21,8 @@ export default function OverviewPage() {
   const ov = useAsync(() => api.overview(), []);
   useVisibleInterval(() => ov.reload(), 15_000);
   const o = ov.data;
-  const day = useAsync(() => api.compare('day'), [o?.bot.mode]);
-  useVisibleInterval(() => day.reload(), 60_000);
   useHealthFeed(30_000);
-  const todayPct = o && o.todayPnlEur !== null && o.equityEur - o.todayPnlEur > 0 ? (o.todayPnlEur / (o.equityEur - o.todayPnlEur)) * 100 : null;
+  const today = o ? todayPct(o) : null;
 
   return (
     <div className="stack overview-page">
@@ -43,24 +42,9 @@ export default function OverviewPage() {
               {o.todayPnlEur !== null && (
                 <span className={`chip ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>
                   {signedEur(o.todayPnlEur)}
-                  {todayPct !== null && ` · ${pct(todayPct, 1, true)}`} today
+                  {today !== null && ` · ${pct(today, 1, true)}`} today
                 </span>
               )}
-              {day.data &&
-                (['btc', 'eth'] as const).map((k) => {
-                  const c = sinceMidnight(day.data![k]);
-                  return c === null ? null : (
-                    <span key={k} className={`chip ${c >= 0 ? 'gain' : 'loss'}`} title={`${k.toUpperCase()}-EUR price change today`}>
-                      {k.toUpperCase()} {pct(c, 1, true)} today
-                    </span>
-                  );
-                })}
-            </div>
-            <div className="hero-chips hero-status">
-              <ModeBadge mode={o.bot.mode} />
-              <span className={`chip${o.bot.enabled && o.lastTickError ? ' loss' : ''}`}>
-                {o.bot.enabled && o.lastTickError ? 'Bot hit an error' : o.running ? 'Bot is awake' : o.bot.enabled ? 'Bot is waking up' : 'Bot is resting'}
-              </span>
             </div>
           </>
         ) : (
@@ -75,27 +59,30 @@ export default function OverviewPage() {
 
       {o && <GuardNotice o={o} />}
 
-      {o && <CompareCard mode={o.bot.mode} />}
-
-      {o && <TrackingCard mode={o.bot.mode} />}
+      {o && (
+        <div className="control-row">
+          <BotCard o={o} onChange={ov.reload} />
+          <LossCard o={o} />
+        </div>
+      )}
 
       {o && (
-        <div className="grid overview-grid">
+        <div className="desk-grid">
           <div className="stack">
-            <BotCard o={o} onChange={ov.reload} />
-            <LossCard o={o} />
+            <CompareCard mode={o.bot.mode} />
+            <TrackingCard mode={o.bot.mode} />
             <EquityCard mode={o.bot.mode} />
           </div>
           <div className="stack">
-            <StrategyCard o={o} />
-            <BalancesCard o={o} />
             <RecentTradesCard o={o} />
+            <BalancesCard o={o} />
+            <StrategyCard o={o} />
           </div>
         </div>
       )}
       {o && <ReadingCard />}
       {!o && !ov.error && (
-        <div className="grid overview-grid">
+        <div className="control-row">
           <div className="card">
             <Skeleton h={120} />
           </div>
@@ -128,6 +115,7 @@ function ReadingCard() {
               navigate(`/article?slug=${a.slug}`);
             }}
           >
+            <img className="article-cover" src={artUrl(`cover-${a.slug}`)} alt="" />
             <span className="tiny muted">
               {a.tag} · {dateOnly(a.date)} · {a.minutes} min read
             </span>
@@ -181,7 +169,7 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
           </div>
         </div>
         <div className="status-art" aria-hidden="true">
-          {on ? <WatchingCat /> : <SleepingCatArt className="" width={150} />}
+          <CatArt mood={botMood(o)} />
         </div>
       </div>
       <div className="row">
@@ -442,14 +430,6 @@ function dailyPnl(points: EquityPoint[]) {
   const out: { day: string; value: number }[] = [];
   for (let i = 1; i < days.length; i++) out.push({ day: days[i][0], value: days[i][1] - days[i - 1][1] });
   return out;
-}
-
-/** % change of a price line since local midnight (or since the line starts, if later). */
-function sinceMidnight(pts: [number, number][]): number | null {
-  const midnight = new Date().setHours(0, 0, 0, 0);
-  const first = pts.find((p) => p[0] >= midnight);
-  const last = pts[pts.length - 1];
-  return first && last && first !== last ? (last[1] / first[1] - 1) * 100 : null;
 }
 
 const COMPARE_RANGES: { value: CompareRange; label: string }[] = [
@@ -748,6 +728,7 @@ function StrategyCard({ o }: { o: Overview }) {
   const s = o.bot.strategy;
   return (
     <section className="card">
+      <img className="card-plate" src={artUrl('spot-plan')} alt="" />
       <div className="card-head">
         <span className="eyebrow">The plan it follows</span>
         <button className="btn ghost small" onClick={() => navigate('/settings')}>
@@ -806,7 +787,7 @@ function BalancesCard({ o }: { o: Overview }) {
       {rows.length === 0 && <p className="soft small">No balances yet.</p>}
       {rows.map((b) => (
         <div className="balance-row" key={b.symbol}>
-          <span className={`coin ${b.symbol}`}>{b.symbol.slice(0, 4)}</span>
+          <Coin symbol={b.symbol} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 500 }}>{b.symbol === 'EUR' ? 'Euros' : b.symbol}</div>
             <div className="tiny muted tnum">

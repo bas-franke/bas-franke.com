@@ -15,14 +15,49 @@
   margin-bottom: 12px;
 }
 
-/* ---------- hero ---------- */
+/* ---------- hero: words on the left, the painting's scene on the right ---------- */
 
-.shell .overview-page .hero-copy {
-  gap: 12px;
-  max-width: 52%;
+.hero {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  display: flex;
+  min-height: 268px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--hero-scrim);
+  box-shadow: var(--shadow);
 }
-.shell .overview-page .hero-copy .greet {
-  margin-bottom: 4px;
+.hero-art {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+  filter: var(--hero-art);
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(90deg, var(--hero-scrim) 26%, color-mix(in srgb, var(--hero-scrim) 72%, transparent) 42%, transparent 62%);
+}
+.hero-copy {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  max-width: 54%;
+  padding: 26px 32px;
+}
+.hero-copy .greet {
+  font-family: var(--serif);
+  font-size: clamp(1.5rem, 2.6vw, 2.1rem);
+  font-weight: 500;
+  font-style: italic;
+  line-height: 1.15;
 }
 .hero-total {
   display: grid;
@@ -45,9 +80,53 @@
 .shell .overview-page .hero .chip {
   padding: 4px 11px;
 }
-.hero-status .chip:not(.brass):not(.live) {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px rgba(24, 34, 58, 0.16);
+
+/* ---------- the top of the desk: switch and loss budget, side by side ---------- */
+
+.control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+.control-row > .card {
+  min-width: 0;
+}
+.desk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(290px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.overview-page .card {
+  container-type: inline-size;
+}
+.card-plate {
+  display: block;
+  width: calc(100% + 44px);
+  max-width: none;
+  height: 96px;
+  margin: -20px -22px 14px;
+  object-fit: cover;
+  filter: var(--hero-art);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+@container (max-width: 640px) {
+  .compare-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compare-side {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .tracking-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1000px) {
+  .control-row,
+  .desk-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ---------- card heads with a range switch ---------- */
@@ -153,7 +232,21 @@
 /* ---------- reading ---------- */
 
 .shell .overview-page .article-cards {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+.shell .overview-page .article-card {
+  padding: 0 0 14px;
+  overflow: hidden;
+}
+.article-cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+  filter: var(--hero-art);
+}
+.article-card > :not(.article-cover) {
+  margin-inline: 16px;
 }
 
 /* ---------- phone ---------- */
@@ -169,26 +262,37 @@
   }
 
   /* Hero: words first, a shorter strip of the painting under them. */
-  .shell .overview-page .hero {
-    border-radius: 20px;
+  .hero {
+    flex-direction: column;
+    min-height: 0;
+    border-radius: 18px;
   }
-  .shell .overview-page .hero-copy {
+  .hero::before {
+    display: none;
+  }
+  .hero-art {
+    position: relative;
+    z-index: 0;
+    order: 2;
+    width: 190%;
     max-width: none;
-    padding: 20px 18px 16px;
-    gap: 12px;
+    height: 200px;
+    margin-left: -90%;
+    object-position: right 72%;
+  }
+  .hero-copy {
+    max-width: none;
+    padding: 18px 16px 14px;
   }
   .shell .overview-page .hero-copy .greet {
-    font-size: 1.6rem;
-    margin-bottom: 0;
+    font-size: 1.5rem;
   }
   .shell .overview-page .hero-copy .hero-num {
-    font-size: 2.35rem;
+    font-size: 2.1rem;
   }
-  .shell .overview-page .hero picture {
-    aspect-ratio: 16 / 8;
-  }
-  .shell .overview-page .hero picture img {
-    object-position: center 58%;
+  .card-plate {
+    width: calc(100% + 32px);
+    margin: -16px -16px 12px;
   }
 
   /* Range switches go full width under their title, with even, tappable buttons. */
