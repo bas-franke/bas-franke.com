@@ -731,13 +731,22 @@ const SPLIT_RUNS: SplitRow[] = [
 ];
 
 const OFF_BULL: [string, string, string, string, string][] = [
-  ['Mar – Jul 2019', '140', '+63%', '+15%', '9%'],
   ['May – Jul 2021', '76', '−38%', '−7%', '4%'],
   ['Dec 2021 – Mar 2022', '88', '−29%', '+10%', '13%'],
   ['Apr 2022 – Jan 2023', '281', '−51%', '+19%', '26%'],
   ['Feb – Apr 2025', '58', '−43%', '−13%', '18%'],
   ['Oct 2025 – May 2026', '188', '−41%', '+29%', '41%'],
   ['May – Aug 2026', '95', '+3%', '+22%', '44%'],
+];
+
+const REAL_SPLITS: [string, string, string, string, string][] = [
+  ['Sep – Nov 2019', '−10%', '+11%', '+4%', '55%'],
+  ['Jan – Mar 2020', '−5%', '+36%', '+52%', '78%'],
+  ['May – Jul 2020', '−6%', '+18%', '+11%', '64%'],
+  ['Mar – May 2021', '−12%', '+123%', '+28%', '31%'],
+  ['Oct – Dec 2021', '−11%', '+23%', '+12%', '71%'],
+  ['Jul – Sep 2022', '−6%', '+42%', '+2%', '27%'],
+  ['Jul – Sep 2025', '−5%', '+13%', '+12%', '57%'],
 ];
 
 function SplitTable({ rows, head }: { rows: string[][]; head: string[] }) {
@@ -788,8 +797,8 @@ function BitcoinDownEtherUp() {
         belt only touches crash buys, so it plays no part in a rising ether.
       </p>
       <p>
-        Bitcoin was in a bull 52% of the time since March 2019. Ether rising without it is rare: in seven and a half years it
-        happened once for any length of time, in the spring of 2019.
+        Bitcoin was in a bull 52% of the time since March 2019. Ether rising while bitcoin falls is uncommon but real: over any 60 days
+        it has happened in seven separate stretches since then.
       </p>
 
       <h2>Three versions of history</h2>
@@ -811,6 +820,34 @@ function BitcoinDownEtherUp() {
         </li>
       </ul>
 
+      <div className="callout">
+        <p>
+          <b>Correction, 31 October.</b> This article first said ether’s one lone rally was spring 2019, when ether rose 63% and the bot made
+          15%. That was wrong: bitcoin rose 164% in those months. Its switch only looked off because the data starts in March 2019 and the
+          140-day average needs 140 days to warm up. The real stretches are in the next table, and the answer changes a little.
+        </p>
+      </div>
+
+      <h2>The real stretches: bitcoin down, ether up</h2>
+      <p>
+        Every 60-day stretch since the switch warmed up in July 2019 where bitcoin fell at least 5% and ether rose at least 10%. Each row is the
+        stretch with the widest gap in its period.
+      </p>
+      <SplitTable rows={REAL_SPLITS} head={['Stretch', 'Bitcoin', 'Ether', 'The bot', 'Time in the market']} />
+      <ul>
+        <li>
+          <b>The two big ones are where it lags most.</b> From March to May 2021 ether rose 123% and the bot made 28%. From July to September
+          2022 ether rose 42% and the bot made 2%. It was in the market only about 30% of the time in both.
+        </li>
+        <li>
+          <b>In the smaller ones it does fine,</b> making about half or more of ether’s rise, and it beat ether from January to March 2020. That
+          stretch ends just before the crash, so it flatters the bot.
+        </li>
+        <li>
+          <b>It made money in all seven,</b> though it trailed ether in six.
+        </li>
+      </ul>
+
       <h2>The real stretches without a bitcoin bull</h2>
       <p>
         Every stretch of two weeks or more where the switch was off, with what ether did and what the bot did. The short ones
@@ -819,13 +856,7 @@ function BitcoinDownEtherUp() {
       <SplitTable rows={OFF_BULL} head={['Stretch', 'Days', 'Ether', 'The bot', 'Time in the market']} />
       <ul>
         <li>
-          <b>The one time ether rose without bitcoin, spring 2019, the bot caught 15 of the 63 points.</b> It was in the market
-          only 9% of the time: it rode small, banked at +16% and +35%, and sat out the rest. That is the honest answer to the
-          question. In a lone ether rally the bot earns something, well short of holding ether, and with a drop of 9% instead
-          of riding the whole way.
-        </li>
-        <li>
-          <b>In every other no-bull stretch ether fell,</b> and the bot either lost much less or made money while ether lost 29%,
+          <b>In nearly every long no-bull stretch ether fell,</b> and the bot either lost much less or made money while ether lost 29%,
           51% and 41%. That is what the no-bull mode is for.
         </li>
         <li>
@@ -838,10 +869,9 @@ function BitcoinDownEtherUp() {
       <h2>The mirror image: bitcoin up, ether down</h2>
       <p>
         This is the dangerous case, not the first one. A bitcoin bull with a weak ether means the bot holds four-times positions
-        in a coin that is going nowhere or down, and banks nothing until +57%. May 2021 was a small taste of it: bitcoin’s bull
-        ended two weeks after ether’s top, and the bot was still big when ether fell 22%. The seat belt caught some of that
-        (the May 2021 hole shrank from 40% to 24%), but a longer split, months of bitcoin grinding up while ether bleeds, would
-        hurt. The “always in a bull” row above is the ceiling of that pain: a 45% worst drop.
+        in a coin that is going nowhere or down, and banks nothing until +57%. The data holds no long stretch of it yet, so this is
+        the untested risk. A longer split, months of bitcoin grinding up while ether bleeds, would hurt, and the “always in a bull” row
+        above gives a feel for how much: a 45% worst drop.
       </p>
 
       <h2>What it means</h2>
@@ -853,8 +883,8 @@ function BitcoinDownEtherUp() {
       </div>
       <ul>
         <li>
-          <b>If you believe in an ether-only rally,</b> the bot is the wrong tool for it: it would catch roughly a quarter of the
-          move. Holding some ether on the side is the simple fix.
+          <b>If you believe in an ether-only rally,</b> the bot is the wrong tool for it: in the two big ones it caught a quarter of the
+          move or less. Holding some ether on the side is the simple fix.
         </li>
         <li>
           <b>If you believe bitcoin leads and ether follows,</b> which is what the last seven years looked like, the switch is
