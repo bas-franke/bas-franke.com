@@ -7,6 +7,7 @@ import { WatchingCat } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { ago, amount, dateOnly, eur, familyLabel, humanize, lossLimitText, num, pct, signedEur, toDate } from '../format';
 import { navigate } from '../router';
+import './overview.css';
 import type { CompareRange, EquityPoint, Overview } from '../types';
 
 const greeting = () => {
@@ -29,14 +30,14 @@ export default function OverviewPage() {
         <span className="greet">{greeting()}.</span>
         {o ? (
           <>
-            <div>
+            <div className="hero-total">
               <div className="soft small">Everything together is worth</div>
-              <div className="row" style={{ alignItems: 'baseline', gap: 12 }}>
+              <div className="hero-total-row">
                 <div className="hero-num">{eur(o.equityEur)}</div>
                 <QuoteShare o={o} />
               </div>
             </div>
-            <div className="row">
+            <div className="hero-chips">
               {o.todayPnlEur !== null && (
                 <span className={`chip ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>
                   {signedEur(o.todayPnlEur)}
@@ -52,6 +53,8 @@ export default function OverviewPage() {
                     </span>
                   );
                 })}
+            </div>
+            <div className="hero-chips hero-status">
               <ModeBadge mode={o.bot.mode} />
               <span className="chip">{o.running ? 'Bot is awake' : o.bot.enabled ? 'Bot is waking up' : 'Bot is resting'}</span>
             </div>
@@ -292,7 +295,7 @@ function RecentTradesCard({ o }: { o: Overview }) {
   }, [orders.data, o.balances]);
 
   return (
-    <section className="card" aria-labelledby="recent-h">
+    <section className="card recent-card" aria-labelledby="recent-h">
       <div className="card-head">
         <span className="eyebrow" id="recent-h">
           Latest trades
@@ -300,7 +303,7 @@ function RecentTradesCard({ o }: { o: Overview }) {
         <Tip>Only orders that filled. A buy shows how its coin did since; a sell shows its result against the buy before it.</Tip>
         <span className="spacer" />
         <a
-          className="small"
+          className="small card-link"
           href="/trades"
           onClick={(e) => {
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -372,7 +375,7 @@ function LossCard({ o }: { o: Overview }) {
           max loss from Settings, the bot switches itself off.
         </Tip>
       </div>
-      <div className="row" style={{ alignItems: 'baseline' }}>
+      <div className="row loss-line">
         <span className={`mid-num ${pnl === null ? 'muted' : pnl >= 0 ? 'gain' : 'loss'}`}>{pnl === null ? '€ 0,00' : signedEur(pnl)}</span>
         {changePct !== null && <span className={`small ${changePct >= 0 ? 'gain' : 'loss'}`}>{pct(changePct, 1, true)}</span>}
         <span className="spacer" />
@@ -483,8 +486,8 @@ function CompareCard({ mode }: { mode: string }) {
 
   return (
     <section className="card">
-      <div className="card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <h2 style={{ marginRight: 'auto' }}>You vs just holding</h2>
+      <div className="card-head has-seg">
+        <h2>You vs just holding</h2>
         <Segmented label="Range" value={range} onChange={pick} options={COMPARE_RANGES} />
       </div>
       {cmp.error && <ErrorBox error={cmp.error} onRetry={cmp.reload} />}
@@ -564,8 +567,8 @@ function EquityCard({ mode }: { mode: string }) {
 
   return (
     <section className="card">
-      <div className="card-head">
-        <h2 style={{ marginRight: 'auto' }}>How it’s going</h2>
+      <div className="card-head has-seg">
+        <h2>How it’s going</h2>
         <Segmented
           label="Period"
           value={days}

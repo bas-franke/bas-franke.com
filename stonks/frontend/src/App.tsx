@@ -4,6 +4,7 @@ import { IconHome, IconLogout, IconLogs, IconMoon, IconNotes, IconResearch, Icon
 import { ToastProvider } from './components/ui';
 import { navigate, useLocation } from './router';
 import { useTheme } from './theme';
+import './shell.css';
 import Login from './pages/Login';
 import OverviewPage from './pages/Overview';
 import TradesPage from './pages/Trades';
@@ -112,8 +113,10 @@ export default function App() {
       <nav className="tabbar" aria-label="Main">
         {NAV.map(({ path: p, label, icon: Icon }) => (
           <NavLink key={p} path={p} title={label}>
-            <Icon />
-            {label}
+            <span className="tab-icon" aria-hidden="true">
+              <Icon />
+            </span>
+            <span className="tab-label">{label}</span>
           </NavLink>
         ))}
       </nav>

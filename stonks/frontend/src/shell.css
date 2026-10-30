@@ -1,0 +1,144 @@
+/* App shell: top bar, desktop nav pill and the phone tab bar.
+   This file loads before styles.css, so selectors carry one extra element/class to win over it. */
+
+/* ---------- desktop / tablet top bar ---------- */
+
+.shell > .topbar {
+  gap: 20px;
+  padding: 20px 0 20px;
+}
+.shell > .topbar .brand {
+  flex: none;
+  min-height: 44px;
+  border-radius: 12px;
+}
+.shell > .topbar .nav {
+  padding: 5px;
+  gap: 2px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.shell > .topbar .nav a {
+  min-height: 36px;
+  padding-inline: 14px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+.shell > .topbar .nav a:not([aria-current='page']) svg {
+  opacity: 0.75;
+}
+.shell > .topbar .nav a[aria-current='page'] {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 6px 14px -8px rgba(24, 34, 58, 0.5);
+}
+.shell > .topbar .top-actions {
+  gap: 8px;
+}
+.shell > .topbar .icon-btn {
+  width: 40px;
+  height: 40px;
+}
+
+@media (max-width: 1120px) {
+  .shell > .topbar .nav a {
+    padding-inline: 11px;
+  }
+}
+@media (max-width: 880px) {
+  /* Icon-only nav: square-ish, comfortable targets. */
+  .shell > .topbar .nav a {
+    min-width: 42px;
+    min-height: 40px;
+    justify-content: center;
+    padding: 0 10px;
+  }
+}
+
+/* ---------- phone ---------- */
+
+@media (max-width: 760px) {
+  .shell > .topbar {
+    padding: max(12px, env(safe-area-inset-top)) 0 12px;
+    gap: 12px;
+  }
+  .shell > .topbar .brand {
+    font-size: 1.35rem;
+  }
+  .shell > .topbar .brand img {
+    width: 32px;
+    height: 32px;
+  }
+  .shell > .topbar .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  nav.tabbar {
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    padding: 5px;
+    gap: 2px;
+    border-radius: 24px;
+    background: color-mix(in srgb, var(--surface) 86%, transparent);
+    backdrop-filter: saturate(1.2) blur(14px);
+    -webkit-backdrop-filter: saturate(1.2) blur(14px);
+  }
+  nav.tabbar a {
+    min-height: 54px;
+    align-content: center;
+    gap: 3px;
+    padding: 4px 0;
+    border-radius: 18px;
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--ink-3);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: color 0.2s;
+  }
+  nav.tabbar a[aria-current='page'] {
+    background: transparent;
+    color: var(--ink);
+  }
+  nav.tabbar .tab-icon {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 28px;
+    border-radius: 999px;
+    transition:
+      background 0.2s,
+      color 0.2s;
+  }
+  nav.tabbar a[aria-current='page'] .tab-icon {
+    background: var(--ink);
+    color: var(--surface);
+  }
+  nav.tabbar a:active .tab-icon {
+    background: var(--surface-3);
+  }
+  nav.tabbar a[aria-current='page']:active .tab-icon {
+    background: var(--ink);
+  }
+  nav.tabbar .tab-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+  nav.tabbar .tab-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Very narrow phones: labels would crowd, keep them but a touch smaller. */
+@media (max-width: 350px) {
+  nav.tabbar a {
+    font-size: 0.58rem;
+  }
+  nav.tabbar .tab-icon {
+    width: 38px;
+  }
+}
