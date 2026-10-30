@@ -524,36 +524,3 @@
     line-height: 1.2;
   }
 }
-
-/* Compare any research */
-.shell .research-page .compare-pick {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(0, 2.4fr) auto;
-  gap: 10px;
-  align-items: end;
-  margin-bottom: 12px;
-}
-.shell .research-page .compare-pick .field {
-  min-width: 0;
-}
-.shell .research-page .compare-pick select {
-  width: 100%;
-}
-.shell .research-page .compare-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  align-items: center;
-  margin-bottom: 10px;
-}
-.shell .research-page .compare-hold {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 13px;
-}
-@media (max-width: 620px) {
-  .shell .research-page .compare-pick {
-    grid-template-columns: 1fr;
-  }
-}

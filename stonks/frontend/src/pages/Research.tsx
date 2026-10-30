@@ -7,7 +7,6 @@ import { IconCheck } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
-import { CompareAcross, compareKey, loadCompare, saveCompare } from './ResearchCompare';
 import './research.css';
 import type { Benchmark, BucketName, HallEntry, Overview, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
 
@@ -147,15 +146,6 @@ function Research({
   }, [newest]);
   const hallKeys = useMemo(() => new Set((hall.data ?? []).map((h) => JSON.stringify(h.entry.spec))), [hall.data]);
   const toast = useToast();
-  const [compared, setCompared] = useState<string[]>(loadCompare);
-  const changeCompared = (keys: string[]) => {
-    setCompared(keys);
-    saveCompare(keys);
-  };
-  const compareTabs = useMemo(
-    () => [...sessions, ...Object.keys(buckets).filter((b) => !sessions.includes(b) && buckets[b as BucketName]?.top.length)],
-    [sessions, buckets],
-  );
   const addToHall = async (e: ResearchEntry) => {
     if (data.id === undefined) return;
     try {
@@ -265,8 +255,6 @@ function Research({
         }}
       />
 
-      <CompareAcross buckets={buckets} tabs={compareTabs} titleOf={bucketTitle} keys={compared} onChange={changeCompared} />
-
       <div className="bucket-tabs" role="tablist" aria-label="Sessions">
         {/* Hall of fame first; the page still opens on the newest session unless a link asks for the hall. */}
         <button type="button" role="tab" id="tab-hall" aria-selected={hallView} aria-controls="bucket-panel" onClick={() => setHallView(true)} title="Hall of fame">
@@ -329,16 +317,6 @@ function Research({
               hasWriteup={!!writeups.data?.has(e.spec.id)}
               bucket={tab}
               onAddToHall={data.id !== undefined && hall.data ? () => void addToHall(e) : undefined}
-              compared={compared.includes(compareKey(tab, e))}
-              onCompare={() => {
-                const key = compareKey(tab, e);
-                if (compared.includes(key)) changeCompared(compared.filter((k) => k !== key));
-                else if (compared.length >= 10) toast('The graph holds 10 strategies. Remove one first.');
-                else {
-                  changeCompared([...compared, key]);
-                  toast('Added to the compare graph above the session tabs.');
-                }
-              }}
             />
           ))
         )}
@@ -708,14 +686,10 @@ function RankCard({
   onRemove,
   hasWriteup,
   bucket,
-  compared,
-  onCompare,
 }: {
   e: ResearchEntry;
   color: string;
   anchor: string;
-  compared?: boolean;
-  onCompare?: () => void;
   active: boolean;
   onActivate?: () => void;
   inHall?: boolean;
@@ -810,11 +784,6 @@ function RankCard({
         {hasWriteup && (
           <button className="btn small" onClick={() => navigate(`/writeup?spec=${encodeURIComponent(s.id)}${bucket ? `&bucket=${encodeURIComponent(bucket)}` : ''}`)}>
             Read the full write-up
-          </button>
-        )}
-        {onCompare && (
-          <button className="btn ghost small" aria-pressed={compared} onClick={onCompare}>
-            {compared ? '✓ On the graph' : '+ Compare'}
           </button>
         )}
         {inHall ? (

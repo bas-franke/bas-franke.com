@@ -5,6 +5,7 @@ import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
 import { navigate, useLocation } from '../router';
+import { CompareResearch } from './ResearchCompare';
 import './reading.css';
 import type { Writeup, WriteupChart, WriteupCoin, WriteupSection } from '../types';
 
@@ -81,7 +82,7 @@ function Toc({ doc }: { doc: Writeup }) {
       <details open={open}>
         <summary>
           <span className="eyebrow">Examples in this write-up</span>
-          <span className="count">{examples.length + (board ? 1 : 0)}</span>
+          <span className="count">{examples.length + (board ? 2 : 0)}</span>
         </summary>
         <ol>
           {examples.map((s) => (
@@ -96,6 +97,13 @@ function Toc({ doc }: { doc: Writeup }) {
             <li>
               <a href="#coin-board" onClick={(e) => jump(e, 'coin-board')}>
                 Every coin, strategy against holding
+              </a>
+            </li>
+          )}
+          {board && (
+            <li>
+              <a href="#compare-research" onClick={(e) => jump(e, 'compare-research')}>
+                Compare a coin with other research
               </a>
             </li>
           )}
@@ -145,6 +153,7 @@ function Paragraphs({ text }: { text?: string }) {
 }
 
 function CoinTable({ s }: { s: WriteupSection }) {
+  const specId = useLocation().query.get('spec') ?? '';
   const coins = s.coins ?? [];
   const [coinId, setCoinId] = useState(coins[0]?.id ?? '');
   const coin = coins.find((c) => c.id === coinId) ?? coins[0];
@@ -198,6 +207,7 @@ function CoinTable({ s }: { s: WriteupSection }) {
       </div>
       {s.body && <p className="tiny muted writeup-hint">{s.body}</p>}
       {coin && range && <CoinCharts coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} />}
+      {coin && specId && <CompareResearch specId={specId} coin={coin} />}
     </section>
   );
 }

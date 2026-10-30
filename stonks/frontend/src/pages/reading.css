@@ -178,3 +178,47 @@
     min-height: 44px;
   }
 }
+
+/* Compare this research with others, one coin at a time */
+.compare-research {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 72px;
+}
+.compare-research .compare-pick {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2.4fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 10px 0 12px;
+}
+.compare-research .compare-pick .field {
+  min-width: 0;
+}
+.compare-research .compare-pick select {
+  width: 100%;
+}
+.compare-research .compare-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.compare-research .compare-hold {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+.compare-research .compare-missing {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+@media (max-width: 620px) {
+  .compare-research .compare-pick {
+    grid-template-columns: 1fr;
+  }
+}
