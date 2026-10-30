@@ -11,6 +11,8 @@ module.exports = {
         PORT: '3006',
       },
       max_memory_restart: '300M',
+      // engine.drain() waits up to 25 s for a running tick before the process goes
+      kill_timeout: 30000,
     },
   ],
 };

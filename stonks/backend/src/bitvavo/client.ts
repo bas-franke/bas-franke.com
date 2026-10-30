@@ -146,6 +146,9 @@ export function signRequest(secret: string, timestamp: number, method: string, p
 /** Bitvavo clientOrderId must be a UUID. */
 export const newClientOrderUuid = () => randomUUID();
 
+/** Bitvavo: the signed timestamp is invalid (302) or fell outside the access window (304): our clock has drifted. */
+const CLOCK_ERRORS = [302, 304];
+
 const toQuery = (params: Record<string, string | number | boolean | undefined>) => {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') q.set(k, String(v));
@@ -191,7 +194,7 @@ export class BitvavoClient {
   }
 
   /** Low-level request. `path` is relative to /v2, e.g. "/order" or "/BTC-EUR/candles". */
-  async request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, opts: { query?: Record<string, string | number | boolean | undefined>; body?: unknown; auth?: boolean; retries?: number } = {}): Promise<T> {
+  async request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, opts: { query?: Record<string, string | number | boolean | undefined>; body?: unknown; auth?: boolean; retries?: number; resynced?: boolean } = {}): Promise<T> {
     const fullPath = `${this.prefix}${path}${toQuery(opts.query ?? {})}`;
     const endpoint = `${method} ${path}`;
     const now = this.now();
@@ -250,6 +253,11 @@ export class BitvavoClient {
         this.blockedUntil = Math.max(named ? Number(named[1]) : 0, this.rateLimitResetAt, this.now() + 60_000);
         if (auth) this.lastPrivateError = msg;
         throw new RateLimitedError(endpoint, this.blockedUntil);
+      }
+      // Refused for its timestamp, so it did nothing, writes included: fix the clock and send it once more.
+      if (auth && code !== null && CLOCK_ERRORS.includes(code) && !opts.resynced) {
+        await this.syncTime().catch(() => undefined);
+        return this.request<T>(method, path, { ...opts, resynced: true });
       }
       if (res.status >= 500 && method === 'GET' && (opts.retries ?? 1) > 0)
         return this.request<T>(method, path, { ...opts, retries: (opts.retries ?? 1) - 1 });

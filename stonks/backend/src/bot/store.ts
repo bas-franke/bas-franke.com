@@ -37,6 +37,8 @@ export interface OrderMeta {
   chaseCancelAt?: number;
   /** Order-book chase: set once the rest of this order was re-placed or given up (never twice). */
   chaseDone?: boolean;
+  /** When Bitvavo first answered "no order found" for this order (ms); cleared when it finds it again. */
+  notFoundSince?: number | null;
 }
 
 export interface OrderRow {
@@ -97,6 +99,18 @@ export async function chaseLeftovers(mode: Mode, since: number): Promise<OrderRo
   const { rows } = await query(
     `SELECT * FROM orders WHERE mode = $1 AND status = 'canceled' AND (raw->>'chaseCancelAt')::bigint > $2
        AND NOT COALESCE((raw->>'chaseDone')::boolean, false) ORDER BY id`,
+    [mode, since],
+  );
+  return rows.map(rowToOrder);
+}
+
+/**
+ * Orders Bitvavo stopped finding (status `unknown`, placed after `since` ms): they no longer block their side, but may
+ * still have filled, so the live broker keeps looking them up.
+ */
+export async function unknownOrders(mode: Mode, since: number): Promise<OrderRow[]> {
+  const { rows } = await query(
+    `SELECT * FROM orders WHERE mode = $1 AND status = 'unknown' AND created_at > to_timestamp($2 / 1000.0) ORDER BY id`,
     [mode, since],
   );
   return rows.map(rowToOrder);

@@ -38,6 +38,9 @@ mock.module('../src/bot/store.js', {
     async openOrders(mode: string) {
       return [...rows.values()].filter((r) => r.mode === mode && isOpen(r.status)).map((r) => ({ ...r }));
     },
+    async unknownOrders(mode: string) {
+      return [...rows.values()].filter((r) => r.mode === mode && r.status === 'unknown').map((r) => ({ ...r }));
+    },
     async fillsForOrder(orderId: number) {
       return fills.filter((f) => f.orderId === orderId);
     },
@@ -135,4 +138,107 @@ test('a definite rejection by Bitvavo still marks the order rejected; an unknown
   };
   const row = await broker.place(marketBuy, ctx);
   assert.equal(rows.get(row!.id)!.status, 'pending');
+});
+
+const notFound = () => new BitvavoError('No order found', 404, 240, 'GET /order', true);
+
+/** A resting order, placed; Bitvavo then loses sight of it. */
+async function restingOrder(broker: InstanceType<typeof LiveBroker>) {
+  rows.clear();
+  fills.length = 0;
+  fake.placeOrder = async () => exOrder({ status: 'new', filledAmount: '0', filledAmountQuote: '0', feePaid: '0', fills: [] });
+  fake.getOrder = async () => {
+    throw notFound();
+  };
+  fake.trades = async () => [];
+  return (await broker.place({ ...marketBuy, orderType: 'limit', amount: '0.002', price: '48000', amountQuote: undefined, postOnly: true }, ctx))!;
+}
+
+test('an order Bitvavo keeps not finding turns unknown after 10 min, a found one starts the clock over', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
+  const now = Date.now();
+  const broker = new LiveBroker();
+  const row = await restingOrder(broker);
+  t.mock.timers.setTime(now + 30 * 60_000); // an old order: its age alone means nothing
+  await broker.sync();
+  assert.equal(rows.get(row.id)!.status, 'new');
+  assert.equal(rows.get(row.id)!.meta.notFoundSince, now + 30 * 60_000);
+  // found again: the miss is forgotten
+  fake.getOrder = async () => exOrder({ status: 'new', filledAmount: '0', filledAmountQuote: '0', feePaid: '0', fills: [] });
+  t.mock.timers.setTime(now + 35 * 60_000);
+  await broker.sync();
+  assert.equal(rows.get(row.id)!.meta.notFoundSince, null);
+  fake.getOrder = async () => {
+    throw notFound();
+  };
+  t.mock.timers.setTime(now + 36 * 60_000);
+  await broker.sync();
+  t.mock.timers.setTime(now + 45 * 60_000);
+  await broker.sync();
+  assert.equal(rows.get(row.id)!.status, 'new', 'under 10 min since the first miss');
+  t.mock.timers.setTime(now + 46 * 60_000);
+  await broker.sync();
+  assert.equal(rows.get(row.id)!.status, 'unknown');
+  assert.equal(isOpen('unknown'), false, 'it no longer blocks its side');
+  assert.deepEqual(await broker.sync(), 0, 'and sync leaves it alone');
+});
+
+test('an unknown order that comes back gets its fills and final status; still open it is cancelled', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
+  const broker = new LiveBroker();
+  const row = await restingOrder(broker);
+  rows.get(row.id)!.status = 'unknown';
+  // still gone: nothing changes
+  assert.equal(await broker.recheckUnknown(), 0);
+  assert.equal(rows.get(row.id)!.status, 'unknown');
+  // back, partly filled and still open
+  const fill = { id: 't9', timestamp: 3, amount: '0.001', price: '48000', taker: false, fee: '0.07', feeCurrency: 'EUR', settled: true };
+  fake.getOrder = async () => exOrder({ status: 'partiallyFilled', filledAmount: '0.001', filledAmountQuote: '48', fills: [fill] });
+  let cancels = 0;
+  (fake as any).cancelOrder = async () => {
+    cancels++;
+    fake.getOrder = async () => exOrder({ status: 'canceled', filledAmount: '0.001', filledAmountQuote: '48', fills: [fill] });
+    return { orderId: 'ex-1' };
+  };
+  assert.equal(await broker.recheckUnknown(), 1);
+  assert.equal(fills.length, 1);
+  assert.equal(cancels, 1);
+  assert.equal(rows.get(row.id)!.status, 'canceled');
+  assert.equal(await broker.recheckUnknown(), 0, 'closed: not looked up again');
+});
+
+test('an unknown order that stays unfindable still gives up its fills from the trade history', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
+  const broker = new LiveBroker();
+  const row = await restingOrder(broker);
+  rows.get(row.id)!.status = 'unknown';
+  const trade = { id: 't1', orderId: 'ex-1', timestamp: 3, market: 'BTC-EUR', side: 'buy', amount: '0.002', price: '48000', taker: false, fee: '0.14', feeCurrency: 'EUR', settled: true };
+  fake.trades = async () => [trade, { ...trade, id: 't2', orderId: 'someone-else' }];
+  assert.equal(await broker.recheckUnknown(), 1);
+  assert.deepEqual(fills.map((f) => f.tradeId), ['t1']);
+  assert.equal(rows.get(row.id)!.status, 'filled');
+  assert.equal(await broker.recheckUnknown(), 0);
+});
+
+test('client: a timestamp error resyncs the clock and resends once, also for writes', async () => {
+  const calls: string[] = [];
+  let bad = 1;
+  const res = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  const client = new realClient.BitvavoClient({
+    apiKey: 'k', apiSecret: 's', operatorId: 1,
+    fetchImpl: (async (url: string, init: RequestInit) => {
+      const u = String(url);
+      calls.push(`${init.method} ${new URL(u).pathname}`);
+      if (u.endsWith('/time')) return res({ time: Date.now() + 5000 });
+      if (bad-- > 0) return res({ errorCode: 304, error: 'not received within the window' }, 403);
+      return res({ orderId: 'x' });
+    }) as typeof fetch,
+  });
+  const out = await client.placeOrder({ market: 'BTC-EUR', side: 'buy', orderType: 'market', amountQuote: '10' });
+  assert.equal(out.orderId, 'x');
+  assert.deepEqual(calls, ['POST /v2/order', 'GET /v2/time', 'POST /v2/order']);
+  assert.ok(Math.abs(client.timeOffset - 5000) < 1000);
+  // a second refusal is the caller's problem, not a loop
+  bad = 2;
+  await assert.rejects(client.balance(), /code 304/);
 });

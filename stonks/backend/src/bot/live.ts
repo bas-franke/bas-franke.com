@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { bitvavo, BitvavoError, RateLimitedError, type BitvavoOrder, type PlaceOrderParams } from '../bitvavo/index.js';
+import { bitvavo, BitvavoError, RateLimitedError, type BitvavoFill, type BitvavoOrder, type BitvavoTrade, type PlaceOrderParams } from '../bitvavo/index.js';
 import { query } from '../db.js';
 import { errText, log } from '../log.js';
 import { chaseMeta, type Balance, type Broker, type PlaceContext } from './broker.js';
 import { postOnlyPrice, type OrderIntent } from './logic.js';
 import { bestBidAsk, ruleFor } from './marketData.js';
-import { fillsForOrder, insertOrder, isOpenStatus, openOrders, recordFill, updateOrder, type OrderRow } from './store.js';
+import { fillsForOrder, insertOrder, isOpenStatus, openOrders, recordFill, unknownOrders, updateOrder, type OrderRow } from './store.js';
 
 /** Bitvavo: "No order found". */
 const ORDER_NOT_FOUND = 240;
@@ -16,6 +16,14 @@ const CANCEL_READBACK_TRIES = 3;
 const CANCEL_READBACK_WAIT_MS = 1500;
 /** Orders younger than this that Bitvavo does not find yet are not reported as a failed check. */
 const FRESH_ORDER_MS = 60_000;
+/** An open order Bitvavo keeps not finding for this long stops blocking its side (status `unknown`). */
+const STUCK_ORDER_MS = 10 * 60_000;
+/** How long `unknown` orders are looked up for fills. */
+const UNKNOWN_KEEP_MS = 3 * 86_400_000;
+/** Bitvavo allows at most 24 h between start and end in a trades query. */
+const TRADES_WINDOW_MS = 86_000_000;
+
+type FillLine = Pick<BitvavoFill, 'id' | 'timestamp' | 'amount' | 'price' | 'taker' | 'fee' | 'feeCurrency'>;
 
 const idsOf = (o: OrderRow) => (o.exchangeOrderId ? { orderId: o.exchangeOrderId } : { clientOrderId: o.meta.uuid });
 
@@ -129,6 +137,58 @@ export class LiveBroker implements Broker {
     return fills;
   }
 
+  /**
+   * Looks up orders marked `unknown` (rechecked from the engine's stray pass): one that turns up again gets its fills
+   * and final status, and is cancelled if still open, because its side has moved on without it. One that stays
+   * unfindable is searched in the trade history, so a fill is never lost. Returns new fills.
+   */
+  async recheckUnknown(): Promise<number> {
+    let fresh = 0;
+    for (const o of await unknownOrders('live', Date.now() - UNKNOWN_KEEP_MS)) {
+      try {
+        let ex: BitvavoOrder;
+        try {
+          ex = await bitvavo.getOrder(o.market, idsOf(o));
+        } catch (err) {
+          if (!(err instanceof BitvavoError && err.errorCode === ORDER_NOT_FOUND)) throw err;
+          fresh += await this.fillsFromTrades(o);
+          continue;
+        }
+        fresh += await this.apply(o, ex);
+        await log('warn', 'order_unknown_found', `Live order ${o.id} (${o.side} ${o.market}) that Bitvavo could not find is back as ${ex.status}`, { orderId: o.id, status: ex.status });
+        if (isOpenStatus(ex.status)) await this.cancel({ ...o, status: ex.status }, 'it came back after being marked unknown');
+      } catch (err) {
+        if (err instanceof RateLimitedError) throw err;
+        await log('warn', 'order_sync_failed', `Rechecking unknown live order ${o.id} (${o.market}) failed: ${errText(err)}`, { orderId: o.id });
+      }
+    }
+    return fresh;
+  }
+
+  /** Every trade of this order, read from its start in 24 h windows. */
+  private async tradesOf(o: OrderRow, orderId: string | null | undefined) {
+    const end = Date.now();
+    const out = new Map<string, BitvavoTrade>();
+    for (let start = Math.max(0, o.meta.activeFrom - 60_000); start < end; start += TRADES_WINDOW_MS) {
+      const page = await bitvavo.trades(o.market, { start, end: Math.min(end, start + TRADES_WINDOW_MS), limit: 1000 });
+      for (const t of page) if ((orderId && t.orderId === orderId) || t.clientOrderId === o.meta.uuid) out.set(t.id, t);
+    }
+    return [...out.values()];
+  }
+
+  /** An `unknown` order's fills from the trade history; it closes as filled once those cover the whole order. */
+  private async fillsFromTrades(o: OrderRow): Promise<number> {
+    const trades = await this.tradesOf(o, o.exchangeOrderId);
+    if (!trades.length) return 0;
+    const fresh = await this.recordFills(o, trades);
+    if (!fresh) return 0;
+    const filled = trades.reduce((s, t) => s + Number(t.amount), 0);
+    const quote = trades.reduce((s, t) => s + Number(t.amount) * Number(t.price), 0);
+    await updateOrder(o.id, { filledAmount: filled, filledQuote: quote, ...(filled >= o.amount - 1e-12 ? { status: 'filled' } : {}) });
+    await log('warn', 'order_unknown_fills', `Live order ${o.id} (${o.side} ${o.market}) is unknown to Bitvavo but its trade history holds ${fresh} new fill(s)`, { orderId: o.id, filled });
+    return fresh;
+  }
+
   /** Startup check: orders Bitvavo reports open that carry one of our UUIDs but are closed in the DB get re-synced. */
   async reconcile(): Promise<void> {
     const open = await bitvavo.ordersOpen();
@@ -153,8 +213,19 @@ export class LiveBroker implements Broker {
         await log('warn', 'order_not_found', `Live order ${o.id} was never received by Bitvavo; marked rejected`, { orderId: o.id });
         return 0;
       }
+      if (err instanceof BitvavoError && err.errorCode === ORDER_NOT_FOUND && o.status !== 'pending') {
+        // Bitvavo loses sight of an order for seconds after a cancel, so the clock starts at the first miss.
+        const now = Date.now();
+        if (!o.meta.notFoundSince) await updateOrder(o.id, {}, { notFoundSince: now });
+        else if (now - o.meta.notFoundSince >= STUCK_ORDER_MS) {
+          await updateOrder(o.id, { status: 'unknown' }, { error: errText(err) });
+          await log('error', 'order_unknown', `Bitvavo has not found live ${o.side} order ${o.id} (${o.market}) for ${Math.round((now - o.meta.notFoundSince) / 60_000)} min; it no longer blocks new orders and is rechecked for fills`, { orderId: o.id, exchangeOrderId: o.exchangeOrderId });
+          return 0;
+        }
+      }
       throw err;
     }
+    if (o.meta.notFoundSince) await updateOrder(o.id, {}, { notFoundSince: null });
     return this.apply(o, ex);
   }
 
@@ -166,32 +237,15 @@ export class LiveBroker implements Broker {
   private async apply(o: OrderRow, ex: BitvavoOrder): Promise<number> {
     const prev = o.status;
     if (ex.orderId && o.exchangeOrderId !== ex.orderId) await updateOrder(o.id, { exchangeOrderId: ex.orderId });
-    let fresh = 0;
-    let fills = ex.fills ?? [];
+    let fills: FillLine[] = ex.fills ?? [];
     const filled = Number(ex.filledAmount ?? 0);
     const known = (await fillsForOrder(o.id)).reduce((s, f) => s + f.amount, 0);
     const listed = fills.reduce((s, f) => s + Number(f.amount), 0);
     if (filled > Math.max(known, listed) + 1e-12) {
       // The order response did not carry every fill: read them from the trade history.
-      // Bitvavo allows at most 24 h between start and end.
-      const start = Math.max(0, o.meta.activeFrom - 60_000);
-      const trades = await bitvavo.trades(o.market, { start, end: Math.min(Date.now(), start + 86_000_000), limit: 1000 });
-      fills = trades
-        .filter((t) => t.orderId === ex.orderId)
-        .map((t) => ({ id: t.id, timestamp: t.timestamp, amount: t.amount, price: t.price, taker: t.taker, fee: t.fee, feeCurrency: t.feeCurrency, settled: t.settled }));
+      fills = await this.tradesOf(o, ex.orderId);
     }
-    for (const f of fills) {
-      const amount = Number(f.amount);
-      const price = Number(f.price);
-      const isNew = await recordFill({
-        orderId: o.id, mode: 'live', tradeId: String(f.id), market: o.market, side: o.side, price, amount, quote: amount * price,
-        fee: Number(f.fee ?? 0), feeCurrency: f.feeCurrency ?? null, taker: f.taker ?? null, executedAt: Number(f.timestamp),
-      });
-      if (isNew) {
-        fresh++;
-        await log('info', 'order_filled', `Live ${o.side} ${amount} ${o.market} filled at ${price}${f.fee ? ` (fee ${f.fee} ${f.feeCurrency})` : ''}`, { orderId: o.id, tradeId: f.id, taker: f.taker });
-      }
-    }
+    const fresh = await this.recordFills(o, fills);
     await updateOrder(
       o.id,
       {
@@ -208,6 +262,24 @@ export class LiveBroker implements Broker {
     );
     if (prev !== ex.status && !isOpenStatus(ex.status))
       await log('info', 'order_closed', `Live order ${o.id} (${o.side} ${o.market}) is ${ex.status}`, { orderId: o.id, filledAmount: ex.filledAmount });
+    return fresh;
+  }
+
+  /** Records fills (idempotent on the trade id); returns how many were new. */
+  private async recordFills(o: OrderRow, fills: FillLine[]): Promise<number> {
+    let fresh = 0;
+    for (const f of fills) {
+      const amount = Number(f.amount);
+      const price = Number(f.price);
+      const isNew = await recordFill({
+        orderId: o.id, mode: 'live', tradeId: String(f.id), market: o.market, side: o.side, price, amount, quote: amount * price,
+        fee: Number(f.fee ?? 0), feeCurrency: f.feeCurrency ?? null, taker: f.taker ?? null, executedAt: Number(f.timestamp),
+      });
+      if (isNew) {
+        fresh++;
+        await log('info', 'order_filled', `Live ${o.side} ${amount} ${o.market} filled at ${price}${f.fee ? ` (fee ${f.fee} ${f.feeCurrency})` : ''}`, { orderId: o.id, tradeId: f.id, taker: f.taker });
+      }
+    }
     return fresh;
   }
 }
