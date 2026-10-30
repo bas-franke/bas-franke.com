@@ -23,7 +23,10 @@ export default function LogsPage() {
     setViewState(v);
     navigate(v === 'orders' ? '/logs?view=orders' : '/logs', { replace: true });
   };
-  const [level, setLevel] = useState<Level>('');
+  const [level, setLevel] = useState<Level>(() => {
+    const l = query.get('level');
+    return l === 'info' || l === 'warn' || l === 'error' ? l : '';
+  });
   const [paused, setPaused] = useState(false);
   const [rows, setRows] = useState<LogRow[]>([]);
   const [fresh, setFresh] = useState<Set<number>>(new Set());

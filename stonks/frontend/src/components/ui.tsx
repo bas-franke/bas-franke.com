@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import type { PaperGate } from '../types';
 
 /** A closed-by-default block. Descriptions on the research screens and the overview live in one of these. */
 export function Fold({ title, children }: { title: string; children: ReactNode }) {
@@ -133,6 +134,27 @@ export const ModeBadge = ({ mode }: { mode: string }) =>
       Paper
     </span>
   );
+
+/** The record behind a 409 from the paper gate: what the strategy has shown in paper against what going live asks for. */
+export function PaperGateNotice({ gate }: { gate: PaperGate }) {
+  return (
+    <>
+      <div className="callout loss">
+        This strategy has not run long enough in paper to trust it with real money. Going live now skips that check, and the skip is written to the logs.
+      </div>
+      <dl className="kv">
+        <dt>Days in paper</dt>
+        <dd className={gate.days >= gate.needDays ? '' : 'loss'}>
+          {gate.days} of {gate.needDays}
+        </dd>
+        <dt>Trades filled in paper</dt>
+        <dd className={gate.fills >= gate.needFills ? '' : 'loss'}>
+          {gate.fills} of {gate.needFills}
+        </dd>
+      </dl>
+    </>
+  );
+}
 
 export function Skeleton({ h = 18, w = '100%', r }: { h?: number; w?: number | string; r?: number }) {
   return <div className="skeleton" style={{ height: h, width: w, borderRadius: r }} />;

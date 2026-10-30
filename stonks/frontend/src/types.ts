@@ -31,18 +31,22 @@ export interface StrategySpec {
   execution: StrategyExecution;
 }
 
+/** What the loss guard does when it trips (SPEC §5). Limits stored before this have no action: the backend fills in no_buys. */
+export type LossAction = 'alert' | 'no_buys' | 'stop';
 export interface LossLimit {
   unit: 'pct' | 'eur';
   value: number;
+  action?: LossAction;
 }
-export const DEFAULT_LOSS_LIMIT: LossLimit = { unit: 'pct', value: 10 };
+export const DEFAULT_LOSS_ACTION: LossAction = 'no_buys';
+export const DEFAULT_LOSS_LIMIT: LossLimit = { unit: 'pct', value: 15, action: DEFAULT_LOSS_ACTION };
 
 export interface BotSettings {
   enabled: boolean;
   mode: Mode;
   strategy: StrategySpec;
   maxExposureEur: number | null;
-  /** Loss over the last 24 h that switches the bot off: a % of the equity 24 h ago, or euros. */
+  /** Loss over the last 24 h that trips the guard (a % of the equity 24 h ago, or euros), and what tripping it does. */
   dailyLossLimit: LossLimit;
   fees: { maker: number; taker: number };
   paperStartEur: number;
@@ -161,7 +165,7 @@ export interface AllocateResult {
   startError?: string;
 }
 
-export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed' | 'custom' | 'stoploss' | 'session1' | 'session2' | 'session3' | 'session4' | 'session5';
+export type BucketName = 'minute' | 'hourly' | 'daily' | 'weekly' | 'mixed' | 'custom' | 'stoploss' | `session${number}`;
 export const BUCKET_NAMES: BucketName[] = ['minute', 'hourly', 'daily', 'weekly', 'mixed', 'custom', 'stoploss', 'session1', 'session2', 'session3', 'session4', 'session5'];
 
 export interface ActiveResearch {
@@ -183,6 +187,8 @@ export interface Overview {
   bot: BotSettings;
   running: boolean;
   lastTickAt: string | null;
+  /** Why the last tick failed; null when it went fine. */
+  lastTickError?: string | null;
   bitvavo: { connected: boolean; error?: string };
   balances: Balance[];
   equityEur: number;
@@ -373,6 +379,55 @@ export interface ResearchPayload {
 }
 
 export type ResearchResponse = ResearchPayload | { empty: true };
+
+/** 409 on PUT /api/bot and POST /api/bot/activate: too little paper history to go live (SPEC §7). */
+export interface PaperGate {
+  days: number;
+  fills: number;
+  needDays: number;
+  needFills: number;
+}
+
+/** GET /api/tracking: expected vs actual vs holding of the strategy a mode runs, [ms, eur] points (SPEC §5b). */
+export interface TrackingData {
+  mode: Mode;
+  range: CompareRange;
+  strategyId: string | null;
+  since: string | null;
+  expected: [number, number][];
+  actual: [number, number][];
+  hold: [number, number][];
+  /** Actual against expected since the strategy started, whatever the range. */
+  gapPct: number | null;
+  slippage: {
+    /** Every fill of this strategy; takerShare (0 to 1) and feesEur cover all of them. */
+    fills: number;
+    /** Fills with a decision to compare with; avgBps covers these. Adverse is positive. */
+    measured: number;
+    avgBps: number | null;
+    takerShare: number | null;
+    feesEur: number;
+  };
+  decisions: { total: number; withOrders: number };
+  alerts: { kind: string; message: string }[];
+}
+
+/** GET /api/health/detail (SPEC §5b). `unknown` does not count toward the overall status. */
+export type HealthLevel = 'ok' | 'warn' | 'fail' | 'unknown';
+export interface HealthComponent {
+  status: HealthLevel;
+  detail: string;
+  checkedAt: string;
+  data: Record<string, unknown>;
+}
+export type HealthPart = 'engine' | 'database' | 'bitvavo' | 'clock' | 'decision' | 'candles' | 'lab' | 'alerts' | 'lossGuard' | 'orders' | 'stuckOrders' | 'shadow' | 'process';
+export interface HealthDetail {
+  status: 'ok' | 'warn' | 'fail';
+  checkedAt: string;
+  bot: { enabled: boolean; mode: Mode; strategyId: string };
+  components: Record<HealthPart, HealthComponent>;
+  events: { id: number; ts: string; level: LogLevel; event: string; message: string }[];
+}
 
 export interface ActivateResult {
   ok: true;

@@ -2,18 +2,23 @@
 import type {
   Benchmark,
   BotSettings,
+  CompareRange,
   FamilyInfo,
   Fill,
+  HealthComponent,
+  HealthDetail,
   Interval,
   LogLevel,
   LogRow,
   MarketInfo,
+  Mode,
   Order,
   ResearchBucket,
   ResearchEntry,
   ResearchPayload,
   Series,
   StrategySpec,
+  TrackingData,
 } from '../types';
 
 export function rng(seed: number) {
@@ -496,6 +501,33 @@ function buildResearchV2(): ResearchPayload & { id: number } {
         'Aimed at the coins session 1 lost to holding.',
         [clone(t[1] ?? t[0], 1, '1d', 12.4, true), clone(t[2] ?? t[0], 2, '1d', 10.1, true)],
       ),
+      session12: bucket(
+        'Session 12',
+        ['15m'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        12.1,
+        { median: 2.2, best: 9.6, exposure: 0.5 },
+        'A later session, to check the tab.',
+        [clone(t[0], 1, '15m', 17.4, true)],
+      ),
+      session5: bucket(
+        'Session 5',
+        ['15m'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        11.6,
+        { median: 2.1, best: 9.4, exposure: 0.5 },
+        'Scored like Session 4.',
+        [clone(t[1] ?? t[0], 1, '15m', 16.3, true)],
+      ),
+      session4: bucket(
+        'Session 4',
+        ['15m'],
+        { holdoutDays: 365, folds: 6, foldSpanDays: 300, dataFrom: '2019-01-01' },
+        11.2,
+        { median: 2.0, best: 9.3, exposure: 0.5 },
+        'Rides the big rises at a 0.05 percent fee.',
+        [clone(t[2] ?? t[0], 1, '15m', 15.1, true)],
+      ),
       session3: bucket(
         'Session 3',
         ['1d'],
@@ -594,17 +626,105 @@ export const initialBot = (): BotSettings => ({
   mode: 'paper',
   strategy: research.top.find((t) => t.spec.family === 'ema_cross')!.spec,
   maxExposureEur: null,
-  dailyLossLimit: { unit: 'pct', value: 10 },
+  dailyLossLimit: { unit: 'pct', value: 15, action: 'no_buys' },
   fees: { maker: 0.0015, taker: 0.0025 },
   paperStartEur: 1000,
 });
+
+// ---------- expected vs actual ----------
+export function tracking(mode: Mode, range: CompareRange, strategyId: string, empty: boolean): TrackingData {
+  const none = { mode, range, strategyId: null, since: null, expected: [], actual: [], hold: [], gapPct: null, decisions: { total: 0, withOrders: 0 }, alerts: [] };
+  if (empty) return { ...none, slippage: { fills: 0, measured: 0, avgBps: null, takerShare: null, feesEur: 0 } };
+  const started = Date.now() - 42 * 86_400_000;
+  const days = { day: 1, week: 7, month: 30, year: 42, all: 42 }[range];
+  const from = Math.max(started, Date.now() - days * 86_400_000);
+  const r2 = rng(21);
+  const n = 240;
+  let e = 1000;
+  let h = 1000;
+  let slip = 1;
+  const expected: [number, number][] = [];
+  const actual: [number, number][] = [];
+  const hold: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const t = from + ((Date.now() - from) * i) / (n - 1);
+    const step = (r2() - 0.48) * 0.014;
+    e *= 1 + step;
+    h *= 1 + step * 1.5 - 0.0005;
+    slip *= 1 - r2() * 0.00018;
+    expected.push([t, Math.round(e * 100) / 100]);
+    actual.push([t, Math.round(e * slip * 100) / 100]);
+    hold.push([t, Math.round(h * 100) / 100]);
+  }
+  const a = actual[n - 1][1];
+  const x = expected[n - 1][1];
+  return {
+    ...none,
+    strategyId,
+    since: new Date(started).toISOString(),
+    expected,
+    actual,
+    hold,
+    gapPct: (a / x - 1) * 100,
+    slippage: { fills: 34, measured: 31, avgBps: 8.4, takerShare: 0.18, feesEur: 11.62 },
+    decisions: { total: 1008, withOrders: 34 },
+    alerts: [],
+  };
+}
+
+// ---------- health ----------
+export function healthDetail(bot: BotSettings, variant: 'ok' | 'warn' | 'fail' | 'guard'): HealthDetail {
+  const now = Date.now();
+  const checkedAt = new Date(now).toISOString();
+  const iso = (ago: number) => new Date(now - ago).toISOString();
+  const part = (status: HealthComponent['status'], detail: string, data: Record<string, unknown> = {}): HealthComponent => ({ status, detail, checkedAt, data });
+  const limit = bot.dailyLossLimit;
+  const limitEur = limit.unit === 'pct' ? 1237 * (limit.value / 100) : limit.value;
+  const guarded = variant === 'guard';
+  const components: HealthDetail['components'] = {
+    engine: part('ok', 'Last tick 12 s ago.', { enabled: bot.enabled, ageSec: 12, lastError: null }),
+    database: part('ok', 'Answers in 4 ms.', { ms: 4 }),
+    bitvavo: part('ok', 'Private calls work.', { hasKeys: true, connected: true, lastOkAt: iso(40_000), lastError: null }),
+    clock: part('ok', "Server clock is 182 ms from Bitvavo's.", { offsetMs: 182, lastSyncAt: iso(1_500_000) }),
+    decision: part('ok', 'Decided on the 2026-10-30T13:00:00.000Z bar.', { bar: iso(1_800_000), ageSec: 1740, interval: bot.strategy.interval, barsBehind: 0, held: null }),
+    candles: part('ok', 'The newest closed candle is there.', { interval: bot.strategy.interval, markets: bot.strategy.markets.map((market) => ({ market, newest: iso(1_800_000), barsBehind: 0 })) }),
+    lab: part('unknown', 'No lab call since the start.', { usesLab: true, catalogFamilies: 214, lastCall: null, lastFailure: null, codeHashMatch: null }),
+    alerts: part('ok', 'Alert mails are on; none sent since the start.', { configured: true, lastSentAt: null, lastError: null }),
+    lossGuard: guarded
+      ? part('fail', `The loss guard is active (${limit.action ?? 'no_buys'}).`, { limit: limit.value, unit: limit.unit, action: limit.action ?? 'no_buys', active: true, lossEur: limitEur + 6.4, limitEur })
+      : part('ok', `Lost €52.70 of the €${limitEur.toFixed(2)} limit over 24 h.`, { limit: limit.value, unit: limit.unit, action: limit.action ?? 'no_buys', active: false, lossEur: 52.7, limitEur }),
+    orders: part('ok', 'No open orders.', { open: 0, oldestAgeSec: null, stale: 0, checkedAt: now }),
+    stuckOrders: part('ok', 'Nothing stuck in the last 24 h.', { retriesExhausted24h: 0, unknownOrders: 0, orderUnknown24h: 0, tickStuck24h: 0, rejected24h: 0, failed24h: 0 }),
+    shadow: part('ok', 'Portfolio is -0.84 % from expected.', { strategyId: bot.strategy.id, lastPointAgeSec: 31, gapPct: -0.84, avgBps: 8.4, fills: 34, alerts: [] }),
+    process: part('ok', 'Up for 1312 min.', { uptimeSec: 78_720, startedAt: iso(78_720_000), deployedAt: iso(79_000_000), rssMb: 142, node: 'v22.12.0' }),
+  };
+  if (variant === 'warn' || variant === 'fail') {
+    components.alerts = part('warn', 'Alert mails are off: SENDGRID_API_KEY, MAIL_FROM or STONKS_ALERT_EMAIL is missing.', { configured: false, lastSentAt: null, lastError: null });
+    components.candles = part('warn', 'The newest candle is late on BTC-EUR.', { interval: bot.strategy.interval, markets: [{ market: 'BTC-EUR', newest: iso(5_400_000), barsBehind: 1 }] });
+  }
+  if (variant === 'fail') {
+    components.engine = part('fail', 'The last tick failed: Bitvavo answered 429: too many requests while reading the balance, retry after 60 s.', { enabled: true, ageSec: 94, lastError: 'Bitvavo answered 429' });
+    components.bitvavo = part('fail', 'Not connected: no successful private call in the last 10 minutes.', { hasKeys: true, connected: false, lastOkAt: iso(900_000), lastError: null });
+  }
+  const levels = Object.values(components).map((c) => c.status);
+  const status = levels.includes('fail') ? 'fail' : levels.includes('warn') ? 'warn' : 'ok';
+  const events: HealthDetail['events'] =
+    variant === 'ok'
+      ? []
+      : [
+          { id: 9102, ts: iso(120_000), level: 'error', event: 'tick_failed', message: 'Tick failed: Bitvavo answered 429: too many requests while reading the balance' },
+          { id: 9087, ts: iso(1_900_000), level: 'warn', event: 'stale_candles', message: 'BTC-EUR candle for the 13:00 bar is not there yet' },
+          { id: 8990, ts: iso(5_400_000), level: 'warn', event: 'order_retry', message: 'Bar 2026-10-30T12:00:00.000Z: placing buy BTC-EUR €120.00 again (attempt 2 of 3)' },
+        ];
+  return { status, checkedAt, bot: { enabled: bot.enabled, mode: bot.mode, strategyId: bot.strategy.id }, components, events };
+}
 
 // ---------- orders, fills ----------
 const r = rng(7);
 const now = Date.now();
 const traded = ['BTC-EUR', 'BTC-EUR', 'BTC-EUR', 'ETH-EUR', 'SOL-EUR'];
 const basePrice: Record<string, number> = { 'BTC-EUR': 98_400, 'ETH-EUR': 3_420, 'SOL-EUR': 172 };
-const statuses = ['filled', 'filled', 'filled', 'filled', 'cancelled', 'partiallyFilled', 'expired'];
+const statuses = ['filled', 'filled', 'filled', 'filled', 'cancelled', 'partiallyFilled', 'expired', 'unknown'];
 
 export const orders: Order[] = [];
 export const fills: Fill[] = [];

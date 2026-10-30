@@ -3,12 +3,13 @@ import { api } from '../api';
 import { ARTICLES } from '../articles';
 import { HeroBanner, SleepingCatArt } from '../components/art';
 import { DailyBars, LineChart, type LineSeries } from '../components/charts';
-import { WatchingCat } from '../components/icons';
+import { IconHealth, WatchingCat } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { ago, amount, dateOnly, eur, familyLabel, humanize, lossLimitText, num, pct, signedEur, toDate } from '../format';
+import { ago, amount, dateOnly, eur, familyLabel, humanize, lossAction, lossLimitText, num, pct, signedEur, toDate } from '../format';
+import { guardOf, useHealth, useHealthFeed } from '../health';
 import { navigate } from '../router';
 import './overview.css';
-import type { CompareRange, EquityPoint, Overview } from '../types';
+import type { CompareRange, EquityPoint, LossAction, Overview } from '../types';
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -21,6 +22,7 @@ export default function OverviewPage() {
   const o = ov.data;
   const day = useAsync(() => api.compare('day'), [o?.bot.mode]);
   useVisibleInterval(() => day.reload(), 60_000);
+  useHealthFeed(30_000);
   const todayPct = o && o.todayPnlEur !== null && o.equityEur - o.todayPnlEur > 0 ? (o.todayPnlEur / (o.equityEur - o.todayPnlEur)) * 100 : null;
 
   return (
@@ -56,7 +58,9 @@ export default function OverviewPage() {
             </div>
             <div className="hero-chips hero-status">
               <ModeBadge mode={o.bot.mode} />
-              <span className="chip">{o.running ? 'Bot is awake' : o.bot.enabled ? 'Bot is waking up' : 'Bot is resting'}</span>
+              <span className={`chip${o.bot.enabled && o.lastTickError ? ' loss' : ''}`}>
+                {o.bot.enabled && o.lastTickError ? 'Bot hit an error' : o.running ? 'Bot is awake' : o.bot.enabled ? 'Bot is waking up' : 'Bot is resting'}
+              </span>
             </div>
           </>
         ) : (
@@ -69,7 +73,11 @@ export default function OverviewPage() {
 
       {ov.error && !o && <ErrorBox error={ov.error} onRetry={ov.reload} />}
 
+      {o && <GuardNotice o={o} />}
+
       {o && <CompareCard mode={o.bot.mode} />}
+
+      {o && <TrackingCard mode={o.bot.mode} />}
 
       {o && (
         <div className="grid overview-grid">
@@ -162,7 +170,7 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
         <Switch checked={on} disabled={busy} label="Bot on or off" onChange={(v) => (v ? setConfirming(true) : act(false))} />
         <div>
           <div className="state" id="bot-h">
-            {on ? (o.running ? 'Trading, calmly' : 'Starting up…') : 'Resting'}
+            {on ? (o.lastTickError ? 'Having trouble' : o.running ? 'Trading, calmly' : 'Starting up…') : 'Resting'}
           </div>
           <div className="sub">
             {on
@@ -202,6 +210,21 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
         </a>
       </div>
       {!o.bitvavo.connected && o.bitvavo.error && <div className={`callout ${live ? 'loss' : ''}`}>{o.bitvavo.error}</div>}
+      {o.lastTickError && (
+        <div className="callout loss tick-error">
+          <b>Its last look at the market failed:</b> {o.lastTickError}{' '}
+          <a
+            href="/health"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              navigate('/health');
+            }}
+          >
+            See Health
+          </a>
+        </div>
+      )}
 
       <Modal
         open={confirming}
@@ -222,7 +245,7 @@ function BotCard({ o, onChange }: { o: Overview; onChange: () => void }) {
           It will run <b>{o.bot.strategy.name}</b> on {o.bot.strategy.markets.join(', ')}, checking every {o.bot.strategy.interval}.
         </p>
         <p className="small">
-          If the portfolio loses {lossLimitText(o.dailyLossLimit, o.dailyLossLimitEur)} or more within 24 hours, it switches itself off again.
+          If the portfolio loses {lossLimitText(o.dailyLossLimit, o.dailyLossLimitEur)} or more within 24 hours, {lossAction(o.dailyLossLimit?.action).then}.
           {o.bot.maxExposureEur !== null ? ` It never holds more than ${eur(o.bot.maxExposureEur, true)} in coins.` : ' It may use the whole portfolio.'}
         </p>
         {live ? (
@@ -372,7 +395,7 @@ function LossCard({ o }: { o: Overview }) {
         <span className="eyebrow">Last 24 hours</span>
         <Tip>
           Profit or loss over the last 24 hours, counting coins at today’s price. Deposits and withdrawals don’t count. If the loss reaches the
-          max loss from Settings, the bot switches itself off.
+          max loss from Settings, {lossAction(o.dailyLossLimit?.action).then}.
         </Tip>
       </div>
       <div className="row loss-line">
@@ -399,8 +422,8 @@ function LossCard({ o }: { o: Overview }) {
             : pnl >= 0
             ? 'Up over the last 24 hours. Nothing to worry about.'
             : frac < 0.75
-              ? `${Math.round(frac * 100)}% of the loss budget used. ${eur(limit - loss)} left before the bot pauses.`
-              : `Close to the limit: ${eur(limit - loss)} left before the bot switches itself off.`}
+              ? `${Math.round(frac * 100)}% of the loss budget used. ${eur(limit - loss)} left before the loss guard acts.`
+              : `Close to the limit: ${eur(limit - loss)} left before the loss guard acts.`}
           {partial && since && ` Counting since ${since.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}, when the bot was switched on.`}
         </p>
       </Fold>
@@ -531,6 +554,116 @@ function CompareCard({ mode }: { mode: string }) {
               ? `at the beginning of the ${label}`
               : `when your portfolio tracking began (${dateOnly(cmp.data!.start)})`}
             . Informative only: it does not change what the bot does. Deposits and withdrawals show up as jumps in your line.
+          </p>
+        </Fold>
+      )}
+    </section>
+  );
+}
+
+const GUARD_TEXT: Record<LossAction, { title: string; body: string }> = {
+  no_buys: { title: 'The loss guard has stopped the buying', body: 'Open buys were cancelled and no new ones go out. Sells, stops and exits go on, and it ends by itself once the loss is back under the limit.' },
+  alert: { title: 'Over the loss limit', body: 'The guard is set to only tell you, so the bot keeps trading as usual.' },
+  stop: { title: 'The loss guard switched the bot off', body: 'Whatever it holds stays held with nothing managing it, until you turn it on again.' },
+};
+
+/** Shown while the loss guard is tripped. The overview has no such field, so this reads the health report. */
+function GuardNotice({ o }: { o: Overview }) {
+  const guard = guardOf(useHealth());
+  if (!guard?.active) return null;
+  const text = GUARD_TEXT[guard.action ?? lossAction(o.dailyLossLimit?.action).value];
+  return (
+    <div className="callout loss guard-notice" role="status">
+      <IconHealth width={20} height={20} aria-hidden="true" />
+      <div>
+        <b>{text.title}.</b> {text.body}
+        {typeof guard.lossEur === 'number' && guard.limitEur !== undefined && ` Lost ${eur(guard.lossEur)} in 24 hours, the limit is ${eur(guard.limitEur)}.`}
+      </div>
+    </div>
+  );
+}
+
+/** What the strategy should have made by the backtest's rules, what the account really did, and just holding (SPEC §5b). */
+function TrackingCard({ mode }: { mode: string }) {
+  const [range, setRange] = useState<CompareRange>('month');
+  const t = useAsync(() => api.tracking({ mode, range }), [mode, range]);
+  useVisibleInterval(() => t.reload(), 60_000);
+  const d = t.data;
+  const series = useMemo<LineSeries[]>(() => {
+    if (!d) return [];
+    return [
+      { name: 'Actual', color: 'var(--ink)', points: d.actual, area: true, width: 2.4 },
+      { name: 'Expected', color: 'var(--brass)', points: d.expected, dash: '6 4', width: 1.8 },
+      { name: 'Just holding', color: 'var(--s2)', points: d.hold, dash: '2 4', width: 1.8 },
+    ];
+  }, [d]);
+  const drawn = series.filter((s) => s.points.length > 1);
+  const label = COMPARE_RANGES.find((r) => r.value === range)!.label.toLowerCase();
+  const slip = d?.slippage;
+  const since = d?.since ? dateOnly(d.since) : null;
+
+  return (
+    <section className="card">
+      <div className="card-head has-seg">
+        <h2>Is it doing what it should?</h2>
+        <Segmented label="Range" value={range} onChange={setRange} options={COMPARE_RANGES} />
+      </div>
+      {t.error && <ErrorBox error={t.error} onRetry={t.reload} />}
+      {!d && !t.error && <Skeleton h={220} />}
+      {d && !drawn.length && (
+        <p className="soft small" style={{ padding: '30px 0' }}>
+          {d.strategyId
+            ? `Nothing to draw for this ${label} yet. A new point is added every minute while the bot is on.`
+            : 'Nothing to compare yet. The tracking starts at this strategy’s first decision.'}
+        </p>
+      )}
+      {d && drawn.length > 0 && slip && (
+        <>
+          <div className="tracking-body">
+            <LineChart
+              series={drawn}
+              height={200}
+              ariaLabel={`What the strategy expected, what the account did and just holding, over the last ${label}`}
+              yFormat={(v) => `€${Math.round(v).toLocaleString('en-US')}`}
+              tipFormat={(v) => eur(v)}
+            />
+            <dl className="tracking-stats" aria-label={since ? `Since ${since}` : undefined}>
+              <div>
+                <dt>Gap to expected</dt>
+                <dd className={`mid-num ${d.gapPct === null ? 'muted' : d.gapPct >= 0 ? 'gain' : 'loss'}`}>{d.gapPct === null ? '–' : pct(d.gapPct, 2, true)}</dd>
+                <dd className="tiny soft">actual against expected</dd>
+              </div>
+              <div>
+                <dt>Slippage</dt>
+                <dd className="mid-num">{slip.avgBps === null ? '–' : `${slip.avgBps.toFixed(1)} bps`}</dd>
+                <dd className="tiny soft">{slip.measured ? `average over ${slip.measured} of ${slip.fills} fills` : 'no fills to measure yet'}</dd>
+              </div>
+              <div>
+                <dt>Fees paid</dt>
+                <dd className="mid-num">{eur(slip.feesEur)}</dd>
+                <dd className="tiny soft">{slip.takerShare === null ? 'no fills yet' : `${pct(slip.takerShare * 100, 0)} at the taker fee`}</dd>
+              </div>
+              <div>
+                <dt>Decisions</dt>
+                <dd className="mid-num">{d.decisions.total}</dd>
+                <dd className="tiny soft">{d.decisions.withOrders} placed orders</dd>
+              </div>
+            </dl>
+          </div>
+          {since && <p className="tiny soft" style={{ marginTop: 10 }}>The four figures count since this strategy started on {since}, whatever the range.</p>}
+        </>
+      )}
+      {d?.alerts.map((a) => (
+        <div className="callout brass" style={{ marginTop: 12 }} key={a.kind}>
+          {a.message}
+        </div>
+      ))}
+      {d && drawn.length > 0 && (
+        <Fold title="How to read this">
+          <p className="tiny soft">
+            Expected is a paper copy that follows every decision by the backtest’s rules: filled at the bar’s close with the maker fee. A gap means the real
+            account lost or gained something the backtest doesn’t see, such as slippage, taker fees or orders that never filled. Slippage is each fill against
+            the close it was decided on; positive means worse than that close. Expected ignores your max-in-coins setting.
           </p>
         </Fold>
       )}

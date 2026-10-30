@@ -1791,7 +1791,7 @@ dialog.modal[open] {
 
   .tabbar {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     position: fixed;
     left: 10px;
     right: 10px;

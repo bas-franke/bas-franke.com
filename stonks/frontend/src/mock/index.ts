@@ -5,9 +5,16 @@
 //   ?mock=live       bot starts in live mode
 //   ?mock=off        bot starts switched off
 //   ?mock=login      start logged out
+//   ?mock=healthwarn / healthfail / guard   Health report with warnings / failures / the loss guard tripped
+//   ?mock=healthdown health report never answers; ?mock=healthdrop answers once, then stops
+//   ?mock=tickerror  overview reports a failed tick
+//   ?mock=notrack    tracking has no data yet
+//   ?mock=limit10    the stored loss limit is 10 %
+//   ?mock=gated      the paper gate always refuses going live
+// Flags combine with commas: ?mock=live,gated
 // Any non-empty password logs in, except "wrong".
 import type { BotSettings, HallEntry } from '../types';
-import { equityPoints, families, fills, initialBot, logs, makeLog, markets, orders, research, researchV2, rng } from './data';
+import { equityPoints, families, fills, healthDetail, initialBot, logs, makeLog, markets, orders, research, researchV2, rng, tracking } from './data';
 
 const flags = new URLSearchParams(location.search).get('mock') ?? '';
 const KEY = 'stonks-mock-session';
@@ -18,6 +25,11 @@ let bot: BotSettings = initialBot();
 let hall: HallEntry[] = [];
 if (flags.includes('off')) bot.enabled = false;
 if (flags.includes('live')) bot.mode = 'live';
+if (flags.includes('limit10')) bot.dailyLossLimit = { unit: 'pct', value: 10, action: 'no_buys' };
+let healthCalls = 0;
+const paperGate = { days: 3, fills: 1, needDays: 14, needFills: 5 };
+const gateRefusal = () =>
+  json({ error: `This strategy has ${paperGate.days} of ${paperGate.needDays} days and ${paperGate.fills} of ${paperGate.needFills} fills in paper. Run it in paper first, or skip this check (skipPaperGate: true).`, paperGate }, 409);
 const liveRng = rng(1234);
 
 const json = (data: unknown, status = 200) =>
@@ -80,6 +92,7 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
       bot,
       running: bot.enabled,
       lastTickAt: bot.enabled ? new Date(Date.now() - 42_000).toISOString() : null,
+      lastTickError: flags.includes('tickerror') ? 'Bitvavo answered 429: too many requests while reading the balance' : null,
       bitvavo: { connected: true },
       balances: [
         { symbol: 'EUR', available: '12.10', inOrder: '0', eurValue: 12.1 },
@@ -101,22 +114,26 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
     });
   }
   if (p === '/bot' && method === 'PUT') {
-    const patch = body as Partial<BotSettings> & { confirmLive?: boolean };
+    const patch = body as Partial<BotSettings> & { confirmLive?: boolean; skipPaperGate?: boolean };
     const errors = validate(patch);
     if (Object.keys(errors).length) return json({ error: 'Invalid settings', errors }, 400);
-    const { confirmLive: _c, ...rest } = patch;
+    const { confirmLive: _c, skipPaperGate: skip, ...rest } = patch;
     const strategyChanged = rest.strategy && JSON.stringify(rest.strategy) !== JSON.stringify(bot.strategy);
+    const staysLive = bot.mode === 'live' && (rest.mode ?? bot.mode) === 'live';
+    if (staysLive && strategyChanged && !patch.confirmLive) return json({ error: 'The bot is in live mode: changing the strategy trades real money. Confirm it first (confirmLive: true).' }, 400);
+    if (flags.includes('gated') && !skip && ((rest.mode === 'live' && bot.mode !== 'live') || (staysLive && strategyChanged))) return gateRefusal();
     bot = { ...bot, ...rest, ...(strategyChanged ? { activeResearch: null } : {}) };
     return json(bot);
   }
   if (p === '/bot/activate' && method === 'POST') {
-    const b = body as { researchId?: number; bucket?: string; rank?: number; start?: boolean; confirmLive?: boolean };
+    const b = body as { researchId?: number; bucket?: string; rank?: number; start?: boolean; confirmLive?: boolean; skipPaperGate?: boolean };
     if (flags.includes('v1')) return json({ error: 'Mock: v1 payload has no id' }, 400);
     if (b.researchId !== researchV2.id) return json({ error: 'The research was updated since this page loaded. Reload it and pick the strategy again.' }, 409);
     const entry = researchV2.buckets?.[b.bucket as 'daily']?.top.find((e) => e.rank === b.rank);
     if (!entry) return json({ error: `There is no number ${b.rank} in the ${b.bucket} list of this research.` }, 400);
     if (!entry.botReady) return json({ error: 'This strategy is still waiting to be ported to the bot.' }, 400);
     if (bot.mode === 'live' && b.confirmLive !== true) return json({ error: 'Live mode: confirm it first (confirmLive: true).' }, 400);
+    if (flags.includes('gated') && bot.mode === 'live' && !b.skipPaperGate) return gateRefusal();
     const activeResearch = { researchId: researchV2.id, bucket: b.bucket!, rank: b.rank!, name: entry.spec.name, activatedAt: new Date().toISOString() };
     bot = { ...bot, strategy: entry.spec, activeResearch, enabled: bot.enabled || b.start === true };
     return json({ ok: true, bot, activeResearch, started: b.start === true });
@@ -139,6 +156,15 @@ async function handle(method: string, url: URL, body: unknown): Promise<Response
       portfolio: walk(1000, 0.02, 0.0004, 7), btc: walk(72000, 0.03, -0.0002, 3), eth: walk(2100, 0.04, -0.0006, 11),
     });
   }
+  if (p === '/tracking' && method === 'GET')
+    return json(tracking((q.get('mode') as 'paper' | 'live') ?? bot.mode, (q.get('range') ?? 'month') as 'month', bot.strategy.id, flags.includes('notrack')));
+  if (p === '/health/detail' && method === 'GET') {
+    healthCalls++;
+    if (flags.includes('healthdown') || (flags.includes('healthdrop') && healthCalls > 1)) throw new TypeError('Failed to fetch');
+    return json(healthDetail(bot, flags.includes('healthfail') ? 'fail' : flags.includes('healthwarn') ? 'warn' : flags.includes('guard') ? 'guard' : 'ok'));
+  }
+  if (p === '/bot/test-alert' && method === 'POST')
+    return json(flags.includes('healthwarn') || flags.includes('healthfail') ? { ok: false, configured: false, error: 'Alert mails are not configured.' } : { ok: true, configured: true });
   if (p === '/portfolio-history/clear' && method === 'POST') return json({ ok: true, removed: 1234 });
   // Write-ups: the mixed #1 card gets one; its content comes from public/mock-writeup.json when that file exists (dev only).
   if (p === '/writeups' && method === 'GET') {

@@ -1,5 +1,18 @@
 /* Settings page. Scoped under .shell .settings-page so it wins over the shared styles.css. */
 
+.shell .settings-page .guard-action {
+  margin-top: 20px;
+  gap: 8px;
+}
+.shell .settings-page .guard-action .segmented {
+  justify-self: start;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.shell .settings-page .guard-action .segmented button {
+  padding-inline: 12px;
+}
+
 .shell .settings-page > .card {
   padding: 0 24px;
 }

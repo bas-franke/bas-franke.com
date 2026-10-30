@@ -42,6 +42,12 @@ export const IconSettings = (p: P) => (
     <circle cx="8" cy="17" r="2" />
   </svg>
 );
+export const IconHealth = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} {...p}>
+    <path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.500 15.400 12 20 12 20Z" />
+    <path d="M7.500 12.500h2.500l1.300-2.300 1.700 4 1.200-1.700h2.300" />
+  </svg>
+);
 export const IconSun = (p: P) => (
   <svg viewBox="0 0 24 24" {...base} {...p}>
     <circle cx="12" cy="12" r="4" />

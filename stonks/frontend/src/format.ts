@@ -1,3 +1,5 @@
+import type { LossAction } from './types';
+
 const eurFmt = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const eurWhole = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 
@@ -26,6 +28,29 @@ export const lossLimitText = (limit: { unit: 'pct' | 'eur'; value: number } | un
   const p = `${limit.value.toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
   return eurNow === undefined ? p : `${p} (${eur(eurNow, true)})`;
 };
+
+/** The loss guard's actions in plain words (SPEC §5). A limit without an action acts like the default. */
+export const LOSS_ACTIONS: { value: LossAction; label: string; explain: string; then: string }[] = [
+  {
+    value: 'no_buys',
+    label: 'Stop buying',
+    explain: 'The bot stays on, cancels its open buys and places no new ones. Sells, stops and exits go on. It ends by itself once the loss is back under the limit.',
+    then: 'it stops buying until the loss is back under that',
+  },
+  {
+    value: 'alert',
+    label: 'Only tell me',
+    explain: 'The bot reports it and keeps trading as usual. Nothing is held back.',
+    then: 'it tells you and keeps trading',
+  },
+  {
+    value: 'stop',
+    label: 'Switch off',
+    explain: 'The bot cancels its orders and switches itself off until you turn it on again.',
+    then: 'it switches itself off',
+  },
+];
+export const lossAction = (a: LossAction | undefined) => LOSS_ACTIONS.find((x) => x.value === a) ?? LOSS_ACTIONS[0];
 
 export const pct = (v: unknown, digits = 1, signed = false) => {
   const n = num(v);

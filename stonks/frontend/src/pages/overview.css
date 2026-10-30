@@ -60,6 +60,53 @@
   margin-right: auto;
 }
 
+/* ---------- notices ---------- */
+
+.guard-notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.guard-notice svg {
+  flex: none;
+  margin-top: 1px;
+}
+.tick-error {
+  overflow-wrap: anywhere;
+}
+.tick-error a {
+  color: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- expected vs actual ---------- */
+
+.tracking-body {
+  display: grid;
+  gap: 16px;
+}
+.tracking-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 18px;
+  margin: 0;
+}
+.tracking-stats dt {
+  font-size: 0.85rem;
+}
+.tracking-stats dd {
+  margin: 0;
+}
+.tracking-stats .mid-num.muted {
+  color: var(--ink-3);
+}
+@media (max-width: 720px) {
+  .tracking-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* ---------- small bits ---------- */
 
 .loss-line {

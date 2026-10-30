@@ -24,6 +24,12 @@ const statusChip = (s: string, filledFrac?: number) => {
   if (closed && filledFrac !== undefined && filledFrac >= 0.995) return <span className="chip gain" title={`Bitvavo: ${s} (the tiny rest was cancelled)`}>filled</span>;
   if (closed && filledFrac !== undefined && filledFrac > 0) return <span className="chip brass" title={`Bitvavo: ${s}`}>partly filled</span>;
   const k = s.toLowerCase();
+  if (k === 'unknown')
+    return (
+      <span className="chip brass" title="Bitvavo can’t find this order. The bot keeps checking it for 3 days, so no fill gets lost.">
+        unknown, rechecking
+      </span>
+    );
   const open = ['new', 'open', 'pending', 'awaitingtrigger'].includes(k) || k.includes('partial');
   const cls = k === 'filled' ? 'gain' : open ? 'brass' : k.includes('reject') || k.includes('error') ? 'loss' : '';
   const label = k === 'new' ? 'open' : s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();

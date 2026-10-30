@@ -7,6 +7,7 @@ import type {
   EquityPoint,
   FamilyInfo,
   HallEntry,
+  HealthDetail,
   Fill,
   LogRow,
   ManualTarget,
@@ -14,7 +15,9 @@ import type {
   MarketInfo,
   Order,
   Overview,
+  PaperGate,
   ResearchResponse,
+  TrackingData,
 } from './types';
 
 export class ApiError extends Error {
@@ -42,6 +45,10 @@ export class ApiError extends Error {
     return out;
   }
 }
+
+/** The paper record of a 409 "too little paper history" answer; null for any other error. */
+export const paperGateOf = (e: unknown): PaperGate | null =>
+  e instanceof ApiError && e.status === 409 ? ((e.body as { paperGate?: PaperGate } | null)?.paperGate ?? null) : null;
 
 /** Called on any 401 from an authenticated endpoint, so the app can fall back to the login screen. */
 let onUnauthorized: () => void = () => {};
@@ -93,7 +100,7 @@ export const api = {
   login: (password: string) => request<{ ok: true }>('POST', '/auth/login', { password }, { quiet401: true }),
   logout: () => request<{ ok: true }>('POST', '/auth/logout'),
   overview: () => request<Overview>('GET', '/overview'),
-  updateBot: (patch: Partial<BotSettings> & { confirmLive?: boolean }) => request<BotSettings>('PUT', '/bot', patch),
+  updateBot: (patch: Partial<BotSettings> & { confirmLive?: boolean; skipPaperGate?: boolean }) => request<BotSettings>('PUT', '/bot', patch),
   start: () => request<BotSettings>('POST', '/bot/start'),
   stop: () => request<BotSettings>('POST', '/bot/stop'),
   orders: (q: ListQuery) => request<{ orders: Order[] }>('GET', `/orders${qs({ ...q })}`),
@@ -103,9 +110,12 @@ export const api = {
   families: () => request<FamilyInfo[] | { families: FamilyInfo[] }>('GET', '/strategies/families'),
   markets: () => request<MarketInfo[] | { markets: MarketInfo[] } | string[]>('GET', '/markets'),
   research: () => request<ResearchResponse>('GET', '/research'),
-  activate: (body: ({ researchId: number; bucket: string; rank: number } | { hallOfFameId: number }) & { start: boolean; confirmLive?: boolean }) =>
+  activate: (body: ({ researchId: number; bucket: string; rank: number } | { hallOfFameId: number }) & { start: boolean; confirmLive?: boolean; skipPaperGate?: boolean }) =>
     request<ActivateResult>('POST', '/bot/activate', body),
   compare: (range: CompareRange) => request<CompareData>('GET', `/compare${qs({ range })}`),
+  tracking: (q: { mode?: string; range: CompareRange }) => request<TrackingData>('GET', `/tracking${qs(q)}`),
+  healthDetail: () => request<HealthDetail>('GET', '/health/detail'),
+  testAlert: () => request<{ ok: boolean; configured: boolean; error?: string }>('POST', '/bot/test-alert', {}),
   clearPortfolioHistory: () => request<{ ok: true; removed: number }>('POST', '/portfolio-history/clear', { confirm: 'CLEAR' }),
   writeups: () => request<{ writeups: { specId: string; title: string; updatedAt: string }[] }>('GET', '/writeups'),
   writeup: (specId: string) => request<Writeup>('GET', `/writeups/${encodeURIComponent(specId)}`),

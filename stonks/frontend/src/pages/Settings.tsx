@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, ApiError, unwrapFamilies, unwrapMarkets } from '../api';
-import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { familyLabel, humanize, lossLimitText, timeOnly } from '../format';
+import { api, ApiError, paperGateOf, unwrapFamilies, unwrapMarkets } from '../api';
+import { ErrorBox, Fold, ModeBadge, Modal, PaperGateNotice, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
+import { familyLabel, humanize, LOSS_ACTIONS, lossAction, lossLimitText, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
 import { navigate, takeHandoff } from '../router';
 import './settings.css';
-import { DEFAULT_CHASE, DEFAULT_LOSS_LIMIT, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type ManualTarget, type MarketInfo, type ParamDescription, type StrategySpec } from '../types';
+import { DEFAULT_CHASE, DEFAULT_LOSS_LIMIT, INTERVALS, type BotSettings, type FamilyInfo, type Interval, type LogRow, type LossAction, type ManualTarget, type MarketInfo, type PaperGate, type ParamDescription, type StrategySpec } from '../types';
 
 type Draft = Omit<BotSettings, 'enabled'>;
 
@@ -27,6 +27,14 @@ const specId = (s: StrategySpec) => {
   return `${s.family}-${m}-${s.interval}-${hash(JSON.stringify([s.params, s.risk, s.execution, s.markets]))}`;
 };
 
+/** Same rule as the backend: key order does not count as a change, the form rebuilds the spec from its fields. */
+const canonical = (v: unknown): unknown => {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (typeof v !== 'object' || v === null) return v;
+  return Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, canonical(x)]));
+};
+const sameSpec = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
 export default function SettingsPage() {
   const toast = useToast();
   const ov = useAsync(() => api.overview(), []);
@@ -40,6 +48,10 @@ export default function SettingsPage() {
   const [liveAsk, setLiveAsk] = useState(false);
   const [liveText, setLiveText] = useState('');
   const [confirmLive, setConfirmLive] = useState(false);
+  /** Asking for LIVE before a strategy change that trades real money. */
+  const [strategyAsk, setStrategyAsk] = useState(false);
+  /** The paper record the backend refused, with the confirmation to send along if the owner goes on anyway. */
+  const [gate, setGate] = useState<{ record: PaperGate; confirm: boolean } | null>(null);
 
   useEffect(() => {
     if (!ov.data || draft) return;
@@ -75,6 +87,7 @@ export default function SettingsPage() {
   const params = normParams(family);
   const multi = isMulti(s.family, family);
   const lossLimit = draft.dailyLossLimit ?? DEFAULT_LOSS_LIMIT;
+  const guardAction = lossAction(lossLimit.action);
   const err = (k: string) => errors[k] ?? errors[k.split('.').pop()!];
 
   const setStrategy = (patch: Partial<StrategySpec>) =>
@@ -105,11 +118,21 @@ export default function SettingsPage() {
     });
   };
 
-  const save = async () => {
+  const goesLive = draft.mode === 'live' && saved.mode !== 'live';
+  const liveStrategyChange = draft.mode === 'live' && saved.mode === 'live' && !sameSpec(draft.strategy, saved.strategy);
+
+  const pressSave = () => {
+    if (!liveStrategyChange) return void save({ confirm: confirmLive });
+    setLiveText('');
+    setStrategyAsk(true);
+  };
+
+  const save = async ({ confirm, skipGate }: { confirm: boolean; skipGate?: boolean }) => {
     setSaving(true);
     setErrors({});
+    setGate(null);
     try {
-      const patch: Partial<BotSettings> & { confirmLive?: boolean } = {
+      const patch: Parameters<typeof api.updateBot>[0] = {
         mode: draft.mode,
         strategy: draft.strategy,
         maxExposureEur: draft.maxExposureEur,
@@ -117,7 +140,8 @@ export default function SettingsPage() {
         paperStartEur: draft.paperStartEur,
         ...(draft.chase ? { chase: draft.chase } : {}),
       };
-      if (draft.mode === 'live' && saved.mode !== 'live') patch.confirmLive = confirmLive;
+      if (goesLive || liveStrategyChange) patch.confirmLive = confirm;
+      if (skipGate) patch.skipPaperGate = true;
       const res = await api.updateBot(patch);
       const { enabled: _e, ...rest } = res;
       setSaved(rest);
@@ -125,7 +149,9 @@ export default function SettingsPage() {
       setConfirmLive(false);
       toast('Saved. The bot uses the new settings from its next look at the market.');
     } catch (e) {
-      if (e instanceof ApiError) {
+      const record = paperGateOf(e);
+      if (record) setGate({ record, confirm });
+      else if (e instanceof ApiError) {
         const fe = e.fieldErrors;
         setErrors(Object.keys(fe).length ? fe : { _: e.message, ...fieldFromMessage(e.message) });
       } else setErrors({ _: (e as Error).message });
@@ -327,8 +353,8 @@ export default function SettingsPage() {
               error={err('dailyLossLimit')}
               hint={
                 lossLimit.unit === 'pct'
-                  ? 'Lose this share of what the portfolio was worth 24 hours earlier and the bot switches itself off.'
-                  : 'Lose this much over any 24 hours and the bot switches itself off.'
+                  ? 'Lose this share of what the portfolio was worth 24 hours earlier and the loss guard acts.'
+                  : 'Lose this much over any 24 hours and the loss guard acts.'
               }
             >
               <div className="row loss-limit" style={{ gap: 8, flexWrap: 'nowrap' }}>
@@ -340,7 +366,7 @@ export default function SettingsPage() {
                     { value: 'eur', label: '€' },
                   ]}
                   onChange={(unit) =>
-                    unit !== lossLimit.unit && setDraft({ ...draft, dailyLossLimit: { unit, value: unit === 'pct' ? DEFAULT_LOSS_LIMIT.value : 100 } })
+                    unit !== lossLimit.unit && setDraft({ ...draft, dailyLossLimit: { ...lossLimit, unit, value: unit === 'pct' ? DEFAULT_LOSS_LIMIT.value : 100 } })
                   }
                 />
                 <Affix suffix={lossLimit.unit === 'pct' ? '%' : '€'}>
@@ -351,7 +377,7 @@ export default function SettingsPage() {
                     max={lossLimit.unit === 'pct' ? 100 : undefined}
                     step={lossLimit.unit === 'pct' ? 1 : 10}
                     value={lossLimit.value}
-                    onChange={(e) => setDraft({ ...draft, dailyLossLimit: { unit: lossLimit.unit, value: Number(e.target.value) } })}
+                    onChange={(e) => setDraft({ ...draft, dailyLossLimit: { ...lossLimit, value: Number(e.target.value) } })}
                     aria-invalid={!!err('dailyLossLimit')}
                     aria-label={lossLimit.unit === 'pct' ? 'Max loss in percent' : 'Max loss in euros'}
                   />
@@ -374,6 +400,28 @@ export default function SettingsPage() {
             {pctField('Stop-loss', 'stopLossPct', 'Sell if the price falls this far under the average buy price.')}
             {pctField('Take-profit', 'takeProfitPct', 'Sell once the price is this far above it.')}
             {pctField('Trailing stop', 'trailingStopPct', 'Sell if the price drops this far from its best level since buying.')}
+          </div>
+          <div className="field guard-action">
+            <span className="label">When the max loss is reached</span>
+            <Segmented<LossAction>
+              label="When the max loss is reached"
+              value={guardAction.value}
+              options={LOSS_ACTIONS.map(({ value, label }) => ({ value, label }))}
+              onChange={(action) => setDraft({ ...draft, dailyLossLimit: { ...lossLimit, action } })}
+            />
+            <span className="hint">{guardAction.explain}</span>
+            {guardAction.value === 'stop' && (
+              <div className="callout loss">
+                <b>The position stays unmanaged.</b> Whatever the bot holds stays held, with no sells and no stops, until you turn it on again. In the backtests
+                this cost 4 to 15 points a year.
+              </div>
+            )}
+            {lossLimit.unit === 'pct' && lossLimit.value === 10 && (
+              <div className="callout brass">
+                Your max loss is 10%. In the backtests 15% with Stop buying came out as the better default. This is only a hint: your setting stays as it is until you
+                change it.
+              </div>
+            )}
           </div>
         </Section>
 
@@ -451,7 +499,7 @@ export default function SettingsPage() {
           >
             Discard
           </button>
-          <button className={`btn ${draft.mode === 'live' && saved.mode !== 'live' ? 'danger' : 'primary'}`} disabled={saving || !dirty || (!family && !!fam.data)} onClick={save}>
+          <button className={`btn ${goesLive || liveStrategyChange ? 'danger' : 'primary'}`} disabled={saving || !dirty || (!family && !!fam.data)} onClick={pressSave}>
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
@@ -481,8 +529,8 @@ export default function SettingsPage() {
         }
       >
         <div className="callout loss">
-          In live mode the bot places <b>real orders</b> on your Bitvavo account with <b>real euros</b>. It can lose money, up to{' '}
-          {lossLimitText(lossLimit)} in 24 hours before it stops itself.
+          In live mode the bot places <b>real orders</b> on your Bitvavo account with <b>real euros</b>. It can lose money. Once it has lost{' '}
+          {lossLimitText(lossLimit)} in 24 hours, {guardAction.then}.
         </div>
         <p className="small">Backtests are not promises. Consider starting with a small max-in-coins amount.</p>
         <div className="field">
@@ -491,6 +539,58 @@ export default function SettingsPage() {
           </label>
           <input id="live-confirm" className="input" autoComplete="off" value={liveText} onChange={(e) => setLiveText(e.target.value)} />
         </div>
+      </Modal>
+
+      <Modal
+        open={strategyAsk}
+        onClose={() => setStrategyAsk(false)}
+        title="Change the live strategy?"
+        actions={
+          <>
+            <button className="btn ghost" onClick={() => setStrategyAsk(false)}>
+              Keep the current one
+            </button>
+            <button
+              className="btn danger"
+              disabled={liveText.trim().toUpperCase() !== 'LIVE'}
+              onClick={() => {
+                setStrategyAsk(false);
+                void save({ confirm: true });
+              }}
+            >
+              Use real money
+            </button>
+          </>
+        }
+      >
+        <div className="callout loss">
+          The bot is in live mode. Saving swaps <b>{saved.strategy.name}</b> for <b>{draft.strategy.name}</b>, on your Bitvavo account with <b>real euros</b>. Open
+          orders of the old strategy are cancelled first.
+        </div>
+        <div className="field">
+          <label htmlFor="strategy-confirm">
+            Type <b>LIVE</b> to confirm
+          </label>
+          <input id="strategy-confirm" className="input" autoComplete="off" value={liveText} onChange={(e) => setLiveText(e.target.value)} />
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!gate}
+        onClose={() => setGate(null)}
+        title="This strategy has too little paper history"
+        actions={
+          <>
+            <button className="btn ghost" onClick={() => setGate(null)}>
+              Cancel
+            </button>
+            <button className="btn danger" disabled={saving} onClick={() => gate && void save({ confirm: gate.confirm, skipGate: true })}>
+              Go live anyway
+            </button>
+          </>
+        }
+      >
+        {gate && <PaperGateNotice gate={gate.record} />}
       </Modal>
     </div>
   );

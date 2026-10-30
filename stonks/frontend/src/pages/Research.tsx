@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError } from '../api';
+import { api, ApiError, paperGateOf } from '../api';
 import { EmptyState } from '../components/art';
 import { LineChart, Spark, type LineSeries } from '../components/charts';
 import { IconCheck } from '../components/icons';
-import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
-import { ago, dateOnly, eur, familyLabel, lossLimitText, pct, toDate } from '../format';
+import { ErrorBox, PaperGateNotice, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
+import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
 import './research.css';
-import type { Benchmark, BucketName, HallEntry, Overview, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
+import type { Benchmark, BucketName, HallEntry, Overview, PaperGate, ResearchBucket, ResearchEntry, ResearchPayload, Series } from '../types';
 
 const RANK_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
 const BENCH_STYLE = [
@@ -280,6 +280,12 @@ function Research({
       {!hallView && bucket && (
       <div id="bucket-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="stack" style={{ gap: 12 }}>
         <BucketIntro name={tab} b={bucket} />
+        {(tab === 'session4' || tab === 'session5') && (
+          <div className="callout brass">
+            Sessions 4 and 5 were ranked at a flat 0.05 % fee, below Bitvavo’s 0.15/0.25 %. Their euro figures and session scores use it; the absolute
+            score uses real fees.
+          </div>
+        )}
 
         {top.length === 0 ? (
           <section className="card">
@@ -507,6 +513,7 @@ function ActivateDialog({
   const [liveText, setLiveText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ msg: string; stale: boolean } | null>(null);
+  const [gate, setGate] = useState<PaperGate | null>(null);
   const bot = overview?.bot;
   const live = bot?.mode === 'live';
   const on = !!bot?.enabled;
@@ -520,7 +527,7 @@ function ActivateDialog({
     setError(null);
     try {
       const which = hallId !== undefined ? { hallOfFameId: hallId } : { researchId, bucket, rank: e.rank };
-      const res = await api.activate({ ...which, start: !on && start, ...(live ? { confirmLive: true } : {}) });
+      const res = await api.activate({ ...which, start: !on && start, ...(live ? { confirmLive: true } : {}), ...(gate ? { skipPaperGate: true } : {}) });
       toast(
         res.started
           ? `Activated. The bot is awake and running ${e.spec.name}.`
@@ -532,7 +539,9 @@ function ActivateDialog({
       );
       onDone();
     } catch (err) {
-      setError({ msg: (err as Error).message, stale: err instanceof ApiError && err.status === 409 });
+      const refused = paperGateOf(err);
+      if (refused) setGate(refused);
+      else setError({ msg: (err as Error).message, stale: err instanceof ApiError && err.status === 409 });
     } finally {
       setBusy(false);
     }
@@ -554,7 +563,7 @@ function ActivateDialog({
             </button>
           ) : (
             <button className={`btn ${live ? 'danger' : 'brass'}`} disabled={busy || !ready} onClick={submit}>
-              {busy ? 'Activating…' : live ? 'Activate with real money' : !on && start ? 'Activate and start' : 'Activate'}
+              {busy ? 'Activating…' : gate ? 'Activate anyway' : live ? 'Activate with real money' : !on && start ? 'Activate and start' : 'Activate'}
             </button>
           )}
         </>
@@ -604,8 +613,8 @@ function ActivateDialog({
       {live && (
         <>
           <div className="callout loss">
-            <b>Live mode.</b> The bot will trade this strategy on your Bitvavo account with real euros. It can lose money, up to{' '}
-            {lossLimitText(overview!.dailyLossLimit, overview!.dailyLossLimitEur)} in 24 hours before it stops itself.
+            <b>Live mode.</b> The bot will trade this strategy on your Bitvavo account with real euros. It can lose money. Once it has lost{' '}
+            {lossLimitText(overview!.dailyLossLimit, overview!.dailyLossLimitEur)} in 24 hours, {lossAction(overview!.dailyLossLimit?.action).then}.
           </div>
           <div className="field">
             <label htmlFor="activate-live">
@@ -615,6 +624,7 @@ function ActivateDialog({
           </div>
         </>
       )}
+      {gate && <PaperGateNotice gate={gate} />}
       {error && <div className="callout loss">{error.msg}</div>}
     </Modal>
   );

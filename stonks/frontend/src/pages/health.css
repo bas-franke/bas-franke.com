@@ -1,0 +1,265 @@
+/* Health page. Loads before styles.css, so rules are scoped under `.shell .health-page` to win. */
+
+.shell .health-page {
+  gap: 18px;
+}
+
+/* ---------- the overall state ---------- */
+
+.health-verdict {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  align-items: start;
+  padding: 20px 22px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.health-verdict[aria-busy='true'] {
+  display: block;
+}
+.health-verdict h2 {
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin: 0;
+}
+.health-verdict p {
+  margin: 4px 0 0;
+}
+.health-verdict-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.health-verdict.ok .health-verdict-mark {
+  background: var(--gain-soft);
+  color: var(--gain-ink);
+}
+.health-verdict.warn {
+  background: var(--brass-soft);
+  border-color: color-mix(in srgb, var(--brass) 30%, transparent);
+}
+.health-verdict.warn .health-verdict-mark {
+  background: var(--brass);
+  color: var(--surface);
+}
+.health-verdict.fail {
+  background: var(--loss-soft);
+  border-color: color-mix(in srgb, var(--loss) 35%, transparent);
+}
+.health-verdict.fail .health-verdict-mark {
+  background: var(--loss);
+  color: var(--surface);
+}
+.health-bot {
+  gap: 8px;
+  margin-top: 10px;
+}
+.health-strategy {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.health-checked {
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* The worst state of the page: solid, and impossible to read as fine. */
+.health-verdict.down {
+  grid-template-columns: auto minmax(0, 1fr);
+  background: var(--loss-ink);
+  border-color: var(--loss-ink);
+  color: var(--surface);
+}
+.health-verdict.down .health-verdict-mark {
+  background: var(--surface);
+  color: var(--loss-ink);
+}
+.health-verdict.down a {
+  color: inherit;
+  font-weight: 600;
+}
+.health-verdict.down .btn {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: transparent;
+}
+.health-why {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  opacity: 0.9;
+  margin-bottom: 12px !important;
+}
+
+/* ---------- the parts ---------- */
+
+.health-parts {
+  display: grid;
+  gap: 18px;
+}
+.health-parts .eyebrow {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+}
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 12px;
+}
+.health-part {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.health-part.warn {
+  border-color: color-mix(in srgb, var(--brass) 55%, var(--line));
+}
+.health-part.fail {
+  border-color: color-mix(in srgb, var(--loss) 65%, var(--line));
+  background: color-mix(in srgb, var(--loss-soft) 55%, var(--surface));
+}
+.health-part.unknown {
+  background: var(--surface-2);
+}
+.health-part-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.health-part-head h3 {
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+}
+.health-mark {
+  font-weight: 700;
+  line-height: 1;
+}
+.health-detail {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+/* A failing part keeps its whole message: that is the one to read. */
+.health-part:not(.fail) .health-detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.health-fact {
+  margin: auto 0 0;
+  padding-top: 2px;
+}
+.health-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 6px;
+}
+.health-note {
+  margin: 0;
+  max-width: 68ch;
+}
+
+/* After a failed refresh: the last answer, with its colours taken away so no green survives. */
+.health-parts.old .health-grid {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.health-old {
+  margin: 0;
+  font-weight: 600;
+  color: var(--loss-ink);
+}
+
+/* ---------- warnings and errors ---------- */
+
+.shell .health-page .card {
+  padding: 20px 22px;
+}
+.health-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.health-events li {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.health-events li:first-child {
+  border-top: 0;
+}
+.health-events .chip {
+  justify-content: center;
+}
+.health-event-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.health-event-text code {
+  font-family: var(--mono);
+}
+
+/* ---------- phone ---------- */
+
+@media (max-width: 760px) {
+  .health-verdict {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 16px;
+  }
+  .health-verdict h2 {
+    font-size: 1.25rem;
+  }
+  .health-checked {
+    grid-column: 1 / -1;
+    white-space: normal;
+    text-align: left;
+    margin-top: 8px !important;
+  }
+  .health-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .health-events li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .health-events .chip {
+    justify-self: start;
+  }
+  .shell .health-page .card {
+    padding: 16px;
+  }
+}
