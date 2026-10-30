@@ -1,3 +1,4 @@
+import { notifyLog } from './bot/alerts.js';
 import { config } from './config.js';
 import { query } from './db.js';
 
@@ -34,6 +35,8 @@ export async function log(level: LogLevel, event: string, message: string, data?
     if (lvl === 'error') console.error(line, payload ?? '');
     else if (lvl === 'warn') console.warn(line, payload ?? '');
     else if (lvl !== 'debug' || process.env.STONKS_DEBUG === '1') console.log(line, payload ?? '');
+    // Before the database write: an outage of the database is exactly when the mail matters.
+    notifyLog(lvl, String(event), String(message));
     if (!config.databaseUrl) return;
     await query('INSERT INTO bot_logs (level, event, message, data) VALUES ($1, $2, $3, $4)', [
       lvl,

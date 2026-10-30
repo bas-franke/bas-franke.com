@@ -5,6 +5,8 @@ import { getBotSettings, SettingsError, updateBotSettings, type BotSettings } fr
 import { explainAny } from '../strategies/runtime.js';
 import { cachedPortfolio, kick, portfolio, start, status, stop, switchOff, lossWindow, todayPnl, withLock } from './engine.js';
 import { startTracking, stopTracking } from './track.js';
+import { alertsConfigured } from './alerts.js';
+import { startShadow, stopShadow } from './shadow.js';
 import { marketRules } from './marketData.js';
 import { resetPaperWallet as resetWallet } from './paper.js';
 import { openOrders } from './store.js';
@@ -22,6 +24,8 @@ export interface Overview {
   /** The engine loop is alive and the bot is switched on. */
   running: boolean;
   lastTickAt: string | null;
+  /** Why the last tick failed; null when it went fine. */
+  lastTickError: string | null;
   bitvavo: { connected: boolean; error?: string };
   balances: Array<{ symbol: string; available: number; inOrder: number; eurValue: number }>;
   equityEur: number;
@@ -43,6 +47,8 @@ export interface Overview {
 export function startBot(): void {
   // Informative BTC/ETH/portfolio tracking for the Overview chart: separate from the trading loop.
   startTracking();
+  startShadow();
+  if (!alertsConfigured()) void log('info', 'alerts_off', 'Alert mails are off: SENDGRID_API_KEY, MAIL_FROM and STONKS_ALERT_EMAIL are not all set');
   try {
     start();
   } catch (err) {
@@ -52,21 +58,42 @@ export function startBot(): void {
 
 export function stopBot(): void {
   stopTracking();
+  stopShadow();
   stop();
 }
 
 const PRIVATE_FRESH_MS = 10 * 60_000;
 const bitvavoConnected = () => bitvavo.hasKeys && Date.now() - bitvavo.lastPrivateOkAt < PRIVATE_FRESH_MS;
 
+/** A running bot ticks every 15 s; this much silence means the loop is stuck. */
+export const TICK_STALE_SEC = 120;
+
+/** The verdict of GET /api/health. lastTickAt is also set by a failed tick, so a tick only counts with no error. */
+export function healthVerdict(h: { enabled: boolean; database: boolean; lastTickAt: number | null; lastTickError: string | null; uptimeSec: number; now: number }) {
+  const ageSec = h.lastTickAt === null ? null : Math.round((h.now - h.lastTickAt) / 1000);
+  // No tick yet is only a problem once the process has had time for its first one.
+  const stale = (ageSec ?? h.uptimeSec) > TICK_STALE_SEC;
+  const lastError = h.lastTickError !== null;
+  return {
+    status: (h.enabled && stale) || lastError || !h.database ? ('degraded' as const) : ('ok' as const),
+    tick: { ageSec, ok: !stale && !lastError },
+    lastError,
+  };
+}
+
 /** For GET /api/health: no amounts. */
-export async function botHealth(): Promise<{ bitvavo: boolean; bot: { enabled: boolean; mode: 'paper' | 'live' } }> {
+export async function botHealth(database: boolean) {
+  let bot: { enabled: boolean; mode: 'paper' | 'live' } = { enabled: false, mode: 'paper' };
   try {
-    if (!config.databaseUrl) return { bitvavo: bitvavoConnected(), bot: { enabled: false, mode: 'paper' } };
-    const s = await getBotSettings();
-    return { bitvavo: bitvavoConnected(), bot: { enabled: s.enabled, mode: s.mode } };
+    if (config.databaseUrl) {
+      const s = await getBotSettings();
+      bot = { enabled: s.enabled, mode: s.mode };
+    }
   } catch {
-    return { bitvavo: bitvavoConnected(), bot: { enabled: false, mode: 'paper' } };
+    /* the verdict already says degraded: the database is what failed */
   }
+  const verdict = healthVerdict({ ...bot, database, lastTickAt: status.lastTickAt, lastTickError: status.lastTickError, uptimeSec: process.uptime(), now: Date.now() });
+  return { ...verdict, bitvavo: bitvavoConnected(), bot };
 }
 
 /** For GET /api/overview (SPEC §7). */
@@ -92,6 +119,7 @@ export async function getOverview(): Promise<Overview> {
     bot: s,
     running: status.started && s.enabled && lastTick !== null && Date.now() - lastTick < 120_000,
     lastTickAt: lastTick ? new Date(lastTick).toISOString() : null,
+    lastTickError: status.lastTickError,
     bitvavo: bv,
     balances: (pf?.balances ?? []).map((b) => ({ symbol: b.symbol, available: b.available, inOrder: b.inOrder, eurValue: b.eurValue })),
     equityEur,

@@ -3,6 +3,7 @@ import { api } from './api/index.js';
 import { botHealth, startBot, stopBot } from './bot/index.js';
 import { config } from './config.js';
 import { dbConfigured, dbReady, migrate } from './db.js';
+import { errText, log } from './log.js';
 
 // Dashboard API plus the trading bot, which runs in this same process (SPEC.md).
 
@@ -11,7 +12,9 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 app.get('/api/health', async (_req, res) => {
-  res.json({ status: 'ok', uptime: Math.round(process.uptime()), database: await dbReady(), ...(await botHealth()) });
+  const database = await dbReady();
+  // 200 also when degraded (the status page's web checks mean "the API answers"); 503 only when the database is down.
+  res.status(dbConfigured() && !database ? 503 : 200).json({ uptime: Math.round(process.uptime()), database, ...(await botHealth(database)) });
 });
 
 app.use('/api', api); // parses JSON bodies itself (small limit, large only for logged-in research uploads)
@@ -52,6 +55,9 @@ async function main() {
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('unhandledRejection', (reason) => {
+    void log('error', 'unhandled_rejection', `Unhandled promise rejection: ${errText(reason)}`);
+  });
 }
 
 main();

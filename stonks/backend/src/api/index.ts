@@ -1,5 +1,7 @@
 import { pgSessionStore } from '../auth.js';
+import { sendTestAlert } from '../bot/alerts.js';
 import { disableTrading, enableTrading, getOverview, listMarkets } from '../bot/index.js';
+import { trackingReport } from '../bot/shadow.js';
 import { priceHistory } from '../bot/track.js';
 import { config } from '../config.js';
 import { query } from '../db.js';
@@ -29,5 +31,7 @@ export const api = createApi({
   validateSpec: async (spec) => void (await checkSpec(spec)),
   isRunnable,
   priceHistory,
+  tracking: (mode, range) => trackingReport((text, params) => query(text, params), mode, range),
+  sendTestAlert,
   maxLoginAttempts: config.loginAttempts,
 });

@@ -138,4 +138,30 @@ export const migrations: { name: string; sql: string }[] = [
       UPDATE hall_of_fame h SET position = o.n FROM (SELECT id, row_number() OVER (ORDER BY id DESC) AS n FROM hall_of_fame) o WHERE h.id = o.id;
     `,
   },
+  {
+    // Expected vs actual (SPEC §5b): a virtual portfolio following the decisions. Rebuilt from bot_logs when needed, so
+    // the keys make a replay add nothing twice. shadow_decisions keeps each bar's closes for the slippage of its fills.
+    name: '006_shadow_tracking',
+    sql: `
+      CREATE TABLE shadow_points (
+        ts            timestamptz NOT NULL,
+        mode          text NOT NULL,
+        strategy_id   text NOT NULL,
+        expected_eur  numeric NOT NULL,
+        actual_eur    numeric,
+        hold_eur      numeric NOT NULL,
+        PRIMARY KEY (mode, strategy_id, ts)
+      );
+
+      CREATE TABLE shadow_decisions (
+        mode         text NOT NULL,
+        strategy_id  text NOT NULL,
+        bar          bigint NOT NULL,
+        ts           timestamptz NOT NULL,
+        prices       jsonb NOT NULL,
+        with_orders  boolean NOT NULL,
+        PRIMARY KEY (mode, strategy_id, bar)
+      );
+    `,
+  },
 ];

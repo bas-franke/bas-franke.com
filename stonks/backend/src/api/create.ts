@@ -5,6 +5,7 @@ import type { ApiDeps } from './deps.js';
 import { historyRoutes } from './history.js';
 import { hallRoutes } from './hall.js';
 import { trackRoutes } from './track.js';
+import { trackingRoutes } from './tracking.js';
 import { notesRoutes } from './notes.js';
 import { writeupRoutes } from './writeups.js';
 import { researchRoutes } from './research.js';
@@ -67,6 +68,7 @@ export function createApi(rawDeps: ApiDeps) {
   api.use(researchRoutes(deps));
   api.use(hallRoutes(deps));
   api.use(trackRoutes(deps));
+  api.use(trackingRoutes(deps));
   api.use(writeupRoutes(deps));
   api.use(notesRoutes(deps));
 

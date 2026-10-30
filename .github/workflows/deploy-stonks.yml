@@ -175,10 +175,16 @@ jobs:
           STONKS_ADMIN_PASSWORD: ${{ secrets.STONKS_ADMIN_PASSWORD }}
           BITVAVO_API_KEY: ${{ secrets.BITVAVO_API_KEY }}
           BITVAVO_API_SECRET: ${{ secrets.BITVAVO_API_SECRET }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          STONKS_ALERT_EMAIL: ${{ secrets.STONKS_ALERT_EMAIL }}
         run: |
           [ -n "$STONKS_ADMIN_PASSWORD" ] || echo "::warning::STONKS_ADMIN_PASSWORD is not set; nobody can log in to the dashboard."
           [ -n "$BITVAVO_API_KEY" ] || echo "::warning::BITVAVO_API_KEY is not set; the bot can only paper trade."
-          for name in STONKS_ADMIN_PASSWORD BITVAVO_API_KEY BITVAVO_API_SECRET; do
+          for name in SENDGRID_API_KEY MAIL_FROM STONKS_ALERT_EMAIL; do
+            [ -n "${!name}" ] || echo "::warning::$name is not set; the bot cannot mail alerts."
+          done
+          for name in STONKS_ADMIN_PASSWORD BITVAVO_API_KEY BITVAVO_API_SECRET SENDGRID_API_KEY MAIL_FROM STONKS_ALERT_EMAIL; do
             value=${!name}
             [ -n "$value" ] || continue
             # Quote for Node's --env-file parser: unquoted, a '#' starts a comment and would silently cut the
