@@ -4,6 +4,7 @@ import { query } from '../db.js';
 import { errText, log } from '../log.js';
 import { getBotSettings, getSetting, onSettingsChange, setSetting, updateBotSettings, type BotSettings, type ManualAllocation } from '../settings.js';
 import { INTERVAL_MS, validateSpec, type Candle, type StrategySpec } from '../strategies/index.js';
+import { codeHashOf } from '../strategies/python.js';
 import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython, TRADED_MARKETS } from '../strategies/runtime.js';
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
@@ -76,6 +77,8 @@ interface ModeState {
   /** JSON of the strategy these fields belong to; a different strategy starts fresh. */
   strategyKey?: string;
   strategyStart?: number;
+  /** Lab code hash the strategy started on; a change at the same VERSION is reported once (SPEC §6b). */
+  codeHash?: string;
   /** Markets exited by a stop; no re-entry until the strategy's own target for them goes back to 0. */
   locks: Record<string, string>;
   /** Highest price since the current position opened, for the trailing stop. */
@@ -403,10 +406,17 @@ async function tickBody() {
   const ms = st[s.mode];
   const key = JSON.stringify(s.strategy);
   if (ms.strategyKey !== key) {
-    st[s.mode] = { ...nextStrategy(ms), strategyKey: key, strategyStart: now };
+    st[s.mode] = { ...nextStrategy(ms), strategyKey: key, strategyStart: now, codeHash: codeHashOf(s.strategy) };
     await saveState(st);
     await log('info', 'strategy_started', `Running ${s.strategy.name} (${s.strategy.id}) in ${s.mode} mode`, { strategy: s.strategy });
     return tickBody2(s, broker, st, version, now);
+  }
+  const code = codeHashOf(s.strategy);
+  if (code && code !== ms.codeHash) {
+    // The first check after this was added has nothing to compare with; it only records the hash.
+    if (ms.codeHash) await log('error', 'family_code_changed', `${s.strategy.name}: the lab code behind it changed without a VERSION bump. The bot keeps trading it, but it is no longer exactly the code the research tested`, { family: s.strategy.family, before: ms.codeHash, after: code });
+    ms.codeHash = code;
+    await saveState(st);
   }
   return tickBody2(s, broker, st, version, now);
 }

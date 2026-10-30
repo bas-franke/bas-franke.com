@@ -174,6 +174,7 @@ mock.module('../src/bitvavo/index.js', { exports: { ...realClient, ...precision,
 mock.module('../src/db.js', { exports: { query: async () => ({ rows: [] }) } });
 // A lab family whose answer the tests script (SPEC §6b).
 let labAnswer: unknown = { t: null, weights: {} };
+let labHash: string | undefined;
 const labFamily = { family: 'moon_core', title: 'Moon', summary: '', version: 1, multiMarket: true, anchored: false, params: [] };
 mock.module('../src/strategies/python.js', {
   exports: {
@@ -182,6 +183,7 @@ mock.module('../src/strategies/python.js', {
     cachedExplanation: () => undefined,
     describePy: async () => ({ error: null, markets: [], anchored: false, explanation: '' }),
     preparePy: () => undefined,
+    codeHashOf: () => labHash,
   },
 });
 const logs: Array<{ level: string; event: string; message: string; data?: any }> = [];
@@ -453,6 +455,22 @@ test('chase: new limit orders from a decision start one tick over the live best 
 const lab = { ...validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', execution: { orderType: 'market' } }), family: 'moon_core', familyVersion: 1 } as StrategySpec;
 const lastBar = (now: number) => barOpen(now - 5_000, '1h') - INTERVAL_MS['1h'];
 const barStart = (ms: number) => Math.ceil(ms / INTERVAL_MS['1h']) * INTERVAL_MS['1h'];
+
+test('lab code that changes without a VERSION bump is reported once and trading goes on', async (t) => {
+  reset(lab);
+  t.mock.timers.enable({ apis: ['Date'], now: barStart(Date.parse('2026-10-28T10:30:00Z') + stray * 120_000) + 10_000 });
+  labAnswer = { hold: 'not relevant here' };
+  labHash = 'aaa';
+  await tick();
+  await tick();
+  assert.equal(logged('family_code_changed').length, 0);
+  labHash = 'bbb';
+  await tick();
+  await tick();
+  assert.equal(logged('family_code_changed').length, 1);
+  assert.equal(status.lastTickError, null);
+  labHash = undefined;
+});
 
 test('hold: the lab cannot decide: nothing is placed, it asks again, and after the grace period the bar is given up', async (t) => {
   reset(lab);

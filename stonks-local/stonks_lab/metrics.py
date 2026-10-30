@@ -72,7 +72,9 @@ def compute(equity, ts, trades: list[dict], start_eur: float, interval: str | No
     final = float(e[-1])
     ret = final / start_eur - 1.0
     imss = INTERVAL_MS.get(interval) if interval else None
-    years = n * imss / YEAR_MS if imss else None
+    # Calendar span, not the bar count: a market with gaps in its candles would otherwise look shorter and earn more.
+    span_ms = int(ts[-1]) - int(ts[0]) + imss if imss and ts is not None and len(ts) == n else None
+    years = max(span_ms, n * imss) / YEAR_MS if span_ms else (n * imss / YEAR_MS if imss else None)
     cagr = None
     if years and years * 365 >= 30 and final > 0:
         cagr = (final / start_eur) ** (1.0 / years) - 1.0
