@@ -26,9 +26,19 @@ Session 12 audit:
 - **Dead band.** A quarter step at 50 % share is 12.5 % of equity, far over the 2 % band, so no signal is lost; but 30-44 % of fills are drift trims, ~11 % of fees. A 5 % band changes the yearly return by -0.1 to +0.7 points. EUR 5 minimum is not binding at EUR 1000.
 - **Loss guard (`out/guard_results.json`).** No action changes the worst drop. `stop` costs 4-15 points a year (3-day restart); `no_buys` 0.7-2.8 at 10 %, 0-0.7 at 15 %, 0-0.3 at 20 %. Recommended: `no_buys` at 15 %, ~1 trigger day a year on a sleeve.
 - **Fees.** Session tabs: 1-3 and stoploss real, 4-5 flat 0.05 %, 6-12 real; timeframe tabs real. Absolute scores are real-fee everywhere: S4/S5 window scores fall 1.4-3.8 points.
-- **CAGR bug, not fixed.** `metrics.years` counts bars, not calendar time; 15m history has gaps (ETH 4.6 %), so published yearly figures run high: s9 ETH +117.8 on the card, +109.8 on calendar time; hold +47.7 vs +45.0. Session 12 uses calendar time.
+- **CAGR bug, fixed in 0c9e9b9, old cards not republished.** `metrics.years` counted bars, not calendar time; 15m history has gaps (ETH 4.6 %), so cards up to Session 11 run high: s9 ETH +117.8 on the card, +109.8 on calendar time; hold +47.7 vs +45.0. Sessions 12-13 use calendar time.
 - **Engine.** Stops now use the plain fill price like the bot; no published card uses `risk` stops. Finding #148 fixed: clock_a13, delay_a13, placebo_dip_a05 cannot rank (delay_a13 reached 11.6 in the registry); none was ever published.
 - **Open test failures, not from this work:** `s10_dipvote` (untracked, default outside its space), `xskew_a18` (never decides on cached data).
+
+### Session 13: risk layers on the live book (2026-10-30, 20 agents)
+
+Layers multiply s9_cyclebull's target by 0..1 (`families/_s13_core.py`, `h.trim_check`), so the main strategy stays. Harness `out/_s13_harness.py`, lead check `out/_s13_verify.py`, publish `out/_s13_publish.py`. Start: ETH drop 51.6, 10-coin 53.6, ETH +109.8 vs hold +45.0, 10 coins +88.3 vs +21.2, 19 unseen coins drop 64.7.
+
+- **Bar.** Flat size cuts cost ~0.55 score per drop point, so rank = score - 0.5 x (drop - 52.6) gives them nothing; 17 of 20 beat 63.74.
+- **Winners.** timestop: ETH drop 34.0 (nudged median 34.0, worst 40.3), ETH +110.1, 10 coins +88.9, unseen 65.1. parabola: 33.0 (35.4, 40.3), +113.5, +86.6, unseen 64.1, BTC +69.9 falls to +60.9. breadth, equitybrake, lockgain: ETH 40.3; equitybrake is the only one that clearly helps unseen coins (60.0, 10 of 10 coins' mean 50.3).
+- **What works.** Stopping the second leg of a crash. Most layers reach ETH 33-34 by fixing two episodes: March 2020 and May 2021. 34 is a floor: Sep 2020 and the 2024-26 bleeds set it. Buys-only and latched caps beat selling and quick release.
+- **It does not generalize well.** ETH gains are large, but crash caps did nothing or worse on the 19 unseen coins (crashcap 67.4, aftershock 67.3, combo 68.2 vs 64.7). Treat the ETH figure as fitted to two events. May 2021 is a cliff: slightly other settings return ETH 40.3.
+- **Dead ends.** Position stops and fast shock exits sell the lows (shocks mean-revert). Long-trend dip filters lower nothing: dips in downtrends pay. Losing streaks do not predict losses. Slow bleeds stayed unsolved; volumealarm alone improved all 7 ETH episodes but costs 1.8 score.
 
 ## Top 10 (diverse, out-of-sample score)
 
