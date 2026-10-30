@@ -4,11 +4,11 @@ import { query } from '../db.js';
 import { errText, log } from '../log.js';
 import { getBotSettings, getSetting, onSettingsChange, setSetting, updateBotSettings, type BotSettings, type ManualAllocation } from '../settings.js';
 import { INTERVAL_MS, validateSpec, type Candle, type StrategySpec } from '../strategies/index.js';
-import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython } from '../strategies/runtime.js';
+import { candlePlan, decide as decideTargets, isAnchored, prepare, runsInPython, TRADED_MARKETS } from '../strategies/runtime.js';
 import type { Balance, Broker } from './broker.js';
 import { LiveBroker } from './live.js';
-import { BUY_CASH_MARGIN, checkDay, limitInEur, makerPrice, MARKET_SLIPPAGE, WINDOW_MS, windowBaseline, type LossLimit, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
-import { allPrices, bestBidAsk, closedCandles, eurPrice, marketRules } from './marketData.js';
+import { bookCheck, BUY_CASH_MARGIN, checkDay, followsBook, limitInEur, makerPrice, MARKET_SLIPPAGE, WINDOW_MS, windowBaseline, type LossAction, type LossLimit, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent, type PlanInput } from './logic.js';
+import { allPrices, bestBidAsk, bookDepth, closedCandles, eurPrice, marketRules } from './marketData.js';
 import { getWallet, PaperBroker, resetPaperWallet } from './paper.js';
 import { chaseLeftovers, fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
 import { amsterdamDay, barOpen, lastClosedBar } from './time.js';
@@ -21,11 +21,58 @@ const STRAY_RETRY_MS = 60_000;
 /** dca_dip replays from the strategy's start; past this many bars the history cannot be loaded and it stops trading. */
 export const DCA_MAX_BARS = 50_000;
 
+/** Pause between a bar's order attempts, and how many there may be. */
+const RETRY_BACKOFF_MS = 60_000;
+export const MAX_ORDER_ATTEMPTS = 5;
+/** Bitvavo's clock is measured again this often (and on every timestamp error, see the client). */
+const CLOCK_SYNC_MS = 3_600_000;
+/** How often `unknown` orders are looked up again. */
+const UNKNOWN_RECHECK_MS = 5 * 60_000;
+/** Without fresh balances or prices for this long, the loss guard says it is working blind. */
+const GUARD_BLIND_MS = 5 * 60_000;
+/** A tick running this long is stuck: the process restarts (PM2) instead of trading on nothing. */
+export const TICK_STUCK_MS = 5 * 60_000;
+const WATCHDOG_EVERY_MS = 30_000;
+/** How long `drain` waits for a running tick. */
+const DRAIN_WAIT_MS = 25_000;
+/** How often a stop exit that cannot go out is reported. */
+const STOP_WARN_MS = 10 * 60_000;
+
+/** The loss guard while its limit is reached (SPEC §5). */
+export interface GuardState {
+  since: number;
+  action: LossAction;
+  lossEur: number;
+  limitEur: number;
+}
+
+/**
+ * What a bar's decision planned, kept while the bar is current so orders that never got to work are placed again
+ * (retryDecision). Sizes stay those of the decision: closes and equity are stored with the weights.
+ */
+export interface BarDecision {
+  bar: number;
+  weights: Record<string, number>;
+  prices: Record<string, number>;
+  equityEur: number;
+  /** `eur` = the order as planned, `qty` = coins held at the decision: together they cap what a retry may still buy. */
+  planned: Array<{ market: string; side: 'buy' | 'sell'; eur: number; qty: number }>;
+  attempts: number;
+  nextAt: number;
+  done: boolean;
+}
+
 /** Per-mode engine memory, stored in `settings.bot_state` so restarts pick up where they left off. */
 interface ModeState {
   day?: DayState;
   /** Open time of the last bar a decision was made on (never decide twice on one bar). */
   lastDecidedBar?: number;
+  decision?: BarDecision;
+  guard?: GuardState;
+  /** Last known EUR price per held coin, so one without a ticker keeps its value across restarts. */
+  knownPrices?: Record<string, number>;
+  /** Coins outside the traded markets already reported for this strategy. */
+  foreignWarned?: string[];
   /** JSON of the strategy these fields belong to; a different strategy starts fresh. */
   strategyKey?: string;
   strategyStart?: number;
@@ -38,6 +85,8 @@ interface ModeState {
 type BotState = Record<Mode, ModeState>;
 const STATE_KEY = 'bot_state';
 const emptyMode = (): ModeState => ({ locks: {}, trail: {} });
+/** A new strategy starts fresh; the account's loss window and guard are not the strategy's. */
+const nextStrategy = (ms: ModeState): ModeState => ({ ...emptyMode(), day: ms.day, guard: ms.guard, knownPrices: ms.knownPrices, lastSnapshotAt: ms.lastSnapshotAt });
 
 /** Markets a manual "move everything" trades: the only ones the bot may hold (owner's rule, 2026-10-27). */
 export const MANUAL_MARKETS = ['BTC-EUR', 'ETH-EUR'];
@@ -99,6 +148,11 @@ export const status = {
   lastIdleRefresh: 0,
   /** Bumped by every settings change so a running tick can notice and stop placing orders. */
   settingsVersion: 0,
+  lastClockSync: 0,
+  lastUnknownCheck: 0,
+  /** Since when the loss guard has had no fresh balances or prices, and whether that was reported. */
+  guardBlindSince: null as number | null,
+  guardBlindLogged: false,
 };
 
 interface PortfolioView {
@@ -110,16 +164,24 @@ interface PortfolioView {
   cashAvailableEur: number;
   quantities: Record<string, number>;
   prices: Map<string, number>;
+  /** EUR price of a coin: live, or the last one known when it has no ticker (never €0 for a coin that had a price). */
+  priceOf: (symbol: string) => number;
 }
 const lastPortfolio: Partial<Record<Mode, PortfolioView>> = {};
 export const cachedPortfolio = (mode: Mode) => lastPortfolio[mode];
 export const lastDayState: Partial<Record<Mode, DayState>> = {};
+/** The loss guard per mode as of the last check; null = not tripped. */
+export const lastGuardState: Partial<Record<Mode, GuardState | null>> = {};
+/** Last price seen per market. */
+const knownPrices = new Map<string, number>();
 
 export async function portfolio(s: BotSettings, mode: Mode = s.mode): Promise<PortfolioView> {
   currentPaperStart = s.paperStartEur;
   const balances = await brokerFor(mode).balances();
   const prices = await allPrices();
-  const valued = balances.map((b) => ({ ...b, eurValue: (b.available + b.inOrder) * eurPrice(b.symbol, prices) }));
+  for (const [m, p] of prices) knownPrices.set(m, p);
+  const priceOf = (symbol: string) => eurPrice(symbol, prices) || eurPrice(symbol, knownPrices);
+  const valued = balances.map((b) => ({ ...b, eurValue: (b.available + b.inOrder) * priceOf(b.symbol) }));
   const eur = balances.find((b) => b.symbol === 'EUR');
   const view: PortfolioView = {
     at: Date.now(),
@@ -130,6 +192,7 @@ export async function portfolio(s: BotSettings, mode: Mode = s.mode): Promise<Po
     cashAvailableEur: eur?.available ?? 0,
     quantities: Object.fromEntries(balances.map((b) => [b.symbol, b.available + b.inOrder])),
     prices,
+    priceOf,
   };
   lastPortfolio[mode] = view;
   return view;
@@ -168,8 +231,15 @@ async function runPending() {
       if (p.resetPaper !== undefined) await resetPaperWallet(p.resetPaper);
       if (p.resetDay || p.resetStrategy) {
         const st = await loadState();
-        if (p.resetDay) st[p.resetDay].day = undefined;
-        if (p.resetStrategy) st[p.resetStrategy] = { ...emptyMode(), day: st[p.resetStrategy].day, lastSnapshotAt: st[p.resetStrategy].lastSnapshotAt };
+        if (p.resetDay) {
+          const ms = st[p.resetDay];
+          ms.day = undefined;
+          ms.guard = undefined;
+          lastGuardState[p.resetDay] = null;
+          // Switched on again: as before, the bar in progress is left alone and the next one decides.
+          if (ms.decision) ms.decision.done = true;
+        }
+        if (p.resetStrategy) st[p.resetStrategy] = nextStrategy(st[p.resetStrategy]);
         await saveState(st);
       }
     } catch (err) {
@@ -209,13 +279,22 @@ export async function switchOff(reason: string, level: 'info' | 'warn' | 'error'
 let timer: NodeJS.Timeout | null = null;
 let ticking = false;
 let kickTimer: NodeJS.Timeout | null = null;
+let watchdogTimer: NodeJS.Timeout | null = null;
+/** When the running tick began, and its promise for `drain`. */
+let tickStartedAt: number | null = null;
+let running: Promise<void> | null = null;
+let draining = false;
 
 export function start() {
   if (status.started) return;
   status.started = true;
+  draining = false;
   listen();
   void log('info', 'engine_started', `Bot engine started (tick every ${TICK_MS / 1000} s)`);
   timer = setInterval(() => void tick(), TICK_MS);
+  // Outside the tick and its lock: this is what still runs when a tick hangs.
+  watchdogTimer = setInterval(() => watchdog(), WATCHDOG_EVERY_MS);
+  watchdogTimer.unref();
   kick(2000);
 }
 
@@ -223,8 +302,32 @@ export function stop() {
   status.started = false;
   if (timer) clearInterval(timer);
   if (kickTimer) clearTimeout(kickTimer);
+  if (watchdogTimer) clearInterval(watchdogTimer);
   timer = null;
   kickTimer = null;
+  watchdogTimer = null;
+}
+
+/** For a clean shutdown: no new ticks, and the running one stops placing orders and gets up to 25 s to finish. */
+export async function drain(): Promise<void> {
+  stop();
+  draining = true;
+  status.settingsVersion++;
+  if (!running) return;
+  let wait: NodeJS.Timeout | undefined;
+  await Promise.race([running, new Promise((r) => (wait = setTimeout(r, DRAIN_WAIT_MS)))]);
+  clearTimeout(wait);
+}
+
+/** Exits (PM2 restarts the process) when a tick has been running too long. Returns true when it did. */
+export function watchdog(now = Date.now(), exit: (code: number) => void = (code) => process.exit(code)): boolean {
+  if (tickStartedAt === null || now - tickStartedAt < TICK_STUCK_MS) return false;
+  const minutes = ((now - tickStartedAt) / 60_000).toFixed(1);
+  tickStartedAt = null;
+  // The log goes to the database, which may be the very thing that hangs.
+  const done = () => exit(1);
+  void Promise.race([log('error', 'tick_stuck', `A bot tick has been running for ${minutes} min; restarting the process`), new Promise((r) => setTimeout(r, 3000))]).then(done, done);
+  return true;
 }
 
 /** Runs a tick soon (after settings changes) without waiting for the interval. */
@@ -237,9 +340,15 @@ export function kick(delay = 200) {
   }, delay);
 }
 
-export async function tick(): Promise<void> {
-  if (ticking) return;
+export function tick(): Promise<void> {
+  if (ticking || draining) return Promise.resolve();
   ticking = true;
+  tickStartedAt = Date.now();
+  running = runTick();
+  return running;
+}
+
+async function runTick(): Promise<void> {
   try {
     await withLock(tickBody);
     status.lastTickError = null;
@@ -249,6 +358,8 @@ export async function tick(): Promise<void> {
   } finally {
     status.lastTickAt = Date.now();
     ticking = false;
+    tickStartedAt = null;
+    running = null;
   }
 }
 
@@ -263,7 +374,12 @@ async function tickBody() {
     await startup(s);
     status.startupDone = true;
   }
+  if (bitvavo.hasKeys && now - status.lastClockSync >= CLOCK_SYNC_MS) {
+    status.lastClockSync = now;
+    await bitvavo.syncTime().catch((err) => log('warn', 'clock_sync_failed', `Measuring Bitvavo's clock failed: ${errText(err)}`));
+  }
   await cancelStray(s, now);
+  await recheckUnknown(now);
 
   if (!s.enabled) {
     if (now - status.lastIdleRefresh > IDLE_REFRESH_MS) {
@@ -287,7 +403,7 @@ async function tickBody() {
   const ms = st[s.mode];
   const key = JSON.stringify(s.strategy);
   if (ms.strategyKey !== key) {
-    st[s.mode] = { ...emptyMode(), day: ms.day, lastSnapshotAt: ms.lastSnapshotAt, strategyKey: key, strategyStart: now };
+    st[s.mode] = { ...nextStrategy(ms), strategyKey: key, strategyStart: now };
     await saveState(st);
     await log('info', 'strategy_started', `Running ${s.strategy.name} (${s.strategy.id}) in ${s.mode} mode`, { strategy: s.strategy });
     return tickBody2(s, broker, st, version, now);
@@ -297,52 +413,51 @@ async function tickBody() {
 
 async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: number, now: number) {
   const ms = st[s.mode];
-  let fills = await broker.sync(s.fees);
-  let pf = await portfolio(s);
-
-  // Daily loss guard (SPEC §5).
-  const afterId = ms.day?.lastFillId ?? (await maxFillId(s.mode));
-  const newFills = ms.day ? await fillsAfter(s.mode, afterId) : [];
-  const check = checkDay(
-    ms.day,
-    now,
-    pf.equityEur,
-    pf.quantities,
-    (sym) => eurPrice(sym, pf.prices),
-    newFills.map((f) => ({ ...f, base: f.market.split('-')[0] })),
-    s.dailyLossLimit,
-  );
-  if (!ms.day) check.state.lastFillId = afterId;
-  if (check.newDay) await log('info', 'day_start', `Loss window starts at €${check.state.startEquity.toFixed(2)} equity (${s.mode}); the limit counts the last 24 h from here`);
-  if (check.flowEur) await log('warn', 'balance_flow', `Balance changed by €${check.flowEur.toFixed(2)} without a trade (deposit or withdrawal?); the daily loss baseline moved with it`, { flowEur: check.flowEur });
-  ms.day = check.state;
-  lastDayState[s.mode] = check.state;
-  await saveState(st);
-  if (check.tripped) {
-    const limitText = `${fmtLimit(s.dailyLossLimit)}${s.dailyLossLimit.unit === 'pct' ? ` (€${check.limitEur.toFixed(2)})` : ''}`;
-    await log('error', 'daily_loss_limit', `Loss over the last 24 h is €${check.lossEur.toFixed(2)}, at or over the ${limitText} limit: cancelling orders and switching the bot off`, { lossEur: check.lossEur, limitEur: check.limitEur, limit: s.dailyLossLimit, baselineEur: check.baselineEur, equity: pf.equityEur });
-    await switchOff(`24 h loss limit of ${limitText} reached`, 'error');
-    return;
+  for (const [symbol, price] of Object.entries(ms.knownPrices ?? {})) if (!knownPrices.has(`${symbol}-EUR`)) knownPrices.set(`${symbol}-EUR`, price);
+  // A failed Bitvavo call fails the tick, but only after the loss guard has run on the last known numbers.
+  let failure: unknown;
+  let fills = 0;
+  try {
+    fills = await broker.sync(s.fees);
+  } catch (err) {
+    failure = err;
   }
+  let pf: PortfolioView | undefined;
+  try {
+    pf = await portfolio(s);
+  } catch (err) {
+    failure ??= err;
+  }
+  const view = pf ?? (await lastKnownView(ms));
+  await watchGuardBlindness(pf ? null : (failure ?? 'no data'), now);
+  const stopped = view ? await lossGuard(s, broker, st, view, !pf, now) : false;
+  if (failure) throw failure;
+  if (stopped || !pf) return;
+  const blockBuys = !!ms.guard && s.dailyLossLimit.action === 'no_buys';
 
   const stillValid = () => status.settingsVersion === version;
 
-  fills += await handleTimeouts(s, broker, now, stillValid);
-  fills += await handleChase(s, broker, now, stillValid);
+  fills += await handleTimeouts(s, broker, now, stillValid, blockBuys);
+  fills += await handleChase(s, broker, now, stillValid, blockBuys);
   fills += await handleStops(s, broker, ms, pf, stillValid);
 
   const bar = lastClosedBar(now, s.strategy.interval);
   if (stillValid() && (ms.lastDecidedBar === undefined || bar > ms.lastDecidedBar)) {
-    // Remember the bar BEFORE placing anything: a crash mid-way skips the rest of this bar rather than doubling it.
-    // Marked right before the first order goes out (not before loading candles, so a failed fetch retries on the
-    // next tick instead of skipping the whole bar).
-    const markDecided = async () => {
+    // Remember the bar and its plan BEFORE placing anything: a crash mid-way resumes through retryDecision, whose
+    // open-order check keeps it from doubling what did go out. Marked right before the first order goes out (not
+    // before loading candles, so a failed fetch retries on the next tick instead of skipping the whole bar).
+    const markDecided = async (decision?: BarDecision) => {
       ms.lastDecidedBar = bar;
+      ms.decision = decision;
       await saveState(st);
     };
     if (fills) pf = await portfolio(s);
-    await decide(s, broker, ms, bar, pf, stillValid, markDecided);
+    await decide(s, broker, ms, bar, pf, stillValid, markDecided, blockBuys);
     fills += await broker.sync(s.fees);
+  } else if (stillValid() && ms.decision && !ms.decision.done && ms.decision.bar === bar && now >= ms.decision.nextAt) {
+    if (fills) pf = await portfolio(s);
+    const placed = await retryDecision(s, broker, ms, ms.decision, pf, now, stillValid, blockBuys);
+    if (placed) fills += placed + (await broker.sync(s.fees));
   }
 
   if (fills > 0 || !ms.lastSnapshotAt || now - ms.lastSnapshotAt >= SNAPSHOT_MS) {
@@ -351,6 +466,71 @@ async function tickBody2(s: BotSettings, broker: Broker, st: BotState, version: 
     ms.lastSnapshotAt = now;
   }
   await saveState(st);
+}
+
+type GuardView = Pick<PortfolioView, 'equityEur' | 'quantities' | 'priceOf'>;
+
+/** The portfolio by the last known holdings and prices, for the loss guard when Bitvavo's balances or prices fail. */
+async function lastKnownView(ms: ModeState): Promise<GuardView | null> {
+  const quantities = ms.day?.lastHoldings;
+  if (!quantities) return null;
+  const fresh = await allPrices().catch(() => null);
+  for (const [m, p] of fresh ?? []) knownPrices.set(m, p);
+  const priceOf = (symbol: string) => eurPrice(symbol, knownPrices);
+  return { equityEur: Object.entries(quantities).reduce((sum, [symbol, qty]) => sum + qty * priceOf(symbol), 0), quantities, priceOf };
+}
+
+/** Says so, once per outage, when the guard has gone without fresh numbers for a while (`failure` null = it has them). */
+async function watchGuardBlindness(failure: unknown, now: number) {
+  if (failure === null) {
+    status.guardBlindSince = null;
+    status.guardBlindLogged = false;
+    return;
+  }
+  status.guardBlindSince ??= now;
+  if (status.guardBlindLogged || now - status.guardBlindSince < GUARD_BLIND_MS) return;
+  status.guardBlindLogged = true;
+  await log('error', 'guard_blind', `The loss guard has had no fresh balances or prices for ${Math.round((now - status.guardBlindSince) / 60_000)} min (${errText(failure)}); at best it runs on the last known numbers`);
+}
+
+/**
+ * Daily loss guard (SPEC §5). Logs a trip once, re-arms when the loss is back under the limit, and acts on
+ * `dailyLossLimit.action`. Returns true when it switched the bot off. `stale` = a view from last known numbers: nothing
+ * in it can be told from a deposit, so fills wait for a fresh one.
+ */
+async function lossGuard(s: BotSettings, broker: Broker, st: BotState, pf: GuardView, stale: boolean, now: number): Promise<boolean> {
+  const ms = st[s.mode];
+  const limit = s.dailyLossLimit;
+  const afterId = ms.day?.lastFillId ?? (await maxFillId(s.mode));
+  const newFills = ms.day && !stale ? await fillsAfter(s.mode, afterId) : [];
+  const check = checkDay(ms.day, now, pf.equityEur, pf.quantities, pf.priceOf, newFills.map((f) => ({ ...f, base: f.market.split('-')[0] })), limit);
+  if (!ms.day) check.state.lastFillId = afterId;
+  if (check.newDay) await log('info', 'day_start', `Loss window starts at €${check.state.startEquity.toFixed(2)} equity (${s.mode}); the limit counts the last 24 h from here`);
+  if (check.flowEur) await log('warn', 'balance_flow', `Balance changed by €${check.flowEur.toFixed(2)} without a trade (deposit or withdrawal?); the daily loss baseline moved with it`, { flowEur: check.flowEur });
+  ms.day = check.state;
+  lastDayState[s.mode] = check.state;
+  ms.knownPrices = Object.fromEntries(Object.keys(pf.quantities).filter((c) => c !== 'EUR' && pf.quantities[c] > 0 && pf.priceOf(c) > 0).map((c) => [c, pf.priceOf(c)]));
+  const limitText = `${fmtLimit(limit)}${limit.unit === 'pct' ? ` (€${check.limitEur.toFixed(2)})` : ''}`;
+  if (check.tripped && !ms.guard) {
+    const consequence = { alert: 'trading goes on', no_buys: 'open buys are cancelled and new buys are withheld, exits go on', stop: 'cancelling orders and switching the bot off' }[limit.action];
+    await log('error', 'daily_loss_limit', `Loss over the last 24 h is €${check.lossEur.toFixed(2)}, at or over the ${limitText} limit: ${consequence}`, { lossEur: check.lossEur, limitEur: check.limitEur, limit, baselineEur: check.baselineEur, equity: pf.equityEur });
+    ms.guard = { since: now, action: limit.action, lossEur: check.lossEur, limitEur: check.limitEur };
+  } else if (!check.tripped && ms.guard && pf.equityEur > 0) {
+    await log('info', 'guard_cleared', `Loss over the last 24 h is €${check.lossEur.toFixed(2)}, back under the ${limitText} limit`, { lossEur: check.lossEur, limitEur: check.limitEur, since: ms.guard.since });
+    ms.guard = undefined;
+  }
+  if (check.tripped && limit.action === 'stop') ms.guard = undefined; // switching on again starts a new window
+  lastGuardState[s.mode] = ms.guard ?? null;
+  await saveState(st);
+  if (check.tripped && limit.action === 'stop') {
+    await switchOff(`24 h loss limit of ${limitText} reached`, 'error');
+    return true;
+  }
+  // Every tick while it lasts: a cancel Bitvavo did not confirm is simply tried again.
+  if (ms.guard && limit.action === 'no_buys')
+    for (const o of await openOrders(s.mode))
+      if (o.side === 'buy') await broker.cancel(o, 'loss guard: no new buys').catch((err) => log('error', 'cancel_failed', `Cancelling order ${o.id} failed: ${errText(err)}`));
+  return false;
 }
 
 let lastStrayAttempt = 0;
@@ -373,12 +553,20 @@ async function cancelStray(s: BotSettings, now: number) {
   }
 }
 
+/** Orders Bitvavo stopped finding no longer block anything but may still have filled (live broker). */
+async function recheckUnknown(now: number) {
+  if (!bitvavo.hasKeys || now - status.lastUnknownCheck < UNKNOWN_RECHECK_MS) return;
+  status.lastUnknownCheck = now;
+  await liveBroker.recheckUnknown().catch((err) => log('warn', 'order_sync_failed', `Rechecking unknown orders failed: ${errText(err)}`));
+}
+
 async function startup(s: BotSettings) {
   // Crash safety: whatever the DB thinks is open gets checked against the exchange before anything new happens.
   try {
     const liveOpen = await openOrders('live');
     if (bitvavo.hasKeys) {
       await bitvavo.syncTime().catch(() => undefined);
+      status.lastClockSync = Date.now();
       if (liveOpen.length || s.mode === 'live') {
         await liveBroker.reconcile();
         await log('info', 'reconciled', `Checked ${liveOpen.length} open live order(s) with Bitvavo after start`);
@@ -406,12 +594,12 @@ async function snapshot(mode: Mode, pf: PortfolioView) {
 
 const baseOf = (market: string) => market.split('-')[0];
 
-async function handleTimeouts(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean): Promise<number> {
+async function handleTimeouts(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean, blockBuys: boolean): Promise<number> {
   let fills = 0;
   for (const o of await openOrders(s.mode)) {
     if (o.orderType !== 'limit' || !o.meta.expiresAt || now < o.meta.expiresAt) continue;
     const ok = await broker.cancel(o, `not filled within ${s.strategy.execution.timeoutBars} bar(s)`);
-    if (!ok || o.meta.fallback !== 'market' || o.meta.fallbackDone || !stillValid()) continue;
+    if (!ok || o.meta.fallback !== 'market' || o.meta.fallbackDone || !stillValid() || (blockBuys && o.side === 'buy')) continue;
     const { rows } = await query('SELECT amount, filled_amount FROM orders WHERE id = $1', [o.id]);
     const remaining = Number(rows[0].amount) - Number(rows[0].filled_amount);
     await updateOrder(o.id, {}, { fallbackDone: true }); // before placing: never two fallbacks for one order
@@ -441,11 +629,11 @@ const CHASE_SUFFIX = / \((repriced|rest at market)\)$/;
  * the rest goes out as a market order. Buys are capped to the free cash (taker fee and margin kept free, as in
  * planOrders). A cancel Bitvavo has not confirmed yet is continued on a later tick, once sync has closed the order.
  */
-async function handleChase(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean): Promise<number> {
+async function handleChase(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean, blockBuys: boolean): Promise<number> {
   const c = s.chase;
   let placed = 0;
   for (const o of await openOrders(s.mode)) {
-    if (o.orderType !== 'limit' || o.meta.chaseSince === undefined || o.status === 'pending' || !stillValid()) continue;
+    if (o.orderType !== 'limit' || o.meta.chaseSince === undefined || o.status === 'pending' || !stillValid() || (blockBuys && o.side === 'buy')) continue;
     const toMarket = now - o.meta.chaseSince >= c.marketAfterMin * 60_000;
     if (!toMarket && now - o.meta.activeFrom < c.repriceSec * 1000) continue;
     const rules = (await marketRules()).get(o.market);
@@ -460,7 +648,7 @@ async function handleChase(s: BotSettings, broker: Broker, now: number, stillVal
   }
   for (const o of await chaseLeftovers(s.mode, now - CHASE_LEFTOVER_MS)) {
     if (!stillValid()) break;
-    if (o.strategyId !== s.strategy.id || (await openOrders(s.mode, o.market)).some((x) => x.side === o.side)) {
+    if (o.strategyId !== s.strategy.id || (blockBuys && o.side === 'buy') || (await openOrders(s.mode, o.market)).some((x) => x.side === o.side)) {
       await updateOrder(o.id, {}, { chaseDone: true }); // the strategy moved on, or a newer order already works
       continue;
     }
@@ -537,25 +725,41 @@ async function handleStops(s: BotSettings, broker: Broker, ms: ModeState, pf: Po
     if (!tr || tr.opened !== pos.openedByFill) tr = { opened: pos.openedByFill, peak: Math.max(price, pos.avgEntry) };
     tr.peak = Math.max(tr.peak, price);
     ms.trail[m] = tr;
-    const hit = stopHit(risk, pos.avgEntry, tr.peak, price);
-    if (!hit || ms.locks[m] || !stillValid()) continue;
-    ms.locks[m] = hit;
-    await log('warn', 'stop_triggered', `${m}: ${hit}; selling the position at market`, { avgEntry: pos.avgEntry, peak: tr.peak, price });
-    for (const o of await openOrders(s.mode, m)) await broker.cancel(o, 'stop triggered');
-    const bal = (await broker.balances()).find((b) => b.symbol === baseOf(m));
+    // A locked market that still holds a position is an exit that has not happened yet: the lock must not hide it, so
+    // every tick tries again (a cancel not confirmed, nothing free to sell yet, a refused order).
+    const pending = ms.locks[m];
+    const hit = pending ? null : stopHit(risk, pos.avgEntry, tr.peak, price);
+    const why = pending ?? hit;
+    if (!why || !stillValid()) continue;
+    if (hit) {
+      ms.locks[m] = hit;
+      await log('warn', 'stop_triggered', `${m}: ${hit}; selling the position at market`, { avgEntry: pos.avgEntry, peak: tr.peak, price });
+    }
     const rules = (await marketRules()).get(m);
     if (!rules) continue;
+    if (pending && pos.qty * price < rules.minOrderInQuoteAsset) continue; // the exit happened: only dust is left
+    const open = await openOrders(s.mode, m);
+    if (open.some((o) => o.side === 'sell' && o.orderType === 'market')) continue; // the exit is on its way
+    for (const o of open) await broker.cancel(o, 'stop triggered');
+    const bal = (await broker.balances()).find((b) => b.symbol === baseOf(m));
     const amount = roundAmount(Math.min(bal?.available ?? 0, pos.qty), rules.quantityDecimals);
     const problem = sizeProblem(rules, Number(amount), price);
     if (problem) {
-      await log('warn', 'stop_skipped', `${m}: stop exit skipped: ${problem}`);
+      const warned = stopWarned.get(m) ?? 0;
+      if (Date.now() - warned >= STOP_WARN_MS) {
+        stopWarned.set(m, Date.now());
+        await log('warn', 'stop_skipped', `${m}: stop exit cannot go out yet (${problem}); trying again every tick`);
+      }
       continue;
     }
-    if (await broker.place({ market: m, side: 'sell', orderType: 'market', amount, postOnly: false, reason: hit, valueEur: Number(amount) * price }, { strategyId: s.strategy.id, expiresAt: null, fallback: 'cancel', fees: s.fees }))
+    if (await broker.place({ market: m, side: 'sell', orderType: 'market', amount, postOnly: false, reason: why, valueEur: Number(amount) * price }, { strategyId: s.strategy.id, expiresAt: null, fallback: 'cancel', fees: s.fees }))
       placed++;
   }
   return placed;
 }
+
+/** When a market's stop exit that could not go out was last reported. */
+const stopWarned = new Map<string, number>();
 
 async function loadCandles(spec: StrategySpec, ms: ModeState, bar: number): Promise<Record<string, Candle[]>> {
   const ms_ = INTERVAL_MS[spec.interval];
@@ -585,7 +789,7 @@ export function dcaBarsNeeded(spec: StrategySpec, strategyStart: number | undefi
   return Math.ceil((bar - from) / ms) + 1;
 }
 
-async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, stillValid: () => boolean, markDecided: () => Promise<void>) {
+async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, stillValid: () => boolean, markDecided: (d?: BarDecision) => Promise<void>, blockBuys: boolean) {
   const spec = s.strategy;
   if (s.manual) {
     const prices: Record<string, number> = {};
@@ -593,7 +797,7 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
       const p = pf.prices.get(m);
       if (p) prices[m] = p;
     }
-    return placeTargets(s, broker, ms, bar, pf, manualWeights(s.manual), prices, stillValid, markDecided);
+    return placeTargets(s, broker, ms, bar, pf, manualWeights(s.manual), prices, stillValid, markDecided, blockBuys);
   }
   if (dcaBarsNeeded(spec, ms.strategyStart, bar) > DCA_MAX_BARS) {
     // Replaying from a later bar would restart the virtual DCA portfolio at zero and sell the position.
@@ -654,42 +858,60 @@ async function decide(s: BotSettings, broker: Broker, ms: ModeState, bar: number
     const cs = candles[m];
     if (cs?.length) prices[m] = cs[cs.length - 1][4];
   }
-  return placeTargets(s, broker, ms, bar, pf, decision.weights, prices, stillValid, markDecided);
+  return placeTargets(s, broker, ms, bar, pf, decision.weights, prices, stillValid, markDecided, blockBuys);
 }
 
-/** Target weights -> orders (planOrders) -> placed, for the strategy's decision or a manual allocation. */
-async function placeTargets(
-  s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, raw: Record<string, number>,
-  prices: Record<string, number>, stillValid: () => boolean, markDecided: () => Promise<void>,
-) {
-  const spec = s.strategy;
+/** Stop locks overrule the strategy: a locked market's weight is 0 until the strategy's own signal goes there. */
+const lockedWeights = (raw: Record<string, number>, ms: ModeState) => {
   const w = { ...raw };
-  for (const m of Object.keys(ms.locks)) {
-    if (!spec.markets.includes(m) || (raw[m] ?? 0) === 0) {
-      await log('info', 'stop_lock_cleared', `${m}: the strategy's signal reset after the stop exit; it may buy again`);
-      delete ms.locks[m];
-    } else w[m] = 0;
-  }
+  for (const m of Object.keys(ms.locks)) if (m in w) w[m] = 0;
+  return w;
+};
 
+/** Limit orders of this spec follow the book; a manual move always does. */
+const chases = (s: BotSettings) => !!s.manual || followsBook(s.strategy);
+
+/** BTC or ETH held although the strategy has no such market: it is sold (TRADED_MARKETS only, manual moves excepted). */
+const strandedMarkets = (s: BotSettings, pf: PortfolioView) =>
+  s.manual ? [] : (TRADED_MARKETS as readonly string[]).filter((m) => !s.strategy.markets.includes(m) && (pf.quantities[baseOf(m)] ?? 0) > 0);
+
+/**
+ * planOrders on the account as it is now, valued like the backtest: closes for everything that has one (coins and equity
+ * alike), so holdings and targets are measured with the same price. A retry passes the decision's equity and `only`.
+ */
+async function planFor(s: BotSettings, pf: PortfolioView, weights: Record<string, number>, closes: Record<string, number>, retry?: { equityEur: number; only: NonNullable<PlanInput['only']> }) {
+  const spec = s.strategy;
+  const stranded = strandedMarkets(s, pf);
+  const markets = [...spec.markets, ...stranded];
+  const prices = { ...closes };
+  for (const m of stranded) {
+    const p = pf.prices.get(m); // not in the strategy's candles
+    if (p) prices[m] = p;
+  }
   const rulesMap = await marketRules();
   const rules: Record<string, MarketRules> = {};
   const holdings: Record<string, Holding> = {};
-  let strategyCoins = 0;
-  for (const m of spec.markets) {
+  let liveCoins = 0;
+  let closeCoins = 0;
+  for (const m of markets) {
     const r = rulesMap.get(m);
     if (r) rules[m] = r;
     const b = pf.balances.find((x) => x.symbol === baseOf(m));
-    holdings[m] = { total: b ? b.available + b.inOrder : 0, available: b?.available ?? 0 };
-    strategyCoins += b ? b.eurValue : 0;
+    const total = b ? b.available + b.inOrder : 0;
+    holdings[m] = { total, available: b?.available ?? 0 };
+    liveCoins += b ? b.eurValue : 0;
+    closeCoins += prices[m] ? total * prices[m] : (b?.eurValue ?? 0);
   }
   const openSides: Record<string, Array<'buy' | 'sell'>> = {};
   for (const o of await openOrders(s.mode)) (openSides[o.market] ??= []).push(o.side);
-  const otherCoinsEur = pf.equityEur - pf.cashEur - strategyCoins;
+  const otherCoinsEur = pf.equityEur - pf.cashEur - liveCoins;
+  const equityEur = retry?.equityEur ?? pf.cashEur + closeCoins + otherCoinsEur;
 
-  // Limit orders start one tick inside the live best bid (buy) / ask (sell) on Bitvavo's book, not at the candle close.
+  // Limit orders that follow the book start one tick inside the live best bid (buy) / ask (sell) on Bitvavo's book, not
+  // at the candle close; specs tuned to rest stay at close∓offset. Stranded coins always leave with a chase.
   const book: Record<string, { bid: number; ask: number }> = {};
   if (spec.execution.orderType === 'limit') {
-    for (const m of spec.markets) {
+    for (const m of chases(s) ? markets : stranded) {
       try {
         book[m] = await bestBidAsk(m);
       } catch (err) {
@@ -697,29 +919,126 @@ async function placeTargets(
       }
     }
   }
-
   const plan = planOrders({
-    spec, targets: w, equityEur: pf.equityEur, cashAvailableEur: pf.cashAvailableEur, holdings, prices, book, rules,
-    maxExposureEur: s.maxExposureEur, otherCoinsEur, openSides, fees: s.fees,
+    spec: { ...spec, markets }, targets: weights, equityEur, cashAvailableEur: pf.cashAvailableEur, holdings, prices, book, rules,
+    maxExposureEur: s.maxExposureEur, otherCoinsEur, openSides, fees: s.fees, only: retry?.only,
   });
-  await log('info', 'decision', `Bar ${new Date(bar).toISOString()}: targets ${fmtWeights(w)}; ${plan.orders.length ? plan.orders.map((o) => `${o.side} ${o.market} €${o.valueEur.toFixed(2)}`).join(', ') : 'no orders'}`, {
-    bar, targets: raw, locked: Object.keys(ms.locks), equityEur: pf.equityEur, cashEur: pf.cashAvailableEur, notes: plan.notes, orders: plan.orders,
+  for (const o of plan.orders) if (stranded.includes(o.market)) o.reason = "not one of this strategy's markets: selling it";
+  return { plan, equityEur, prices, stranded, book };
+}
+
+/** Places a decision's orders: resting at their price with timeout and fallback, or following the book (handleChase). */
+async function placeOrders(s: BotSettings, broker: Broker, orders: OrderIntent[], stranded: string[], bar: number, stillValid: () => boolean) {
+  const spec = s.strategy;
+  const expiresAt = bar + INTERVAL_MS[spec.interval] * (1 + spec.execution.timeoutBars);
+  let placed = 0;
+  for (const intent of orders) {
+    if (!stillValid()) break;
+    const chase = intent.orderType === 'limit' && (chases(s) || stranded.includes(intent.market));
+    const row = await broker.place(intent, chase
+      ? { strategyId: spec.id, expiresAt: null, fallback: 'cancel', barTime: bar, fees: s.fees, chase: { since: Date.now(), root: null } }
+      : { strategyId: spec.id, expiresAt, fallback: spec.execution.fallback, barTime: bar, fees: s.fees });
+    if (row) placed++;
+  }
+  return placed;
+}
+
+/** Book check before a decision's orders go out: warns, never blocks; a failed read is ignored. Returns the spreads. */
+async function checkBooks(orders: OrderIntent[]) {
+  const spreads: Record<string, number> = {};
+  for (const o of orders) {
+    try {
+      const c = bookCheck(await bookDepth(o.market), o.side, o.valueEur);
+      if (!c) continue;
+      spreads[o.market] = c.spreadBps;
+      if (c.thin.length) await log('warn', 'thin_book', `${o.market}: thin book for this ${o.side}: ${c.thin.join(', ')}`, { market: o.market, side: o.side, valueEur: o.valueEur, spreadBps: c.spreadBps, depthEur: c.depthEur });
+    } catch {
+      // only a warning was at stake
+    }
+  }
+  return spreads;
+}
+
+/** Once per strategy: coins the bot may not trade are left alone, but the owner should know they are there. */
+async function warnForeignCoins(ms: ModeState, pf: PortfolioView) {
+  const seen = (ms.foreignWarned ??= []);
+  for (const b of pf.balances) {
+    if (b.symbol === 'EUR' || TRADED_MARKETS.includes(`${b.symbol}-EUR`) || seen.includes(b.symbol)) continue;
+    seen.push(b.symbol);
+    await log('warn', 'foreign_coin', `${b.symbol} (€${b.eurValue.toFixed(2)}) is in the account but the bot only trades ${TRADED_MARKETS.join(' and ')}; it stays untouched`, { symbol: b.symbol, eurValue: b.eurValue });
+  }
+}
+
+/** Target weights -> orders (planOrders) -> placed, for the strategy's decision or a manual allocation. */
+async function placeTargets(
+  s: BotSettings, broker: Broker, ms: ModeState, bar: number, pf: PortfolioView, raw: Record<string, number>,
+  closes: Record<string, number>, stillValid: () => boolean, markDecided: (d?: BarDecision) => Promise<void>, blockBuys: boolean,
+) {
+  const spec = s.strategy;
+  for (const m of Object.keys(ms.locks)) {
+    if (!spec.markets.includes(m) || (raw[m] ?? 0) === 0) {
+      await log('info', 'stop_lock_cleared', `${m}: the strategy's signal reset after the stop exit; it may buy again`);
+      delete ms.locks[m];
+    }
+  }
+  const w = lockedWeights(raw, ms);
+  if (!s.manual) await warnForeignCoins(ms, pf);
+
+  const { plan, equityEur, prices, stranded, book } = await planFor(s, pf, w, closes);
+  const planned = plan.orders.map((o) => ({ market: o.market, side: o.side, eur: o.valueEur, qty: pf.quantities[baseOf(o.market)] ?? 0 }));
+  // Loss guard: the decision stands and is logged, its buys wait until the loss is back under the limit.
+  const withheld = blockBuys ? plan.orders.filter((o) => o.side === 'buy') : [];
+  for (const o of withheld) plan.notes.push({ market: o.market, note: `buy of €${o.valueEur.toFixed(2)} withheld by the loss guard` });
+  const orders = plan.orders.filter((o) => !withheld.includes(o));
+  const cancelMarkets = plan.cancelMarkets.filter((m) => !withheld.some((o) => o.market === m));
+
+  const spreads = await checkBooks(orders);
+  for (const [m, b] of Object.entries(book)) spreads[m] ??= ((b.ask - b.bid) / ((b.ask + b.bid) / 2)) * 10_000;
+  await log('info', 'decision', `Bar ${new Date(bar).toISOString()}: targets ${fmtWeights(w)}; ${orders.length ? orders.map((o) => `${o.side} ${o.market} €${o.valueEur.toFixed(2)}`).join(', ') : 'no orders'}`, {
+    bar, strategyId: spec.id, mode: s.mode, targets: raw, prices, locked: Object.keys(ms.locks), equityEur, cashEur: pf.cashAvailableEur, spreads, notes: plan.notes, orders,
   });
-  await markDecided();
+  const decision: BarDecision = { bar, weights: raw, prices: closes, equityEur, planned, attempts: 0, nextAt: 0, done: !planned.length };
+  await markDecided(decision);
   if (!stillValid()) {
     await log('info', 'decision_aborted', 'Settings changed during the decision; no orders placed');
     return;
   }
-  for (const m of plan.cancelMarkets) for (const o of await openOrders(s.mode, m)) await broker.cancel(o, 'strategy changed direction');
-  const expiresAt = bar + INTERVAL_MS[spec.interval] * (1 + spec.execution.timeoutBars);
-  for (const intent of plan.orders) {
-    if (!stillValid()) break;
-    // Limit orders always follow the order book: handleChase re-prices them and finally sends the rest at market.
-    const chase = intent.orderType === 'limit';
-    await broker.place(intent, chase
-      ? { strategyId: spec.id, expiresAt: null, fallback: 'cancel', barTime: bar, fees: s.fees, chase: { since: Date.now(), root: null } }
-      : { strategyId: spec.id, expiresAt, fallback: spec.execution.fallback, barTime: bar, fees: s.fees });
+  for (const m of cancelMarkets) for (const o of await openOrders(s.mode, m)) await broker.cancel(o, 'strategy changed direction');
+  decision.attempts = 1;
+  decision.nextAt = Date.now() + RETRY_BACKOFF_MS;
+  await placeOrders(s, broker, orders, stranded, bar, stillValid);
+}
+
+/**
+ * Second chance for a bar's orders while it is current: a planned market+side with no working order (rejected, cancelled
+ * post-only, a crash before placing, a chase that ended unfilled) whose holdings still differ from the target beyond the
+ * dead-band is planned again from the stored decision. Only what was planned, and a buy only up to its planned size: as
+ * in the backtest, cash from this bar's sells waits for the next decision. Returns the orders placed.
+ */
+async function retryDecision(s: BotSettings, broker: Broker, ms: ModeState, d: BarDecision, pf: PortfolioView, now: number, stillValid: () => boolean, blockBuys: boolean): Promise<number> {
+  const open = await openOrders(s.mode);
+  const idle = d.planned.filter((p) => !open.some((o) => o.market === p.market && o.side === p.side));
+  d.nextAt = now + RETRY_BACKOFF_MS;
+  const allowed = idle.filter((p) => !(blockBuys && p.side === 'buy'));
+  if (!allowed.length) return 0;
+  const only = allowed.map((p) => ({
+    market: p.market, side: p.side,
+    maxEur: p.side === 'buy' ? p.eur - Math.max(0, (pf.quantities[baseOf(p.market)] ?? 0) - p.qty) * (d.prices[p.market] ?? 0) : undefined,
+  }));
+  const { plan, stranded } = await planFor(s, pf, lockedWeights(d.weights, ms), d.prices, { equityEur: d.equityEur, only });
+  if (!plan.orders.length) {
+    if (idle.length === d.planned.length && allowed.length === idle.length) d.done = true; // nothing is working, nothing is left
+    return 0;
   }
+  if (d.attempts >= MAX_ORDER_ATTEMPTS) {
+    d.done = true;
+    await log('error', 'order_retries_exhausted', `Bar ${new Date(d.bar).toISOString()}: ${plan.orders.map((o) => `${o.side} ${o.market}`).join(', ')} still not working after ${d.attempts} attempts; giving up until the next decision`, { bar: d.bar, attempts: d.attempts, orders: plan.orders });
+    return 0;
+  }
+  d.attempts++;
+  await log('warn', 'order_retry', `Bar ${new Date(d.bar).toISOString()}: placing ${plan.orders.map((o) => `${o.side} ${o.market} €${o.valueEur.toFixed(2)}`).join(', ')} again (attempt ${d.attempts} of ${MAX_ORDER_ATTEMPTS})`, { bar: d.bar, attempts: d.attempts, orders: plan.orders, notes: plan.notes });
+  for (const m of plan.cancelMarkets) for (const o of await openOrders(s.mode, m)) await broker.cancel(o, 'strategy changed direction');
+  return placeOrders(s, broker, plan.orders, stranded, d.bar, stillValid);
 }
 
 const fmtWeights = (w: Record<string, number>) =>
@@ -729,6 +1048,12 @@ const fmtLimit = (l: LossLimit) => (l.unit === 'pct' ? `${l.value} %` : `€${l.
 
 async function dayState(mode: Mode): Promise<DayState | undefined> {
   return lastDayState[mode] ?? (await loadState())[mode].day;
+}
+
+/** For the Overview: the loss guard right now, or null when it has not tripped. */
+export async function guardStatus(mode: Mode): Promise<GuardState | null> {
+  const known = lastGuardState[mode];
+  return known !== undefined ? known : ((await loadState())[mode].guard ?? null);
 }
 
 export async function todayPnl(mode: Mode, equity: number): Promise<number | null> {

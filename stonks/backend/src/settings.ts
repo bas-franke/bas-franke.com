@@ -1,4 +1,4 @@
-import type { LossLimit } from './bot/logic.js';
+import type { LossAction, LossLimit } from './bot/logic.js';
 import { query } from './db.js';
 import { log } from './log.js';
 import { validateSpec, type StrategySpec } from './strategies/index.js';
@@ -10,7 +10,7 @@ export interface BotSettings {
   mode: 'paper' | 'live';
   strategy: StrategySpec;
   maxExposureEur: number | null;
-  /** Loss over the last 24 h that switches the bot off: a % of the equity 24 h ago, or euros. */
+  /** Loss over the last 24 h that trips the guard (a % of the equity 24 h ago, or euros) and what tripping it does. */
   dailyLossLimit: LossLimit;
   fees: { maker: number; taker: number };
   paperStartEur: number;
@@ -24,8 +24,11 @@ export interface BotSettings {
   chase: ChaseSettings;
 }
 
-export type { LossLimit };
-export const DEFAULT_LOSS_LIMIT: LossLimit = { unit: 'pct', value: 10 };
+export type { LossAction, LossLimit };
+/** What the guard does when stored settings do not say (chosen from the backtest, 2026-10-30). */
+export const DEFAULT_LOSS_ACTION: LossAction = 'no_buys';
+const LOSS_ACTIONS: readonly unknown[] = ['alert', 'no_buys', 'stop'];
+export const DEFAULT_LOSS_LIMIT: LossLimit = { unit: 'pct', value: 15, action: DEFAULT_LOSS_ACTION };
 
 export interface ChaseSettings {
   repriceSec: number;
@@ -97,7 +100,9 @@ function checkLossLimit(v: unknown): LossLimit {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
     throw new SettingsError('dailyLossLimit.value must be a positive number');
   if (v.unit === 'pct' && value > 100) throw new SettingsError('dailyLossLimit.value must be at most 100 %');
-  return { unit: v.unit, value };
+  const action = v.action ?? DEFAULT_LOSS_ACTION;
+  if (!LOSS_ACTIONS.includes(action)) throw new SettingsError('dailyLossLimit.action must be "alert", "no_buys" or "stop"');
+  return { unit: v.unit, value, action: action as LossAction };
 }
 
 function checkManual(v: unknown): ManualAllocation | null {
@@ -178,11 +183,11 @@ export async function getBotSettings(): Promise<BotSettings> {
 }
 
 async function safeParse(stored: Record<string, unknown>, defaults: BotSettings): Promise<BotSettings> {
-  // Before 2026-10-27 the limit was a fixed `dailyLossLimitEur` (default €100). The old default becomes the new
-  // default (10 %); an amount the owner picked stays in euros.
+  // Before 2026-10-27 the limit was a fixed `dailyLossLimitEur` (default €100). That old default became 10 %; an
+  // amount the owner picked stays in euros. A stored limit is never rewritten, it only gains the default action.
   if (stored.dailyLossLimit === undefined && typeof stored.dailyLossLimitEur === 'number') {
     const { dailyLossLimitEur: old, ...rest } = stored;
-    stored = old === 100 ? rest : { ...rest, dailyLossLimit: { unit: 'eur', value: old } };
+    stored = { ...rest, dailyLossLimit: old === 100 ? { unit: 'pct', value: 10 } : { unit: 'eur', value: old } };
   }
   try {
     return checkSettings({ ...defaults, ...stored });

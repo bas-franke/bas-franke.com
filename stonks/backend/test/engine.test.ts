@@ -31,6 +31,19 @@ let onPlace: (() => void) | null = null;
 /** The account the fake brokers report. */
 let cash = 1000;
 let held: Record<string, number> = {};
+/** Coins in open orders, per symbol. */
+let tickers = new Map([['BTC-EUR', 400], ['ETH-EUR', 400]]);
+/** Thrown by balances() (a Bitvavo outage). */
+let balanceError: Error | null = null;
+/** place(): null = refused, 'open' = a working order row, default = what the existing tests expect (nothing back). */
+let placeResult: 'open' | null = null;
+let nextOrderId = 1000;
+let positions: Record<string, Array<Record<string, unknown>>> = {};
+let depth: { bids: Array<[number, number]>; asks: Array<[number, number]> } | null = null;
+/** While set, a tick hangs on its first read. */
+let hangSettings: Promise<void> | null = null;
+let clockSyncs = 0;
+let unknownChecks = 0;
 /** Bitvavo has not confirmed the cancel yet: the order stays open in the DB until a later sync. */
 let cancelUnconfirmed = false;
 
@@ -46,12 +59,16 @@ function makeCandles(n: number, lastBar: number, rising = true): Candle[] {
 class FakeBroker {
   constructor(readonly mode: 'paper' | 'live') {}
   async balances() {
+    if (balanceError) throw balanceError;
     return [{ symbol: 'EUR', available: cash, inOrder: 0 }, ...Object.entries(held).map(([symbol, available]) => ({ symbol, available, inOrder: 0 }))];
   }
   async place(intent: OrderIntent, ctx?: unknown) {
     placed.push({ mode: this.mode, intent, ctx });
     onPlace?.();
-    return null;
+    if (placeResult !== 'open') return null;
+    const o = { ...order(nextOrderId++, this.mode as 'paper' | 'live'), market: intent.market, side: intent.side, orderType: intent.orderType };
+    orders.push(o);
+    return o;
   }
   async cancel(o: OrderRow) {
     cancelled.push({ mode: this.mode, id: o.id });
@@ -66,7 +83,10 @@ class FakeBroker {
 
 mock.module('../src/settings.js', {
   exports: {
-    getBotSettings: async () => structuredClone(botSettings),
+    getBotSettings: async () => {
+      if (hangSettings) await hangSettings;
+      return structuredClone(botSettings);
+    },
     getSetting: async (k: string) => structuredClone(settings[k]),
     setSetting: async (k: string, v: unknown) => {
       settings[k] = structuredClone(v);
@@ -85,8 +105,9 @@ mock.module('../src/bot/store.js', {
     isOpenStatus: (s: string) => OPEN.includes(s),
     openOrders: async (mode: string, market?: string) => orders.filter((o) => o.mode === mode && OPEN.includes(o.status) && (!market || o.market === market)),
     fillsAfter: async () => [],
-    fillsFor: async () => [],
+    fillsFor: async (_mode: string, market: string) => positions[market] ?? [],
     maxFillId: async () => 0,
+    unknownOrders: async () => [],
     updateOrder: async (id: number, _patch: unknown, meta?: Record<string, unknown>) => {
       const o = orders.find((x) => x.id === id);
       if (o && meta) o.meta = { ...o.meta, ...meta };
@@ -95,7 +116,19 @@ mock.module('../src/bot/store.js', {
       orders.filter((o) => o.mode === mode && o.status === 'canceled' && (o.meta.chaseCancelAt ?? 0) > since && !o.meta.chaseDone),
   },
 });
-mock.module('../src/bot/live.js', { exports: { LiveBroker: class extends FakeBroker { constructor() { super('live'); } } } });
+mock.module('../src/bot/live.js', {
+  exports: {
+    LiveBroker: class extends FakeBroker {
+      constructor() {
+        super('live');
+      }
+      async recheckUnknown() {
+        unknownChecks++;
+        return 0;
+      }
+    },
+  },
+});
 mock.module('../src/bot/paper.js', {
   exports: {
     PaperBroker: class extends FakeBroker { constructor() { super('paper'); } },
@@ -107,8 +140,15 @@ const btcRules = precision.parseMarketRules({ market: 'BTC-EUR', status: 'tradin
 const ethRules = { ...btcRules, market: 'ETH-EUR', base: 'ETH' };
 mock.module('../src/bot/marketData.js', {
   exports: {
-    allPrices: async () => new Map([['BTC-EUR', 400], ['ETH-EUR', 400]]),
+    allPrices: async () => {
+      if (tickers.size === 0) throw new Error('ticker: network error');
+      return tickers;
+    },
     bestBidAsk: async () => book,
+    bookDepth: async () => {
+      if (!depth) throw new Error('book: network error');
+      return depth;
+    },
     eurPrice: (s: string, p: Map<string, number>) => (s === 'EUR' ? 1 : p.get(`${s}-EUR`) ?? 0),
     marketRules: async () => new Map([['BTC-EUR', btcRules], ['ETH-EUR', ethRules]]),
     closedCandles: async (_m: string, _i: string, lastBar: number, opts: { bars: number }) => {
@@ -121,7 +161,15 @@ mock.module('../src/bot/marketData.js', {
     },
   },
 });
-const fakeClient = { hasKeys: true, balance: async () => [], syncTime: async () => 0, ordersOpen: async () => [] };
+const fakeClient = {
+  hasKeys: true,
+  balance: async () => [],
+  syncTime: async () => {
+    clockSyncs++;
+    return 0;
+  },
+  ordersOpen: async () => [],
+};
 mock.module('../src/bitvavo/index.js', { exports: { ...realClient, ...precision, bitvavo: fakeClient } });
 mock.module('../src/db.js', { exports: { query: async () => ({ rows: [] }) } });
 // A lab family whose answer the tests script (SPEC §6b).
@@ -158,12 +206,18 @@ function reset(spec: StrategySpec, enabled = true, mode: 'paper' | 'live' = 'pap
   labAnswer = { t: null, weights: {} };
   cash = 1000;
   held = {};
+  tickers = new Map([['BTC-EUR', 400], ['ETH-EUR', 400]]);
+  balanceError = null;
+  placeResult = null;
+  positions = {};
+  depth = null;
+  book = { bid: 400, ask: 401 };
   candleFailures = 0;
   candleLag = 0;
   candleCalls = 0;
   onPlace = null;
   cancelUnconfirmed = false;
-  botSettings = { enabled, mode, strategy: spec, maxExposureEur: null, dailyLossLimit: { unit: 'eur', value: 100 }, fees: { maker: 0.0015, taker: 0.0025 }, paperStartEur: 1000 };
+  botSettings = { enabled, mode, strategy: spec, maxExposureEur: null, dailyLossLimit: { unit: 'eur', value: 100, action: 'stop' }, fees: { maker: 0.0015, taker: 0.0025 }, paperStartEur: 1000 };
   status.startupDone = true;
   status.lastIdleRefresh = Date.now();
 }
@@ -443,4 +497,435 @@ test('hold: { t: null } with zero weights never sells', async (t) => {
   await tick();
   assert.equal(placed.length, 0);
   assert.equal(logged('decision_held').length, 1);
+});
+
+// ---- helpers for the account-level tests below ----
+const stateOf = () => (settings.bot_state as any).paper;
+/** A tick time well inside a bar, unique per test. */
+const midBar = (base: string) => Date.parse(base) + stray * 2 * INTERVAL_MS['1h'];
+/** Stored state for a strategy already running, with this bar decided. */
+function running(spec: StrategySpec, now: number, extra: Record<string, unknown> = {}) {
+  settings.bot_state = { paper: { locks: {}, trail: {}, lastDecidedBar: lastBar(now), strategyKey: JSON.stringify(spec), strategyStart: now - 86_400_000, ...extra }, live: { locks: {}, trail: {} } };
+}
+
+// ---- loss guard action (SPEC §5) ----
+test('guard no_buys: logged once, open buys cancelled, new buys withheld with notes, sells go on, then cleared', async (t) => {
+  reset(rot);
+  botSettings.dailyLossLimit = { unit: 'eur', value: 100, action: 'no_buys' };
+  const now = midBar('2026-11-01T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  cash = 0;
+  held = { BTC: 1 };
+  tickers = new Map([['BTC-EUR', 1000], ['ETH-EUR', 400]]);
+  running(rot, now);
+  await tick();
+  assert.equal(logged('daily_loss_limit').length, 0);
+  orders = [{ ...order(70, 'paper'), side: 'buy' }, { ...order(71, 'paper'), side: 'sell' }];
+  tickers = new Map([['BTC-EUR', 850], ['ETH-EUR', 400]]);
+  t.mock.timers.setTime(now + 15_000);
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(logged('daily_loss_limit').length, 1);
+  assert.equal(logged('daily_loss_limit')[0].level, 'error');
+  assert.equal(botSettings.enabled, true, 'the bot stays on');
+  assert.deepEqual(cancelled.map((c) => c.id), [70], 'buys only');
+  assert.equal(engine.lastGuardState.paper?.action, 'no_buys');
+  assert.equal((await engine.guardStatus('paper'))?.action, 'no_buys');
+  await tick();
+  assert.equal(logged('daily_loss_limit').length, 1, 'once per trip');
+  // a new bar: the decision is logged, its buy withheld
+  cash = 500;
+  orders = [];
+  t.mock.timers.setTime(now + INTERVAL_MS['1h']);
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.ok(placed.every((p) => p.intent.side === 'sell'), 'no buy placed');
+  const d = logged('decision').at(-1)!;
+  assert.ok(d.data.notes.some((n: { note: string }) => /withheld by the loss guard/.test(n.note)), JSON.stringify(d.data.notes));
+  // recovered: cleared once, and the withheld buy of this bar goes out through the retry path
+  tickers = new Map([['BTC-EUR', 1000], ['ETH-EUR', 400]]);
+  t.mock.timers.setTime(now + INTERVAL_MS['1h'] + 61_000);
+  await tick();
+  assert.equal(logged('guard_cleared').length, 1);
+  assert.equal(await engine.guardStatus('paper'), null);
+  assert.ok(placed.some((p) => p.intent.side === 'buy'), 'the buy is released');
+  // tripping again logs again
+  tickers = new Map([['BTC-EUR', 850], ['ETH-EUR', 400]]);
+  t.mock.timers.setTime(now + INTERVAL_MS['1h'] + 76_000);
+  await tick();
+  assert.equal(logged('daily_loss_limit').length, 2, 're-armed');
+});
+
+test('guard alert only logs; stop switches the bot off as before', async (t) => {
+  for (const action of ['alert', 'stop']) {
+    reset(ema);
+    botSettings.dailyLossLimit = { unit: 'eur', value: 100, action };
+    const now = midBar('2026-11-02T10:30:00Z');
+    t.mock.timers.enable({ apis: ['Date'], now });
+    cash = 0;
+    held = { BTC: 1 };
+    tickers = new Map([['BTC-EUR', 1000]]);
+    running(ema, now);
+    await tick();
+    orders = [{ ...order(72, 'paper'), side: 'buy' }];
+    tickers = new Map([['BTC-EUR', 800]]);
+    t.mock.timers.setTime(now + 15_000);
+    await tick();
+    assert.equal(logged('daily_loss_limit').length, 1);
+    assert.equal(botSettings.enabled, action === 'alert');
+    t.mock.timers.reset();
+    if (action === 'alert') assert.equal(cancelled.length, 0);
+    else assert.deepEqual(cancelled.map((c) => c.id), [72]);
+  }
+});
+
+test('guard: a coin without a ticker keeps its last known price, and zero equity never trips', async (t) => {
+  reset(ema);
+  const now = midBar('2026-11-03T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  cash = 0;
+  held = { BTC: 1 };
+  tickers = new Map([['BTC-EUR', 1000], ['ETH-EUR', 400]]);
+  running(ema, now);
+  await tick();
+  tickers = new Map([['ETH-EUR', 400]]); // BTC's ticker is gone
+  t.mock.timers.setTime(now + 15_000);
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(logged('daily_loss_limit').length, 0);
+  assert.equal(engine.cachedPortfolio('paper')!.equityEur, 1000);
+  assert.equal(stateOf().knownPrices.BTC, 1000);
+  held = {}; // a read that comes back empty
+  t.mock.timers.setTime(now + 30_000);
+  await tick();
+  assert.equal(logged('daily_loss_limit').length, 0);
+  assert.equal(botSettings.enabled, true);
+});
+
+test('guard: a failed Bitvavo tick still runs it on the last known numbers, and says so after a while', async (t) => {
+  reset(ema);
+  botSettings.dailyLossLimit = { unit: 'eur', value: 100, action: 'stop' };
+  const now = midBar('2026-11-04T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  cash = 0;
+  held = { BTC: 1 };
+  tickers = new Map([['BTC-EUR', 1000]]);
+  running(ema, now);
+  await tick();
+  balanceError = new Error('balance: network error');
+  t.mock.timers.setTime(now + 15_000);
+  await tick();
+  assert.match(status.lastTickError ?? '', /balance/);
+  assert.equal(logged('guard_blind').length, 0);
+  t.mock.timers.setTime(now + 6 * 60_000);
+  await tick();
+  assert.equal(logged('guard_blind').length, 1);
+  await tick();
+  assert.equal(logged('guard_blind').length, 1, 'once per outage');
+  tickers = new Map([['BTC-EUR', 800]]);
+  await tick();
+  assert.equal(logged('daily_loss_limit').length, 1, 'the price fell while balances are down: it trips');
+  assert.equal(botSettings.enabled, false);
+});
+
+// ---- retries of a bar's orders ----
+test('retry: a refused order is placed again after 60 s, five attempts in all, then order_retries_exhausted', async (t) => {
+  reset(ema);
+  const now = midBar('2026-11-05T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  await tick();
+  assert.equal(placed.length, 1);
+  assert.equal(stateOf().decision.attempts, 1);
+  t.mock.timers.setTime(now + 30_000);
+  await tick();
+  assert.equal(placed.length, 1, 'backoff');
+  for (let i = 1; i <= 4; i++) {
+    t.mock.timers.setTime(now + i * 61_000);
+    await tick();
+    assert.equal(placed.length, 1 + i, `attempt ${i + 1}`);
+  }
+  assert.equal(logged('order_retries_exhausted').length, 0);
+  t.mock.timers.setTime(now + 5 * 61_000);
+  await tick();
+  assert.equal(placed.length, 5);
+  assert.equal(logged('order_retries_exhausted').length, 1);
+  assert.equal(logged('order_retries_exhausted')[0].level, 'error');
+  t.mock.timers.setTime(now + 6 * 61_000);
+  await tick();
+  assert.equal(placed.length, 5, 'done for this bar');
+});
+
+test('retry: a working order is not doubled, and a filled plan ends the decision', async (t) => {
+  reset(ema);
+  placeResult = 'open';
+  const now = midBar('2026-11-06T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  await tick();
+  assert.equal(placed.length, 1);
+  t.mock.timers.setTime(now + 61_000);
+  await tick();
+  assert.equal(placed.length, 1, 'its order still works');
+  assert.equal(stateOf().decision.done, false);
+  // filled: the coins are there, the order closed
+  orders[0].status = 'filled';
+  cash = 5;
+  held = { BTC: 2.48 };
+  t.mock.timers.setTime(now + 122_000);
+  await tick();
+  assert.equal(placed.length, 1);
+  assert.equal(stateOf().decision.done, true);
+});
+
+test('retry: the next bar drops the old plan; a crash after markDecided resumes through the same path', async (t) => {
+  reset(ema);
+  const now = midBar('2026-11-07T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const bar = lastBar(now);
+  // the state a crash leaves: bar marked decided, nothing placed
+  running(ema, now, { decision: { bar, weights: { 'BTC-EUR': 1 }, prices: { 'BTC-EUR': 400 }, equityEur: 1000, planned: [{ market: 'BTC-EUR', side: 'buy', eur: 990, qty: 0 }], attempts: 0, nextAt: 0, done: false } });
+  await tick();
+  assert.equal(placed.length, 1, 'resumed');
+  assert.equal(candleCalls, 0, 'from the stored weights');
+  assert.equal(placed[0].ctx.barTime, bar);
+  assert.equal(stateOf().decision.attempts, 1);
+  // an unknown-outcome order from before the crash blocks it instead
+  placed.length = 0;
+  running(ema, now, { decision: { ...stateOf().decision, attempts: 0, nextAt: 0 } });
+  orders = [{ ...order(80, 'paper', 'pending'), side: 'buy' }];
+  await tick();
+  assert.equal(placed.length, 0);
+  // and a plan of an older bar is never retried
+  orders = [];
+  running(ema, now, { decision: { ...stateOf().decision, bar: bar - INTERVAL_MS['1h'], attempts: 0, nextAt: 0 } });
+  await tick();
+  assert.equal(placed.length, 0);
+});
+
+test('retry: a rotation does not buy this bar with cash from this bar\'s sell, a planned buy never grows', async (t) => {
+  reset(rot);
+  const now = midBar('2026-11-08T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const bar = lastBar(now);
+  // the decision sold BTC and could only afford a €100 buy of ETH, which was refused; the sell has filled since
+  cash = 900;
+  running(rot, now, { decision: { bar, weights: { 'BTC-EUR': 0, 'ETH-EUR': 1 }, prices: { 'BTC-EUR': 400, 'ETH-EUR': 400 }, equityEur: 1000, planned: [{ market: 'BTC-EUR', side: 'sell', eur: 900, qty: 2.25 }, { market: 'ETH-EUR', side: 'buy', eur: 100, qty: 0 }], attempts: 1, nextAt: 0, done: false } });
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].intent.market, 'ETH-EUR');
+  assert.ok(placed[0].intent.valueEur <= 100, `only what was planned, got ${placed[0].intent.valueEur}`);
+  // a market the decision did not plan stays out however much cash there is
+  placed.length = 0;
+  running(rot, now, { decision: { ...stateOf().decision, planned: [{ market: 'BTC-EUR', side: 'sell', eur: 900, qty: 2.25 }], attempts: 1, nextAt: 0, done: false } });
+  await tick();
+  assert.equal(placed.length, 0);
+  assert.equal(stateOf().decision.done, true);
+});
+
+// ---- chase per spec ----
+test('a spec tuned to rest rests at close-offset with its timeout and fallback; the default follows the book', async (t) => {
+  const tuned = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 }, execution: { limitOffsetBps: 20, timeoutBars: 3, fallback: 'market' } });
+  reset(tuned);
+  const now = midBar('2026-11-09T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  book = { bid: 600, ask: 601 };
+  await tick();
+  assert.equal(placed.length, 1);
+  const close = logged('decision')[0].data.prices['BTC-EUR'];
+  assert.equal(placed[0].intent.price, (close * 0.998).toFixed(2));
+  assert.equal(placed[0].ctx.chase, undefined);
+  assert.equal(placed[0].ctx.fallback, 'market');
+  assert.equal(placed[0].ctx.expiresAt, lastBar(now) + 4 * INTERVAL_MS['1h']);
+});
+
+// ---- stranded coins ----
+test('stranded: ETH under a BTC strategy is sold with a chase, foreign coins are reported once and left alone', async (t) => {
+  const lim = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 } });
+  reset(lim);
+  const now = midBar('2026-11-10T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  cash = 0;
+  held = { ETH: 1, DOGE: 100 };
+  tickers = new Map([['BTC-EUR', 400], ['ETH-EUR', 400], ['DOGE-EUR', 0.1]]);
+  await tick();
+  assert.equal(status.lastTickError, null);
+  const sells = placed.filter((p) => p.intent.market === 'ETH-EUR');
+  assert.equal(sells.length, 1);
+  assert.equal(sells[0].intent.side, 'sell');
+  assert.equal(sells[0].intent.amount, '1.00000000');
+  assert.ok(sells[0].ctx.chase);
+  assert.ok(!placed.some((p) => p.intent.market.startsWith('DOGE')));
+  assert.equal(logged('foreign_coin').length, 1);
+  assert.deepEqual(stateOf().decision.planned.map((p: { market: string }) => p.market), ['ETH-EUR']);
+  // the next bar: the sell still works, so it is not sold twice, and DOGE is not reported again
+  orders = [{ ...order(90, 'paper'), market: 'ETH-EUR', side: 'sell' }];
+  placed.length = 0;
+  t.mock.timers.setTime(now + INTERVAL_MS['1h']);
+  await tick();
+  assert.equal(placed.filter((p) => p.intent.market === 'ETH-EUR').length, 0);
+  assert.equal(logged('foreign_coin').length, 1);
+});
+
+test('stranded: a manual move touches only its own markets and reports nothing', async (t) => {
+  reset(ema);
+  botSettings.manual = { target: 'BTC', setAt: '2026-11-11T12:00:00Z' };
+  const now = midBar('2026-11-11T12:00:30Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  held = { DOGE: 100 };
+  tickers = new Map([['BTC-EUR', 400], ['ETH-EUR', 400], ['DOGE-EUR', 0.1]]);
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(logged('foreign_coin').length, 0);
+  assert.deepEqual(placed.map((p) => p.intent.market), ['BTC-EUR']);
+  assert.ok(placed[0].ctx.chase, 'a manual move keeps chasing');
+});
+
+// ---- stops ----
+const stopped = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 }, risk: { maxWeight: 1, stopLossPct: 0.1 }, execution: { orderType: 'market' } });
+const longAt = (price: number) => [{ id: 1, market: 'BTC-EUR', side: 'buy', amount: 1, quote: price, fee: 0, feeCurrency: 'EUR' }];
+
+test('stop: an exit that could not sell is tried again every tick until it goes out, once', async (t) => {
+  reset(stopped);
+  const now = midBar('2026-11-12T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  running(stopped, now);
+  positions = { 'BTC-EUR': longAt(500) };
+  tickers = new Map([['BTC-EUR', 400]]);
+  // nothing free yet: the coins sit in an order whose cancel Bitvavo has not confirmed
+  cash = 0;
+  orders = [{ ...order(95, 'paper'), side: 'sell', market: 'BTC-EUR' }];
+  cancelUnconfirmed = true;
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(logged('stop_triggered').length, 1);
+  assert.equal(placed.length, 0);
+  assert.equal(logged('stop_skipped').length, 1);
+  // the cancel lands, the first place is refused
+  cancelUnconfirmed = false;
+  orders = [];
+  held = { BTC: 1 };
+  t.mock.timers.setTime(now + 15_000);
+  await tick();
+  assert.equal(placed.length, 1, 'tried');
+  // the next one works: a market sell is on its way, so it is not sent twice
+  placeResult = 'open';
+  t.mock.timers.setTime(now + 30_000);
+  await tick();
+  assert.equal(placed.length, 2);
+  assert.equal(orders.at(-1)!.side, 'sell');
+  t.mock.timers.setTime(now + 45_000);
+  await tick();
+  assert.equal(placed.length, 2, 'the exit is working');
+  // sold: the position is gone and the lock stays
+  orders.at(-1)!.status = 'filled';
+  positions = {};
+  held = {};
+  t.mock.timers.setTime(now + 60_000);
+  await tick();
+  assert.equal(placed.length, 2);
+  assert.ok(stateOf().locks['BTC-EUR']);
+  assert.equal(logged('stop_triggered').length, 1, 'one trigger');
+});
+
+test('stop: dust left after the exit is not an unfilled exit', async (t) => {
+  reset(stopped);
+  const now = midBar('2026-11-12T16:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  running(stopped, now, { locks: { 'BTC-EUR': 'stop loss' } });
+  positions = { 'BTC-EUR': [{ ...longAt(500)[0], amount: 0.000001, quote: 0.0005 }] };
+  held = { BTC: 0.000001 };
+  await tick();
+  assert.equal(placed.length, 0);
+  assert.equal(logged('stop_skipped').length, 0);
+});
+
+// ---- decision data, sizing, depth ----
+test('decision log: bar, targets, close prices, equity, strategy and mode; sized on closes for coins and equity alike', async (t) => {
+  const half = validateSpec({ family: 'ema_cross', markets: ['BTC-EUR'], interval: '1h', params: { fast: 2, slow: 5 }, risk: { maxWeight: 0.5 }, execution: { orderType: 'market' } });
+  reset(half);
+  const now = midBar('2026-11-13T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  cash = 0;
+  held = { BTC: 1 };
+  tickers = new Map([['BTC-EUR', 1000]]); // far from the candle close the fake serves
+  await tick();
+  const d = logged('decision')[0];
+  const close = d.data.prices['BTC-EUR'];
+  assert.ok(close < 600, String(close));
+  assert.equal(d.data.bar, lastBar(now));
+  assert.deepEqual(d.data.targets, { 'BTC-EUR': 0.5 });
+  assert.equal(d.data.strategyId, half.id);
+  assert.equal(d.data.mode, 'paper');
+  assert.equal(d.data.equityEur, close, 'the coin at its close, not the ticker');
+  // 50 % at the same price on both sides: half the coin goes (live equity against a close would sell nothing here)
+  assert.equal(placed[0].intent.side, 'sell');
+  assert.equal(placed[0].intent.amount, '0.50000000');
+});
+
+test('depth: a wide spread or thin depth warns but never blocks, a failed read is ignored, the spread goes in the log', async (t) => {
+  reset(ema);
+  const now = midBar('2026-11-14T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  depth = { bids: [[399, 1]], asks: [[401, 1]] }; // 50 bps, nothing within 25 bps of mid
+  await tick();
+  assert.equal(placed.length, 1);
+  assert.equal(logged('thin_book').length, 1);
+  assert.ok(Math.abs(logged('decision')[0].data.spreads['BTC-EUR'] - 50) < 0.1);
+  depth = null;
+  placed.length = 0;
+  logs.length = 0;
+  t.mock.timers.setTime(now + INTERVAL_MS['1h']);
+  await tick();
+  assert.equal(status.lastTickError, null);
+  assert.equal(placed.length, 1);
+  assert.equal(logged('thin_book').length, 0);
+});
+
+// ---- process health ----
+test('clock is measured hourly; unknown orders are rechecked from the tick', async (t) => {
+  reset(ema, false);
+  const now = midBar('2026-11-15T10:30:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  status.lastClockSync = now - 3_600_001;
+  status.lastUnknownCheck = 0;
+  const syncs = clockSyncs;
+  const checks = unknownChecks;
+  await tick();
+  assert.equal(clockSyncs, syncs + 1);
+  assert.equal(unknownChecks, checks + 1);
+  t.mock.timers.setTime(now + 15_000);
+  await tick();
+  assert.equal(clockSyncs, syncs + 1);
+  assert.equal(unknownChecks, checks + 1);
+});
+
+test('watchdog: a tick stuck over 5 minutes exits the process; drain waits for the running tick and blocks new ones', async () => {
+  reset(ema);
+  botSettings.enabled = false;
+  const exits: number[] = [];
+  assert.equal(engine.watchdog(Date.now(), (c) => exits.push(c)), false, 'no tick is running');
+  let release = () => undefined as void;
+  const gate = new Promise<void>((r) => (release = r));
+  const started = Date.now();
+  hangSettings = gate;
+  const running_ = tick();
+  assert.equal(engine.watchdog(started + 60_000, (c) => exits.push(c)), false);
+  assert.equal(engine.watchdog(started + engine.TICK_STUCK_MS + 1, (c) => exits.push(c)), true);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(exits, [1]);
+  // drain: resolves only when the tick is done
+  let drained = false;
+  const d = engine.drain().then(() => (drained = true));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(drained, false);
+  hangSettings = null;
+  release();
+  await d;
+  await running_;
+  assert.equal(drained, true);
+  const before = status.lastTickAt;
+  await tick();
+  assert.equal(status.lastTickAt, before, 'no tick after draining');
+  start();
+  stop();
 });

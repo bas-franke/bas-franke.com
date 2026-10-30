@@ -4,7 +4,9 @@ import { parseMarketRules } from '../src/bitvavo/precision.js';
 import {
   cashDelta,
   makerPrice,
+  bookCheck,
   checkDay,
+  followsBook,
   paperLimitFills,
   paperMarketPrice,
   planOrders,
@@ -301,4 +303,44 @@ test('makerPrice: one tick inside the book, never crossing it, never outbidding 
   assert.equal(makerPrice('sell', { bid: 100, ask: 103 }, btc, 104), '102.00');
   // finer ticks follow the market's tick size
   assert.equal(makerPrice('buy', { bid: 2500.1, ask: 2500.5 }, eth), '2500.11');
+});
+
+test('followsBook: the default execution follows the book, anything tuned rests', () => {
+  assert.equal(followsBook(single), true);
+  assert.equal(followsBook(validateSpec({ ...single, execution: { limitOffsetBps: 0 } })), false);
+  assert.equal(followsBook(validateSpec({ ...single, execution: { timeoutBars: 2 } })), false);
+  assert.equal(followsBook(validateSpec({ ...single, execution: { fallback: 'market' } })), false);
+});
+
+test('executor: a retry only places what was planned, a buy at most its planned size and only above the dead-band', () => {
+  const rot = validateSpec({ family: 'rotation_momentum', markets: ['BTC-EUR', 'ETH-EUR'], interval: '1d', params: { top: 2 } });
+  const base = input({ spec: rot, targets: { 'BTC-EUR': 0.5, 'ETH-EUR': 0.5 }, prices: { 'BTC-EUR': 50_000, 'ETH-EUR': 2000 } });
+  assert.equal(planOrders(base).orders.length, 2);
+  const one = planOrders({ ...base, only: [{ market: 'ETH-EUR', side: 'buy' }] });
+  assert.deepEqual(one.orders.map((o) => o.market), ['ETH-EUR']);
+  const capped = planOrders({ ...base, only: [{ market: 'ETH-EUR', side: 'buy', maxEur: 100 }] });
+  assert.ok(capped.orders[0].valueEur <= 100 && capped.orders[0].valueEur > 95, String(capped.orders[0].valueEur));
+  assert.equal(planOrders({ ...base, only: [{ market: 'ETH-EUR', side: 'buy', maxEur: 10 }] }).orders.length, 0, 'under 2 % of equity');
+  assert.equal(planOrders({ ...base, only: [{ market: 'ETH-EUR', side: 'sell' }] }).orders.length, 0, 'the other side was not planned');
+});
+
+test('bookCheck: spread and depth on the side the order would take', () => {
+  const book = { bids: [[99.99, 10], [99.5, 10]] as Array<[number, number]>, asks: [[100.01, 1], [100.1, 2], [101, 100]] as Array<[number, number]> };
+  const buy = bookCheck(book, 'buy', 10)!;
+  assert.ok(Math.abs(buy.spreadBps - 2) < 0.01);
+  assert.ok(Math.abs(buy.depthEur - (100.01 + 200.2)) < 1e-9);
+  assert.deepEqual(buy.thin, []);
+  assert.match(bookCheck(book, 'buy', 100)!.thin[0], /within 25 bps/);
+  assert.match(bookCheck({ bids: [[99, 100]], asks: [[101, 100]] }, 'sell', 1)!.thin[0], /spread/);
+  assert.equal(bookCheck({ bids: [], asks: [] }, 'buy', 1), null);
+});
+
+test('daily loss guard: zero equity leaves the window alone and never trips', () => {
+  const t0 = Date.parse('2026-10-26T08:00:00Z');
+  const price = (s: string) => (s === 'EUR' ? 1 : 1000);
+  const first = checkDay(undefined, t0, 1000, { BTC: 1 }, price, [], EUR100);
+  const zero = checkDay(first.state, t0 + 60_000, 0, {}, price, [], EUR100);
+  assert.equal(zero.tripped, false);
+  assert.equal(zero.flowEur, 0);
+  assert.deepEqual(zero.state.lastHoldings, { BTC: 1 });
 });

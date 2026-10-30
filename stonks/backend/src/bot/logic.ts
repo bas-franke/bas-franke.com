@@ -11,6 +11,13 @@ export const CHURN_MIN_EUR = 5;
 /** Cash a buy leaves unspent on top of the reserved fee (0.1 %), so rounding never makes Bitvavo refuse it. */
 export const BUY_CASH_MARGIN = 0.001;
 export const CHURN_MIN_FRACTION = 0.02;
+/** The spec a limit order follows the book with (SPEC §2): these are the defaults, nobody tuned them to rest. */
+const BOOK_OFFSET_BPS = 5;
+const BOOK_TIMEOUT_BARS = 1;
+/** Book check before a decision's orders go out (warns only). */
+export const THIN_SPREAD_BPS = 30;
+export const THIN_DEPTH_BPS = 25;
+export const THIN_DEPTH_SHARE = 0.2;
 
 export interface Holding {
   /** Coins owned (available + in orders). */
@@ -53,6 +60,9 @@ export interface PlanInput {
   /** Markets with one of the bot's orders still working, by side. */
   openSides: Record<string, Array<'buy' | 'sell'>>;
   fees: { maker: number; taker: number };
+  /** A retry of a decision: only these market+side may get an order, a buy at most `maxEur` (what the decision planned,
+   * so cash from this bar's sells never funds a buy the decision did not make). */
+  only?: Array<{ market: string; side: 'buy' | 'sell'; maxEur?: number }>;
 }
 
 export interface PlanResult {
@@ -108,14 +118,18 @@ export function planOrders(input: PlanInput): PlanResult {
     const fullExit = targetEur[m] === 0 && h.available > 0;
     if (!fullExit && Math.abs(diff) < threshold) continue;
     const side: 'buy' | 'sell' = fullExit || diff < 0 ? 'sell' : 'buy';
+    const allowed = input.only?.find((p) => p.market === m && p.side === side);
+    if (input.only && !allowed) continue;
     const open = input.openSides[m] ?? [];
     if (open.includes(side)) {
       result.notes.push({ market: m, note: `a ${side} order is still working` });
       continue;
     }
+    const eur = allowed?.maxEur === undefined ? diff : Math.min(diff, allowed.maxEur);
+    if (side === 'buy' && eur < threshold) continue;
     if (open.length) result.cancelMarkets.push(m);
     if (side === 'buy') {
-      buys.push({ market: m, eur: diff });
+      buys.push({ market: m, eur });
       continue;
     }
     const qty = fullExit ? h.available : Math.min(h.available, -diff / price);
@@ -176,6 +190,30 @@ export function planOrders(input: PlanInput): PlanResult {
     }
   }
   return result;
+}
+
+/**
+ * True when a spec's limit orders follow the book (the chase, SPEC §2). The default execution does; any other offset,
+ * timeout or fallback was tuned to rest at close∓offset, so those orders rest and keep their timeout and fallback.
+ */
+export const followsBook = (spec: Pick<StrategySpec, 'execution'>) => {
+  const e = spec.execution;
+  return e.limitOffsetBps === BOOK_OFFSET_BPS && e.timeoutBars === BOOK_TIMEOUT_BARS && e.fallback === 'cancel';
+};
+
+/** Spread and the depth an order would lean on, from Bitvavo's book: `thin` lists what looks wrong. Null without a two-sided book. */
+export function bookCheck(book: { bids: Array<[number, number]>; asks: Array<[number, number]> }, side: 'buy' | 'sell', valueEur: number) {
+  const bid = book.bids[0]?.[0];
+  const ask = book.asks[0]?.[0];
+  if (!(bid > 0) || !(ask > 0)) return null;
+  const mid = (bid + ask) / 2;
+  const spreadBps = ((ask - bid) / mid) * 10_000;
+  let depthEur = 0;
+  for (const [p, q] of side === 'buy' ? book.asks : book.bids) if ((Math.abs(p - mid) / mid) * 10_000 <= THIN_DEPTH_BPS) depthEur += p * q;
+  const thin: string[] = [];
+  if (spreadBps > THIN_SPREAD_BPS) thin.push(`spread ${spreadBps.toFixed(1)} bps`);
+  if (valueEur > THIN_DEPTH_SHARE * depthEur) thin.push(`order €${valueEur.toFixed(2)} against €${depthEur.toFixed(2)} within ${THIN_DEPTH_BPS} bps`);
+  return { spreadBps, depthEur, thin };
 }
 
 /**
@@ -294,11 +332,16 @@ export function stopHit(risk: RiskSpec, avgEntry: number, peak: number, price: n
 
 // ---------- daily loss guard (SPEC §5) ----------
 
-/** The loss limit as set: a % of the equity 24 h ago, or a fixed number of euros. */
+/** What a tripped limit does: only report it, withhold new buys while exits go on, or switch the bot off. */
+export type LossAction = 'alert' | 'no_buys' | 'stop';
+
+/** The loss limit as set: a % of the equity 24 h ago, or a fixed number of euros, and what tripping it does. */
 export interface LossLimit {
   unit: 'pct' | 'eur';
   value: number;
+  action: LossAction;
 }
+type LimitSize = Pick<LossLimit, 'unit' | 'value'>;
 
 export const WINDOW_MS = 24 * 3_600_000;
 /** How often the rolling window keeps an equity sample. */
@@ -336,7 +379,7 @@ export interface DayCheck {
 }
 
 /** The limit in euros against a baseline equity. */
-export const limitInEur = (limit: LossLimit, baselineEur: number) =>
+export const limitInEur = (limit: LimitSize, baselineEur: number) =>
   limit.unit === 'pct' ? (Math.max(0, baselineEur) * limit.value) / 100 : limit.value;
 
 /** Equity 24 h before `now` per the samples, corrected for flows since then. */
@@ -360,9 +403,14 @@ export function checkDay(
   holdings: Record<string, number>,
   priceOf: (symbol: string) => number,
   newFills: Array<FillLike & { base: string }>,
-  limit: LossLimit,
+  limit: LimitSize,
 ): DayCheck {
   const day = amsterdamDay(now);
+  // Zero equity is a failed read or an emptied account, never a measured loss: leave the window as it is.
+  if (!(equityEur > 0) && prev?.lastHoldings) {
+    const state = { ...prev } as DayState;
+    return { state, newDay: false, newCalendarDay: false, flowEur: 0, baselineEur: prev.startEquity ?? 0, lossEur: 0, limitEur: limitInEur(limit, prev.startEquity ?? 0), tripped: false };
+  }
   const maxFillId = newFills.reduce((m, f) => Math.max(m, f.id), prev?.lastFillId ?? 0);
   if (!prev || !prev.lastHoldings) {
     const state: DayState = { day, startEquity: equityEur, samples: [{ t: now, eq: equityEur, flow: 0 }], flow: 0, lastHoldings: { ...holdings }, lastFillId: maxFillId };

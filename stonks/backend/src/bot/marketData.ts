@@ -61,6 +61,13 @@ export async function bestBidAsk(market: string): Promise<{ bid: number; ask: nu
   return { bid, ask };
 }
 
+/** Bitvavo's order book (best level first) as numbers: `[price, size]`. */
+export async function bookDepth(market: string, depth = 200): Promise<{ bids: Array<[number, number]>; asks: Array<[number, number]> }> {
+  const raw = await bitvavo.book(market, depth);
+  const levels = (side: Array<[string, string]>) => side.map(([p, q]): [number, number] => [Number(p), Number(q)]);
+  return { bids: levels(raw.bids), asks: levels(raw.asks) };
+}
+
 const toCandle = (c: [number, string, string, string, string, string]): Candle => [
   Number(c[0]), Number(c[1]), Number(c[2]), Number(c[3]), Number(c[4]), Number(c[5]),
 ];
