@@ -152,6 +152,20 @@ function Research({
       )
     : [];
   const active = overview ? (overview.activeResearch ?? overview.bot.activeResearch ?? null) : null;
+  // The running strategy's spec, so a session card and its hall of fame copy both show as active,
+  // whichever of the two it was activated from.
+  const activeKey = useMemo(() => {
+    if (!active) return null;
+    const halls = hall.data ?? [];
+    if (active.bucket === 'hall') {
+      const h = halls.find((x) => x.id === active.researchId);
+      return h ? JSON.stringify(h.entry.spec) : null;
+    }
+    const kept = halls.find((x) => x.researchId === active.researchId && x.bucket === active.bucket && x.rank === active.rank);
+    if (kept) return JSON.stringify(kept.entry.spec);
+    const e = active.researchId === data.id ? buckets[active.bucket as BucketName]?.top.find((x) => x.rank === active.rank) : undefined;
+    return e ? JSON.stringify(e.spec) : null;
+  }, [active, hall.data, data.id, buckets]);
   const s = data.summary;
 
   // Deep link from the Overview: /research?bucket=session3&rank=2 scrolls to that card.
@@ -256,6 +270,7 @@ function Research({
           hall={hall}
           writeups={writeups.data}
           active={active}
+          activeKey={activeKey}
           onActivate={(h) => setPick({ e: h.entry, bucket: 'hall', hallId: h.id })}
         />
       )}
@@ -278,7 +293,7 @@ function Research({
               e={e}
               color={RANK_COLORS[i]}
               anchor={`card-${tab}-${e.rank}`}
-              active={!!active && active.researchId === data.id && active.bucket === tab && active.rank === e.rank}
+              active={(!!active && active.researchId === data.id && active.bucket === tab && active.rank === e.rank) || activeKey === JSON.stringify(e.spec)}
               onActivate={data.id !== undefined ? () => setPick({ e, bucket: tab }) : undefined}
               inHall={hallKeys.has(JSON.stringify(e.spec))}
               hasWriteup={!!writeups.data?.has(e.spec.id)}
@@ -914,11 +929,14 @@ function HallOfFame({
   hall,
   writeups,
   active,
+  activeKey,
   onActivate,
 }: {
   hall: { data?: HallEntry[] | null; error?: Error | null; reload: () => void };
   writeups?: Set<string> | null;
   active: Overview['activeResearch'] | null;
+  /** Spec of the running strategy, also when it was activated from a session. */
+  activeKey: string | null;
   onActivate: (h: HallEntry) => void;
 }) {
   const toast = useToast();
@@ -986,7 +1004,7 @@ function HallOfFame({
             e={{ ...h.entry, rank: i + 1 }}
             color={RANK_COLORS[i % RANK_COLORS.length]}
             anchor={`card-hall-${h.id}`}
-            active={!!active && active.bucket === 'hall' && active.researchId === h.id}
+            active={(!!active && active.bucket === 'hall' && active.researchId === h.id) || activeKey === JSON.stringify(h.entry.spec)}
             onActivate={() => onActivate(h)}
             origin={`kept ${dateOnly(h.addedAt)} · was ${bucketTitle(h.bucket)} #${h.rank}`}
             onRemove={() => void remove(h)}
