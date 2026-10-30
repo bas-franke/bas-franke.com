@@ -60,21 +60,14 @@ const rebase = (pts: Pts, from: number, to: number): Pts => {
   return cut.length ? cut.map(([t, v]) => [t, (v / cut[0][1]) * 1000]) : cut;
 };
 
-/** Yearly return on calendar time, so old and new research read the same way. */
-function yearly(pts: Pts): number | null {
+/**
+ * Yearly return on calendar time, so old and new research read the same way. Curves hold about 220 points, so the
+ * span is the graph's, not the distance between one curve's own samples. Too coarse for a worst drop: crashes fall between points.
+ */
+function yearly(pts: Pts, spanMs: number): number | null {
   if (pts.length < 2) return null;
-  const years = (pts[pts.length - 1][0] - pts[0][0]) / YEAR_MS;
+  const years = spanMs / YEAR_MS;
   return years * 365 < 30 ? null : ((pts[pts.length - 1][1] / pts[0][1]) ** (1 / years) - 1) * 100;
-}
-
-function worstDrop(pts: Pts): number {
-  let peak = 0;
-  let dd = 0;
-  for (const [, v] of pts) {
-    peak = Math.max(peak, v);
-    dd = Math.max(dd, 1 - v / peak);
-  }
-  return dd * 100;
 }
 
 const fmtYearly = (v: number | null) => (v === null ? '–' : pct(v, 1, true));
@@ -232,8 +225,8 @@ export function CompareResearch({ specId, coin }: { specId: string; coin: Writeu
             baselineLabel="€1,000 start"
           />
           <p className="small soft">
-            Every line starts at €1,000 on {dateOnly(view.start)} and ends on {dateOnly(view.end)}. Even growth draws doubling as the same height wherever it happens. Figures use
-            calendar years and the points on the graph, so a worst drop can read a little under the write-up&rsquo;s.
+            Every line starts at €1,000 on {dateOnly(view.start)} and ends on {dateOnly(view.end)}. Even growth draws doubling as the same height wherever it happens. Yearly figures
+            use calendar years over these dates. Each write-up has its true worst drop; the graph&rsquo;s points are too far apart to measure one.
           </p>
           <div className="table-wrap">
             <table className="data cards">
@@ -244,14 +237,13 @@ export function CompareResearch({ specId, coin }: { specId: string; coin: Writeu
                   <th className="r">Holding yearly</th>
                   <th className="r">Ahead of holding</th>
                   <th className="r">€1,000 became</th>
-                  <th className="r">Worst drop</th>
                   <th aria-label="Remove" />
                 </tr>
               </thead>
               <tbody>
                 {view.rows.map((r) => {
-                  const y = yearly(r.equity);
-                  const h = yearly(r.holdEquity);
+                  const y = yearly(r.equity, view.end - view.start);
+                  const h = yearly(r.holdEquity, view.end - view.start);
                   return (
                     <tr key={r.key}>
                       <td className="full">
@@ -271,9 +263,6 @@ export function CompareResearch({ specId, coin }: { specId: string; coin: Writeu
                       </td>
                       <td className="r" data-label="€1,000 became">
                         {eur(r.equity[r.equity.length - 1][1], true)}
-                      </td>
-                      <td className="r" data-label="Worst drop">
-                        {pct(-worstDrop(r.equity), 1)}
                       </td>
                       <td className="r">
                         {r.key !== 'self' && (
