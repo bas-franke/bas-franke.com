@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
+import { artUrl, PageBanner } from '../components/art';
 import { ModeBadge, Skeleton, Tip } from '../components/ui';
 import { ago, dateTime, eur, lossAction, lossLimitText, timeOnly } from '../format';
 import { refreshHealth, useHealth, useHealthFeed, type HealthFeed } from '../health';
@@ -49,6 +50,21 @@ const LEVEL: Record<HealthLevel, { label: string; chip: string; mark: string }> 
   fail: { label: 'Failing', chip: 'loss', mark: '×' },
   unknown: { label: 'Unknown', chip: '', mark: '?' },
 };
+
+/** Worst first inside a group, so the eye lands on what needs it. Equal parts keep their usual place. */
+const SEVERITY: Record<HealthLevel, number> = { fail: 0, warn: 1, unknown: 2, ok: 3 };
+
+/** The verdict's picture, or its mark until that state has one. */
+function VerdictMark({ state, mark }: { state: string; mark: string }) {
+  const src = artUrl(`verdict-${state}`);
+  return src ? (
+    <img className="health-verdict-art" src={src} alt="" />
+  ) : (
+    <div className="health-verdict-mark" aria-hidden="true">
+      {mark}
+    </div>
+  );
+}
 
 const span = (sec: number) => (sec < 90 ? `${sec} s` : sec < 5400 ? `${Math.round(sec / 60)} min` : sec < 129_600 ? `${Math.round(sec / 3600)} h` : `${Math.round(sec / 86_400)} days`);
 
@@ -165,9 +181,7 @@ function Verdict({ feed }: { feed: HealthFeed }) {
   if (error) {
     return (
       <section className="health-verdict down" role="alert">
-        <div className="health-verdict-mark" aria-hidden="true">
-          ×
-        </div>
+        <VerdictMark state="fail" mark="×" />
         <div style={{ minWidth: 0 }}>
           <h2>{error.status ? 'The bot’s server is answering with errors' : 'Can’t reach the bot’s server'}</h2>
           <p>
@@ -199,9 +213,7 @@ function Verdict({ feed }: { feed: HealthFeed }) {
   if (stale)
     return (
       <section className="health-verdict unknown">
-        <div className="health-verdict-mark" aria-hidden="true">
-          ?
-        </div>
+        <VerdictMark state="unknown" mark="?" />
         <div>
           <h2>Checking…</h2>
           <p>The last answer is {ago(lastOkAt)} old, so it doesn’t count any more.</p>
@@ -213,9 +225,7 @@ function Verdict({ feed }: { feed: HealthFeed }) {
   const ordered = [...bad].sort((a, b) => Number(data.components[b].status === 'fail') - Number(data.components[a].status === 'fail'));
   return (
     <section className={`health-verdict ${data.status}`}>
-      <div className="health-verdict-mark" aria-hidden="true">
-        {LEVEL[data.status].mark}
-      </div>
+      <VerdictMark state={data.status} mark={LEVEL[data.status].mark} />
       <div style={{ minWidth: 0 }}>
         <h2>{headline(data)}</h2>
         {ordered.length > 0 && <p>{ordered.map((k) => TITLE[k] ?? k).join(', ')}.</p>}
@@ -279,13 +289,7 @@ export default function HealthPage() {
 
   return (
     <div className="stack health-page">
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">Health</span>
-          <h1>Is the bot all right?</h1>
-          <p className="lede">Every part of the bot, checked on the server. The page refreshes itself while you look at it.</p>
-        </div>
-      </div>
+      <PageBanner art="banner-health" eyebrow="Health" title="Is the bot all right?" lede="Every part of the bot, checked on the server. The page refreshes itself while you look at it." />
 
       <Verdict feed={feed} />
 
@@ -296,22 +300,33 @@ export default function HealthPage() {
               Last known state, from {lastOkAt ? ago(lastOkAt) : 'earlier'}. Not current.
             </p>
           )}
-          {GROUPS.map((g) => (
-            <section key={g.title} aria-label={g.title}>
-              <h2 className="eyebrow">{g.title}</h2>
-              <div className="health-grid">
-                {g.parts.map((p) => (
-                  <PartCard
-                    key={p.key}
-                    part={p.key}
-                    title={p.title}
-                    c={data.components[p.key]}
-                    extra={p.key === 'alerts' ? <TestAlert disabled={old} /> : undefined}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
+          {GROUPS.map((g) => {
+            const level = (k: HealthPart) => SEVERITY[data.components[k]?.status] ?? SEVERITY.unknown;
+            const ok = g.parts.filter((p) => data.components[p.key]?.status === 'ok').length;
+            return (
+              <section key={g.title} aria-label={g.title}>
+                <div className="health-group-head">
+                  <h2 className="eyebrow">{g.title}</h2>
+                  <span className="health-tally">
+                    {ok} of {g.parts.length} OK
+                  </span>
+                </div>
+                <div className="health-grid">
+                  {[...g.parts]
+                    .sort((a, b) => level(a.key) - level(b.key))
+                    .map((p) => (
+                      <PartCard
+                        key={p.key}
+                        part={p.key}
+                        title={p.title}
+                        c={data.components[p.key]}
+                        extra={p.key === 'alerts' ? <TestAlert disabled={old} /> : undefined}
+                      />
+                    ))}
+                </div>
+              </section>
+            );
+          })}
           {hasUnknown && (
             <p className="small soft health-note">
               <b>Unknown</b> means this page can’t tell yet: nothing of the kind has happened since the last restart, or that part could not be read. It doesn’t

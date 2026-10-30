@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, ApiError } from '../api';
-import { SleepingCatArt } from '../components/art';
+import { artUrl } from '../components/art';
+import './login.css';
 
 export default function Login({ onIn }: { onIn: () => void }) {
   const [password, setPassword] = useState('');
@@ -31,29 +32,34 @@ export default function Login({ onIn }: { onIn: () => void }) {
 
   return (
     <main className="login">
-      <div className="card login-card">
-        <SleepingCatArt width={220} />
-        <h1>Stonks</h1>
-        <p className="soft">A quiet little trading desk. Please let yourself in.</p>
-        <form onSubmit={submit}>
-          <div className="field">
-            <label htmlFor="pw">Password</label>
-            <input
-              id="pw"
-              className="input"
-              type="password"
-              autoComplete="current-password"
-              autoFocus
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={!!error}
-            />
-            {error && <span className="error">{error}</span>}
-          </div>
-          <button className="btn primary" disabled={busy || !password}>
-            {busy ? 'Opening the door…' : 'Come in'}
-          </button>
-        </form>
+      <div className="login-art">
+        <img src={artUrl('login-door')} alt="" />
+      </div>
+      <div className="login-side">
+        <div className="card login-card">
+          <img className="login-mark" src="/icon-64.png" alt="" width={48} height={48} />
+          <h1>Stonks</h1>
+          <p className="soft">A quiet little trading desk. Please let yourself in.</p>
+          <form onSubmit={submit}>
+            <div className="field">
+              <label htmlFor="pw">Password</label>
+              <input
+                id="pw"
+                className="input"
+                type="password"
+                autoComplete="current-password"
+                autoFocus
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={!!error}
+              />
+              {error && <span className="error">{error}</span>}
+            </div>
+            <button className="btn primary" disabled={busy || !password}>
+              {busy ? 'Opening the door…' : 'Come in'}
+            </button>
+          </form>
+        </div>
       </div>
     </main>
   );

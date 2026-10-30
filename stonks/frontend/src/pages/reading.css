@@ -5,15 +5,29 @@
 
 .shell .article-page {
   width: 100%;
-  max-width: 1000px;
+  max-width: 900px;
   margin-inline: auto;
-  gap: 16px;
+  gap: 10px;
+}
+.shell .article-page .article-sheet {
+  padding: 0;
+}
+.article-hero {
+  display: block;
+  width: 100%;
+  aspect-ratio: 21 / 8;
+  object-fit: cover;
+  filter: var(--hero-art);
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+}
+.article-head {
+  padding: 26px 40px 0;
 }
 .shell .article-page h1 {
   font-size: clamp(1.6rem, 3.4vw, 2.3rem);
   line-height: 1.15;
   letter-spacing: -0.015em;
-  margin: 10px 0 12px;
+  margin: 0 0 12px;
   text-wrap: balance;
 }
 .shell .article-page .eyebrow a {
@@ -27,7 +41,7 @@
 }
 .shell .article-page .article-body {
   max-width: none;
-  padding: 32px 40px 36px;
+  padding: 22px 40px 36px;
 }
 .shell .article-page .article-body p,
 .shell .article-page .article-body li {
@@ -67,15 +81,21 @@
 
 /* ---------- write-ups ---------- */
 
-.shell .writeup .page-head h1 {
-  font-size: clamp(1.5rem, 3vw, 2.1rem);
-  line-height: 1.15;
-  text-wrap: balance;
+.shell .writeup .page-banner {
+  margin-bottom: 0;
 }
-.shell .writeup .page-head .eyebrow a {
+.shell .writeup .page-banner h1 {
+  line-height: 1.15;
+}
+.shell .writeup .page-banner .eyebrow a {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
+}
+.shell .writeup-compare b {
+  font-family: var(--mono);
+  font-size: 1.15rem;
+  letter-spacing: -0.03em;
 }
 .shell .writeup .lede {
   font-size: 1.05rem;
@@ -106,11 +126,16 @@
     gap: 12px;
   }
   .shell .article-page h1 {
-    margin: 6px 0 10px;
+    margin: 0 0 10px;
+  }
+  .article-hero {
+    aspect-ratio: 16 / 8;
+  }
+  .article-head {
+    padding: 18px 18px 0;
   }
   .shell .article-page .article-body {
-    padding: 22px 18px 26px;
-    border-radius: 16px;
+    padding: 16px 18px 26px;
   }
   .shell .article-page .article-body p,
   .shell .article-page .article-body li {

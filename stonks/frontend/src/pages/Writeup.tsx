@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { api } from '../api';
+import { PageBanner } from '../components/art';
 import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
@@ -41,17 +42,16 @@ export default function WriteupPage() {
   const w = useAsync(() => api.writeup(id), [id]);
   return (
     <div className="stack writeup" style={{ gap: 12 }}>
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">
-            <a href={back ? `/research?bucket=${encodeURIComponent(back)}` : '/research'} onClick={(e) => (e.preventDefault(), navigate(back ? `/research?bucket=${encodeURIComponent(back)}` : '/research'))}>
-              ← Research
-            </a>
-          </span>
-          <h1>{w.data?.title ?? 'Strategy write-up'}</h1>
-          {w.data?.subtitle && <p className="lede">{w.data.subtitle}</p>}
-        </div>
-      </div>
+      <PageBanner
+        art="banner-research"
+        eyebrow={
+          <a href={back ? `/research?bucket=${encodeURIComponent(back)}` : '/research'} onClick={(e) => (e.preventDefault(), navigate(back ? `/research?bucket=${encodeURIComponent(back)}` : '/research'))}>
+            ← Research
+          </a>
+        }
+        title={w.data?.title ?? 'Strategy write-up'}
+        lede={w.data?.subtitle}
+      />
       {w.error && <ErrorBox error={w.error} onRetry={w.reload} />}
       {!w.data && !w.error && <Skeleton h={400} />}
       {w.data && <Toc doc={w.data} />}

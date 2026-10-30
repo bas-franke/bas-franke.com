@@ -6,11 +6,15 @@
 
 /* ---------- the overall state ---------- */
 
+.shell .health-page .page-banner {
+  margin-bottom: 0;
+}
+
 .health-verdict {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 4px 16px;
-  align-items: start;
+  align-items: center;
   padding: 20px 22px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -43,6 +47,12 @@
   background: var(--surface-3);
   color: var(--ink-2);
 }
+.health-verdict-art {
+  display: block;
+  width: 104px;
+  height: 104px;
+  object-fit: contain;
+}
 .health-verdict.ok .health-verdict-mark {
   background: var(--gain-soft);
   color: var(--gain-ink);
@@ -53,7 +63,7 @@
 }
 .health-verdict.warn .health-verdict-mark {
   background: var(--brass);
-  color: var(--surface);
+  color: #18223a;
 }
 .health-verdict.fail {
   background: var(--loss-soft);
@@ -61,7 +71,7 @@
 }
 .health-verdict.fail .health-verdict-mark {
   background: var(--loss);
-  color: var(--surface);
+  color: #18223a;
 }
 .health-bot {
   gap: 8px;
@@ -112,32 +122,60 @@
 }
 .health-parts .eyebrow {
   display: block;
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 0.72rem;
+}
+.health-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.health-tally {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-3);
 }
 .health-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
+/* A status board: every part wears its state on its left edge. */
 .health-part {
+  --edge: var(--gain);
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  padding: 14px 16px;
-  border-radius: 14px;
+  padding: 13px 15px 13px 18px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--surface);
 }
+.health-part::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--edge);
+}
 .health-part.warn {
+  --edge: var(--brass);
   border-color: color-mix(in srgb, var(--brass) 55%, var(--line));
 }
 .health-part.fail {
+  --edge: var(--loss);
   border-color: color-mix(in srgb, var(--loss) 65%, var(--line));
   background: color-mix(in srgb, var(--loss-soft) 55%, var(--surface));
 }
 .health-part.unknown {
+  --edge: var(--line-strong);
   background: var(--surface-2);
 }
 .health-part-head {
@@ -174,6 +212,9 @@
 .health-fact {
   margin: auto 0 0;
   padding-top: 2px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: -0.01em;
 }
 .health-test {
   display: flex;
@@ -242,6 +283,10 @@
   }
   .health-verdict h2 {
     font-size: 1.25rem;
+  }
+  .health-verdict-art {
+    width: 72px;
+    height: 72px;
   }
   .health-checked {
     grid-column: 1 / -1;

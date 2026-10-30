@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { articleBySlug } from '../articles';
+import { artUrl } from '../components/art';
 import { dateOnly } from '../format';
 import { navigate, useLocation } from '../router';
 import './reading.css';
@@ -33,18 +34,22 @@ export default function ArticlePage() {
       </div>
     );
 
+  const cover = artUrl(`cover-${a.slug}`);
   return (
     <div className="stack article-page">
-      <div>
-        {home}
-        <h1>{a.title}</h1>
-        <div className="row small soft article-meta">
-          <span className="chip outline">{a.tag}</span>
-          <span>{dateOnly(a.date)}</span>
-          <span>· {a.minutes} min read</span>
-        </div>
-      </div>
-      <article className="card article-body">{a.body()}</article>
+      {home}
+      <article className="card article-sheet">
+        {cover && <img className="article-hero" src={cover} alt="" />}
+        <header className="article-head">
+          <h1>{a.title}</h1>
+          <div className="row small soft article-meta">
+            <span className="chip outline">{a.tag}</span>
+            <span>{dateOnly(a.date)}</span>
+            <span>· {a.minutes} min read</span>
+          </div>
+        </header>
+        <div className="article-body">{a.body()}</div>
+      </article>
     </div>
   );
 }

@@ -1131,30 +1131,6 @@ dialog.modal[open] {
   color: var(--brass-ink);
 }
 
-/* ---------- login ---------- */
-
-.login {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px 16px;
-}
-.login-card {
-  width: min(400px, 100%);
-  text-align: center;
-  padding: 40px 32px 32px;
-}
-.login-card h1 {
-  font-style: italic;
-  margin: 14px 0 6px;
-}
-.login-card form {
-  display: grid;
-  gap: 12px;
-  margin-top: 26px;
-  text-align: left;
-}
-
 /* ---------- empty / loading ---------- */
 
 .empty-art {
