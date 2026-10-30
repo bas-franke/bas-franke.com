@@ -3,7 +3,7 @@ import { refreshDesk } from '../desk';
 import { api, ApiError } from '../api';
 import { artUrl, EmptyState, PageBanner } from '../components/art';
 import { LineChart, type LineSeries } from '../components/charts';
-import { IconCheck } from '../components/icons';
+import { IconChart, IconCheck, IconPlay, IconSliders, IconStar, IconStarFilled, IconTrash } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
@@ -765,22 +765,26 @@ function RankCard({
         baseline={1000}
         baselineLabel="€1,000 start"
       />
-      <p className="rank-summary">{e.explanation.summary}</p>
 
       <footer className="row rank-actions">
         {hasWriteup && (
-          <button className="btn small" onClick={() => navigate(`/writeup?spec=${encodeURIComponent(s.id)}${bucket ? `&bucket=${encodeURIComponent(bucket)}` : ''}`)}>
-            Every coin and compare
+          <button
+            className="btn small icon"
+            title="Every coin and the compare graph"
+            aria-label="Every coin and the compare graph"
+            onClick={() => navigate(`/writeup?spec=${encodeURIComponent(s.id)}${bucket ? `&bucket=${encodeURIComponent(bucket)}` : ''}`)}
+          >
+            <IconChart width={18} height={18} />
           </button>
         )}
         {inHall ? (
           <span className="chip brass hall-star" title="In the hall of fame: kept forever">
-            ★ hall of fame
+            <IconStarFilled width={14} height={14} /> hall of fame
           </span>
         ) : (
           onAddToHall && (
-            <button className="btn ghost small hall-star" onClick={onAddToHall} title="Keep this strategy forever, whatever new research finds">
-              ☆ Keep in hall of fame
+            <button className="btn ghost small icon hall-star" onClick={onAddToHall} title="Keep in the hall of fame" aria-label="Keep in the hall of fame">
+              <IconStar width={18} height={18} />
             </button>
           )
         )}
@@ -788,22 +792,24 @@ function RankCard({
         {e.botReady && (
           <div className="row" style={{ gap: 8 }}>
             <button
-              className="btn ghost small"
+              className="btn ghost small icon"
+              title="Tweak in settings"
+              aria-label="Tweak in settings"
               onClick={() => {
                 setHandoff({ spec: e.spec, rank: e.rank });
                 navigate('/settings');
               }}
             >
-              Tweak in settings
+              <IconSliders width={18} height={18} />
             </button>
             {active ? (
-              <span className="chip gain">
-                <IconCheck width={13} /> active in the bot
+              <span className="chip gain" title="Active in the bot">
+                <IconCheck width={13} /> active
               </span>
             ) : (
               onActivate && (
-                <button className="btn brass" onClick={onActivate}>
-                  Activate in bot
+                <button className="btn brass icon" onClick={onActivate} title="Activate in the bot" aria-label="Activate in the bot">
+                  <IconPlay width={18} height={18} />
                 </button>
               )
             )}
@@ -960,8 +966,14 @@ function RemoveButton({ onRemove }: { onRemove: () => void }) {
     return () => clearTimeout(t);
   }, [sure]);
   return (
-    <button className={`btn small ${sure ? 'danger' : 'ghost'}`} onClick={() => (sure ? onRemove() : setSure(true))}>
-      {sure ? 'Yes, remove it' : 'Remove from hall of fame'}
+    <button
+      className={`btn small icon ${sure ? 'danger' : 'ghost'}`}
+      title={sure ? 'Yes, remove it from the hall of fame' : 'Remove from the hall of fame'}
+      aria-label={sure ? 'Yes, remove it from the hall of fame' : 'Remove from the hall of fame'}
+      onClick={() => (sure ? onRemove() : setSure(true))}
+    >
+      <IconTrash width={18} height={18} />
+      {sure && 'Remove?'}
     </button>
   );
 }

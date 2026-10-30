@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { articleBySlug } from '../articles';
 import { artUrl } from '../components/art';
-import { dateOnly } from '../format';
+import { dateOnly, whenPosted } from '../format';
 import { navigate, useLocation } from '../router';
 import './reading.css';
 
@@ -44,7 +44,7 @@ export default function ArticlePage() {
           <h1>{a.title}</h1>
           <div className="row small soft article-meta">
             <span className="chip outline">{a.tag}</span>
-            <span>{dateOnly(a.date)}</span>
+            <span title={dateOnly(a.date)}>{whenPosted(a.date)}</span>
             <span>· {a.minutes} min read</span>
           </div>
         </header>

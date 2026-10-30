@@ -295,7 +295,7 @@ camelCase and numbers (not numeric strings).
 | `DELETE /api/hall-of-fame/:id` | `{}` | `{ ok }`; only the owner removes entries, nothing else ever does |
 | `POST /api/bot/start` / `POST /api/bot/stop` | | updated `settings.bot`; stop writes `enabled:false` first, so it answers at once even during a slow tick, and the bot's open orders are cancelled on the next tick |
 | `GET /api/orders` | `?mode=&market=&limit=&before=` | `{ orders:[...] }` newest first |
-| `GET /api/fills` | same | `{ fills:[...] }` |
+| `GET /api/fills` | same | `{ fills:[...] }` With `mode`, only fills since that mode's first portfolio point (`equity_snapshots`); the same for `/api/orders` on `created_at`, so clearing the portfolio history hides older trades too |
 | `GET /api/equity` | `?mode=&days=` | `{ mode, points:[{ts,totalEur,cashEur}] }` (≤ 1500 points; optional `buyHold:[{ts,totalEur}]`) |
 | `GET /api/logs` | `?level=&after=<id>&before=<id>&limit=` | `{ logs:[...] }` newest first; `level` is a minimum; `after` returns the oldest entries after that id so a live tail never skips |
 | `GET /api/strategies/families` | | the bot-ready families with param descriptions |

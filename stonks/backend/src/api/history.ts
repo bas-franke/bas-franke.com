@@ -18,10 +18,13 @@ export function historyRoutes(deps: ApiDeps) {
     const market = patternParam(req, 'market', MARKET_RE);
     const before = intParam(req, 'before', 1, Number.MAX_SAFE_INTEGER);
     const limit = intParam(req, 'limit', 1, MAX_LIMIT) ?? 100;
-    if (mode) where.push(`mode = $${params.push(mode)}`);
+    const modeIdx = mode ? params.push(mode) : 0;
+    if (mode) where.push(`mode = $${modeIdx}`);
     if (market) where.push(`market = $${params.push(market)}`);
     if (before) where.push(`id < $${params.push(before)}`);
-    return { where: where.length ? `WHERE ${where.join(' AND ')}` : '', params, limit };
+    // Only what happened since the mode's portfolio history began: clearing that history hides the older trades too.
+    const since = (col: string) => (mode ? ` AND ${col} >= COALESCE((SELECT min(ts) FROM equity_snapshots WHERE mode = $${modeIdx}), 'epoch')` : '');
+    return { where: where.length ? `WHERE ${where.join(' AND ')}` : '', params, limit, since };
   };
 
   r.get('/orders', async (req, res) => {
@@ -29,7 +32,7 @@ export function historyRoutes(deps: ApiDeps) {
     const { rows } = await deps.query(
       `SELECT id, mode, client_order_id, exchange_order_id, market, side, order_type, price, amount, filled_amount,
               filled_quote, fee_paid, fee_currency, status, strategy_id, reason, created_at, updated_at
-         FROM orders ${f.where} ORDER BY id DESC LIMIT ${f.limit}`,
+         FROM orders ${f.where}${f.since('created_at')} ORDER BY id DESC LIMIT ${f.limit}`,
       f.params,
     );
     res.json({
@@ -61,7 +64,7 @@ export function historyRoutes(deps: ApiDeps) {
     const { rows } = await deps.query(
       `SELECT id, order_id, mode, exchange_trade_id, market, side, price, amount, quote, fee, fee_currency, taker,
               executed_at
-         FROM fills ${f.where} ORDER BY id DESC LIMIT ${f.limit}`,
+         FROM fills ${f.where}${f.since('executed_at')} ORDER BY id DESC LIMIT ${f.limit}`,
       f.params,
     );
     res.json({

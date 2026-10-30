@@ -5,7 +5,7 @@ import { artUrl, CatArt, HeroBanner } from '../components/art';
 import { LineChart, type LineSeries } from '../components/charts';
 import { IconHealth } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
-import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, num, pct, signedEur } from '../format';
+import { ago, dateOnly, eur, whenPosted, familyLabel, lossAction, lossLimitText, num, pct, signedEur } from '../format';
 import { botMood, refreshDesk, todayPct } from '../desk';
 import { guardOf, useHealth, useHealthFeed } from '../health';
 import { navigate } from '../router';
@@ -120,7 +120,7 @@ function ReadingCard() {
           >
             <img className="article-cover" src={artUrl(`cover-${a.slug}`)} alt="" />
             <span className="tiny muted">
-              {a.tag} · {dateOnly(a.date)} · {a.minutes} min read
+              {a.tag} · {whenPosted(a.date)} · {a.minutes} min read
             </span>
             <h3>{a.title}</h3>
             <p className="small soft">{a.blurb}</p>

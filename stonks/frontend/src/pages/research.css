@@ -253,16 +253,28 @@
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.shell .research-page .rank-actions .btn {
-  min-height: 40px;
+/* Icon buttons: one square each, the main one in brass. The label lives in the title and aria-label. */
+.shell .research-page .rank-actions .btn.icon {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 12px;
 }
-.shell .research-page .rank-actions .hall-star.chip {
-  min-height: 32px;
-  padding: 4px 12px;
+.shell .research-page .rank-actions .btn.icon svg {
+  display: block;
 }
+.shell .research-page .rank-actions .btn.icon.danger {
+  width: auto;
+  padding-inline: 12px;
+  gap: 6px;
+}
+.shell .research-page .rank-actions .hall-star.chip,
 .shell .research-page .rank-actions .chip.gain {
-  min-height: 40px;
-  padding: 6px 14px;
+  min-height: 38px;
+  padding: 4px 12px;
   font-size: 0.85rem;
 }
 .shell .research-page .rank-more {
@@ -418,40 +430,26 @@
     padding: 0 16px;
   }
 
-  /* Actions: thumb-sized, the main one gets a full-width row at the bottom. */
+  /* Actions: one row of thumb-sized icon buttons. */
   .shell .research-page .rank-actions {
     display: flex;
     flex-wrap: wrap;
-    justify-content: stretch;
+    justify-content: flex-end;
     gap: 8px;
-  }
-  .shell .research-page .rank-actions > .btn,
-  .shell .research-page .rank-actions > .chip {
-    flex: 1 1 auto;
-    justify-content: center;
-    min-height: 44px;
   }
   .shell .research-page .rank-actions > .row {
-    flex: 1 1 100%;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
-  .shell .research-page .rank-actions .btn {
+  .shell .research-page .rank-actions .btn.icon {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
     min-height: 44px;
-    padding-inline: 12px;
-    white-space: normal;
-    text-align: center;
-    line-height: 1.2;
   }
   .shell .research-page .rank-actions .btn.ghost {
     border-color: var(--line);
     background: var(--surface-2);
     color: var(--ink);
-  }
-  .shell .research-page .rank-actions .chip.gain {
-    justify-content: center;
-    min-height: 44px;
   }
 
   .shell .research-page .hall-move {

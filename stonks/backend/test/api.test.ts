@@ -263,7 +263,11 @@ describe('history routes', () => {
     const o = await get('/api/orders?mode=paper&market=BTC-EUR&limit=500&before=100');
     assert.equal(o.status, 200);
     assert.deepEqual(o.call.params, ['paper', 'BTC-EUR', 100]);
-    assert.match(o.call.sql, /mode = \$1 AND market = \$2 AND id < \$3 ORDER BY id DESC LIMIT 500/);
+    // With a mode, only orders since that mode's portfolio history began are listed.
+    assert.match(o.call.sql, /mode = \$1 AND market = \$2 AND id < \$3 AND created_at >= COALESCE\(\(SELECT min\(ts\) FROM equity_snapshots WHERE mode = \$1\), 'epoch'\) ORDER BY id DESC LIMIT 500/);
+    const fm = await get('/api/fills?mode=live');
+    assert.match(fm.call.sql, /WHERE mode = \$1 AND executed_at >= COALESCE\(\(SELECT min\(ts\) FROM equity_snapshots WHERE mode = \$1\), 'epoch'\) ORDER BY/);
+    assert.deepEqual(fm.call.params, ['live']);
     assert.equal(o.body.orders[0].id, 7);
     assert.equal(o.body.orders[0].price, 60000.5);
     assert.equal(o.body.orders[0].clientOrderId, 'stonks-1');

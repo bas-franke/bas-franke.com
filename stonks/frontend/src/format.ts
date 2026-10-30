@@ -94,6 +94,18 @@ export const dateOnly = (v: unknown) => {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
+/** Reading cards: how long ago a piece was posted, and the date once it is more than two months old. */
+export const whenPosted = (v: unknown) => {
+  const d = toDate(v);
+  if (!d) return '–';
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (days > 61) return dateOnly(d);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 14) return `${days} days ago`;
+  return `${Math.round(days / 7)} weeks ago`;
+};
+
 export const timeOnly = (v: unknown) => {
   const d = toDate(v);
   if (!d) return '–';

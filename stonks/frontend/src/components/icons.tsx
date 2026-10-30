@@ -85,6 +85,35 @@ export const IconCheck = (p: P) => (
     <path d="m5 12.5 4.5 4.5L19 7.5" />
   </svg>
 );
+/** A rising line: the write-up with every coin and the compare graph. */
+export const IconChart = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} {...p}>
+    <path d="M4 19h16M5 15l4-5 3.5 3L19 6" />
+  </svg>
+);
+export const IconStar = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} {...p}>
+    <path d="m12 3.5 2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.8l-5.4 2.9 1.2-5.9L3.4 9.7l6-.7z" />
+  </svg>
+);
+export const IconStarFilled = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} fill="currentColor" {...p}>
+    <path d="m12 3.5 2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.8l-5.4 2.9 1.2-5.9L3.4 9.7l6-.7z" />
+  </svg>
+);
+/** Sliders: tweak the settings. */
+export const IconSliders = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} {...p}>
+    <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+    <circle cx="16" cy="7" r="2" />
+    <circle cx="10" cy="17" r="2" />
+  </svg>
+);
+export const IconTrash = (p: P) => (
+  <svg viewBox="0 0 24 24" {...base} {...p}>
+    <path d="M4 7h16M9 7V4.5h6V7M7 7l1 13h8l1-13M10 11v6M14 11v6" />
+  </svg>
+);
 export const IconPower = (p: P) => (
   <svg viewBox="0 0 24 24" {...base} strokeWidth={2} {...p}>
     <path d="M12 4v7" />
