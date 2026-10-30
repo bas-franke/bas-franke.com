@@ -1,0 +1,231 @@
+/* Hero: dawn. */
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  min-height: 100svh;
+  display: grid;
+  align-items: center;
+  padding-top: var(--nav-h);
+  padding-bottom: 112px;
+  overflow: hidden;
+}
+
+/* a slow, soft patch of light drifting behind the hero */
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -10%;
+  right: -10%;
+  width: 70vw;
+  height: 80vh;
+  background:
+    radial-gradient(closest-side at 40% 45%, var(--warm-soft), transparent 75%),
+    radial-gradient(closest-side at 70% 60%, var(--accent-soft), transparent 80%);
+  filter: blur(40px);
+  animation: drift 32s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(-6%, -2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(6%, 6%, 0) scale(1.08);
+  }
+}
+
+.hero__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: center;
+}
+
+.hero__actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.hero__art {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  max-height: 72vh;
+  justify-self: end;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  overflow: hidden;
+  box-shadow: 0 30px 60px -40px rgba(80, 50, 20, 0.35);
+}
+
+.scroll-cue {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.scroll-cue:hover {
+  color: var(--ink);
+}
+
+.scroll-cue__track {
+  position: relative;
+  width: 1px;
+  height: 72px;
+  background: var(--line-2);
+}
+
+.scroll-cue__dot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--ink);
+  animation: cue-drop 2.8s var(--ease) infinite;
+}
+
+@keyframes cue-drop {
+  0% {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(68px);
+    opacity: 0;
+  }
+}
+
+@supports (animation-timeline: view()) {
+  /* the hero lifts away and its picture sinks back as you leave it */
+  .hero {
+    view-timeline: --hero;
+  }
+
+  .hero__text {
+    animation: hero-text-out linear both;
+    animation-timeline: --hero;
+    animation-range: exit 0% exit 100%;
+  }
+
+  .hero__art > .art {
+    animation: hero-art-out linear both;
+    animation-timeline: --hero;
+    animation-range: exit 0% exit 100%;
+  }
+
+  @keyframes hero-text-out {
+    to {
+      translate: 0 -90px;
+      opacity: 0;
+    }
+  }
+
+  @keyframes hero-art-out {
+    from {
+      scale: 1.02;
+    }
+    to {
+      translate: 0 12%;
+      scale: 1.16;
+    }
+  }
+}
+
+@media (max-width: 960px) {
+  .hero__inner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero {
+    min-height: 0;
+    padding-top: calc(var(--nav-h) + 48px);
+    padding-bottom: 96px;
+  }
+
+  .hero__art {
+    aspect-ratio: 16 / 10;
+    max-height: none;
+    justify-self: stretch;
+    margin-top: 16px;
+  }
+
+  .scroll-cue {
+    position: static;
+    transform: none;
+    margin: 36px auto 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .hero .eyebrow {
+    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+  }
+
+  .hero .lead {
+    font-size: 1.05rem;
+  }
+
+  .hero {
+    padding-top: calc(var(--nav-h) + 32px);
+    padding-bottom: 64px;
+  }
+
+  /* below the text on a phone the picture is just something to scroll past */
+  .hero__art {
+    display: none;
+  }
+
+  .hero__actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .hero__actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hero__actions .link {
+    justify-self: center;
+    margin-top: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-cue__dot {
+    opacity: 1;
+    transform: translateY(28px);
+  }
+}

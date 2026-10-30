@@ -39,7 +39,7 @@ const RIGHT = PAGE.width - MARGIN;
 const CONTENT_WIDTH = RIGHT - MARGIN;
 const FOOTER_ROOM = 30;
 
-// The site's palette (styles.css) on white paper.
+// The site's palette (styles/tokens.css) on white paper.
 const INK = rgb(0.106, 0.114, 0.11);
 const INK_2 = rgb(0.294, 0.306, 0.294);
 const INK_3 = rgb(0.431, 0.443, 0.427);

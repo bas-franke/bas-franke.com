@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { trackPageViews } from './analytics';
-import './styles.css';
+import './styles/index.css';
 
 trackPageViews();
 

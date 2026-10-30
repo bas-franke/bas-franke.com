@@ -1,0 +1,98 @@
+/* Skills: late afternoon. */
+
+.skills {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: clamp(40px, 7vw, 120px);
+  align-items: start;
+}
+
+.tiers {
+  border-top: 1px solid var(--line);
+}
+
+.tier {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  padding: 26px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tier__name {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1.4rem;
+  font-variation-settings: 'opsz' 24;
+  margin: 0 0 4px;
+  line-height: 1.2;
+}
+
+.tier__note {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+}
+
+.tier__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-size: 1.05rem;
+}
+
+.principles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 30px;
+  counter-reset: principle;
+}
+
+.principle {
+  position: relative;
+  padding-left: 44px;
+  counter-increment: principle;
+}
+
+.principle::before {
+  content: counter(principle, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+}
+
+.principle h3 {
+  font-size: 1.5rem;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+
+.principle p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+@media (max-width: 960px) {
+  .skills {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .tier {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}

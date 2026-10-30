@@ -1,0 +1,30 @@
+/* Reading progress. */
+
+/* A hairline along the top that fills as the page is read. */
+.progress {
+  display: none;
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 60;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--warm));
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+
+@supports (animation-timeline: view()) {
+  .progress {
+    display: block;
+    animation: progress linear both;
+    animation-timeline: scroll(root);
+  }
+
+  @keyframes progress {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+}

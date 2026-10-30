@@ -1,0 +1,125 @@
+/* Contact: night, by the lamp. */
+
+.contact {
+  display: grid;
+  gap: clamp(40px, 7vw, 120px);
+  align-items: start;
+}
+
+.contact--with-form {
+  grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+}
+
+.contact__list {
+  list-style: none;
+  margin: 36px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 28px;
+}
+
+.contact__list li {
+  display: grid;
+  gap: 10px;
+}
+
+.contact__big {
+  justify-self: start;
+  font-family: var(--serif);
+  font-size: clamp(1.5rem, 3vw, 2.3rem);
+  font-variation-settings: 'opsz' 36;
+  line-height: 1.2;
+  text-decoration: none;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line-2);
+  transition: color 0.3s, border-color 0.3s;
+  overflow-wrap: anywhere;
+}
+
+.contact__big:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.form {
+  display: grid;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.field label {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.field input,
+.field textarea {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  border-radius: 0;
+  padding: 10px 0;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.3s;
+}
+
+.field input:focus,
+.field textarea:focus {
+  border-color: var(--accent);
+}
+
+.field--trap {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.form__actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.form__error {
+  margin: 0;
+  color: var(--bad);
+  font-size: 0.95rem;
+}
+
+.form__done {
+  padding: 28px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.form__done p {
+  margin: 0;
+}
+
+.form__done .form__done-title {
+  font-family: var(--serif);
+  font-size: 1.8rem;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+@media (max-width: 960px) {
+  .contact--with-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

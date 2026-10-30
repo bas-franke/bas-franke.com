@@ -1,0 +1,48 @@
+/* What every section shares: its spacing and heading. */
+
+.section {
+  padding-top: clamp(96px, 12vw, 168px);
+}
+
+.section__head {
+  display: grid;
+  gap: 18px;
+  margin-bottom: clamp(40px, 6vw, 76px);
+}
+
+/* Section headings rise out of a mask and their eyebrow rule draws itself. */
+.section__head h2 {
+  clip-path: polygon(-5% 0, 105% 0, 105% 0, -5% 0);
+  translate: 0 0.5em;
+  transition:
+    clip-path 1.2s var(--ease) 0.12s,
+    translate 1.2s var(--ease) 0.12s;
+}
+
+.section__head.in h2 {
+  clip-path: polygon(-5% -30%, 105% -30%, 105% 130%, -5% 130%);
+  translate: 0 0;
+}
+
+.section__head .eyebrow::before {
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 1s var(--ease) 0.3s;
+}
+
+.section__head.in .eyebrow::before {
+  transform: none;
+}
+
+@media (max-width: 640px) {
+  .section {
+    padding-top: 80px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section__head h2 {
+    clip-path: none;
+    translate: none;
+  }
+}

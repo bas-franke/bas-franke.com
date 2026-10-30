@@ -1,0 +1,58 @@
+/* bas-franke.com: warm paper, soft ink, one lake-blue accent and a little lamplight. */
+
+:root {
+  --paper: #f4efe6;
+  --paper-2: #ebe4d8;
+  --paper-3: #e1d8c9;
+  --ink: #221e1a;
+  --ink-2: #514a42;
+  --ink-3: #766d62;
+  --line: #ddd4c5;
+  --line-2: #c7bba8;
+  --accent: #4f6b7c;
+  --accent-2: #3b5565;
+  --accent-soft: rgba(79, 107, 124, 0.14);
+  /* lamplight: the warm second colour, used for glow and the odd detail */
+  --warm: #a8693c;
+  --warm-soft: rgba(214, 150, 88, 0.2);
+  --ok: #4f7f5e;
+  --bad: #b05a4c;
+
+  --serif: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --sans: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur: 900ms;
+  --gutter: clamp(20px, 5vw, 72px);
+  --max: 1240px;
+  --nav-h: 72px;
+  --radius: 10px;
+
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --paper: #16130f;
+  --paper-2: #1e1a15;
+  --paper-3: #27221b;
+  --ink: #eee5d6;
+  --ink-2: #bfb4a3;
+  --ink-3: #93897b;
+  --line: #2f2922;
+  --line-2: #453c31;
+  --accent: #8fabbd;
+  --accent-2: #aac2d1;
+  --accent-soft: rgba(143, 171, 189, 0.14);
+  --warm: #e0a46e;
+  --warm-soft: rgba(224, 150, 80, 0.14);
+  --ok: #7fb58f;
+  --bad: #d6857a;
+  color-scheme: dark;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --nav-h: 96px;
+  }
+}
