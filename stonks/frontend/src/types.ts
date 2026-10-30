@@ -353,7 +353,25 @@ export interface Benchmark {
 }
 
 /** One timeframe bucket of a v2 research payload (SPEC §8). */
+/** One book on a session's live board (SPEC §8). */
+export interface BoardRow {
+  place?: number | null;
+  name: string;
+  angle?: string | null;
+  rank?: number | null;
+  ethYearly?: number | null;
+  holdYearly?: number | null;
+  ethDrop?: number | null;
+  meanYearly?: number | null;
+  meanHoldYearly?: number | null;
+  meanDrop?: number | null;
+  status?: string | null;
+  running?: boolean | null;
+}
+
 export interface ResearchBucket {
+  /** A session in progress, or its full table once it is done. */
+  board?: { live: boolean; finished: number; total: number; note?: string; rows: BoardRow[] } | null;
   label: string;
   intervals: string[];
   profile?: { holdoutDays?: number; folds?: number; foldSpanDays?: number; dataFrom?: string } | null;

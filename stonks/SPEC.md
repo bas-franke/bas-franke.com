@@ -290,6 +290,7 @@ camelCase and numbers (not numeric strings).
 | `PUT /api/bot` | partial `settings.bot` | updated `settings.bot`; switching `mode` to `live` needs `{ confirmLive:true }`; validated |
 | `POST /api/bot/activate` | `{ researchId, bucket, rank, start, confirmLive? }` | `{ ok, bot, activeResearch, started, startError? }`; 400 not bot-ready / unknown family / live without confirm, 409 when `researchId` is not the newest snapshot (§8) |
 | `POST /api/bot/allocate` | `{ target: "BTC"\|"ETH"\|"EUR"\|null, confirmLive? }` | `{ ok, bot, started, startError? }`; moves everything to one coin or euros (switches the bot on), `null` = back to the strategy; 400 live without confirm |
+| `POST /api/research` buckets | `board?: { live, finished, total, note, rows[] }` | a session's live rankings; the page rereads every 30 s while any board is `live`, rows are flat objects, at most 60 |
 | `GET /api/hall-of-fame` | | `{ entries: [{ id, addedAt, researchId, bucket, rank, entry }] }`, newest first; `entry` = the research entry as kept (§7 shape, `botReady` = runnable on this server now) |
 | `GET /api/tracking` | `?mode=&range=day\|week\|month\|year\|all` | expected vs actual vs hold, gap, slippage, drift alerts (§5b) |
 | `GET /api/health/detail` | | `{ status, checkedAt, bot, components:{ engine, database, bitvavo, clock, decision, candles, lab, alerts, lossGuard, orders, stuckOrders, shadow, process }, events }` (§5b) |

@@ -522,3 +522,24 @@
     line-height: 1.2;
   }
 }
+
+/* A session's live rankings */
+.shell .research-page .live-board .is-running td {
+  background: color-mix(in srgb, var(--gain) 9%, transparent);
+}
+.shell .research-page .live-board .live-chip {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+}
+.shell .research-page .live-board .dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.shell .research-page .live-board-table td:nth-child(2) {
+  min-width: 190px;
+}

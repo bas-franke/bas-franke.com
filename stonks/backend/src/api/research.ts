@@ -139,6 +139,19 @@ export const isBucket = (v: unknown): v is Bucket => typeof v === 'string' && ((
 
 const optFinite = (v: unknown, path: string) => (v === undefined || v === null ? null : finite(v, path));
 
+/** A session still running: every book so far, updated as agents finish (SPEC.md §8). */
+function liveBoard(v: unknown, path: string) {
+  const b = obj(v, path);
+  if (!Array.isArray(b.rows) || b.rows.length > 60) fail(`${path}.rows must be an array of at most 60`);
+  return {
+    live: b.live === true,
+    finished: finite(b.finished, `${path}.finished`),
+    total: finite(b.total, `${path}.total`),
+    note: optStr(b.note, `${path}.note`, 600) ?? '',
+    rows: (b.rows as unknown[]).map((r, i) => flat(r, `${path}.rows[${i}]`, 20)),
+  };
+}
+
 function bucket(v: unknown, path: string) {
   const b = obj(v, path);
   return {
@@ -150,6 +163,7 @@ function bucket(v: unknown, path: string) {
     benchmark: b.benchmark === undefined || b.benchmark === null ? null : benchmark(b.benchmark, `${path}.benchmark`),
     notes: optStr(b.notes, `${path}.notes`, 4000) ?? '',
     top: topList(b.top ?? [], `${path}.top`, 0),
+    ...(b.board === undefined || b.board === null ? {} : { board: liveBoard(b.board, `${path}.board`) }),
   };
 }
 

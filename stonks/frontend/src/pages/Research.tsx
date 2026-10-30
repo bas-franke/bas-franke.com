@@ -4,7 +4,7 @@ import { api, ApiError } from '../api';
 import { artUrl, EmptyState, PageBanner } from '../components/art';
 import { LineChart, type LineSeries } from '../components/charts';
 import { IconChart, IconCheck, IconPlay, IconSliders, IconStar, IconStarFilled, IconTrash } from '../components/icons';
-import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast } from '../components/ui';
+import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { ago, dateOnly, eur, familyLabel, lossAction, lossLimitText, pct, toDate } from '../format';
 import { navigate, setHandoff, useLocation } from '../router';
 import './research.css';
@@ -43,6 +43,9 @@ const score = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1));
 export default function ResearchPage() {
   const r = useAsync(() => api.research(), []);
   const ov = useAsync(() => api.overview(), []);
+  // A session in progress fills its board as agents finish.
+  const liveSession = !!r.data && 'buckets' in r.data && Object.values(r.data.buckets ?? {}).some((b) => b?.board?.live);
+  useVisibleInterval(() => r.reload(), 30_000, liveSession);
   if (r.error) return <ErrorBox error={r.error} onRetry={r.reload} />;
   if (!r.data)
     return (
@@ -232,6 +235,7 @@ function Research({
       {!hallView && bucket && (
       <div id="bucket-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="stack" style={{ gap: 12 }}>
         <BucketIntro name={tab} b={bucket} />
+        {bucket.board && <LiveBoard board={bucket.board} />}
         {(tab === 'session4' || tab === 'session5') && (
           <div className="callout brass">
             Sessions 4 and 5 were ranked at a flat 0.05 % fee, below Bitvavo’s 0.15/0.25 %. Their euro figures and session scores use it; the absolute
@@ -333,6 +337,61 @@ function Research({
         />
       )}
     </div>
+  );
+}
+
+function LiveBoard({ board }: { board: NonNullable<ResearchBucket['board']> }) {
+  const yr = (v: unknown) => fx(v, (n) => pct(n, 0, true));
+  const drop = (v: unknown) => fx(v, (n) => pct(-Math.abs(n), 0));
+  return (
+    <section className="card live-board" aria-label="Rankings so far">
+      <div className="card-head">
+        <h2 style={{ marginRight: 'auto' }}>{board.live ? 'Rankings so far' : 'All the books'}</h2>
+        <span className={`chip ${board.live ? 'brass' : 'outline'}`}>
+          {board.live && <span className="dot" />} {board.finished} of {board.total} finished
+        </span>
+      </div>
+      {board.note && <p className="small soft">{board.note}</p>}
+      <div className="table-wrap">
+        <table className="data live-board-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Book</th>
+              <th className="r">Rank</th>
+              <th className="r">ETH yearly vs holding</th>
+              <th className="r">ETH drop</th>
+              <th className="r">10 coins yearly vs holding</th>
+              <th className="r">10-coin drop</th>
+            </tr>
+          </thead>
+          <tbody>
+            {board.rows.map((r) => (
+              <tr key={r.name} className={r.running ? 'is-running' : undefined}>
+                <td className="tnum">{r.place ?? '–'}</td>
+                <td>
+                  <b>{r.name}</b>
+                  {r.running && <span className="chip gain live-chip">running now</span>}
+                  {r.status && <span className="chip outline live-chip">{r.status}</span>}
+                  {r.angle && <div className="tiny soft">{r.angle}</div>}
+                </td>
+                <td className="r tnum">
+                  <b>{fx(r.rank, (n) => n.toFixed(1))}</b>
+                </td>
+                <td className="r tnum nowrap">
+                  {yr(r.ethYearly)} vs {yr(r.holdYearly)}
+                </td>
+                <td className="r tnum">{drop(r.ethDrop)}</td>
+                <td className="r tnum nowrap">
+                  {yr(r.meanYearly)} vs {yr(r.meanHoldYearly)}
+                </td>
+                <td className="r tnum">{drop(r.meanDrop)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
