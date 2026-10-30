@@ -33,6 +33,10 @@ export interface OrderMeta {
   chaseSince?: number;
   /** Order-book chase: id of the first order of this chain. */
   chaseRoot?: number;
+  /** Order-book chase: when this order was cancelled to be re-placed (ms). */
+  chaseCancelAt?: number;
+  /** Order-book chase: set once the rest of this order was re-placed or given up (never twice). */
+  chaseDone?: boolean;
 }
 
 export interface OrderRow {
@@ -81,6 +85,19 @@ export async function openOrders(mode: Mode, market?: string): Promise<OrderRow[
   const { rows } = await query(
     `SELECT * FROM orders WHERE mode = $1 AND status = ANY($2) AND ($3::text IS NULL OR market = $3) ORDER BY id`,
     [mode, OPEN_STATUSES, market ?? null],
+  );
+  return rows.map(rowToOrder);
+}
+
+/**
+ * Orders the chase cancelled after `since` (ms) whose rest was not re-placed yet: Bitvavo can be slow to report a
+ * cancelled order, so the cancel did not confirm and the next tick continues the chain once sync has closed it.
+ */
+export async function chaseLeftovers(mode: Mode, since: number): Promise<OrderRow[]> {
+  const { rows } = await query(
+    `SELECT * FROM orders WHERE mode = $1 AND status = 'canceled' AND (raw->>'chaseCancelAt')::bigint > $2
+       AND NOT COALESCE((raw->>'chaseDone')::boolean, false) ORDER BY id`,
+    [mode, since],
   );
   return rows.map(rowToOrder);
 }

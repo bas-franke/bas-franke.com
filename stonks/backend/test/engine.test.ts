@@ -28,6 +28,8 @@ let candleCalls = 0;
 /** Bars the newest candle lags behind the bar asked for (a late Bitvavo candle). */
 let candleLag = 0;
 let onPlace: (() => void) | null = null;
+/** Bitvavo has not confirmed the cancel yet: the order stays open in the DB until a later sync. */
+let cancelUnconfirmed = false;
 
 function makeCandles(n: number, lastBar: number, rising = true): Candle[] {
   const out: Candle[] = [];
@@ -50,6 +52,7 @@ class FakeBroker {
   }
   async cancel(o: OrderRow) {
     cancelled.push({ mode: this.mode, id: o.id });
+    if (cancelUnconfirmed) return false;
     o.status = 'canceled';
     return true;
   }
@@ -81,7 +84,12 @@ mock.module('../src/bot/store.js', {
     fillsAfter: async () => [],
     fillsFor: async () => [],
     maxFillId: async () => 0,
-    updateOrder: async () => undefined,
+    updateOrder: async (id: number, _patch: unknown, meta?: Record<string, unknown>) => {
+      const o = orders.find((x) => x.id === id);
+      if (o && meta) o.meta = { ...o.meta, ...meta };
+    },
+    chaseLeftovers: async (mode: string, since: number) =>
+      orders.filter((o) => o.mode === mode && o.status === 'canceled' && (o.meta.chaseCancelAt ?? 0) > since && !o.meta.chaseDone),
   },
 });
 mock.module('../src/bot/live.js', { exports: { LiveBroker: class extends FakeBroker { constructor() { super('live'); } } } });
@@ -132,6 +140,7 @@ function reset(spec: StrategySpec, enabled = true, mode: 'paper' | 'live' = 'pap
   candleLag = 0;
   candleCalls = 0;
   onPlace = null;
+  cancelUnconfirmed = false;
   botSettings = { enabled, mode, strategy: spec, maxExposureEur: null, dailyLossLimit: { unit: 'eur', value: 100 }, fees: { maker: 0.0015, taker: 0.0025 }, paperStartEur: 1000 };
   status.startupDone = true;
   status.lastIdleRefresh = Date.now();
@@ -287,6 +296,31 @@ test('chase: a limit buy left behind by the book is re-placed one tick over the 
   assert.match(placed[0].intent.reason, /\(repriced\)$/);
   assert.deepEqual(placed[0].ctx.chase, { since: now - 40_000, root: 41 });
   assert.equal(placed[0].ctx.expiresAt, null);
+});
+
+test('chase: a cancel Bitvavo has not confirmed yet is re-placed on a later tick, exactly once', async (t) => {
+  reset(ema, false);
+  botSettings.enabled = true;
+  botSettings.chase = CHASE;
+  botSettings.strategy = { ...ema, id: 'chased-strategy' };
+  const now = Date.parse('2026-10-27T12:30:40Z') + stray * 120_000;
+  t.mock.timers.enable({ apis: ['Date'], now });
+  settings.bot_state = { paper: { locks: {}, trail: {}, lastDecidedBar: now, strategyKey: JSON.stringify(botSettings.strategy), strategyStart: now - 3600_000 }, live: { locks: {}, trail: {} } };
+  book = { bid: 400.5, ask: 401 };
+  orders = [{ ...chased(45, { since: now - 40_000, active: now - 40_000, market: 'BTC-EUR' }), strategyId: 'chased-strategy' }];
+  cancelUnconfirmed = true;
+  await tick();
+  assert.deepEqual(cancelled.map((c) => c.id), [45]);
+  assert.equal(placed.length, 0, 'nothing re-placed while the cancel is unconfirmed');
+  // the next sync reads the order back as cancelled
+  orders[0].status = 'canceled';
+  t.mock.timers.setTime(now + 15_000);
+  await tick();
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].intent.price, '400.51');
+  assert.deepEqual(placed[0].ctx.chase, { since: now - 40_000, root: 45 });
+  await tick();
+  assert.equal(placed.length, 1, 'never placed twice');
 });
 
 test('chase: an order that is itself the best bid keeps its place; younger than 30 s is left alone', async (t) => {

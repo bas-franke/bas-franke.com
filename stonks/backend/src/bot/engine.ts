@@ -10,7 +10,7 @@ import { LiveBroker } from './live.js';
 import { BUY_CASH_MARGIN, checkDay, limitInEur, makerPrice, MARKET_SLIPPAGE, WINDOW_MS, windowBaseline, type LossLimit, planOrders, replayPosition, stopHit, type DayState, type Holding, type OrderIntent } from './logic.js';
 import { allPrices, bestBidAsk, closedCandles, eurPrice, marketRules } from './marketData.js';
 import { getWallet, PaperBroker, resetPaperWallet } from './paper.js';
-import { fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
+import { chaseLeftovers, fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
 import { amsterdamDay, barOpen, lastClosedBar } from './time.js';
 
 export const TICK_MS = 15_000;
@@ -435,10 +435,11 @@ async function handleTimeouts(s: BotSettings, broker: Broker, now: number, still
 const CHASE_SUFFIX = / \((repriced|rest at market)\)$/;
 
 /**
- * Order-book chase (settings.chase, always on): a limit order still unfilled `repriceSec` after it was placed is cancelled and
- * placed again for the unfilled rest one tick inside the best bid (buy) or best ask (sell) (makerPrice), post-only as
- * before, unless it already leads the book. Once the first order of the chain is `marketAfterMin` old, the rest goes out as a market order. Buys are
- * capped to the free cash (taker fee and margin kept free, as in planOrders).
+ * Order-book chase (settings.chase, always on): a limit order still unfilled `repriceSec` after it was placed is
+ * cancelled and placed again for the unfilled rest one tick inside the best bid (buy) or best ask (sell) (makerPrice),
+ * post-only as before, unless it already leads the book. Once the first order of the chain is `marketAfterMin` old,
+ * the rest goes out as a market order. Buys are capped to the free cash (taker fee and margin kept free, as in
+ * planOrders). A cancel Bitvavo has not confirmed yet is continued on a later tick, once sync has closed the order.
  */
 async function handleChase(s: BotSettings, broker: Broker, now: number, stillValid: () => boolean): Promise<number> {
   const c = s.chase;
@@ -453,46 +454,71 @@ async function handleChase(s: BotSettings, broker: Broker, now: number, stillVal
     const target = makerPrice(o.side, book, rules, o.price);
     if (!toMarket && Number(target) === o.price) continue; // still leads the book: keep its place in the queue
     const why = toMarket ? `not filled within ${c.marketAfterMin} min: the rest goes at market` : `repricing to the order book (${target})`;
+    await updateOrder(o.id, {}, { chaseCancelAt: now }); // before cancelling: a later tick may finish the chain
     if (!(await broker.cancel(o, why))) continue;
-    const { rows } = await query('SELECT amount, filled_amount FROM orders WHERE id = $1', [o.id]);
-    let rest = Number(rows[0]?.amount ?? o.amount) - Number(rows[0]?.filled_amount ?? o.filledAmount ?? 0);
-    if (!(rest > 0) || !stillValid()) continue;
-    const price = toMarket ? (o.side === 'buy' ? book.ask : book.bid) : Number(target);
-    if (o.side === 'buy') {
-      const cash = (await broker.balances()).find((b) => b.symbol === 'EUR')?.available ?? 0;
-      rest = Math.min(rest, cash / (price * (1 + s.fees.taker + BUY_CASH_MARGIN + (toMarket ? MARKET_SLIPPAGE : 0))));
+    placed += await continueChase(s, broker, o, now, stillValid);
+  }
+  for (const o of await chaseLeftovers(s.mode, now - CHASE_LEFTOVER_MS)) {
+    if (!stillValid()) break;
+    if (o.strategyId !== s.strategy.id || (await openOrders(s.mode, o.market)).some((x) => x.side === o.side)) {
+      await updateOrder(o.id, {}, { chaseDone: true }); // the strategy moved on, or a newer order already works
+      continue;
     }
-    const base = (o.reason ?? 'order').replace(CHASE_SUFFIX, '');
-    let intent: OrderIntent;
-    if (toMarket && o.side === 'buy') {
-      const quote = roundQuote(rest * price, rules.notionalDecimals);
-      if (Number(quote) < rules.minOrderInQuoteAsset) {
-        await log('info', 'chase_done', `${o.market}: the unfilled rest (€${quote}) is under the minimum order; not sent at market`, { orderId: o.id });
-        continue;
-      }
-      intent = { market: o.market, side: 'buy', orderType: 'market', amountQuote: quote, postOnly: false, reason: `${base} (rest at market)`, valueEur: Number(quote) };
-    } else {
-      const amount = roundAmount(rest, rules.quantityDecimals);
-      const problem = sizeProblem(rules, Number(amount), price);
-      if (problem) {
-        await log('info', 'chase_done', `${o.market}: the unfilled rest is too small to place again (${problem})`, { orderId: o.id });
-        continue;
-      }
-      intent = toMarket
-        ? { market: o.market, side: 'sell', orderType: 'market', amount, postOnly: false, reason: `${base} (rest at market)`, valueEur: Number(amount) * price }
-        : { market: o.market, side: o.side, orderType: 'limit', amount, price: target, postOnly: o.meta.postOnly, reason: `${base} (repriced)`, valueEur: Number(amount) * price };
-    }
-    await log('info', toMarket ? 'chase_market' : 'chase_reprice', toMarket
-      ? `${o.market}: ${o.side} not filled within ${c.marketAfterMin} min; sending the rest (${intent.amount ?? `€${intent.amountQuote}`}) at market`
-      : `${o.market}: ${o.side} ${intent.amount} moved from ${o.price} to ${target} (book ${book.bid} / ${book.ask})`,
-      { orderId: o.id, root: o.meta.chaseRoot ?? o.id, book });
-    const row = await broker.place(intent, {
-      strategyId: o.strategyId, expiresAt: null, fallback: 'cancel', barTime: o.meta.barTime, fees: s.fees,
-      ...(toMarket ? {} : { chase: { since: o.meta.chaseSince, root: o.meta.chaseRoot ?? o.id } }),
-    });
-    if (row) placed++;
+    await log('info', 'chase_resumed', `${o.market}: order ${o.id} is cancelled now; placing its rest again`, { orderId: o.id });
+    placed += await continueChase(s, broker, o, now, stillValid);
   }
   return placed;
+}
+
+/** How long after a chase cancel the chain may still be continued. */
+const CHASE_LEFTOVER_MS = 5 * 60_000;
+
+/** Places the unfilled rest of a cancelled chase order again: at the book, or at market once the chain is old. */
+async function continueChase(s: BotSettings, broker: Broker, o: OrderRow, now: number, stillValid: () => boolean): Promise<number> {
+  const c = s.chase;
+  await updateOrder(o.id, {}, { chaseDone: true }); // before placing: never two re-placements for one order
+  const rules = (await marketRules()).get(o.market);
+  if (!rules || !stillValid()) return 0;
+  const toMarket = now - (o.meta.chaseSince ?? now) >= c.marketAfterMin * 60_000;
+  const { rows } = await query('SELECT amount, filled_amount FROM orders WHERE id = $1', [o.id]);
+  let rest = Number(rows[0]?.amount ?? o.amount) - Number(rows[0]?.filled_amount ?? o.filledAmount ?? 0);
+  if (!(rest > 0)) return 0;
+  const book = await bestBidAsk(o.market);
+  const target = makerPrice(o.side, book, rules);
+  const price = toMarket ? (o.side === 'buy' ? book.ask : book.bid) : Number(target);
+  if (o.side === 'buy') {
+    const cash = (await broker.balances()).find((b) => b.symbol === 'EUR')?.available ?? 0;
+    rest = Math.min(rest, cash / (price * (1 + s.fees.taker + BUY_CASH_MARGIN + (toMarket ? MARKET_SLIPPAGE : 0))));
+  }
+  const base = (o.reason ?? 'order').replace(CHASE_SUFFIX, '');
+  let intent: OrderIntent;
+  if (toMarket && o.side === 'buy') {
+    const quote = roundQuote(rest * price, rules.notionalDecimals);
+    if (Number(quote) < rules.minOrderInQuoteAsset) {
+      await log('info', 'chase_done', `${o.market}: the unfilled rest (€${quote}) is under the minimum order; not sent at market`, { orderId: o.id });
+      return 0;
+    }
+    intent = { market: o.market, side: 'buy', orderType: 'market', amountQuote: quote, postOnly: false, reason: `${base} (rest at market)`, valueEur: Number(quote) };
+  } else {
+    const amount = roundAmount(rest, rules.quantityDecimals);
+    const problem = sizeProblem(rules, Number(amount), price);
+    if (problem) {
+      await log('info', 'chase_done', `${o.market}: the unfilled rest is too small to place again (${problem})`, { orderId: o.id });
+      return 0;
+    }
+    intent = toMarket
+      ? { market: o.market, side: 'sell', orderType: 'market', amount, postOnly: false, reason: `${base} (rest at market)`, valueEur: Number(amount) * price }
+      : { market: o.market, side: o.side, orderType: 'limit', amount, price: target, postOnly: o.meta.postOnly, reason: `${base} (repriced)`, valueEur: Number(amount) * price };
+  }
+  await log('info', toMarket ? 'chase_market' : 'chase_reprice', toMarket
+    ? `${o.market}: ${o.side} not filled within ${c.marketAfterMin} min; sending the rest (${intent.amount ?? `€${intent.amountQuote}`}) at market`
+    : `${o.market}: ${o.side} ${intent.amount} moved from ${o.price} to ${target} (book ${book.bid} / ${book.ask})`,
+    { orderId: o.id, root: o.meta.chaseRoot ?? o.id, book });
+  const row = await broker.place(intent, {
+    strategyId: o.strategyId, expiresAt: null, fallback: 'cancel', barTime: o.meta.barTime, fees: s.fees,
+    ...(toMarket ? {} : { chase: { since: o.meta.chaseSince ?? now, root: o.meta.chaseRoot ?? o.id } }),
+  });
+  return row ? 1 : 0;
 }
 
 async function handleStops(s: BotSettings, broker: Broker, ms: ModeState, pf: PortfolioView, stillValid: () => boolean): Promise<number> {

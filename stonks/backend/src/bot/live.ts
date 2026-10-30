@@ -11,6 +11,11 @@ import { fillsForOrder, insertOrder, isOpenStatus, openOrders, recordFill, updat
 const ORDER_NOT_FOUND = 240;
 /** A pending order the exchange still does not know after this long was never placed. */
 const PENDING_GIVE_UP_MS = 2 * 60_000;
+/** Read-backs of a cancelled order before the next sync takes over. */
+const CANCEL_READBACK_TRIES = 3;
+const CANCEL_READBACK_WAIT_MS = 1500;
+/** Orders younger than this that Bitvavo does not find yet are not reported as a failed check. */
+const FRESH_ORDER_MS = 60_000;
 
 const idsOf = (o: OrderRow) => (o.exchangeOrderId ? { orderId: o.exchangeOrderId } : { clientOrderId: o.meta.uuid });
 
@@ -94,8 +99,17 @@ export class LiveBroker implements Broker {
         return false;
       }
     }
-    // Read back the final state: it may have (partly) filled just before the cancel.
-    await this.syncOne(order).catch(() => undefined);
+    // Read back the final state: it may have (partly) filled just before the cancel. Bitvavo often answers "no
+    // order found" (240) for a few seconds after a cancel, so try a few times before leaving it to the next sync.
+    for (let attempt = 0; attempt < CANCEL_READBACK_TRIES; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, CANCEL_READBACK_WAIT_MS));
+      try {
+        await this.syncOne(order);
+        break;
+      } catch (err) {
+        if (!(err instanceof BitvavoError && err.errorCode === ORDER_NOT_FOUND)) break;
+      }
+    }
     const { rows } = await query('SELECT status FROM orders WHERE id = $1', [order.id]);
     return !isOpenStatus(String(rows[0]?.status ?? 'canceled'));
   }
@@ -107,6 +121,8 @@ export class LiveBroker implements Broker {
         fills += await this.syncOne(o);
       } catch (err) {
         if (err instanceof RateLimitedError) throw err;
+        // Bitvavo does not find an order for a few seconds after it was placed; the next sync reads it.
+        if (err instanceof BitvavoError && err.errorCode === ORDER_NOT_FOUND && Date.now() - o.meta.activeFrom < FRESH_ORDER_MS) continue;
         await log('warn', 'order_sync_failed', `Checking live order ${o.id} (${o.market}) failed: ${errText(err)}`, { orderId: o.id });
       }
     }
