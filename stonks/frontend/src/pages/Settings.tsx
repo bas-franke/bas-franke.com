@@ -488,6 +488,7 @@ export default function SettingsPage() {
       />
 
       <ClearHistory mode={saved.mode} />
+      <ClearTradesAndLogs mode={saved.mode} />
 
       {(dirty || errors._) && (
         <div className="save-bar">
@@ -805,6 +806,73 @@ function ClearHistory({ mode }: { mode: string }) {
   );
 }
 
+/** Settings > "Clear trades and logs": deletes the mode's trades and every log line after typing CLEAR. The server refuses while a coin is held. */
+function ClearTradesAndLogs({ mode }: { mode: string }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const r = await api.clearTradesAndLogs();
+      toast(`Cleared ${r.removed.fills} trades, ${r.removed.orders} orders and ${r.removed.logs} log lines.`);
+      refreshDesk();
+      setOpen(false);
+      setText('');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card danger-card">
+      <Section id="trades" kicker="Danger zone" title="Trades and logs" intro="The bot's own record of what it did.">
+        <div className="stack" style={{ gap: 10 }}>
+          <p className="small soft" style={{ margin: 0 }}>
+            Clearing deletes the trades and orders of your {mode} account and every log line, and the expected vs actual numbers start again from now. It only works while the bot
+            holds no coin and no orders are working. Your balance at Bitvavo stays as it is.
+          </p>
+          <div>
+            <button className="btn danger small" onClick={() => setOpen(true)}>
+              Clear trades and logs
+            </button>
+          </div>
+        </div>
+      </Section>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Clear trades and logs?"
+        actions={
+          <>
+            <button className="btn ghost" onClick={() => setOpen(false)}>
+              Keep them
+            </button>
+            <button className="btn danger" disabled={text.trim() !== 'CLEAR' || busy} onClick={() => void run()}>
+              {busy ? 'Clearing…' : 'Clear trades and logs'}
+            </button>
+          </>
+        }
+      >
+        <div className="callout loss">
+          This deletes the <b>{mode}</b> trades and orders and all logs for good. It can’t be undone. If you need them for tax, export your history from Bitvavo first.
+        </div>
+        {error && <div className="callout loss">{error}</div>}
+        <div className="field">
+          <label htmlFor="clear-trades-confirm">
+            Type <b>CLEAR</b> to confirm
+          </label>
+          <input id="clear-trades-confirm" className="input" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 function Section({ id, kicker, title, intro, children }: { id: string; kicker?: string; title: string; intro: string; children: ReactNode }) {
   const spot = artUrl(`spot-${id}`);
   return (
@@ -828,6 +896,7 @@ const JUMPS = [
   { id: 'mode', label: 'Paper or live' },
   { id: 'move', label: 'Move everything' },
   { id: 'history', label: 'Portfolio history' },
+  { id: 'trades', label: 'Trades and logs' },
 ];
 
 function jumpTo(id: string) {

@@ -822,6 +822,46 @@ describe('portfolio vs buy and hold', () => {
   });
 });
 
+describe('clearing trades and logs', () => {
+  const orders = [{ n: '0' }];
+  let balances: unknown[] = [];
+  let h: Harness;
+  let cookie: string;
+  before(async () => {
+    h = await startHarness({ getOverview: async () => ({ balances }) }, { orders, fills: [], bot_logs: [] });
+    cookie = await h.login();
+  });
+  after(() => h.close());
+  const clear = (json: unknown) => h.req('POST', '/api/trades-and-logs/clear', { json, cookie });
+  const deletes = (from: number) => h.calls.slice(from).filter((c) => c.sql.startsWith('DELETE'));
+
+  test('needs CLEAR and a login', async () => {
+    assert.equal((await clear({ confirm: 'clear' })).status, 400);
+    assert.equal((await h.req('POST', '/api/trades-and-logs/clear', { json: { confirm: 'CLEAR' } })).status, 401);
+  });
+
+  test('refuses while a coin is held or orders are in flight, and deletes nothing', async () => {
+    const n = h.calls.length;
+    balances = [{ symbol: 'EUR', eurValue: 500 }, { symbol: 'ETH', eurValue: 120 }];
+    const held = await clear({ confirm: 'CLEAR' });
+    assert.equal(held.status, 409);
+    assert.match(((await held.json()) as any).error, /ETH/);
+    balances = [{ symbol: 'ETH', eurValue: 1.7 }]; // dust is no position
+    orders[0].n = '1';
+    assert.equal((await clear({ confirm: 'CLEAR' })).status, 409);
+    assert.deepEqual(deletes(n), []);
+    orders[0].n = '0';
+  });
+
+  test('clears fills, then orders, then logs, restarts tracking and leaves one line', async () => {
+    const n = h.calls.length;
+    assert.equal((await clear({ confirm: 'CLEAR' })).status, 200);
+    assert.deepEqual(deletes(n).map((c) => c.sql), ['DELETE FROM fills WHERE mode = $1', 'DELETE FROM orders WHERE mode = $1', 'DELETE FROM bot_logs']);
+    assert.ok(h.calls.slice(n).some((c) => c.sql.includes("'tracking_reset'")));
+    assert.ok(h.logs.some((l) => l.event === 'trades_and_logs_cleared'));
+  });
+});
+
 describe('security hardening', () => {
   test('rateKey groups an IPv6 /64 and unwraps IPv4-mapped addresses', () => {
     assert.equal(rateKey('203.0.113.7'), '203.0.113.7');

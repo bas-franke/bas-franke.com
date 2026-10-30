@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import { OPEN_STATUSES } from '../bot/store.js';
 import type { ApiDeps } from './deps.js';
-import { enumParam, fail, MODES } from './util.js';
+import { ConflictError, enumParam, fail, MODES, num } from './util.js';
 
 // Portfolio vs buy and hold BTC / ETH for the Overview (SPEC.md §5a). Purely informative: reads equity_snapshots
 // and track_points (one row a minute), and fills BTC/ETH from Bitvavo candles where no track points exist yet.
@@ -13,6 +14,9 @@ export async function markTrackingReset(deps: ApiDeps, mode: string): Promise<vo
     [mode, (deps.now ?? Date.now)()],
   );
 }
+
+/** Worth of a coin that counts as a real position; below it is dust the bot could not sell anyway. */
+const POSITION_MIN_EUR = 5;
 
 export const RANGES = ['day', 'week', 'month', 'year', 'all'] as const;
 const SPAN_MS: Record<Exclude<(typeof RANGES)[number], 'all'>, number> = {
@@ -109,6 +113,29 @@ export function trackRoutes(deps: ApiDeps) {
     await markTrackingReset(deps, mode);
     const removed = (a.rowCount ?? 0) + (b.rowCount ?? 0);
     await deps.log('warn', 'portfolio_history_cleared', `Portfolio history of the ${mode} account cleared (${removed} points); charts start again from now`, { mode, removed });
+    res.json({ ok: true, mode, removed });
+  });
+
+  // Settings > "Clear trades and logs". Stops and the position's average entry are read from the fills, so it refuses
+  // while a coin is held, and while orders are working or just ended (a late fill still needs its order). Ids keep counting.
+  r.post('/trades-and-logs/clear', async (req, res) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    if (body?.confirm !== 'CLEAR') fail('Type CLEAR to confirm (confirm: "CLEAR").');
+    const mode = (await deps.getBotSettings()).mode;
+    const { balances } = (await deps.getOverview()) as { balances?: { symbol: string; eurValue: unknown }[] };
+    const held = (balances ?? []).filter((b) => b.symbol.toUpperCase() !== 'EUR' && (num(b.eurValue) ?? 0) >= POSITION_MIN_EUR);
+    if (held.length) throw new ConflictError(`The bot still holds ${held.map((b) => b.symbol).join(', ')}. Clear this once it is out of the position.`);
+    const { rows } = await deps.query(
+      `SELECT count(*) AS n FROM orders WHERE mode = $1 AND (status = ANY($2) OR status = 'unknown' OR updated_at > now() - interval '15 minutes')`,
+      [mode, OPEN_STATUSES],
+    );
+    if (Number(rows[0]?.n ?? 0) > 0) throw new ConflictError('Orders are working or ended in the last 15 minutes. Try again once they have settled.');
+    const a = await deps.query('DELETE FROM fills WHERE mode = $1', [mode]);
+    const b = await deps.query('DELETE FROM orders WHERE mode = $1', [mode]);
+    const c = await deps.query('DELETE FROM bot_logs');
+    await markTrackingReset(deps, mode);
+    const removed = { fills: a.rowCount ?? 0, orders: b.rowCount ?? 0, logs: c.rowCount ?? 0 };
+    await deps.log('warn', 'trades_and_logs_cleared', `Trades of the ${mode} account and all logs cleared`, { mode, ...removed });
     res.json({ ok: true, mode, removed });
   });
 

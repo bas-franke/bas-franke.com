@@ -113,6 +113,7 @@ export const api = {
   tracking: (q: { mode?: string; range: CompareRange }) => request<TrackingData>('GET', `/tracking${qs(q)}`),
   healthDetail: () => request<HealthDetail>('GET', '/health/detail'),
   testAlert: () => request<{ ok: boolean; configured: boolean; error?: string }>('POST', '/bot/test-alert', {}),
+  clearTradesAndLogs: () => request<{ ok: true; removed: { fills: number; orders: number; logs: number } }>('POST', '/trades-and-logs/clear', { confirm: 'CLEAR' }),
   clearPortfolioHistory: () => request<{ ok: true; removed: number }>('POST', '/portfolio-history/clear', { confirm: 'CLEAR' }),
   writeups: () => request<{ writeups: { specId: string; title: string; updatedAt: string }[] }>('GET', '/writeups'),
   writeup: (specId: string) => request<Writeup>('GET', `/writeups/${encodeURIComponent(specId)}`),
