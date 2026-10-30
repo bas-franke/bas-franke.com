@@ -90,6 +90,8 @@
 @supports (animation-timeline: view()) {
   html {
     timeline-scope: --day-about, --day-evening, --day-skills, --arch;
+    /* scroll anchoring would follow the parts that move with the scroll, and in WebKit that runs the page away from the reader */
+    overflow-anchor: none;
   }
 
   #about {
