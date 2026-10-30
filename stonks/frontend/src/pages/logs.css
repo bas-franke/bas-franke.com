@@ -1,0 +1,141 @@
+/* Logs: the bot's diary. Mono columns on desktop, a meta line over the message on phones. */
+
+.logs-page .logs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+.logs-page .logs-tail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.logs-page .logs-card {
+  padding: 4px 0;
+}
+.logs-page .logs-empty {
+  padding: 30px 24px;
+}
+
+.logs-page .log-day {
+  padding: 14px 24px 8px;
+  font-family: var(--sans);
+  border-bottom: 1px solid var(--line);
+}
+
+.logs-page .log-row {
+  position: relative;
+  grid-template-columns: 74px 64px 160px minmax(0, 1fr);
+  padding: 9px 24px;
+}
+.logs-page .log-row .ts {
+  font-variant-numeric: tabular-nums;
+}
+.logs-page .log-row .lvl {
+  justify-self: start;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  background: var(--surface-2);
+}
+.logs-page .log-row .lvl.info {
+  background: color-mix(in srgb, var(--s1) 12%, transparent);
+}
+.logs-page .log-row .lvl.warn {
+  background: var(--brass-soft);
+  color: var(--brass-ink);
+}
+.logs-page .log-row .lvl.error {
+  background: var(--loss-soft);
+}
+/* a thin colour edge on warnings and errors so they stand out while scrolling */
+.logs-page .log-row.lv-warn::before,
+.logs-page .log-row.lv-error::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--warn);
+}
+.logs-page .log-row.lv-error::before {
+  background: var(--loss);
+}
+.logs-page .log-row .msg {
+  line-height: 1.5;
+}
+.logs-page .log-row details summary {
+  padding: 2px 0;
+}
+.logs-page .log-row details summary:hover {
+  color: var(--ink-2);
+}
+
+@media (max-width: 760px) {
+  .logs-page .logs-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .logs-page .logs-filters .segmented {
+    display: flex;
+    width: 100%;
+  }
+  .logs-page .logs-filters .segmented button {
+    flex: 1 1 auto;
+    min-height: 40px;
+    padding: 6px 8px;
+    font-size: 0.88rem;
+  }
+  .logs-page .logs-tail {
+    justify-content: space-between;
+    margin-left: 0;
+  }
+  .logs-page .logs-tail .btn {
+    min-height: 44px;
+    padding: 8px 18px;
+  }
+
+  .logs-page .logs-card {
+    padding: 2px 0;
+  }
+  .logs-page .logs-empty {
+    padding: 26px 16px;
+  }
+  .logs-page .log-day {
+    padding: 14px 16px 8px;
+  }
+
+  .logs-page .log-row {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    gap: 4px 10px;
+    padding: 12px 16px;
+  }
+  .logs-page .log-row .ts {
+    font-size: 0.74rem;
+  }
+  .logs-page .log-row .event {
+    font-size: 0.74rem;
+  }
+  /* the message is what you read: proportional type, a touch larger */
+  .logs-page .log-row .msg {
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+  .logs-page .log-row details summary {
+    font-family: var(--mono);
+    padding: 8px 0 2px;
+    min-width: 64px;
+  }
+  .logs-page .log-row pre {
+    font-size: 0.72rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}

@@ -5,6 +5,7 @@ import { ErrorBox, Segmented, Skeleton, useVisibleInterval } from '../components
 import { dateOnly, timeOnly } from '../format';
 import { navigate, useLocation } from '../router';
 import type { LogRow } from '../types';
+import './logs.css';
 
 const MAX_ROWS = 1000;
 type Level = '' | 'info' | 'warn' | 'error';
@@ -82,7 +83,7 @@ export default function LogsPage() {
   const shown = view === 'orders' ? rows.filter((l) => isOrderEvent(l.event)) : rows;
   let lastDay = '';
   return (
-    <div className="stack">
+    <div className="stack logs-page">
       <div className="page-head">
         <div>
           <span className="eyebrow">Logs</span>
@@ -90,7 +91,7 @@ export default function LogsPage() {
           <p className="lede">Everything it notices and does, as it happens. New lines appear every few seconds while this page is open. “Orders only” shows each decision and what happened to every order it placed.</p>
         </div>
       </div>
-      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="logs-filters">
         <Segmented<View>
           label="Show"
           value={view}
@@ -111,18 +112,19 @@ export default function LogsPage() {
             { value: 'error', label: 'Errors' },
           ]}
         />
-        <span className="spacer" />
-        <span className={`chip ${paused ? '' : 'gain pulse'}`}>
-          <span className="dot" />
-          {paused ? 'Paused' : 'Live tail'}
-        </span>
-        <button className="btn small" onClick={() => setPaused((p) => !p)}>
-          {paused ? <IconPlay width={15} /> : <IconPause width={15} />}
-          {paused ? 'Resume' : 'Pause'}
-        </button>
+        <div className="logs-tail">
+          <span className={`chip ${paused ? '' : 'gain pulse'}`}>
+            <span className="dot" />
+            {paused ? 'Paused' : 'Live tail'}
+          </span>
+          <button className="btn small" onClick={() => setPaused((p) => !p)}>
+            {paused ? <IconPlay width={15} /> : <IconPause width={15} />}
+            {paused ? 'Resume' : 'Pause'}
+          </button>
+        </div>
       </div>
       {error && <ErrorBox error={error} onRetry={initial} />}
-      <section className="card" style={{ padding: '6px 0' }}>
+      <section className="card logs-card">
         {!loaded && (
           <div className="stack" style={{ padding: 20, gap: 10 }}>
             {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -131,7 +133,7 @@ export default function LogsPage() {
           </div>
         )}
         {loaded && shown.length === 0 && (
-          <p className="soft small" style={{ padding: '30px 24px' }}>
+          <p className="soft small logs-empty">
             {view === 'orders' ? 'No order activity in the latest lines yet.' : `Nothing logged yet${level ? ' at this level' : ''}.`}
           </p>
         )}
@@ -144,9 +146,7 @@ export default function LogsPage() {
             return (
               <div key={l.id}>
                 {header && (
-                  <div className="eyebrow" style={{ padding: '12px 24px 6px', fontFamily: 'var(--sans)' }}>
-                    {day}
-                  </div>
+                  <div className="eyebrow log-day">{day}</div>
                 )}
                 <div className={`log-row lv-${l.level}${fresh.has(l.id) ? ' new' : ''}`}>
                   <span className="ts">{timeOnly(l.ts)}</span>
