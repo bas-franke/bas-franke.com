@@ -699,7 +699,7 @@ export function healthDetail(bot: BotSettings, variant: 'ok' | 'warn' | 'fail' |
     process: part('ok', 'Up for 1312 min.', { uptimeSec: 78_720, startedAt: iso(78_720_000), deployedAt: iso(79_000_000), rssMb: 142, node: 'v22.12.0' }),
   };
   if (variant === 'warn' || variant === 'fail') {
-    components.alerts = part('warn', 'Alert mails are off: SENDGRID_API_KEY, MAIL_FROM or STONKS_ALERT_EMAIL is missing.', { configured: false, lastSentAt: null, lastError: null });
+    components.alerts = part('warn', 'Alert mails are off: SENDGRID_API_KEY or STONKS_ALERT_EMAIL is missing.', { configured: false, lastSentAt: null, lastError: null });
     components.candles = part('warn', 'The newest candle is late on BTC-EUR.', { interval: bot.strategy.interval, markets: [{ market: 'BTC-EUR', newest: iso(5_400_000), barsBehind: 1 }] });
   }
   if (variant === 'fail') {

@@ -223,7 +223,7 @@ copy's position scaled to the real equity. Nothing is deleted; clearing the port
 actual for both modes; the paper wallet stays. It answers 409 while a coin worth €5 or more is held in the current mode, or an order in either mode is open, unknown or ended in the last 15 minutes: stops and average
 entries come from the fills. Ids keep counting, so the cursors stay valid, but after a clear `bot_logs` can no longer rebuild `shadow_state`.
 
-Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`, `MAIL_FROM`, `STONKS_ALERT_EMAIL`): every `error` and the
+Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`, `STONKS_ALERT_EMAIL`; the sender `stonks@bas-franke.com` is in code): every `error` and the
 warnings `decision_held`, `stale_candles`, `foreign_coin`, `stop_skipped`, `tracking_drift`, one mail per event name per 30 minutes.
 Unconfigured it does nothing. `POST /api/bot/test-alert` sends one.
 

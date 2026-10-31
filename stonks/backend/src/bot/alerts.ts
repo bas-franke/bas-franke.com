@@ -12,15 +12,18 @@ const DASHBOARD = 'https://stonks.bas-franke.com';
 /** Warnings worth a mail; every 'error' line is one too. */
 const WARN_EVENTS = new Set(['decision_held', 'stale_candles', 'foreign_coin', 'stop_skipped', 'tracking_drift']);
 
+/** Sender address; bas-franke.com must be authenticated in SendGrid (or this address verified as a single sender). */
+const MAIL_FROM = 'stonks@bas-franke.com';
+
 const settings = () => ({
   key: process.env.SENDGRID_API_KEY ?? '',
-  from: process.env.MAIL_FROM ?? '',
+  from: MAIL_FROM,
   to: process.env.STONKS_ALERT_EMAIL ?? '',
 });
 
 export function alertsConfigured(): boolean {
-  const { key, from, to } = settings();
-  return Boolean(key && from && to);
+  const { key, to } = settings();
+  return Boolean(key && to);
 }
 
 export const shouldAlert = (level: string, event: string) => level === 'error' || (level === 'warn' && WARN_EVENTS.has(event));
@@ -108,7 +111,7 @@ export function notifyLog(level: string, event: string, message: string, now = D
 
 /** POST /api/bot/test-alert: one mail right now, past the dedup. */
 export async function sendTestAlert(): Promise<{ ok: boolean; configured: boolean; error?: string }> {
-  if (!alertsConfigured()) return { ok: false, configured: false, error: 'Mail is not set up: SENDGRID_API_KEY, MAIL_FROM and STONKS_ALERT_EMAIL must all be set on the server.' };
+  if (!alertsConfigured()) return { ok: false, configured: false, error: 'Mail is not set up: SENDGRID_API_KEY and STONKS_ALERT_EMAIL must all be set on the server.' };
   const r = await deliver('[stonks] test alert', `This is a test of the stonks bot's alert mail.\n\n${DASHBOARD}`);
   return { ...r, configured: true };
 }

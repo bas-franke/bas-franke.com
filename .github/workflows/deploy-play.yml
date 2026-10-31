@@ -88,21 +88,19 @@ jobs:
             "server:/srv/apps/$PROJECT/backend/"
 
       # Account mails (activation, password reset) go through SendGrid. The key and the verified sender address come
-      # from the repository secrets SENDGRID_API_KEY and MAIL_FROM; without them accounts still work but no mail is sent.
+      # from the repository secret SENDGRID_API_KEY (the sender address is in code); without it accounts still work but no mail is sent.
       - name: Sync mail settings
         env:
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          MAIL_FROM: ${{ secrets.MAIL_FROM }}
         run: |
           if [ -z "$SENDGRID_API_KEY" ]; then
             echo "::warning::SENDGRID_API_KEY is not set; play cannot send activation or password reset mails."
             exit 0
           fi
           # Values go over stdin so they never show up in a command line; umask keeps the temp file private.
-          printf '%s\n%s\n' "$SENDGRID_API_KEY" "$MAIL_FROM" | ssh server "umask 077 && read -r key && { read -r from || true; } \
+          printf '%s\n' "$SENDGRID_API_KEY" | ssh server "umask 077 && read -r key \
             && f=/srv/apps/$PROJECT/.env && touch \$f \
-            && { grep -v -e '^SENDGRID_API_KEY=' \${from:+-e '^MAIL_FROM='} \$f || true; printf 'SENDGRID_API_KEY=%s\n' \"\$key\"; \
-                 if [ -n \"\$from\" ]; then printf 'MAIL_FROM=%s\n' \"\$from\"; fi; } > \$f.new \
+            && { grep -v '^SENDGRID_API_KEY=' \$f || true; printf 'SENDGRID_API_KEY=%s\n' \"\$key\"; } > \$f.new \
             && mv \$f.new \$f"
 
       - name: Install and restart backend

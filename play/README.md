@@ -212,7 +212,6 @@ Nothing is required. Optional tuning:
 | `CREATE_RATE_LIMIT`    | `10`    | Room creations per IP per minute                              |
 | `DATABASE_URL`         | none    | PostgreSQL for accounts (written by the *Provision databases* workflow); without it: guests only |
 | `SENDGRID_API_KEY`     | none    | Activation and password reset mails (synced from the GitHub secret by the deploy workflow) |
-| `MAIL_FROM`            | `play@bas-franke.com` | Sender address; must be a verified sender in SendGrid (GitHub secret `MAIL_FROM`) |
 | `PUBLIC_URL`           | `https://play.bas-franke.com` | Base of the links in those mails                 |
 | `AUTH_ATTEMPTS`        | `20`    | Login/sign-up attempts per IP per 10 minutes                  |
 | `SIGNUPS_PER_HOUR`     | `5`     | New accounts per IP per hour                                  |
@@ -263,7 +262,7 @@ timeout; without it the lobby works but joining a room fails.
   `RDS_MASTER_PASSWORD` secret). It creates the `play` database and user and writes `DATABASE_URL` to the `.env`.
   Tables are created by the backend on start (`backend/src/migrations.ts`).
 - Mail: in SendGrid verify a sender (Settings → Sender Authentication, or a single sender) and create an API key with
-  *Mail Send* permission. Add the repository secrets `SENDGRID_API_KEY` and `MAIL_FROM` (the verified address); the
+  *Mail Send* permission. The sender `play@bas-franke.com` is in code (`backend/src/config.ts`); it must be covered by domain authentication or verified as a single sender. Add the repository secret `SENDGRID_API_KEY`; the
   next deploy writes them to `/srv/apps/play/.env`. Without them sign-ups wait for an activation mail that never comes.
 
 ## 4. Deploy

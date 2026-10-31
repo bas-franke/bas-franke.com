@@ -21,9 +21,9 @@ export const config = {
   publicUrl: (env.PUBLIC_URL ?? 'https://play.bas-franke.com').replace(/\/+$/, ''),
   /** SendGrid for activation and password reset mails. Without it the links are only logged (local development). */
   sendgridApiKey: env.SENDGRID_API_KEY,
-  /** A sender address verified in SendGrid. */
-  mailFrom: env.MAIL_FROM ?? 'play@bas-franke.com',
-  mailFromName: env.MAIL_FROM_NAME ?? 'play.bas-franke.com',
+  /** Sender address; bas-franke.com must be authenticated in SendGrid (or this address verified as a single sender). */
+  mailFrom: 'play@bas-franke.com',
+  mailFromName: 'play.bas-franke.com',
   /** Login, sign-up and mail-sending attempts allowed per IP per 10 minutes. */
   authAttempts: Number(env.AUTH_ATTEMPTS ?? 20),
   /** New accounts per IP per hour. */

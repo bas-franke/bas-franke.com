@@ -123,7 +123,7 @@ export function labVerdict(usesLab: boolean, families: number, stats: typeof lab
 
 export function alertsVerdict(configured: boolean, lastSentAt: number | null, lastError: string | null): Verdict {
   const data = { configured, lastSentAt: lastSentAt ? new Date(lastSentAt).toISOString() : null, lastError };
-  if (!configured) return say('warn', 'Alert mails are off: SENDGRID_API_KEY, MAIL_FROM or STONKS_ALERT_EMAIL is missing.', data);
+  if (!configured) return say('warn', 'Alert mails are off: SENDGRID_API_KEY or STONKS_ALERT_EMAIL is missing.', data);
   if (lastError) return say('warn', `The last alert mail failed: ${lastError}`, data);
   return say('ok', lastSentAt ? 'Alert mails are on.' : 'Alert mails are on; none sent since the start.', data);
 }

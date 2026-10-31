@@ -5,7 +5,7 @@ import { healthVerdict } from '../src/bot/health.js';
 import { errText, log } from '../src/log.js';
 import { startHarness } from './helpers/api-harness.js';
 
-const NAMES = ['SENDGRID_API_KEY', 'MAIL_FROM', 'STONKS_ALERT_EMAIL', 'BITVAVO_API_SECRET', 'DATABASE_URL'];
+const NAMES = ['SENDGRID_API_KEY', 'STONKS_ALERT_EMAIL', 'BITVAVO_API_SECRET', 'DATABASE_URL'];
 const saved = Object.fromEntries(NAMES.map((n) => [n, process.env[n]]));
 const realFetch = globalThis.fetch;
 const flush = () => new Promise((r) => setImmediate(r));
@@ -15,7 +15,6 @@ let answer: () => Promise<Response>;
 
 function configure() {
   process.env.SENDGRID_API_KEY = 'SG.key.value';
-  process.env.MAIL_FROM = 'bot@example.com';
   process.env.STONKS_ALERT_EMAIL = 'owner@example.com';
 }
 
@@ -69,7 +68,7 @@ describe('alerts', () => {
     assert.equal(sent[0].url, 'https://api.sendgrid.com/v3/mail/send');
     assert.equal(sent[0].auth, 'Bearer SG.key.value');
     assert.deepEqual(sent[0].body.personalizations, [{ to: [{ email: 'owner@example.com' }] }]);
-    assert.equal(sent[0].body.from.email, 'bot@example.com');
+    assert.equal(sent[0].body.from.email, 'stonks@bas-franke.com');
     assert.equal(sent[0].body.subject, '[stonks] tick_failed');
     notifyLog('error', 'tick_failed', 'again', t + 30 * 60_000 + 1);
     await flush();
