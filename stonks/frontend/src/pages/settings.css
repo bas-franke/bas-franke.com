@@ -260,7 +260,7 @@
     background: var(--surface);
   }
   .jump-nav button[aria-current='true'] {
-    border-color: var(--ink);
+    border-color: var(--brass);
   }
   .shell .settings-page .settings-section {
     padding: 20px 0;

@@ -114,9 +114,17 @@
 .logs-page .log-row pre {
   font-family: var(--mono);
 }
+/* The data link follows the message, so a row stays one line. */
+.logs-page .log-row details {
+  display: inline;
+}
 .logs-page .log-row details summary {
+  display: inline;
+  white-space: nowrap;
+  margin-left: 8px;
   padding: 2px 0;
   font-family: var(--mono);
+  cursor: pointer;
 }
 .logs-page .log-row details summary:hover {
   color: var(--ink-2);

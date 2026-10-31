@@ -270,14 +270,11 @@
     overflow-wrap: anywhere;
   }
   .trades-page table.data.cards.trades-table .c-amount {
-    order: 4;
-  }
-  .trades-page table.data.cards.trades-table .c-price {
     order: 5;
   }
   .trades-page table.data.cards.trades-table .c-filled,
   .trades-page table.data.cards.trades-table .c-value {
-    order: 5;
+    order: 6;
     text-align: right !important;
   }
   .trades-page table.data.cards.trades-table .c-price,
@@ -298,10 +295,10 @@
     text-transform: uppercase;
     color: var(--ink-3);
   }
-  /* Amount and price keep their width and stay on one line, the third column takes what is left. */
+  /* Price and amount sit in the same columns on every card, as on the table, the third takes what is left. */
   .trades-page table.data.cards.trades-table .c-price,
   .trades-page table.data.cards.trades-table .c-amount {
-    flex: 0 0 auto;
+    flex: 0 0 36%;
     white-space: nowrap;
   }
   .trades-page table.data.cards.trades-table .c-filled .filled {

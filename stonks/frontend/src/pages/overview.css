@@ -101,14 +101,16 @@
   container-type: inline-size;
 }
 
-/* The chart's card runs as tall as the column beside it, with the figures at the bottom. */
+/* The chart's card runs as tall as the column beside it, with its fold at the bottom. */
 .shell .overview-page .compare-card {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
+.shell .overview-page .compare-card > details {
+  margin-top: auto;
+}
 .shell .overview-page .compare-grid {
-  flex: 1 0 auto;
   grid-template-columns: minmax(0, 1fr) 250px;
   align-items: stretch;
 }

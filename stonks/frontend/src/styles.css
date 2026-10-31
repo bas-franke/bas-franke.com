@@ -8,7 +8,7 @@
   --surface-3: #ece4d6;
   --ink: #18223a;
   --ink-2: #4f5668;
-  --ink-3: #868a93;
+  --ink-3: #6f7380;
   --line: #e4d9c7;
   --line-strong: #cfc4ae;
   --gain: #5d8f5a;
@@ -41,6 +41,9 @@
   --tape-up: #3c6a3c;
   --tape-down: #a0432a;
   /* Main buttons, what is picked in a tab row, and things that float over the page. */
+  --danger: #b04e30;
+  --danger-hover: #9c4227;
+  --danger-ink: #fffaf3;
   --fill: #c9a24a;
   --fill-hover: #d6b25f;
   --fill-ink: #18223a;
@@ -77,7 +80,7 @@
     --surface-3: #223049;
     --ink: #f1e9dc;
     --ink-2: #b9b3a7;
-    --ink-3: #7f8393;
+    --ink-3: #9296a6;
     --line: #26324a;
     --line-strong: #36435d;
     --gain: #8fbf88;
@@ -99,6 +102,9 @@
     --desk-live-soft: rgba(240, 160, 131, 0.16);
     --tape-up: #a4d29d;
     --tape-down: #f0a083;
+    --danger: #e0866a;
+    --danger-hover: #f0a58c;
+    --danger-ink: #152036;
     --fill: #f1e9dc;
     --fill-hover: #e2d6c2;
     --fill-ink: #152036;
@@ -136,7 +142,7 @@
   --surface-3: #223049;
   --ink: #f1e9dc;
   --ink-2: #b9b3a7;
-  --ink-3: #7f8393;
+  --ink-3: #9296a6;
   --line: #26324a;
   --line-strong: #36435d;
   --gain: #8fbf88;
@@ -158,6 +164,9 @@
   --desk-live-soft: rgba(240, 160, 131, 0.16);
   --tape-up: #a4d29d;
   --tape-down: #f0a083;
+  --danger: #e0866a;
+  --danger-hover: #f0a58c;
+  --danger-ink: #152036;
   --fill: #f1e9dc;
   --fill-hover: #e2d6c2;
   --fill-ink: #152036;
@@ -199,6 +208,7 @@ html {
 }
 
 body {
+  font-variant-numeric: lining-nums;
   margin: 0;
   min-height: 100vh;
   background:
@@ -552,12 +562,12 @@ body:has(.notes-page) {
   background: color-mix(in srgb, var(--brass) 84%, var(--surface));
 }
 .btn.danger {
-  background: var(--loss);
-  border-color: var(--loss);
-  color: #fffaf3;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--danger-ink);
 }
 .btn.danger:hover:not(:disabled) {
-  background: var(--loss-ink);
+  background: var(--danger-hover);
 }
 .btn.ghost {
   background: transparent;
@@ -567,6 +577,9 @@ body:has(.notes-page) {
 .btn.ghost:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--ink);
+}
+.btn.ghost.small {
+  border-color: var(--line-strong);
 }
 .btn.small {
   padding: 6px 12px;

@@ -501,7 +501,7 @@ function CompareCard({ mode }: { mode: string }) {
         <div className="compare-grid">
           <LineChart
             series={lines.map((l) => l.series)}
-            height={matchMedia('(min-width: 1360px)').matches ? 430 : 180}
+            height={matchMedia('(min-width: 1120px)').matches ? 400 : 180}
             legend={false}
             baseline={100}
             ariaLabel={`Your portfolio and buy and hold BTC and ETH over the last ${label}, indexed to 100`}

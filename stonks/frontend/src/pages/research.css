@@ -496,8 +496,8 @@
   .shell .research-page .stat:nth-child(odd):last-child {
     flex-basis: 100%;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
     gap: 12px;
   }
   .shell .research-page .stat:nth-child(-n + 2) .stat-value {
