@@ -1059,7 +1059,141 @@ function TwoWeakSpots() {
   );
 }
 
+const LESS_BTC: string[][] = [
+  ['Start (Session 14’s #1)', '69.5', '71.4', '43.7', '62.7'],
+  ['Start, only its wait lowered', '70.4', '72.7', '45.6', '64.9'],
+  ['Coin recovery ride (new #1)', '71.7', '73.0', '44.2', '62.6'],
+  ['Own supertrend up', '72.7', '72.7', '46.0', '65.7'],
+  ['Force index plus lead', '72.5', '72.9', '45.5', '66.5'],
+  ['MACD pushing up', '72.0', '73.3', '45.6', '65.6'],
+  ['Fisher turn (agent’s best)', '70.5', '–', '45.6', '65.6'],
+  ['Overheated rides trail', '69.4', '–', '43.7', '62.7'],
+];
+
+function LessBitcoin() {
+  return (
+    <>
+      <p className="lede">
+        The bot trades a coin but takes its big orders from bitcoin. When a coin takes off on its own while bitcoin is weak, it holds back. So we set
+        50 research agents on one question: can the new #1 catch more of those coin-specific spikes without giving up what makes it good? The honest
+        answer is a little, at a price, and half of the little was one number.
+      </p>
+
+      <h2>What we measured</h2>
+      <p>
+        We looked at every stretch of one to three months in which a coin rose at least 15% <b>and</b> beat bitcoin by at least 15 points over the same
+        stretch. There are about 630 of them across the nine coins that are not bitcoin. For each we ask how much of the coin’s rise the book’s account
+        kept. We call that <b>overtake kept</b>, from 0 to 100. The start, Session 14’s new #1, keeps <b>70.6</b>: 68.1 on ether and 73.1 on the other eight coins.
+      </p>
+      <p>
+        The ranking put this first and the old strength second: a book lost points for every point it gave up against the start (score, late years, worst
+        drops) but earned nothing for gaining strength. Every agent could use any of the TAAPI indicators.
+      </p>
+
+      <h2>What the agents tried</h2>
+      <p>
+        Fifty ideas, all with the same shape: a second key that turns a coin’s own bull on when bitcoin’s is off. Supertrend, Aroon, ichimoku, parabolic
+        SAR, Donchian breakouts, KAMA, Hull average, ADX, vortex, Bollinger squeezes, on-balance volume, force index, MACD, Fisher, Williams %R, StochRSI,
+        money flow, ranking against the other coins, the coin-to-bitcoin ratio, correlation and beta to bitcoin, a faster hourly lane, a comeback ride
+        after a deep fall, and more. Almost all of them gained between one and three points of overtake kept at the agent’s own settings. The best looked
+        like 73 to 74.
+      </p>
+
+      <h2>The test that mattered</h2>
+      <p>
+        As in the last session, we did not trust the agents’ own numbers. We took the best 15, plus the start, and nudged every setting by up to 15% in
+        12 shared random draws, then repeated with a fresh seed. We also ran them on the 19 coins no agent saw. “Wait lowered” is the start with one
+        number changed: how long a ride starting far above its average waits before it holds anything, from 0.25 to 0.1. Many agents had quietly done the
+        same, so it is the fair yardstick.
+      </p>
+      <SplitTable
+        wrap
+        rows={LESS_BTC}
+        head={['Book', 'Kept, nudged', 'Kept, fresh draws', 'Worst drop, nudged', 'Unseen coins, drop']}
+      />
+      <p className="small soft">
+        Kept is overtake kept (median of 12 draws; the second column is a new seed and a different 12). Drops are average worst drops in percent: the ether
+        and 10-coin drop for the nudged column, the 19 unseen coins for the last.
+      </p>
+
+      <h2>What we found</h2>
+      <ul>
+        <li>
+          <b>The gain is small.</b> On the shared draws the start keeps 69.5. The best books keep 72 to 73, and the single number “wait lowered” already keeps
+          70.4. With a fresh seed the start keeps 71.4 and the best 73. So the true gain from a real coin-specific signal is about one to two points out of 100.
+        </li>
+        <li>
+          <b>The agents’ winners did not hold up.</b> The best on its own settings, the Fisher turn, claimed 73.9. On the shared draws it keeps 70.5, level
+          with the start.
+        </li>
+        <li>
+          <b>Size is the lever, and size costs drops.</b> Nearly every book gets its gain by trading a coin’s own bull at 1.25 to 1.75 times the normal size.
+          Past that, the worst drop jumps: the books were either near 40 or near 51, with little in between. That is leverage, not independence.
+        </li>
+        <li>
+          <b>The books that gain also fall further.</b> On the shared draws the typical worst drop goes from 43.7 for the start to 45 or 46 for most of them.
+          On the 19 unseen coins, almost every one with a signal did worse than the start (65 to 66 against 62.7). Only three kept the unseen drops level.
+        </li>
+        <li>
+          <b>Bitcoin’s delay is not the problem.</b> A faster bitcoin switch added a point or two of independence and three to seven of drop, because it is simply
+          more time inside bitcoin’s bull. Correlation to bitcoin is high most of the time, so rules that wait for a decoupling almost never fire.
+        </li>
+        <li>
+          <b>The signals come late.</b> A breakout, a trend flip or a momentum cross is seen after the spike has started, so the first and often biggest leg is
+          missed. Only about one overtake stretch in ten has bitcoin weak the whole time, and the start already keeps 36% of those.
+        </li>
+      </ul>
+
+      <h2>The three that placed</h2>
+      <p>
+        Only three of the tested books also kept the 19 unseen coins’ drops level with the start’s, which was our bar for placing.
+      </p>
+      <ol>
+        <li>
+          <b>Coin recovery ride.</b> A coin that was at least 20% under its one-year high within the last half year and closes above its previous 30-day high
+          opens its own daily ride, sized by volatility, ending under the 20-day low. It needs no bitcoin bull. Kept 71.7 on the shared draws against 69.5, and
+          73.0 against 71.4 on the fresh seed. It keeps 62.2 on the unseen coins against 59.9. The mean yearly return of the 10 coins dips to +82.7% against +87.8%.
+        </li>
+        <li>
+          <b>Own momentum bull.</b> A coin that gained at least 0.5 (in log terms) over the 120 days ending a week ago, and beat bitcoin by 0.3, gets its own bull
+          at twice the size. A smaller gain than the first.
+        </li>
+        <li>
+          <b>Overheated rides trail.</b> It changes two numbers the start already had, so it adds no settings. It placed third only by keeping the unseen drops level;
+          on the shared draws it does not beat the start.
+        </li>
+      </ol>
+
+      <h2>Did it solve it?</h2>
+      <div className="callout brass">
+        <p>
+          <b>Not really.</b> The bot can depend a little less on bitcoin, by one to three points of overtake kept out of 100, and the cheap half of that is lowering
+          one number. A real coin-specific signal adds about a point on top, and anything bigger buys it with extra size and deeper drops. Where bitcoin is weak but
+          a coin runs, the spike is mostly over by the time any signal fires.
+        </p>
+      </div>
+      <p>
+        Nothing changed on the bot: it still runs the same strategy until the owner chooses to switch. The tab is Session 15 on the Research page. If a next
+        session tries again, the open question is earlier entries, not bigger sizes.
+      </p>
+      <p className="small soft">
+        Method: 50 books, the start and a wait-lowered control. All returns after Bitvavo’s fees, March 2019 to October 2026, each coin from its first candle.
+        Everything here is tuned on years the agents had seen. Past results say nothing certain about the future; this is research, not financial advice.
+      </p>
+    </>
+  );
+}
+
 export const ARTICLES: Article[] = [
+  {
+    slug: 'less-bitcoin',
+    title: 'Less bitcoin, 50 tries: can the new #1 move on its own?',
+    blurb: 'We set 50 research agents on the bot’s habit of waiting for bitcoin when a coin takes off alone. How much of those spikes it now keeps, what half of the gain really was, and what it costs.',
+    date: '2026-10-31T15:30:00+01:00',
+    minutes: 7,
+    tag: 'Research',
+    body: LessBitcoin,
+  },
   {
     slug: 'two-weak-spots',
     title: 'Two weak spots, 30 tries: what we fixed and what we could not',
