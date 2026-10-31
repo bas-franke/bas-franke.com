@@ -8,7 +8,7 @@ import type { ResearchBucket, ResearchEntry, WriteupCoin } from '../types';
 const STORE = 'stonks.research.compare';
 const MAX = 8;
 const YEAR_MS = 365 * 86_400_000;
-const COLORS = ['var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
+export const COLORS = ['var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
 
 type Pts = [number, number][];
 type Scale = 'log' | 'euro';
@@ -17,8 +17,26 @@ type Curves = Record<string, { equity: Pts; holdEquity: Pts }>;
 
 const curveCache = new Map<string, Promise<Curves>>();
 
+export type Compared = { key: string; id: string; label: string };
+export type CoinTableData = { head: string[]; rows: string[][] };
+const tableCache = new Map<string, Promise<CoinTableData | null>>();
+
+/** The "every coin" table of another research's write-up, for the rows under each coin. */
+export function tableOf(specId: string): Promise<CoinTableData | null> {
+  let p = tableCache.get(specId);
+  if (!p) {
+    p = api.writeup(specId).then((doc) => {
+      const s = doc.sections.find((x) => x.coins?.length && x.head && x.rows);
+      return s ? { head: s.head!, rows: s.rows! } : null;
+    });
+    p.catch(() => tableCache.delete(specId));
+    tableCache.set(specId, p);
+  }
+  return p;
+}
+
 /** Session 12's boards name their single-coin rows "ETH alone". */
-const coinOf = (id: string) => id.replace(/ alone$/, '');
+export const coinOf = (id: string) => id.replace(/ alone$/, '');
 
 function curvesOf(specId: string): Promise<Curves> {
   let p = curveCache.get(specId);
@@ -79,6 +97,7 @@ export function ResearchGraph({
   rangeId,
   onCoin,
   onRange,
+  onCompare,
 }: {
   specId: string;
   coins: WriteupCoin[];
@@ -86,6 +105,7 @@ export function ResearchGraph({
   rangeId: string;
   onCoin: (id: string) => void;
   onRange: (id: string) => void;
+  onCompare?: (list: Compared[]) => void;
 }) {
   const range = coin.ranges.find((r) => r.id === rangeId) ?? coin.ranges[0];
   const coinId = coinOf(coin.id);
@@ -137,6 +157,8 @@ export function ResearchGraph({
       }),
     [picked, tabs],
   );
+
+  useEffect(() => onCompare?.(others), [others, onCompare]);
 
   useEffect(() => {
     for (const { id } of others) {

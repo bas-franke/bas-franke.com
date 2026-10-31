@@ -5,7 +5,7 @@ import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
 import { navigate, useLocation } from '../router';
-import { ResearchGraph } from './ResearchCompare';
+import { COLORS as CMP_COLORS, ResearchGraph, coinOf, tableOf, type CoinTableData, type Compared } from './ResearchCompare';
 import './reading.css';
 import type { Writeup, WriteupChart, WriteupSection } from '../types';
 
@@ -143,6 +143,27 @@ function Paragraphs({ text }: { text?: string }) {
   );
 }
 
+/** Thousands read as 12.3K and millions as 4.5M, so the numbers stay short. */
+function shortNumbers(t: string) {
+  return t.replace(/\d{1,3}(?:,\d{3})+(?:\.\d+)?/g, (m) => {
+    const n = Number(m.replace(/,/g, ''));
+    const s = (v: number, u: string) => `${v >= 100 ? Math.round(v) : Number(v.toFixed(v >= 10 ? 1 : 2))}${u}`;
+    return n >= 1e6 ? s(n / 1e6, 'M') : s(n / 1e3, 'K');
+  });
+}
+
+/** "€22,490 (+2,149%)" reads as €22.5K with the bracket on a second, smaller line. */
+function Cell({ text }: { text: string }) {
+  const m = /^(.*?)\s*\(([^()]*)\)$/.exec(text);
+  if (!m || !m[1]) return <>{shortNumbers(text)}</>;
+  return (
+    <>
+      {shortNumbers(m[1])}
+      <span className="cell-sub">{shortNumbers(m[2])}</span>
+    </>
+  );
+}
+
 function CoinTable({ s }: { s: WriteupSection }) {
   const specId = useLocation().query.get('spec') ?? '';
   const coins = s.coins ?? [];
@@ -154,6 +175,17 @@ function CoinTable({ s }: { s: WriteupSection }) {
   // `compact` lists the columns shown at first; the rest appear behind "Show all columns".
   const [all, setAll] = useState(false);
   const cols = (s.head ?? []).map((_, j) => j).filter((j) => all || !s.compact || s.compact.includes(j));
+  const [compared, setCompared] = useState<Compared[]>([]);
+  const [others, setOthers] = useState<Record<string, CoinTableData | null>>({});
+  useEffect(() => {
+    for (const { id } of compared) {
+      if (id in others) continue;
+      tableOf(id).then(
+        (t) => setOthers((o) => ({ ...o, [id]: t })),
+        () => setOthers((o) => ({ ...o, [id]: null })),
+      );
+    }
+  }, [compared, others]);
   const pick = (id: string) => {
     setCoinId(id);
     document.getElementById('coin-charts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -165,7 +197,7 @@ function CoinTable({ s }: { s: WriteupSection }) {
           {all ? 'Show fewer columns' : 'Show all columns'}
         </button>
       )}
-      <div className="table-wrap writeup-table">
+      <div className="table-wrap writeup-table dense">
         <table className="data">
           <thead>
             <tr>
@@ -177,21 +209,43 @@ function CoinTable({ s }: { s: WriteupSection }) {
             </tr>
           </thead>
           <tbody>
-            {(s.rows ?? []).map((r, i) => (
-              <tr key={i} className={coins.length && r[0] === coin?.id ? 'is-picked' : undefined}>
-                {cols.map((j) => [r[j] ?? '', j] as const).map(([c, j]) => (
-                  <td key={j} className={j ? 'r' : undefined}>
-                    {j === 0 && coins.some((x) => x.id === c) ? (
-                      <button type="button" className="writeup-coin" aria-pressed={c === coin?.id} onClick={() => pick(c)}>
-                        {c}
-                      </button>
-                    ) : (
-                      c
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {(s.rows ?? []).flatMap((r, i) => {
+              const picked = coins.length && r[0] === coin?.id;
+              const main = (
+                <tr key={i} className={picked ? 'is-picked' : undefined}>
+                  {cols.map((j) => [r[j] ?? '', j] as const).map(([c, j]) => (
+                    <td key={j} className={j ? 'r' : undefined}>
+                      {j === 0 && coins.some((x) => x.id === c) ? (
+                        <button type="button" className="writeup-coin" aria-pressed={c === coin?.id} onClick={() => pick(c)}>
+                          {c}
+                        </button>
+                      ) : (
+                        <Cell text={c} />
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+              // Each compared strategy's own row for this coin sits right under it, columns matched by their heading.
+              const under = compared.flatMap((o, k) => {
+                const t = others[o.id];
+                const row = t?.rows.find((x) => coinOf(x[0]) === coinOf(r[0]));
+                if (!t || !row) return [];
+                return [
+                  <tr key={`${i}-${o.key}`} className="is-compare" style={{ ['--cmp' as string]: CMP_COLORS[k % CMP_COLORS.length] }}>
+                    {cols.map((j) => {
+                      const at = j === 0 ? 0 : t.head.indexOf(s.head![j]);
+                      return (
+                        <td key={j} className={j ? 'r' : undefined}>
+                          {j === 0 ? <span className="cmp-name" title={o.label}>{o.label}</span> : at >= 0 ? <Cell text={row[at] ?? ''} /> : '–'}
+                        </td>
+                      );
+                    })}
+                  </tr>,
+                ];
+              });
+              return [main, ...under];
+            })}
           </tbody>
         </table>
       </div>
@@ -208,7 +262,7 @@ function CoinTable({ s }: { s: WriteupSection }) {
   return (
     <section className="card" id="coin-board">
       <h2>{s.title}</h2>
-      {coin && range && <ResearchGraph specId={specId} coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} />}
+      {coin && range && <ResearchGraph specId={specId} coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} onCompare={setCompared} />}
       <div className="writeup-numbers" id="coin-numbers" data-fold>
         <Fold title={`Every coin, the numbers (${coins.length})`}>{table}</Fold>
       </div>

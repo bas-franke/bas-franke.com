@@ -370,3 +370,11 @@
     min-height: 36px;
   }
 }
+
+/* Every coin, the numbers: tight columns, the bracketed part on a second line, compared strategies under each coin. */
+.writeup-table.dense table.data th,
+.writeup-table.dense table.data td { padding: 5px 7px; white-space: nowrap; line-height: 1.2; }
+.writeup-table.dense .cell-sub { display: block; font-size: 0.78em; color: var(--ink-3); }
+.writeup-table.dense tr.is-compare td { background: color-mix(in srgb, var(--cmp) 7%, transparent); font-size: 0.92em; }
+.writeup-table.dense tr.is-compare td:first-child { box-shadow: inset 3px 0 0 var(--cmp); }
+.writeup-table.dense .cmp-name { display: block; max-width: 11em; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
