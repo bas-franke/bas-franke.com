@@ -104,6 +104,7 @@ mock.module('../src/settings.js', {
 });
 mock.module('../src/bot/store.js', {
   exports: {
+    OPEN_STATUSES: OPEN,
     isOpenStatus: (s: string) => OPEN.includes(s),
     openOrders: async (mode: string, market?: string) => orders.filter((o) => o.mode === mode && OPEN.includes(o.status) && (!market || o.market === market)),
     fillsAfter: async () => [],

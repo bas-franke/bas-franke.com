@@ -13,6 +13,7 @@ import { allPrices, barWasEmpty, bestBidAsk, bookDepth, closedCandles, eurPrice,
 import { getWallet, PaperBroker, resetPaperWallet } from './paper.js';
 import { chaseLeftovers, fillsAfter, fillsFor, maxFillId, openOrders, updateOrder, type Mode, type OrderRow } from './store.js';
 import { amsterdamDay, barOpen, lastClosedBar } from './time.js';
+import { mailFinishedTrades, type TradeAccount } from './tradeMail.js';
 
 export const TICK_MS = 15_000;
 const SNAPSHOT_MS = 5 * 60_000;
@@ -365,6 +366,7 @@ async function runTick(): Promise<void> {
   try {
     await withLock(tickBody);
     status.lastTickError = null;
+    await mailFinishedTrades(await liveAccount());
   } catch (err) {
     status.lastTickError = errText(err);
     await log('error', 'tick_failed', `Bot tick failed: ${errText(err)}`, { stack: err instanceof Error ? err.stack?.split('\n').slice(0, 6) : undefined });
@@ -374,6 +376,22 @@ async function runTick(): Promise<void> {
     tickStartedAt = null;
     running = null;
   }
+}
+
+/** The live account as of the last tick, for trade mails; also fresh while the bot is off, so a late fill still mails. */
+async function liveAccount(): Promise<TradeAccount | undefined> {
+  const pf = lastPortfolio.live;
+  if (!pf) return undefined;
+  const { strategy } = effective(await getBotSettings());
+  return {
+    equityEur: pf.equityEur,
+    cashEur: pf.cashEur,
+    held: (symbol) => {
+      const b = pf.balances.find((x) => x.symbol === symbol);
+      return { amount: b ? b.available + b.inOrder : 0, eurValue: b?.eurValue ?? 0 };
+    },
+    strategyName: (id) => (id === strategy.id ? strategy.name : id),
+  };
 }
 
 /** Only a spec that runs as lab code has a hash to compare: TypeScript ports and manual moves do not run it. */

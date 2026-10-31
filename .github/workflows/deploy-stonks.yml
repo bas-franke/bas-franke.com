@@ -214,3 +214,8 @@ jobs:
       - name: Health check
         run: |
           ssh server "for i in \$(seq 1 15); do curl -fsS http://127.0.0.1:$BACKEND_PORT/api/health && exit 0; sleep 2; done; pm2 logs $PROJECT --lines 50 --nostream; exit 1"
+
+      # `[test-mail]` in the commit message sends the sample trade mail from the server, with the real mail settings.
+      - name: Send test mail
+        if: contains(github.event.head_commit.message, '[test-mail]')
+        run: ssh server "cd /srv/apps/$PROJECT/backend && node --env-file-if-exists=/srv/apps/$PROJECT/.env dist/bot/testMail.js"

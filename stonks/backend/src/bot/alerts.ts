@@ -9,8 +9,10 @@ const RETRY_MS = 5 * 60_000;
 const TIMEOUT_MS = 10_000;
 const DASHBOARD = 'https://stonks.bas-franke.com';
 
-/** Warnings worth a mail; every 'error' line is one too. */
-const WARN_EVENTS = new Set(['decision_held', 'stale_candles', 'foreign_coin', 'stop_skipped', 'tracking_drift']);
+/** Warnings that mean the bot is not doing its work; every 'error' line mails too, unless it is listed below. */
+const WARN_EVENTS = new Set(['decision_held', 'stale_candles', 'stop_skipped']);
+/** Errors the bot keeps working through. The owner's rule: stonks only mails fills (tradeMail.ts) and a bot that is not working. */
+const NOT_BOT_FAILURES = new Set(['login_disabled', 'login_paused', 'family_code_changed']);
 
 /** Sender address; bas-franke.com must be authenticated in SendGrid (or this address verified as a single sender). */
 const MAIL_FROM = 'stonks@bas-franke.com';
@@ -26,7 +28,7 @@ export function alertsConfigured(): boolean {
   return Boolean(key && to);
 }
 
-export const shouldAlert = (level: string, event: string) => level === 'error' || (level === 'warn' && WARN_EVENTS.has(event));
+export const shouldAlert = (level: string, event: string) => (level === 'error' && !NOT_BOT_FAILURES.has(event)) || (level === 'warn' && WARN_EVENTS.has(event));
 
 /** Cuts anything that looks like a credential out of text that leaves the server. */
 export function scrub(text: string): string {
@@ -41,7 +43,7 @@ export function scrub(text: string): string {
 /** For the Health page. Kept in memory: a restart starts empty. */
 export const alertStats = { lastSentAt: null as number | null, lastError: null as string | null };
 
-async function deliver(subject: string, text: string): Promise<{ ok: boolean; error?: string }> {
+export async function deliver(subject: string, text: string, html?: string): Promise<{ ok: boolean; error?: string }> {
   const { key, from, to } = settings();
   try {
     const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
@@ -51,7 +53,9 @@ async function deliver(subject: string, text: string): Promise<{ ok: boolean; er
         personalizations: [{ to: [{ email: to }] }],
         from: { email: from, name: 'stonks bot' },
         subject: scrub(subject),
-        content: [{ type: 'text/plain', value: scrub(text) }],
+        content: [{ type: 'text/plain', value: scrub(text) }, ...(html ? [{ type: 'text/html', value: scrub(html) }] : [])],
+        // Click tracking rewrites links through SendGrid's domain.
+        tracking_settings: { click_tracking: { enable: false, enable_text: false } },
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -107,13 +111,6 @@ export function notifyLog(level: string, event: string, message: string, now = D
       /* nothing left to do */
     }
   }
-}
-
-/** POST /api/bot/test-alert: one mail right now, past the dedup. */
-export async function sendTestAlert(): Promise<{ ok: boolean; configured: boolean; error?: string }> {
-  if (!alertsConfigured()) return { ok: false, configured: false, error: 'Mail is not set up: SENDGRID_API_KEY and STONKS_ALERT_EMAIL must all be set on the server.' };
-  const r = await deliver('[stonks] test alert', `This is a test of the stonks bot's alert mail.\n\n${DASHBOARD}`);
-  return { ...r, configured: true };
 }
 
 /** For tests. */

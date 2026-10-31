@@ -164,4 +164,13 @@ export const migrations: { name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    // Trade mails (SPEC §5): a fill stays NULL until SendGrid took its mail. Fills from before the mails existed count as
+    // mailed, so the first start sends no backlog.
+    name: '007_fill_mails',
+    sql: `
+      ALTER TABLE fills ADD COLUMN mailed_at timestamptz;
+      UPDATE fills SET mailed_at = now();
+    `,
+  },
 ];

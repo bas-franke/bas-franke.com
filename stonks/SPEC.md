@@ -223,9 +223,17 @@ copy's position scaled to the real equity. Nothing is deleted; clearing the port
 actual for both modes; the paper wallet stays. It answers 409 while a coin worth €5 or more is held in the current mode, or an order in either mode is open, unknown or ended in the last 15 minutes: stops and average
 entries come from the fills. Ids keep counting, so the cursors stay valid, but after a clear `bot_logs` can no longer rebuild `shadow_state`.
 
-Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`, `STONKS_ALERT_EMAIL`; the sender `stonks@bas-franke.com` is in code): every `error` and the
-warnings `decision_held`, `stale_candles`, `foreign_coin`, `stop_skipped`, `tracking_drift`, one mail per event name per 30 minutes.
-Unconfigured it does nothing. `POST /api/bot/test-alert` sends one.
+Stonks sends two kinds of mail: a finished trade, and an alert that the bot is not working. Nothing else mails.
+
+Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`, `STONKS_ALERT_EMAIL`; the sender `stonks@bas-franke.com` is in code): every `error` except
+`login_disabled`, `login_paused` and `family_code_changed`, and the warnings `decision_held`, `stale_candles`, `stop_skipped`, one mail per event name per 30 minutes.
+Unconfigured it does nothing.
+
+Trade mails (`bot/tradeMail.ts`) use the same mail settings. Every finished live trade mails once with the subject `B40% - 22:01 22-01-2026`:
+`B` buy or `S` sell, the traded value as a share of the whole portfolio right after the trade, and the last fill's time in Amsterdam. The body has
+the order and account details. A trade is all unmailed fills of one market and side of the last 24 h, mailed once no order of that market and side still works
+(a chase's reprices are one trade); `fills.mailed_at` is set when SendGrid accepted the mail. Paper trades do not mail. `POST /api/bot/test-alert`, the Health page's button
+and a commit message with `[test-mail]` (a step of the deploy) send a trade mail with sample numbers.
 
 `GET /api/health` stays public and has no amounts; `status` is `ok` or `degraded` (tick older than 120 s while on, last tick failed, or
 no database, which also answers 503). The status page checks it. `GET /api/health/detail` (logged in) reports each part with

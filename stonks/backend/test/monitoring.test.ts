@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, describe, mock, test } from 'node:test';
-import { alertsConfigured, notifyLog, resetAlerts, scrub, sendTestAlert, shouldAlert } from '../src/bot/alerts.js';
+import { alertsConfigured, notifyLog, resetAlerts, scrub, shouldAlert } from '../src/bot/alerts.js';
 import { healthVerdict } from '../src/bot/health.js';
+import { sendTestAlert } from '../src/bot/tradeMail.js';
 import { errText, log } from '../src/log.js';
 import { startHarness } from './helpers/api-harness.js';
 
@@ -43,8 +44,9 @@ after(() => {
 describe('alerts', () => {
   test('which events mail', () => {
     assert.equal(shouldAlert('error', 'anything'), true);
-    for (const e of ['decision_held', 'stale_candles', 'foreign_coin', 'stop_skipped', 'tracking_drift']) assert.equal(shouldAlert('warn', e), true);
-    assert.equal(shouldAlert('warn', 'thin_book'), false);
+    for (const e of ['decision_held', 'stale_candles', 'stop_skipped']) assert.equal(shouldAlert('warn', e), true);
+    for (const e of ['thin_book', 'foreign_coin', 'tracking_drift']) assert.equal(shouldAlert('warn', e), false);
+    for (const e of ['login_disabled', 'login_paused', 'family_code_changed']) assert.equal(shouldAlert('error', e), false);
     assert.equal(shouldAlert('info', 'decision_held'), false);
   });
 
