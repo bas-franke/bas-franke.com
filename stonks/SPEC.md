@@ -233,7 +233,7 @@ Trade mails (`bot/tradeMail.ts`) use the same mail settings. Every finished live
 `B` buy or `S` sell, the traded value as a share of the whole portfolio right after the trade, and the last fill's time in Amsterdam. The body has
 the order and account details. A trade is all unmailed fills of one market and side of the last 24 h, mailed once no order of that market and side still works
 (a chase's reprices are one trade); `fills.mailed_at` is set when SendGrid accepted the mail. Paper trades do not mail. `POST /api/bot/test-alert`, the Health page's button
-and a commit message with `[test-mail]` (a step of the deploy) send a trade mail with sample numbers.
+and a commit message with `[test-mail]` (a step of the deploy, so the commit must change a path that deploys) send a trade mail with sample numbers.
 
 `GET /api/health` stays public and has no amounts; `status` is `ok` or `degraded` (tick older than 120 s while on, last tick failed, or
 no database, which also answers 503). The status page checks it. `GET /api/health/detail` (logged in) reports each part with
