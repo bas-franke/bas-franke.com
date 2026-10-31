@@ -9,4 +9,5 @@ export const projects: Project[] = [
   { name: 'play', domains: ['play.bas-franke.com'], port: 3004, database: true, websocket: '/api/ws' },
   { name: 'wordward', domains: ['wordward.bas-franke.com'], port: 3005, database: true },
   { name: 'stonks', domains: ['stonks.bas-franke.com'], port: 3006, database: true },
+  { name: 'pulse', domains: ['pulse.bas-franke.com'], port: 3007, database: true, websocket: '/api/ws' },
 ];

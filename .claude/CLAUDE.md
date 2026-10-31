@@ -12,6 +12,7 @@ database inside a **shared RDS instance**.
 | play        | `play/`       | `play.bas-franke.com`                   | 3004         | `play`   |
 | wordward    | `wordward/`   | `wordward.bas-franke.com`               | 3005         | `wordward` |
 | stonks      | `stonks/`     | `stonks.bas-franke.com`                 | 3006         | `stonks`   |
+| pulse      | `pulse/`      | `pulse.bas-franke.com`                  | 3007         | `pulse`    |
 
 When adding a project, add a row here, register it in `status/backend/src/projects.ts` so the status page
 monitors it, and follow [docs/adding-a-project.md](docs/adding-a-project.md).

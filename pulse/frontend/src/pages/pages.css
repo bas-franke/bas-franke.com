@@ -1,0 +1,4 @@
+/* page styles: each page owns its own file */
+@import './dashboard.css';
+@import './board.css';
+@import './notes.css';
