@@ -93,13 +93,13 @@
   outline-offset: -2px;
 }
 .shell .research-page .bucket-tabs button[aria-selected='true'] {
-  background: var(--ink);
-  color: var(--surface);
+  background: var(--pick);
+  color: var(--pick-ink);
   box-shadow: var(--shadow);
 }
 .shell .research-page .bucket-tabs button[aria-selected='true'] .count {
-  background: color-mix(in srgb, var(--surface) 18%, transparent);
-  color: var(--surface);
+  background: color-mix(in srgb, var(--pick-ink) 12%, transparent);
+  color: var(--pick-ink);
 }
 .shell .research-page .bucket-tabs #tab-hall {
   color: var(--brass-ink);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { refreshDesk } from '../desk';
 import { api, ApiError, unwrapFamilies, unwrapMarkets } from '../api';
-import { artUrl, PageBanner } from '../components/art';
+import { Art, PageBanner } from '../components/art';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
 import { familyLabel, humanize, LOSS_ACTIONS, lossAction, lossLimitText, timeOnly } from '../format';
 import { isOrderEvent } from './Logs';
@@ -536,7 +536,7 @@ export default function SettingsPage() {
           </>
         }
       >
-        {artUrl('modal-live') && <img className="modal-art" src={artUrl('modal-live')} alt="" />}
+        <Art slot="modal-live" className="modal-art" />
         <div className="callout loss">
           In live mode the bot places <b>real orders</b> on your Bitvavo account with <b>real euros</b>. It can lose money. Once it has lost{' '}
           {lossLimitText(lossLimit)} in 24 hours, {guardAction.then}.
@@ -874,11 +874,10 @@ function ClearTradesAndLogs() {
 }
 
 function Section({ id, kicker, title, intro, children }: { id: string; kicker?: string; title: string; intro: string; children: ReactNode }) {
-  const spot = artUrl(`spot-${id}`);
   return (
     <section className="settings-section" id={`set-${id}`} tabIndex={-1}>
       <div className="intro">
-        {spot && <img className="section-spot" src={spot} width={56} height={56} alt="" />}
+        <Art slot={`spot-${id}`} className="section-spot" width={56} height={56} />
         {kicker && <span className="eyebrow">{kicker}</span>}
         <h3>{title}</h3>
         <p>{intro}</p>

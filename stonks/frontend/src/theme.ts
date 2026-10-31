@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
 const KEY = 'stonks-theme';
@@ -23,6 +23,24 @@ const apply = (t: ThemeChoice) => {
 apply(read());
 
 export const systemDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+
+const darkNow = () => {
+  const t = document.documentElement.getAttribute('data-theme');
+  return t ? t === 'dark' : systemDark();
+};
+const watchDark = (changed: () => void) => {
+  const seen = new MutationObserver(changed);
+  seen.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  mq.addEventListener('change', changed);
+  return () => {
+    seen.disconnect();
+    mq.removeEventListener('change', changed);
+  };
+};
+
+/** Whether the dark theme is showing right now, for anything that isn't CSS. */
+export const useIsDark = () => useSyncExternalStore(watchDark, darkNow);
 
 export function useTheme() {
   const [choice, setChoice] = useState<ThemeChoice>(read);

@@ -26,14 +26,30 @@
   --shadow-lift: 0 2px 4px rgba(60, 45, 20, 0.06), 0 18px 40px -18px rgba(60, 45, 20, 0.28);
   --radius: 16px;
   --radius-sm: 11px;
-  /* The rail and the ticker: the dark edge of the desk, in both themes. */
-  --desk: #17213a;
-  --desk-2: #202c49;
-  --desk-ink: #f1e9dc;
-  --desk-ink-2: #a9adb8;
-  --desk-line: rgba(241, 233, 220, 0.1);
-  --tape-up: #a4d29d;
-  --tape-down: #f0a083;
+  /* The rail, the ticker and the phone bars. Paper by day, the dark edge of the desk by night. */
+  --desk: #ece3d4;
+  --desk-2: #e2d8c6;
+  --desk-ink: #18223a;
+  --desk-ink-2: #565c6c;
+  --desk-line: rgba(24, 34, 58, 0.1);
+  --desk-on: #fbf7f0;
+  --desk-on-ink: #18223a;
+  --desk-tile: #fbf7f0;
+  --desk-gold: #7a5c18;
+  --desk-gold-soft: rgba(138, 106, 34, 0.14);
+  --desk-live-soft: rgba(160, 67, 42, 0.12);
+  --tape-up: #3c6a3c;
+  --tape-down: #a0432a;
+  /* Main buttons, what is picked in a tab row, and things that float over the page. */
+  --fill: #c9a24a;
+  --fill-hover: #d6b25f;
+  --fill-ink: #18223a;
+  --pick: #f2e7cc;
+  --pick-ink: #18223a;
+  --pop: #fffaf3;
+  --pop-ink: #18223a;
+  --pop-line: #e4d9c7;
+  --veil: rgba(96, 78, 50, 0.3);
   --sticky-top: 52px;
   --grain-opacity: 0.07;
   --grain-blend: multiply;
@@ -72,6 +88,26 @@
     --loss-soft: rgba(224, 134, 106, 0.15);
     --desk: #0b111e;
     --desk-2: #141d31;
+    --desk-ink: #f1e9dc;
+    --desk-ink-2: #a9adb8;
+    --desk-line: rgba(241, 233, 220, 0.1);
+    --desk-on: #f1e9dc;
+    --desk-on-ink: #17213a;
+    --desk-tile: #efe6d6;
+    --desk-gold: #e2c47f;
+    --desk-gold-soft: rgba(217, 183, 103, 0.16);
+    --desk-live-soft: rgba(240, 160, 131, 0.16);
+    --tape-up: #a4d29d;
+    --tape-down: #f0a083;
+    --fill: #f1e9dc;
+    --fill-hover: #e2d6c2;
+    --fill-ink: #152036;
+    --pick: #f1e9dc;
+    --pick-ink: #152036;
+    --pop: #f1e9dc;
+    --pop-ink: #152036;
+    --pop-line: transparent;
+    --veil: rgba(11, 17, 30, 0.5);
     --hero-scrim: #152036;
     --hero-art: brightness(0.62) saturate(0.95);
     --brass: #d4b05c;
@@ -111,6 +147,26 @@
   --loss-soft: rgba(224, 134, 106, 0.15);
   --desk: #0b111e;
   --desk-2: #141d31;
+  --desk-ink: #f1e9dc;
+  --desk-ink-2: #a9adb8;
+  --desk-line: rgba(241, 233, 220, 0.1);
+  --desk-on: #f1e9dc;
+  --desk-on-ink: #17213a;
+  --desk-tile: #efe6d6;
+  --desk-gold: #e2c47f;
+  --desk-gold-soft: rgba(217, 183, 103, 0.16);
+  --desk-live-soft: rgba(240, 160, 131, 0.16);
+  --tape-up: #a4d29d;
+  --tape-down: #f0a083;
+  --fill: #f1e9dc;
+  --fill-hover: #e2d6c2;
+  --fill-ink: #152036;
+  --pick: #f1e9dc;
+  --pick-ink: #152036;
+  --pop: #f1e9dc;
+  --pop-ink: #152036;
+  --pop-line: transparent;
+  --veil: rgba(11, 17, 30, 0.5);
   --hero-scrim: #152036;
   --hero-art: brightness(0.62) saturate(0.95);
   --brass: #d4b05c;
@@ -479,13 +535,13 @@ body:has(.notes-page) {
   cursor: not-allowed;
 }
 .btn.primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--surface);
+  background: var(--fill);
+  border-color: var(--fill);
+  color: var(--fill-ink);
   box-shadow: var(--shadow);
 }
 .btn.primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 88%, var(--brass));
+  background: var(--fill-hover);
 }
 .btn.brass {
   background: var(--brass);
@@ -762,8 +818,9 @@ select.input {
   max-width: min(260px, 70vw);
   padding: 9px 12px;
   border-radius: 10px;
-  background: var(--ink);
-  color: var(--surface);
+  background: var(--pop);
+  color: var(--pop-ink);
+  outline: 1px solid var(--pop-line);
   font-size: 0.78rem;
   font-weight: 400;
   line-height: 1.45;
@@ -1056,7 +1113,7 @@ dialog.modal {
   max-height: calc(100vh - 48px);
 }
 dialog.modal::backdrop {
-  background: rgba(20, 24, 35, 0.42);
+  background: var(--veil);
   backdrop-filter: blur(3px);
 }
 dialog.modal[open] {
@@ -1154,8 +1211,9 @@ dialog.modal[open] {
   top: 22px;
   transform: translateX(-50%);
   z-index: 60;
-  background: var(--ink);
-  color: var(--surface);
+  background: var(--pop);
+  color: var(--pop-ink);
+  outline: 1px solid var(--pop-line);
   padding: 11px 18px;
   border-radius: 999px;
   font-size: 0.88rem;

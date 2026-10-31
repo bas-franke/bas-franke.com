@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { artUrl, PageBanner } from '../components/art';
+import { Art, PageBanner } from '../components/art';
 import { ModeBadge, Skeleton, Tip } from '../components/ui';
 import { ago, dateTime, eur, lossAction, lossLimitText, timeOnly } from '../format';
 import { refreshHealth, useHealth, useHealthFeed, type HealthFeed } from '../health';
@@ -56,14 +56,12 @@ const SEVERITY: Record<HealthLevel, number> = { fail: 0, warn: 1, unknown: 2, ok
 
 /** The verdict's picture, or its mark until that state has one. */
 function VerdictMark({ state, mark }: { state: string; mark: string }) {
-  const src = artUrl(`verdict-${state}`);
-  return src ? (
-    <img className="health-verdict-art" src={src} alt="" />
-  ) : (
+  const fallback = (
     <div className="health-verdict-mark" aria-hidden="true">
       {mark}
     </div>
   );
+  return <Art slot={`verdict-${state}`} className="health-verdict-art" fallback={fallback} />;
 }
 
 const span = (sec: number) => (sec < 90 ? `${sec} s` : sec < 5400 ? `${Math.round(sec / 60)} min` : sec < 129_600 ? `${Math.round(sec / 3600)} h` : `${Math.round(sec / 86_400)} days`);

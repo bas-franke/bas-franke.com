@@ -1,4 +1,4 @@
-/* App shell: the dark rail, the ticker, painted page banners, and the phone's top bar and tab bar.
+/* App shell: the rail, the ticker, painted page banners, and the phone's top bar and tab bar.
    This file loads before styles.css; nothing there styles these parts any more. */
 
 .shell {
@@ -106,8 +106,9 @@
   color: var(--desk-ink);
 }
 .rail-nav a[aria-current='page'] {
-  background: var(--desk-ink);
-  color: #17213a;
+  background: var(--desk-on);
+  color: var(--desk-on-ink);
+  box-shadow: 0 1px 2px var(--desk-line);
 }
 .rail-nav a svg {
   width: 19px;
@@ -115,7 +116,7 @@
 }
 .rail :focus-visible,
 .ticker :focus-visible {
-  outline-color: #d9b767;
+  outline-color: var(--desk-gold);
 }
 .rail-foot {
   display: grid;
@@ -141,7 +142,7 @@
   height: 58px;
   border-radius: 10px;
   overflow: hidden;
-  background: #efe6d6;
+  background: var(--desk-tile);
   color: #4f5668;
 }
 .rail-cat img,
@@ -199,7 +200,7 @@
   box-shadow: 0 0 0 2px var(--desk);
 }
 .nav-dot.warn {
-  background: #d9b767;
+  background: var(--desk-gold);
 }
 .nav-dot.fail {
   background: var(--tape-down);
@@ -316,11 +317,11 @@
   font-family: var(--sans);
 }
 .tick-end .chip {
-  background: rgba(217, 183, 103, 0.16);
-  color: #e2c47f;
+  background: var(--desk-gold-soft);
+  color: var(--desk-gold);
 }
 .tick-end .chip.live {
-  background: rgba(240, 160, 131, 0.16);
+  background: var(--desk-live-soft);
   color: var(--tape-down);
   border-color: transparent;
 }
@@ -396,6 +397,44 @@
   gap: 8px;
   align-items: center;
   margin-top: 6px;
+}
+
+/* ---------- a picture still to come ---------- */
+
+.art-ph {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  background:
+    repeating-linear-gradient(135deg, transparent 0 11px, color-mix(in srgb, var(--line) 45%, transparent) 11px 12px),
+    linear-gradient(135deg, var(--surface-2), var(--surface-3));
+}
+.art-ph-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+}
+.page-banner-art.art-ph {
+  padding-left: 34%;
+}
+.section-spot.art-ph {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+}
+.section-spot.art-ph .art-ph-name {
+  display: none;
+}
+img[data-night] {
+  filter: none !important;
 }
 
 /* ---------- phone ---------- */
@@ -518,8 +557,8 @@
     color: var(--desk-ink);
   }
   .tabbar [aria-current='page'] .tab-icon {
-    background: var(--desk-ink);
-    color: #17213a;
+    background: var(--desk-on);
+    color: var(--desk-on-ink);
   }
   .tabbar .tab-icon svg {
     width: 20px;
@@ -547,7 +586,7 @@
     animation: sheet-in 0.2s ease-out;
   }
   dialog.more-sheet::backdrop {
-    background: rgba(11, 17, 30, 0.5);
+    background: var(--veil);
   }
   .more-grid {
     display: grid;
@@ -579,7 +618,7 @@
     gap: 6px;
   }
   .more-tile[aria-current='page'] {
-    outline: 2px solid #d9b767;
+    outline: 2px solid var(--desk-gold);
     outline-offset: -2px;
   }
 }

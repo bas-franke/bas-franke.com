@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, ApiError } from '../api';
-import { artUrl } from '../components/art';
+import { Art } from '../components/art';
 import './login.css';
 
 export default function Login({ onIn }: { onIn: () => void }) {
@@ -33,11 +33,11 @@ export default function Login({ onIn }: { onIn: () => void }) {
   return (
     <main className="login">
       <div className="login-art">
-        <img src={artUrl('login-door')} alt="" />
+        <Art slot="login-door" />
       </div>
       <div className="login-side">
         <div className="card login-card">
-          <img className="login-mark" src="/icon-64.png" alt="" width={48} height={48} />
+          <Art slot="brand-mark" className="login-mark" width={48} height={48} fallback={<img className="login-mark" src="/icon-64.png" alt="" width={48} height={48} />} />
           <h1>Stonks</h1>
           <p className="soft">A quiet little trading desk. Please let yourself in.</p>
           <form onSubmit={submit}>

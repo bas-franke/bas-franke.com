@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { refreshDesk } from '../desk';
 import { api, ApiError } from '../api';
-import { artUrl, EmptyState, PageBanner } from '../components/art';
+import { Art, EmptyState, PageBanner } from '../components/art';
 import { LineChart, type LineSeries } from '../components/charts';
 import { IconChart, IconCheck, IconPlay, IconSliders, IconStar, IconStarFilled, IconTrash } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Skeleton, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
@@ -1085,7 +1085,7 @@ function HallOfFame({
   return (
     <div id="bucket-panel" role="tabpanel" aria-labelledby="tab-hall" className="stack" style={{ gap: 12 }}>
       <section className="card quiet bucket-intro hall-intro">
-        <img className="hall-art" src={artUrl('banner-hall')} alt="" />
+        <Art slot="banner-hall" className="hall-art" />
         <h2>Hall of fame</h2>
         <Fold title="What this is">
           <p className="notes">

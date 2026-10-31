@@ -78,8 +78,8 @@
   background: var(--surface-2);
 }
 .jump-nav button[aria-current='true'] {
-  background: var(--ink);
-  color: var(--surface);
+  background: var(--pick);
+  color: var(--pick-ink);
 }
 .jump-nav button:focus-visible {
   outline-offset: -2px;

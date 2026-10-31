@@ -5,7 +5,7 @@ import { ago, eur, pct, signedEur } from '../format';
 import { feedLevel, useHealth } from '../health';
 import { navigate, useLocation } from '../router';
 import { useTheme } from '../theme';
-import { artUrl, CatArt } from './art';
+import { Art, CatArt } from './art';
 import { IconHealth, IconHome, IconLogout, IconLogs, IconMoon, IconMore, IconNotes, IconResearch, IconSettings, IconSun, IconTrades } from './icons';
 import { ModeBadge } from './ui';
 
@@ -88,7 +88,7 @@ function Actions({ onLogout }: { onLogout: () => void }) {
 
 const Brand = () => (
   <NavLink path="/" className="brand" title="Stonks">
-    <img src="/icon-64.png" alt="" width={34} height={34} />
+    <Art slot="brand-mark" width={34} height={34} fallback={<img src="/icon-64.png" alt="" width={34} height={34} />} />
     <span className="brand-name">Stonks</span>
   </NavLink>
 );
@@ -208,7 +208,7 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           const { label, icon: Icon } = NAV.find((n) => n.path === path)!;
           return (
             <NavLink key={path} path={path} className="more-tile" onGo={onClose}>
-              <img src={artUrl(art)} alt="" />
+              <Art slot={art} />
               <span>
                 <Icon width={18} height={18} /> {label}
               </span>

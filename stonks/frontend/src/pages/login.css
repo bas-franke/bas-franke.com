@@ -1,4 +1,4 @@
-/* The way in: the painting fills most of the screen, the door is on the dark edge of the desk. */
+/* The way in: the painting fills most of the screen, the door is on the edge of the desk. */
 
 html:has(.login) {
   scrollbar-gutter: auto;

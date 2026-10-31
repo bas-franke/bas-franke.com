@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, setUnauthorizedHandler } from './api';
-import { artUrl } from './components/art';
+import { Art } from './components/art';
 import { logout, NAV, Rail, TabBar, Ticker, TopBar } from './components/shell';
 import { ToastProvider } from './components/ui';
 import { DeskProvider } from './desk';
@@ -53,7 +53,6 @@ export default function App() {
 
   const Page = PAGES[path] ?? PAGES['/'];
   const out = () => logout(() => setAuth('out'));
-  const ridge = artUrl('footer-ridge');
   return (
     <ToastProvider>
       <DeskProvider>
@@ -63,7 +62,7 @@ export default function App() {
             <TopBar onLogout={out} />
             <Ticker />
             <main key={path}>{Page()}</main>
-            {ridge && <img className="ridge" src={ridge} alt="" />}
+            <Art slot="footer-ridge" className="ridge" fallback={null} />
           </div>
         </div>
         <TabBar />
