@@ -1397,7 +1397,142 @@ function EveryDial() {
   );
 }
 
+const S15_REAL: string[][] = [
+  ['Sep 2019', '−10%', '+12%', '+4%', '+4%', '84%'],
+  ['May 2020', '−10%', '+12%', '+10%', '+7%', '72%'],
+  ['Feb 2021', '−8%', '+27%', '+41%', '+29%', '41%'],
+  ['Mar 2021', '−12%', '+125%', '+18%', '+45%', '73%'],
+  ['Oct 2021', '−10%', '+24%', '+13%', '+19%', '67%'],
+  ['Jun 2022', '−9%', '+32%', '+1%', '+7%', '71%'],
+  ['Jul 2022', '−6%', '+43%', '+2%', '+9%', '79%'],
+  ['Jul 2025', '−5%', '+14%', '+14%', '+12%', '100%'],
+];
+
+const S15_FAKE: string[][] = [
+  ['Lone climb', '−15%', '+49%', '+9%', '+13%'],
+  ['Late spike', '−12%', '+60%', '+16%', '+23%'],
+  ['Violent rebound', '−10%', '+70%', '+32%', '+24%'],
+  ['Fake-out', '−18%', '−10%', '+2%', '+1%'],
+];
+
+function BitcoinDownS15() {
+  return (
+    <>
+      <p className="lede">
+        What does the number one of Session 15 do when bitcoin sinks and ether runs? We answered it two ways: eight real stretches from the past, and
+        four made-up futures that we ran through the same backtester. The short version: it catches a slice of the run, never the whole thing, and it
+        is not afraid of a fake-out.
+      </p>
+
+      <h2>First, who is the number one?</h2>
+      <p>
+        It is <b>Session 14’s old number one</b>, plus one extra helper called the <b>coin recovery ride</b>. The old book watches bitcoin like a weather
+        report: sunny means big bets, cloudy means normal ones. The new helper does not look at bitcoin at all. It wakes up when two things are true:
+      </p>
+      <ul>
+        <li>
+          <b>The coin has been hurt.</b> Within the last half year it was at least 20% under its one-year high.
+        </li>
+        <li>
+          <b>And now it is climbing out.</b> Today’s close beats the highest close of the last 30 days.
+        </li>
+      </ul>
+      <p>
+        Then it buys. How much? <b>0.5 divided by how wild the coin is</b> (a calm coin gets a big bet, a wild one a small bet), and never more than half
+        the account. It leaves when the price closes under the lowest close of the last 20 days. Of all the rides that want to be in at once, the biggest one
+        wins. The rest of the old book keeps doing its own thing next to it.
+      </p>
+
+      <div className="callout">
+        <p>
+          <b>In kid words.</b> Bitcoin is the weatherman. The old book will not go big unless he says sunny. The recovery ride is a second kid at the window
+          who says: “I do not care what he says. My coin just got up off the floor, so I will take a small, careful step.”
+        </p>
+      </div>
+
+      <h2>The real examples</h2>
+      <p>
+        Every 60-day stretch since mid-2019 where bitcoin fell at least 5% and ether rose at least 10%, one for each period (the one with the widest gap).
+        The bot trades ether only. “Start” is Session 14’s #1 without the helper.
+      </p>
+      <SplitTable rows={S15_REAL} head={['60 days from', 'Bitcoin', 'Ether', 'Start', 'Session 15 #1', 'Time in the market']} />
+      <ul>
+        <li>
+          <b>It made money in all eight.</b> It trailed ether in seven of them and beat it once, in February 2021.
+        </li>
+        <li>
+          <b>The helper matters most where the start sits out.</b> In March 2021 ether rose 125% while bitcoin fell 12%. The start made 18%, mostly because it
+          waits when a coin is already far above its average. The #1 made 45%: it was in the market 73% of the time instead of 36%. In June and July 2022 it
+          turned +1% and +2% into +7% and +9%.
+        </li>
+        <li>
+          <b>It is not always better.</b> In February 2021 the start made 41% and the #1 only 29%, even though the #1 was in the market longer (41% of the time against 28%). In May 2020 and
+          July 2025 it also made a little less than the start.
+        </li>
+        <li>
+          <b>It never gets close to ether’s full run.</b> It is in the market a part of the time and sizes by wildness, so a 125% rise becomes 45%. That is the
+          price of not blowing up when the same jump goes the other way.
+        </li>
+      </ul>
+
+      <h2>The made-up examples</h2>
+      <p>
+        Real history has only a few of these. So we made four. Each one picks up on 1 January 2023: ether has just fallen 67% under its one-year high and
+        bitcoin is not in a bull. Then a 90-day future is drawn by hand with a bit of random wobble (ether 4.5% a day, bitcoin 2.5%), and both books trade it candle by
+        candle with Bitvavo’s fees.
+      </p>
+      <SplitTable rows={S15_FAKE} head={['Made-up future', 'Bitcoin', 'Ether', 'Start', 'Session 15 #1']} />
+      <ul>
+        <li>
+          <b>Lone climb:</b> bitcoin slides 15%, ether climbs 49% in a steady line. Both books ride it; the #1 trades 7 times against the start’s 15 and ends with +13% against +9%.
+        </li>
+        <li>
+          <b>Late spike:</b> ether sleeps for six weeks, then jumps 60%. The #1 ends with +23% against +16%, again with half the trades (6 against 12).
+        </li>
+        <li>
+          <b>Violent rebound:</b> ether jumps 70% in three weeks. This is the one where the helper loses: +24% against +32%, and it trades 5 times against 13. In this path the start’s own
+          rides were the better fit and the helper’s extra entry gave no edge. We did not dig for more reason than that.
+        </li>
+        <li>
+          <b>Fake-out:</b> ether jumps 40%, then gives it all back, ending 10% down. Both books give back almost everything they made on the way up and end about flat (+2% and +1%), while ether
+          itself ends 10% down. It does not lose money on a spike that fails.
+        </li>
+      </ul>
+      <p className="small soft">
+        A first version with a calmer ether (2.5% a day) gave identical results for both books in the first two futures, because the start was already
+        all-in. The helper only changes anything when the old book would have held back.
+      </p>
+
+      <h2>What this tells us</h2>
+      <div className="callout brass">
+        <p>
+          <b>If bitcoin falls and ether rises, the bot still takes part, but only as a careful passenger.</b> The recovery ride lifts a typical slice of the run
+          by a few points, and a lot more when the old book would have waited. It does not chase the whole move, and it has not shown it can reliably beat the
+          start in a very sharp jump. The fake-out is the real test of the helper, and it passes: it does not lose money on a spike that fails.
+        </p>
+      </div>
+      <p>
+        Nothing changed on the bot: it keeps running the same strategy until the owner chooses to switch.
+      </p>
+      <p className="small soft">
+        Method: the real rows come from the same backtest as the Session 15 tab, with Bitvavo’s fees. The made-up rows are one random draw each, so another draw
+        would move the numbers by a few points but not the order of the story. Past results say nothing certain about the future; this is research, not
+        financial advice.
+      </p>
+    </>
+  );
+}
+
 export const ARTICLES: Article[] = [
+  {
+    slug: 'bitcoin-down-s15',
+    title: 'If bitcoin falls and ether rises: what Session 15’s number one does',
+    blurb: 'Eight real stretches and four made-up futures where bitcoin sinks and ether climbs, run through the new #1 and the book it came from: how much of the run it catches, where it loses, and what a fake-out does.',
+    date: '2026-10-31T18:30:00+01:00',
+    minutes: 6,
+    tag: 'Research',
+    body: BitcoinDownS15,
+  },
   {
     slug: 'every-dial',
     title: 'Every dial on the bot, explained like you are five',
