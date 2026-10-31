@@ -180,6 +180,13 @@
   .shell .article-page .article-body table.data th {
     min-width: 6.5em;
   }
+  /* Tables short enough to fit the phone, wrapped labels and all */
+  .shell .article-page .article-body table.data.fit :is(th, td) {
+    min-width: 0;
+  }
+  .shell .article-page .article-body table.data.fit :is(th, td):not(:first-child) {
+    padding-inline: 6px;
+  }
 
   .shell .writeup .lede {
     font-size: 0.98rem;

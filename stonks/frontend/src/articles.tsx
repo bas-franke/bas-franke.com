@@ -749,10 +749,10 @@ const REAL_SPLITS: [string, string, string, string, string][] = [
   ['Jul – Sep 2025', '−5%', '+13%', '+12%', '57%'],
 ];
 
-function SplitTable({ rows, head }: { rows: string[][]; head: string[] }) {
+function SplitTable({ rows, head, wrap = false }: { rows: string[][]; head: string[]; wrap?: boolean }) {
   return (
     <div className="table-wrap">
-      <table className="data">
+      <table className={wrap ? 'data fit' : 'data'}>
         <thead>
           <tr>
             {head.map((h, i) => (
@@ -766,7 +766,7 @@ function SplitTable({ rows, head }: { rows: string[][]; head: string[] }) {
           {rows.map((r) => (
             <tr key={r[0]}>
               {r.map((c, i) => (
-                <td key={i} className={i ? 'r tnum nowrap' : 'nowrap'}>
+                <td key={i} className={i ? 'r tnum nowrap' : wrap ? undefined : 'nowrap'}>
                   {i === 1 && rows === SPLIT_RUNS ? <b>{c}</b> : c}
                 </td>
               ))}
@@ -904,12 +904,176 @@ function BitcoinDownEtherUp() {
   );
 }
 
+type PlainRow = [string, string, string, string];
+
+const NEW_VS_LIVE: PlainRow[] = [
+  ['Ether a year, as tuned', '+110%', '+116%', '+45%'],
+  ['Ether a year, settings nudged', '+82%', '+84%', '+45%'],
+  ['Ether worst fall, as tuned', '−34%', '−32%', '−80%'],
+  ['Ether worst fall, settings nudged', '−41%', '−37%', '−80%'],
+  ['Bitcoin a year', '+72%', '+68%', '+49%'],
+  ['10 coins a year, average', '+89%', '+88%', '+21%'],
+  ['19 unseen coins a year, average', '+25%', '+29%', '−22%'],
+];
+
+const BLEED_STRETCHES: PlainRow[] = [
+  ['Mar – Nov 2024', '−25%', '+2%', '+13%'],
+  ['Aug 2025 – Aug 2026', '−51%', '+12%', '+31%'],
+  ['Mar – May 2021', '+150%', '+25%', '+15%'],
+  ['Jul – Sep 2022', '+74%', '+6%', '+6%'],
+];
+
+function TwoWeakSpots() {
+  return (
+    <>
+      <p className="lede">
+        Two recent articles found two weak spots in the bot. So we set 30 research agents on them, each trying a different fix. One weak spot
+        got better. The other mostly did not. And the test itself taught us something we did not want to hear about the bot running today.
+      </p>
+
+      <h2>The two weak spots</h2>
+      <p>
+        <b>Weak spot one: the bot may be tuned too well to the past.</b> It has about 25 hand-set numbers, like a radio with 25 dials, all turned
+        until old songs sounded perfect. That does not prove new songs will. Research on trading is full of strategies that looked brilliant
+        on old data and then disappointed.
+      </p>
+      <p>
+        <b>Weak spot two: the bot trades ether but takes its orders from bitcoin.</b> Mostly that has worked. But in two big ether rallies it
+        caught only a small part of the rise, and the opposite case worries us more: bitcoin doing fine while ether slowly sinks, with the bot
+        holding a big position.
+      </p>
+      <p>Both matter for the same reason: a backtest is only useful if the future looks a bit like it. These are the two places where it may not.</p>
+
+      <h2>How we went about it</h2>
+      <p>
+        Each agent took one idea: fewer dials, ether making its own decisions, drop the dip buying, wait for proof before going big, and so on.
+        Then came the step that mattered most. We took all 30 results and the running bot and turned every dial a little at random, up to 15%,
+        the same way for all of them, 12 times. A good strategy should survive a small bump. One that only works at its exact settings should not.
+      </p>
+      <p>
+        That test shook up the order. One book that had looked like a clear second place ended up level with the running bot. Only two stayed clearly
+        ahead when we repeated the test with 24 new random bumps.
+      </p>
+
+      <h2>Weak spot one: the honest answer is uncomfortable</h2>
+      <ul>
+        <li>
+          <b>The running bot’s headline numbers are its best case.</b> At its exact settings ether makes +110% a year with a worst fall of 34%.
+          With the dials bumped, the typical result is about +82% a year and a 41% fall. That is still far better than holding ether, at +45% a year
+          and an 80% fall. But +82% and 41% are the fairer numbers to keep in mind.
+        </li>
+        <li>
+          <b>Hiding the last years confirms it.</b> One agent tuned only on the years up to 2022, then tested on the years after. The worst fall went
+          from 32% to 45%. Five such tuned versions tried it, and none beat the running bot on the years they had not seen.
+        </li>
+        <li>
+          <b>Fewer dials works, at a small price.</b> One book went from 25 to 17 numbers and kept most of the result, with ether at +105% a year as
+          tuned. In the bump test it was not clearly better than the running bot, though.
+        </li>
+        <li>
+          <b>Dip buying stays.</b> Published research doubts this part, so we tried removing it. Ether fell to +82% a year as tuned and every group of
+          coins did worse. One warning: on ether and bitcoin, just three nights carry most of the gain.
+        </li>
+      </ul>
+
+      <h2>Weak spot two: half solved</h2>
+      <ul>
+        <li>
+          <b>We partly blamed the wrong thing.</b> We said bitcoin’s switch cost the bot the spring 2021 rally. In fact the switch was on more than 90%
+          of that time. A different rule held it back: one that keeps the bot out when a coin looks overheated. Removing that rule made results worse overall.
+        </li>
+        <li>
+          <b>Letting ether decide for itself failed.</b> Going big on ether’s own trend meant going big on its false starts: the worst fall rose
+          to 39%. Letting all coins vote instead of bitcoin failed too, with every one of the 10 coins earning less.
+        </li>
+        <li>
+          <b>The sinking ether case did improve.</b> The closest real example is 2024: from March to November ether lost 25% while bitcoin rose 7%.
+          The running bot made +2% there. The new #1 made +13%.
+        </li>
+        <li>
+          <b>The missed rallies are still missed.</b> No book caught them without giving up more somewhere else. The best small step came from the
+          second-placed book, which roughly doubled a very small gain in 2022, from +6% to +11%, while ether rose 74%.
+        </li>
+      </ul>
+
+      <h2>The new #1: stretched rides wait</h2>
+      <p>
+        The agent looked at what the worst trades had in common. Most began when a coin had already run far above its usual price, so the bot was
+        jumping onto a train that had left the station. The new rule is simple: <b>if a coin is already far above its 100-day average, a new ride buys
+        nothing until the price has climbed a bit further.</b> If it really is taking off, the bot joins a little late. If the move was running out of
+        steam, the bot stays out. The rule adds one more change: breakout rides end a bit sooner on the way down.
+      </p>
+      <p>Here it is next to the bot running today, and next to simply holding the coin. “Nudged” is the typical result of the 24 random bumps, so read those lines first.</p>
+      <SplitTable wrap rows={NEW_VS_LIVE} head={['', 'Today', 'New #1', 'Hold']} />
+      <p>
+        So the real improvement is not more profit. Bumped, ether’s yearly return is about the same. The gain is <b>shallower falls</b>, and that is what
+        kept it ahead in 20 of the 24 bumps. Here is where it helps and where it hurts, with what ether did and what each book made.
+      </p>
+      <SplitTable wrap rows={BLEED_STRETCHES} head={['Stretch', 'Ether', 'Today', 'New #1']} />
+
+      <h2>What could go wrong with the new #1</h2>
+      <ul>
+        <li>
+          <b>It knew the answers.</b> The agent built this rule by studying the falls of 2024 and 2025–26, so doing well in exactly those years proves
+          little. The fairer test is the 19 coins no agent saw.
+        </li>
+        <li>
+          <b>That fairer test is a mild yes, not a loud one.</b> On average those coins earned more, +29% a year against +25% (holding: −22%). But only 10 of
+          the 19 earned more, and a few big winners pull up the average. Worst falls got better on 9 and worse on 8.
+        </li>
+        <li>
+          <b>It joins late by design.</b> In a fast rally that costs real money: from March to May 2021 it made +15% where the running bot made +25%. A market
+          that mostly goes straight up would suit it less.
+        </li>
+        <li>
+          <b>Some coins lose out.</b> Bitcoin earns +68% a year against +72%, and Solana and TRON give up more. Link and XRP gain the most.
+        </li>
+        <li>
+          <b>It adds dials.</b> After an article warning about too many settings, it has two more than the running bot, and the shaky inherited ones are
+          all still there.
+        </li>
+        <li>
+          <b>The worst case did not move.</b> Across all 36 random bumps the deepest fall on ether was about 52% for the running bot and 51% for the new #1. A
+          typical year may be calmer, but a bad setting and a bad market can still hurt about as much.
+        </li>
+        <li>
+          <b>It has never traded real money.</b> Everything here is a backtest.
+        </li>
+      </ul>
+
+      <h2>Where that leaves us</h2>
+      <div className="callout brass">
+        <p>
+          <b>The new #1 looks like a small, believable improvement: shallower falls at about the same return.</b> It is not a breakthrough, and it does not
+          fix the missed rallies. The bigger lesson is about expectations: for either book, about +80% a year and a 40% fall are fairer than the headline
+          numbers, and real trading usually comes in lower still.
+        </p>
+      </div>
+      <p>Nothing has changed on the bot: it keeps running the same strategy until the owner chooses to switch.</p>
+      <p className="small soft">
+        Method: 30 books plus the running bot, every setting nudged by up to 15%, with the same nudge for a setting two books share, except numbers a book hard-coded.
+        First 12 draws, then 24 fresh draws for the four leaders. Bumped figures are medians, and the table’s bumped figures come from the 24 draws. All returns after fees, on calendar
+        years, on data from 2019 to 2026. Past results say nothing certain about the future; this is research, not financial advice.
+      </p>
+    </>
+  );
+}
+
 export const ARTICLES: Article[] = [
+  {
+    slug: 'two-weak-spots',
+    title: 'Two weak spots, 30 tries: what we fixed and what we could not',
+    blurb: 'Why we went after the two problems from the last articles, how it went, and how the new #1 compares with the bot running today, including what could go wrong with it.',
+    date: '2026-10-31T11:00:00+01:00',
+    minutes: 7,
+    tag: 'Research',
+    body: TwoWeakSpots,
+  },
   {
     slug: 'if-bitcoin-falls-and-ether-rises',
     title: 'If bitcoin falls and ether rises: what the seat belt bot would do',
     blurb: 'Session 13’s winner takes its orders from bitcoin while trading ether. We forced the bitcoin switch off, forced it on, and looked at every real stretch where the two parted ways.',
-    date: '2026-10-31',
+    date: '2026-10-30T23:33:00+01:00',
     minutes: 6,
     tag: 'Research',
     body: BitcoinDownEtherUp,
@@ -918,7 +1082,7 @@ export const ARTICLES: Article[] = [
     slug: 'does-the-world-know-this-trick',
     title: 'Does the world already know this trick?',
     blurb: 'Session 13’s winner is a trend rule with a bitcoin switch, a dip buyer and a time stop. What the research literature found when it tested the same ideas, where they stand against known strategies, and how likely they are to beat holding ether.',
-    date: '2026-10-31',
+    date: '2026-10-30T23:33:00+01:00',
     minutes: 8,
     tag: 'Research',
     body: DoesTheWorldKnow,
@@ -927,7 +1091,7 @@ export const ARTICLES: Article[] = [
     slug: 'the-seat-belt',
     title: 'The seat belt: Session 13’s winner against the bot you run',
     blurb: 'Session 13 added one careful habit to the strategy the bot runs and cut ether’s worst drop from 52% to 34%. What it does, explained simply, how likely each is to last, and which one to run.',
-    date: '2026-10-31',
+    date: '2026-10-30T23:33:00+01:00',
     minutes: 6,
     tag: 'Research',
     body: SeatBelt,
@@ -936,7 +1100,7 @@ export const ARTICLES: Article[] = [
     slug: 'how-the-bot-trades',
     title: 'How the bot trades, in plain language',
     blurb: 'When it buys, when it sells, and when it stays out: real market moments with charts of every trade, from the biggest earners to the times it goes wrong.',
-    date: '2026-10-30',
+    date: '2026-10-30T18:05:00+01:00',
     minutes: 12,
     tag: 'How it works',
     body: HowItTrades,
@@ -945,7 +1109,7 @@ export const ARTICLES: Article[] = [
     slug: 'twenty-nine-coins',
     title: 'Tested on 29 coins: why the cycle bull wins',
     blurb: 'The number one of Sessions 6 to 10, run unchanged on 19 coins no research agent ever saw. Session 9’s cycle bull comes out on top, and its main rule is why.',
-    date: '2026-10-29',
+    date: '2026-10-29T23:12:00+01:00',
     minutes: 5,
     tag: 'Research',
     body: AllCoins,
@@ -954,7 +1118,7 @@ export const ARTICLES: Article[] = [
     slug: 'will-the-winners-last',
     title: 'Will the winners last?',
     blurb: 'An honest look at the top strategy of the last five research sessions: why each could keep working, why it could fail, and which one is the safest bet.',
-    date: '2026-10-29',
+    date: '2026-10-29T22:27:00+01:00',
     minutes: 6,
     tag: 'Research',
     body: WillItLast,

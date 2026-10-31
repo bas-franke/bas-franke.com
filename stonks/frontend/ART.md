@@ -83,6 +83,8 @@ Article covers: each one tells its story with objects, subject centered.
 17. `cover-does-the-world-know-this-trick`: a brass globe beside a tall stack of open old books, a magnifying glass, a printed chart tucked between the pages.
 18. `cover-if-bitcoin-falls-and-ether-rises`: an old brass balance scale with one plain gold coin sinking and one plain silver coin rising, the cat's paw reaching up. Coins carry no symbols.
 
+Still to paint (now an interim copy of the research banner): `cover-two-weak-spots`: a brass radio with many small dials on the desk, a hand-sized ether coin propped against it, the cat studying the dials.
+
 ### Group 2: evening scenes, 1536x1024 (landscape), 10 pictures
 
 These are the dark theme's versions. Same composition rules as Group 1, but the empty left side is deep ink navy wall

@@ -41,6 +41,17 @@ Layers multiply s9_cyclebull's target by 0..1 (`families/_s13_core.py`, `h.trim_
 - **Guard that sells and waits 14 days (`out/_lossguard_exit.py`, 15 % in 24 h, all 29 coins).** Tested, not built. s13_timestop trips 280 times, on every coin, at ~98 % exposure; mean yearly +46.9 -> +26.7, mean worst drop 60.0 -> 65.5, better on 0 of 29 coins, lower drop on 5. ETH 9 trips, +110.1 -> +96.5, drop 34.0 -> 37.2 (holding +45.0); a 10 % limit gives ETH +72.4, drop 39.1. Fills are the optimistic limit model; a forced sale in a crash pays more. Big one-day falls mostly happen in rides that recover, and the wait misses the rebound.
 - **Dead ends.** Position stops and fast shock exits sell the lows (shocks mean-revert). Long-trend dip filters lower nothing: dips in downtrends pay. Losing streaks do not predict losses. Slow bleeds stayed unsolved; volumealarm alone improved all 7 ETH episodes but costs 1.8 score.
 
+### Session 14: 30 agents on the live book (2026-10-31)
+
+Aim: the two weak spots of the last articles, too many tuned numbers and orders from bitcoin. Rank agents only roughly: they nudged 2 to 37 settings, so their steady figures do not compare. Harness `out/_s14_harness.py`, lead check `out/_s14_verify.py` (table `out/_s14_table.py`), publish `out/_s14_publish.py`. Do not run `lab.py publish` afterwards.
+
+- **Equal test.** 12 common draws, all settings +-15 %, a setting shared by two books gets the same factor; 24 fresh draws for the leaders (seed 7717). Nudge a book's undeclared params too: sideways carries the live numbers as params, and first came out unnudged and #1.
+- **The live book.** Exact: ETH +110.1, drop 34.0. Nudged median over 24 draws: ETH +82.3, drop 41.4, worst drop 51.9 (holding +45.0, 80). Tuned on years to 2022 only: drop 31.6 -> 44.5 on later years; 0 of 5 train winners beat live on test.
+- **Winners.** bleed (`s14_bleed`, rides starting stretched above the 100-day average wait for a further rise, giveback 3): equal rank 64.58 vs 61.45 on fresh draws, beat live in 20 of 24, ETH +84.2 nudged, drop 36.6. ratio: 63.26, 21 of 24, ETH +96.3, drop 39.0. fewest (17 numbers): 61.93, 13 of 24, worst ETH drop 59.6. plateau: 62.97, 12 of 24. onetrend fifth on the first draws.
+- **bleed, caveats.** Unseen coins +28.9 vs +24.7 a year, drop 62.7 vs 65.1, but only 10 of 19 earn more; 9 lower drop, 8 higher. Worse on BTC (+68.5 vs +72.2), SOL, TRX, BNB. Mar-May 2021 +15.1 vs +24.5. Built on the 2024 and 2025-26 bleeds, so those wins are not clean. Worst ETH drop over 36 draws 51.0.
+- **Bitcoin's switch.** Stays: own-trend switches, coin votes and confirmation all lost. Bulls were on 90 %+ in Mar-May 2021: the ceiling caused that miss, and removing it ranks lower. Jul-Sep 2022 ran under the average. Neither rally is solved.
+- **Parts.** Removing dips costs most (score 63.5 -> 56.0, ETH +81.5), though three nights carry ETH and BTC. Sharp peaks: `macd_days`, `cyc_hot`. Banking barely matters. Turnover falls 58 % but euros traded only 4 %, so fees barely move.
+
 ## Top 10 (diverse, out-of-sample score)
 
 | # | hash | family | iv | markets | score | test % | vs B&H | max DD | trades | params |
