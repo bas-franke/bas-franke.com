@@ -19,18 +19,23 @@ How the pictures are cropped:
 
 ## The prompt
 
-Paste everything between the lines into ChatGPT, with `src/assets/art/hero-dusk.webp` attached (or a screenshot of the
-Overview).
+Paste everything between the lines into ChatGPT. It needs no reference image: the scene is described in words.
 
 ---
 
 You are illustrating a matching set of 59 pictures for a private home trading dashboard called Stonks. Its world is one
-cozy desk by an arched window. Match the attached painting exactly in style and subject.
+cozy desk by an arched window.
 
-**Style for every picture:** soft gouache and watercolor with visible paper grain, warm muted palette of cream, ink navy,
-aged brass, sage green and terracotta. The same white cat with a grey-striped tail. Recurring things: a wooden desk, brass
-desk lamp, olive branches, speckled ceramic cups, old books, small candlestick charts on screens. Calm and quiet, never
-busy, generous empty space.
+**Style for every picture:** soft gouache and watercolor illustration with visible paper grain and gentle hand-painted
+edges, warm muted palette of cream, ink navy, aged brass, sage green and terracotta. Calm and quiet, never busy, generous
+empty space.
+
+**The cat, the same in every picture:** a fluffy white cat with a soft round face, pink inner ears, and a grey-striped tail.
+
+**The room, the same in every scene:** a warm wooden desk in front of a tall arched window with a dark wooden frame and one
+cross bar. Through the window: layered hills, a calm lake and a small village with cypress trees. On the desk: a brass desk
+lamp with a dome shade on the right, a small silver laptop showing a rising candlestick chart, a speckled ceramic cup on a
+round wooden coaster, two old books in sage green and terracotta, and an olive branch in a pale ceramic vase on the left.
 
 **Never:** readable text, letters, numbers, logos or brand names, except the shapes I name on coins. Chart candles are
 shapes only, sage green and terracotta. No people. No frames, borders, captions or watermarks.
@@ -48,8 +53,8 @@ never dusk or night.
 Hero scenes: keep the left 45% as plain, flat, pale cream wall (#f4ede3) with nothing on it, because words sit there. The
 desk, window and cat fill the right 55%.
 
-1. `hero-morning`: the same desk and arched window as the attached painting at early morning. Pale gold sunrise over the hills and lake, soft mist, the cat just waking and stretching, steam from a fresh cup, lamp off.
-2. `hero-day`: the same desk and window in bright afternoon. Blue sky, sunlit hills, a sunbeam across the desk, the cat sitting upright watching the tablet's candles, cup half full.
+1. `hero-morning`: the room at early morning. Pale gold sunrise over the hills and lake, soft mist, the cat just waking and stretching, steam from a fresh cup, lamp off.
+2. `hero-day`: the room in bright afternoon. Blue sky, sunlit hills, a sunbeam across the desk, the cat sitting upright watching the tablet's candles, cup half full.
 
 Banners: the subject sits in the right half and in the middle 40% of the height, because the rest is cropped away. The left
 side is plain pale cream wall.
@@ -82,16 +87,16 @@ Article covers: each one tells its story with objects, subject centered.
 These are the dark theme's versions. Same composition rules as Group 1, but the empty left side is deep ink navy wall
 (#152036), and everything is lit only by the lamp and the dusk sky.
 
-19. `hero-dusk`: a richer repaint of the attached painting: dusk over the hills and lake, the lamp lit, the cat asleep beside the tablet.
-20. `hero-night`: the same desk and window deep at night. Stars over dark hills, tiny village lights, only the brass lamp lit, the cat asleep in the lamplight.
-21. `banner-trades-dark`: picture 3 at night in lamplight.
-22. `banner-logs-dark`: picture 4 at night in lamplight, the small candle lit.
-23. `banner-health-dark`: picture 5 at night, the gauges softly glowing.
-24. `banner-research-dark`: picture 6 at night, the flasks glowing amber.
-25. `banner-hall-dark`: picture 7 at dusk, the trophies catching the lamplight.
-26. `banner-notes-dark`: picture 8 at night in lamplight.
-27. `banner-settings-dark`: picture 9 at night, the dials softly glowing.
-28. `footer-ridge-dark`: picture 12 at dusk, tiny village lights, the top half plain sky fading to ink navy (#152036).
+19. `hero-dusk`: the room at dusk. An orange and violet sky over the hills and lake, tiny village lights, the lamp lit, the cat curled asleep beside the laptop, steam rising from the cup.
+20. `hero-night`: the room deep at night. Stars over dark hills, tiny village lights, only the brass lamp lit, the cat asleep in the lamplight.
+21. `banner-trades-dark`: at night in lamplight, a brass stock-ticker machine on the desk, its paper tape curling down beside an open ledger and a fountain pen, a tablet of candles behind, a cup of tea.
+22. `banner-logs-dark`: at night in lamplight, an open leather diary with a brass bookmark and a pencil, the cat's paw resting on the page, a small lit candle in a holder. Handwriting as soft unreadable squiggles.
+23. `banner-health-dark`: at night, the white cat wearing a tiny stethoscope, listening to an old brass machine with softly glowing gauges. Gauge faces have no numbers.
+24. `banner-research-dark`: a home laboratory desk at night, glass flasks glowing amber, paper charts pinned to the wall, a brass magnifying glass over a printed candlestick chart, olive branch in a jar.
+25. `banner-hall-dark`: a wooden shelf at dusk with three small brass trophies catching the lamplight, framed miniature chart paintings, a ribbon, and the cat sitting proudly beside them.
+26. `banner-notes-dark`: at night in lamplight, a stack of cream notepads, sharpened pencils in a ceramic cup, a sprig of olive, one page with soft unreadable sketches of chart lines.
+27. `banner-settings-dark`: at night, a panel of softly glowing brass dials, knobs and a big toggle switch on a wooden console, the cat's tail curling around it.
+28. `footer-ridge-dark`: a wide layered landscape of hills at dusk whose ridgelines subtly rise and fall like a chart, tiny village lights, very simple, no foreground, the top half plain sky fading to ink navy (#152036).
 
 ### Group 3: tall scenes, 1024x1536 (portrait), 2 pictures
 
