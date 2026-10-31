@@ -13,7 +13,7 @@ from PIL import Image
 OUT = Path(__file__).resolve().parent.parent / 'src' / 'assets' / 'art'
 
 # Longest side in pixels, by slot prefix. The site never shows a picture larger than this.
-SIZES = {'hero-': 2048, 'login-': 1600, 'banner-': 1200, 'cover-': 1200, 'modal-': 1000, 'footer-': 2048, 'cat-': 640, 'verdict-': 480, 'empty-': 640, 'spot-': 320, 'coin-': 128, 'brand-': 128}
+SIZES = {'hero-': 2048, 'login-': 1600, 'banner-': 1200, 'cover-': 1200, 'modal-': 1000, 'footer-': 2048, 'cat-': 640, 'verdict-': 480, 'empty-': 640, 'spot-plan': 1000, 'spot-': 320, 'coin-': 128, 'brand-': 128}
 
 
 def main(folder: str) -> None:

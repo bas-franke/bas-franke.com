@@ -39,17 +39,15 @@ export function Art({ slot, className, alt = '', fallback, width, height }: { sl
 
 /**
  * The hero follows the clock, like the greeting, and the theme: the light theme only ever shows daylight, the dark one
- * dusk and night. Until a time of day has its own painting, dusk stands in.
+ * dusk and night.
  */
 export const heroSlot = (dark: boolean, hour = new Date().getHours()) =>
   dark ? (hour >= 6 && hour < 22 ? 'hero-dusk' : 'hero-night') : hour >= 5 && hour < 11 ? 'hero-morning' : 'hero-day';
 
 export function HeroBanner({ children }: { children: ReactNode }) {
-  const slot = heroSlot(useIsDark());
-  const src = artUrl(slot);
   return (
     <section className="hero">
-      <img className="hero-art" src={src ?? artUrl('hero-dusk')} alt="" />
+      <img className="hero-art" src={artUrl(heroSlot(useIsDark()))} alt="" />
       <div className="hero-copy">{children}</div>
     </section>
   );
@@ -83,8 +81,8 @@ export const SleepingCatArt = ({ className = 'empty-art', width = 300, art = 'ca
     className={className}
     src={artUrl(art) ?? artUrl('cat-asleep')}
     width={width}
-    height={Math.round((width * 283) / 360)}
-    alt="A white cat asleep by a tablet showing candles, with a lamp and a cup of tea"
+    height={width}
+    alt="A white cat asleep"
   />
 );
 

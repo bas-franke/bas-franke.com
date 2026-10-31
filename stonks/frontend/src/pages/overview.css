@@ -30,20 +30,19 @@
 }
 .hero-art {
   position: absolute;
-  inset: 0;
+  inset: 0 0 0 auto;
   z-index: -2;
-  width: 100%;
+  width: 86%;
   height: 100%;
   object-fit: cover;
-  object-position: right center;
-  filter: var(--hero-art);
+  object-position: right 74%;
 }
 .hero::before {
   content: '';
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(90deg, var(--hero-scrim) 26%, color-mix(in srgb, var(--hero-scrim) 72%, transparent) 42%, transparent 62%);
+  background: linear-gradient(90deg, var(--hero-scrim) 30%, transparent 56%);
 }
 .hero-copy {
   display: grid;

@@ -1,9 +1,10 @@
 # Stonks artwork
 
-Every picture on the site is a named slot. A slot with no file shows a placeholder with its name, or a fallback
-(coins show their letters, cats and Health verdicts a simple mark, the hero the dusk painting). `footer-ridge` shows
-nothing until it exists. `<slot>-dark` is an optional second file for the dark theme; without one, the dark theme shows
-the light picture dimmed. The light theme only ever shows daylight pictures.
+Every picture on the site is a named slot, and all 59 below are in place. A slot with no file shows a placeholder with
+its name, or a fallback (coins show their letters, cats and Health verdicts a simple mark). `footer-ridge` shows nothing
+until it exists. `<slot>-dark` is an optional second file for the dark theme; without one, the dark theme shows the light
+picture dimmed. The light theme only ever shows daylight pictures. `cat-asleep` isn't in the prompt: it is `brand-mark` at
+640 px.
 
 1. Generate an image, save it as `<slot>.png` in one folder.
 2. Run `python tools/art_import.py <folder>` in `stonks/frontend`. It resizes and writes `src/assets/art/<slot>.webp`.
@@ -13,7 +14,7 @@ How the pictures are cropped:
 
 - **Page banners:** the whole width sits on the right half of a strip about 4:1, the left half of the picture fades into
   the page, and only the middle 40% of the height shows.
-- **Hero:** the right 55% shows, behind nothing; the left is covered by the words on a plain wall.
+- **Hero:** the lower part of the right 55% shows, around the desk; the left is covered by the words on a plain wall.
 - **Covers:** 16:7 on cards, 21:8 on the article.
 - **`spot-plan`:** a 96 px strip. **`modal-live`:** a 140 px strip. Only the middle shows.
 
