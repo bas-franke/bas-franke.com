@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, unwrapMarkets } from '../api';
 import { Coin, EmptyState, PageBanner } from '../components/art';
 import { ErrorBox, Segmented, Skeleton, useAsync } from '../components/ui';
-import { amount, dateTime, eur, num, price } from '../format';
+import { amount, dateTime, eur, num } from '../format';
 import type { Fill, Order } from '../types';
 import './trades.css';
 
@@ -14,6 +14,13 @@ const pick = <T,>(...v: T[]) => v.find((x) => x !== undefined && x !== null);
 /** Fees are in EUR on Bitvavo EUR markets; anything else is shown with its currency. */
 const feeText = (fee: unknown, currency?: string | null) =>
   fee === undefined || fee === null ? '–' : !currency || currency === 'EUR' ? eur(fee) : `${amount(fee)} ${currency}`;
+
+/** A coin's price, written like the euros beside it, with the digits a cheap coin needs. */
+const price = (v: unknown) => {
+  const n = num(v);
+  if (!Number.isFinite(n)) return '–';
+  return `€ ${n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: n >= 1000 ? 2 : n >= 1 ? 4 : 6 })}`;
+};
 
 /**
  * Bitvavo reports "canceled" when the bot cancels the leftover of an order that already (almost) filled, for example

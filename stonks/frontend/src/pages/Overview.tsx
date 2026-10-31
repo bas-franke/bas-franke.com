@@ -388,7 +388,7 @@ function LossCard({ o }: { o: Overview }) {
   // Calm sage → brass → terracotta as the loss nears the limit.
   const color = frac < 0.4 ? 'var(--gain)' : frac < 0.75 ? 'var(--brass)' : 'var(--loss)';
   return (
-    <section className="card">
+    <section className="card loss-card">
       <div className="card-head">
         <span className="eyebrow">Last 24 hours</span>
         <Tip>
@@ -485,7 +485,7 @@ function CompareCard({ mode }: { mode: string }) {
   const label = COMPARE_RANGES.find((r) => r.value === range)!.label.toLowerCase();
 
   return (
-    <section className="card">
+    <section className="card compare-card">
       <div className="card-head has-seg">
         <h2>You vs just holding</h2>
         <Segmented label="Range" value={range} onChange={pick} options={COMPARE_RANGES} />
@@ -501,7 +501,7 @@ function CompareCard({ mode }: { mode: string }) {
         <div className="compare-grid">
           <LineChart
             series={lines.map((l) => l.series)}
-            height={180}
+            height={matchMedia('(min-width: 1360px)').matches ? 430 : 180}
             legend={false}
             baseline={100}
             ariaLabel={`Your portfolio and buy and hold BTC and ETH over the last ${label}, indexed to 100`}
@@ -598,7 +598,7 @@ function TrackingStats({ mode }: { mode: string }) {
           <dd className="tiny soft">{d.decisions.withOrders} placed orders</dd>
         </div>
       </dl>
-      {since && <p className="tiny soft" style={{ marginTop: 8 }}>These four count since this strategy started on {since}, whatever the range above.</p>}
+      {since && <p className="tiny soft tracking-note">These four count since this strategy started on {since}, whatever the range above.</p>}
       {d.alerts.map((a) => (
         <div className="callout brass" style={{ marginTop: 12 }} key={a.kind}>
           {a.message}

@@ -96,10 +96,39 @@
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(290px, 1fr);
   gap: 18px;
-  align-items: start;
 }
 .overview-page .card {
   container-type: inline-size;
+}
+
+/* The chart's card runs as tall as the column beside it, with the figures at the bottom. */
+.shell .overview-page .compare-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.shell .overview-page .compare-grid {
+  flex: 1 0 auto;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  align-items: stretch;
+}
+.shell .overview-page .compare-side {
+  align-content: space-between;
+}
+.shell .overview-page .compare-side .tiny {
+  overflow-wrap: anywhere;
+}
+.tracking-note {
+  margin: 8px 0 12px;
+}
+
+/* The fold sits level with the chips of the card beside it. */
+.shell .overview-page .loss-card {
+  display: flex;
+  flex-direction: column;
+}
+.loss-card details {
+  margin-top: auto;
 }
 .card-plate {
   display: block;
@@ -111,11 +140,15 @@
   filter: var(--hero-art);
   border-radius: var(--radius) var(--radius) 0 0;
 }
+.card-plate.art-ph,
+.article-cover.art-ph {
+  display: flex;
+}
 @container (max-width: 640px) {
-  .compare-grid {
+  .shell .overview-page .compare-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .compare-side {
+  .shell .overview-page .compare-side {
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
   .tracking-stats {
@@ -209,7 +242,6 @@
   gap: 12px;
   padding: 11px 8px;
   margin: 0 -8px;
-  border-radius: 10px;
   border-top-color: var(--line);
 }
 .shell .recent-card .recent-trades li:hover {
@@ -230,7 +262,7 @@
 /* ---------- reading ---------- */
 
 .shell .overview-page .article-cards {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
 }
 .shell .overview-page .article-card {
   padding: 0 0 14px;

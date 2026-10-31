@@ -82,7 +82,7 @@
   padding-top: 12px;
   padding-bottom: 10px;
   border-top: 1px solid var(--line);
-  border-bottom: 3px double var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
 }
 .trades-page .trade-market {
   display: inline-flex;
@@ -210,12 +210,10 @@
   }
   .trades-page .trades-summary {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px 12px;
-    padding: 12px 0;
-  }
-  .trades-page .trades-summary > div:last-child {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .trades-page table.data.cards.trades-table tr {
@@ -300,8 +298,18 @@
     text-transform: uppercase;
     color: var(--ink-3);
   }
+  /* Amount and price keep their width and stay on one line, the third column takes what is left. */
+  .trades-page table.data.cards.trades-table .c-price,
+  .trades-page table.data.cards.trades-table .c-amount {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
   .trades-page table.data.cards.trades-table .c-filled .filled {
     display: flex;
+  }
+  .trades-page .c-filled .fillbar {
+    flex: 0 1 40px;
+    min-width: 14px;
   }
 
   /* line 3: when and fee, quiet */
