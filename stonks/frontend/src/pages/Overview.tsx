@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { ARTICLES } from '../articles';
-import { Art, CatArt, HeroBanner } from '../components/art';
+import { Art, CatArt, HeroBanner, coverSlot } from '../components/art';
 import { LineChart, type LineSeries } from '../components/charts';
 import { IconHealth } from '../components/icons';
 import { ErrorBox, Fold, ModeBadge, Modal, Segmented, Skeleton, Switch, Tip, useAsync, useToast, useVisibleInterval } from '../components/ui';
@@ -118,7 +118,7 @@ function ReadingCard() {
               navigate(`/article?slug=${a.slug}`);
             }}
           >
-            <Art slot={`cover-${a.slug}`} className="article-cover" />
+            <Art slot={coverSlot(a.slug)} className="article-cover" />
             <span className="tiny muted">
               {a.tag} · {whenPosted(a.date)} · {a.minutes} min read
             </span>

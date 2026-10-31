@@ -30,6 +30,23 @@ function ArtPlaceholder({ slot, className = '' }: { slot: string; className?: st
   );
 }
 
+/**
+ * The cover slot of an article. An article without its own cover borrows one that exists, picked from its slug so the
+ * same article always gets the same picture.
+ */
+export function coverSlot(slug: string): string {
+  const own = `cover-${slug}`;
+  if (artUrl(own)) return own;
+  const have = Object.keys(files)
+    .map((f) => /\/(cover-[^/]+?)(-dark)?\.webp$/.exec(f)?.[1])
+    .filter((s, i, all): s is string => !!s && all.indexOf(s) === i)
+    .sort();
+  if (!have.length) return own;
+  let h = 0;
+  for (const c of slug) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return have[h % have.length];
+}
+
 /** One slot: its picture, or `fallback`, or the placeholder. Decorative unless given `alt`. */
 export function Art({ slot, className, alt = '', fallback, width, height }: { slot: string; className?: string; alt?: string; fallback?: ReactNode; width?: number; height?: number }) {
   const { src, night } = useArt(slot);

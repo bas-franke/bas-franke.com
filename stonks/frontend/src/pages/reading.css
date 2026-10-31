@@ -386,3 +386,9 @@
 .writeup-table.dense tr.is-picked td:first-child { background: color-mix(in srgb, var(--brass) 18%, var(--surface)); }
 .writeup-table.dense tr.is-compare td:first-child { background: color-mix(in srgb, var(--cmp) 9%, var(--surface)); }
 .writeup-table.dense .cmp-name { max-width: 6em; }
+
+/* Explainer tables of text: wrap, read left to right, a little air between rows. */
+.dial-table td, .dial-table th { text-align: left; vertical-align: top; }
+.dial-table td { white-space: normal; padding-top: 9px; padding-bottom: 9px; line-height: 1.4; }
+.dial-table td:first-child { white-space: nowrap; color: var(--ink); }
+.dial-table td:last-child { color: var(--ink-2); font-variant-numeric: tabular-nums; }

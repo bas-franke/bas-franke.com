@@ -1184,7 +1184,229 @@ function LessBitcoin() {
   );
 }
 
+type Dial = [string, string, string];
+
+/** A plain table for text: the dial's name, what it does in everyday words, and where it is set. Cells wrap. */
+function DialTable({ rows }: { rows: Dial[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="data dial-table">
+        <thead>
+          <tr>
+            <th>Dial</th>
+            <th>What it is, like you are five</th>
+            <th>Set to</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r[0]}>
+              <td>
+                <b>{r[0]}</b>
+              </td>
+              <td>{r[1]}</td>
+              <td className="nowrap">{r[2]}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const DIALS_BITCOIN: Dial[] = [
+  ['btc_days', 'The big question: is bitcoin having a good time? Bitcoin is the bot’s weather report. If its price today is above its average of the last 140 days, it is a “bull”: sunny.', '140 days'],
+  ['btc_exit_days', 'A quicker way out. The sun is also gone if bitcoin falls under its shorter 75-day average, even if it is still above the 140-day one.', '75 days'],
+  ['btc_band', 'A cushion so the bot does not flip-flop when bitcoin sits right on the line. Zero means no cushion.', 'off (0)'],
+  ['bull_size', 'On a sunny day the bot dares more: both rides (below) are four times bigger. They can never be more than “everything we have”.', '4 times'],
+  ['bear_size', 'On a cloudy day the rides are the normal size, not smaller.', '1 times'],
+  ['bull_take', 'In the sun, each time the bot takes some winnings off the table it takes this share of what is left.', 'half'],
+  ['bull_gain', 'In the sun the bot waits longer before taking winnings: three times the normal gain.', '3 times'],
+  ['bull_give', 'In the sun the breakout ride may fall back this many times its normal distance before it quits. 1 means the same as always.', '1 times'],
+  ['bull_z', 'In the sun the dips (below) count at their normal depth. Below 1 would mean smaller dips already buy.', '1 times'],
+  ['core, coin_days', 'A “always keep something” savings position in the sun, only while the coin itself is above its average. Switched off.', 'off (0)'],
+];
+
+const DIALS_RIDE: Dial[] = [
+  ['high_days', 'The breakout ride: the price must close above the highest close of the last 27 days. Like a kid jumping higher than anyone this month.', '27 days'],
+  ['giveback', 'How far the price may fall back from its best since the buy before the bot leaves. It is measured in “daily swings”, the size of a normal day.', '3.9 daily swings'],
+  ['hvol_days', 'How many days of history decide how big a “normal day” is.', '11 days'],
+  ['target_vol', 'How much of a bumpy ride the bot accepts for one position. It buys this number divided by how wild the coin is: a calm coin gets a big bet, a wild one a small bet.', '0.5 a year'],
+  ['gate_days', 'An extra rule: only ride when the price is above this many days’ average. Off.', 'off (0)'],
+  ['take_gain', 'When the ride is up about 16%, the bot takes some money out. It does it again at about 35%.', '0.15 (16%)'],
+  ['take_frac', 'Each time it takes money out, it sells this share of what is still riding.', 'half'],
+  ['s_macd', 'The second ride, built on a gauge called MACD. This is how much of the account it may use. 1 means switched on; 0 would switch it off.', 'on (1)'],
+  ['macd_days', 'How slow the MACD gauge is: the number of days that set how it is drawn.', '26 days'],
+  ['stretch', 'The MACD ride only quits on a downward cross after the gauge has reached this height. A small wobble is not enough to leave.', '1.0'],
+  ['macd_vol', 'The same idea as target_vol, for the MACD ride: calm coins get a bigger bet, wild ones a smaller one.', '0.45 a year'],
+  ['ride_1h', 'Look at finished one-hour candles to decide the two rides, not the bot’s own fifteen-minute ones. Slower, calmer decisions.', 'on (1)'],
+];
+
+const DIALS_DIPS: Dial[] = [
+  ['snap_hours', 'The quick sell-off (the “snap”): how many hours it is measured over. A snap is a sudden drop, like a ball dropped on the floor.', '4 hours'],
+  ['snap_vol_days', 'How many days of history decide what a “normal move” is, so the bot knows when a drop is not normal.', '55 days'],
+  ['snap_trend_days', 'The daily trend the drop is measured against.', '60 days'],
+  ['z_up, z_down', 'How deep a snap must be before the bot buys it, counted in normal moves: 3.0 below a rising trend, 4.4 below a falling one. It is pickier when the trend is falling.', '3.0 and 4.4'],
+  ['exit_rsi', 'When the bounce is done, the bot sells the snap. “RSI” is a heat gauge from 0 to 100, and 50 means the bounce has reached the middle.', '50'],
+  ['vdip_hours', 'The slow dip: price drifting under its average. This is the average’s length in hours.', '40 hours'],
+  ['vdip_z', 'How far under that average the price must be, in wobble units, before the bot buys the slow dip. It sells when price is back at the average.', '2.2'],
+  ['ladder_first', 'The dip ladder: the bot does not buy everything at once. At the first trigger it buys this share of the full amount.', 'half'],
+  ['ladder_mult', 'It buys the rest when the dip is this many times as deep as the trigger.', '1.25 times'],
+  ['fast_z, fast_gain', 'Speed matters. If the last hour fell faster than 4 normal moves, a dip gets one extra helping for every unit faster. A slow drift gets less, or nothing.', '4.0 and 1.0'],
+  ['speed_vdip', 'How much the speed rule also applies to the slow dip. 1 means fully.', '1.0'],
+];
+
+const DIALS_CYCLE: Dial[] = [
+  ['cycle_days', 'The coin’s “very long walk”: the average of its last 450 days. The gauge says how far above that average the price has run.', '450 days'],
+  ['cyc_hot', 'When the price is more than about 3.7 times its 450-day average, the coin is overheated, like a pot about to boil over. 1.3 is a log value and equals 3.7 times.', '1.3'],
+  ['hot_size', 'In the overheated zone, the breakout ride and the MACD ride are switched off. Zero means no rides at all.', 'off (0)'],
+  ['hot_give', 'If rides were allowed there, how much tighter the breakout ride’s exit would be. 1 means the same.', '1 times'],
+  ['cyc_on', 'An optional entry check: only ride big once the gauge is above this. Off.', 'off (-9)'],
+  ['cyc_btc', '1 means use bitcoin’s own gauge, 0 means the coin’s own. The bot uses the coin’s own.', 'coin’s own (0)'],
+];
+
+const DIALS_STOP: Dial[] = [
+  ['deep', 'A “crash buy” is any buy made when the coin is at least 30% under its best close of the last 10 days. The idea: buy a falling thing and hope for a quick bounce.', '30% under'],
+  ['deep_days', 'How many days back counts when looking for “the best close”.', '10 days'],
+  ['hours', 'How long a crash buy gets to bounce. Like giving a ball six hours to come back up.', '6 hours'],
+  ['gain', 'What counts as a bounce: the price being 5% above what the bot paid.', '5% above the buy'],
+];
+
+const DIALS_BOT: Dial[] = [
+  ['coin and candles', 'Which coin the strategy trades and how often it looks: ether (ETH-EUR), a new picture of the price every 15 minutes.', 'ETH-EUR, 15 minutes'],
+  ['fees', 'What Bitvavo takes: 0.15% when the bot waits patiently with a limit order, 0.25% when it grabs at once. The bot tries to be patient.', '0.15% / 0.25%'],
+  ['chase', 'A resting order is moved to the best price in the book every 30 seconds; if it is still not filled after 10 minutes, the rest is bought or sold at once.', '30 seconds, 10 minutes'],
+  ['daily loss guard', 'A seat belt on the whole account. If it loses 15% within 24 hours, the bot stops buying (it can still sell).', '15%, no new buys'],
+  ['max exposure', 'An optional euro cap on how much money the bot may use at all. Empty means no cap.', 'owner’s choice'],
+];
+
+function EveryDial() {
+  return (
+    <>
+      <p className="lede">
+        The bot looks like one thing, but it is really a handful of small helpers, each with a few dials. About forty-four dials in all. This is every
+        one of them, in plain words, and how they hand things to each other. Think of it as a toy factory with a weather report at the front door.
+      </p>
+
+      <div className="callout brass">
+        <p>
+          <b>The one-minute version.</b> The bot checks the weather (bitcoin), then runs two “ride the winners” plans and three “buy the dip” plans. In sunny
+          weather it bets four times bigger. If the coin is overheated, it stops riding. And a stopwatch takes back any crash buy that did not bounce within six hours.
+        </p>
+      </div>
+
+      <h2>The map: who talks to whom</h2>
+      <ol>
+        <li>
+          <b>The weather report</b> (bitcoin’s dials) says sun or clouds. It changes how big the rides and the winnings-taking are.
+        </li>
+        <li>
+          <b>The overheating check</b> (the long-walk dials) can switch the rides off when the coin has run too far.
+        </li>
+        <li>
+          <b>The two rides</b> (breakout and MACD) follow winners. How big they are comes from the weather, the coin’s wildness and the overheating check.
+        </li>
+        <li>
+          <b>The three dip buyers</b> (snap, slow dip, ladder) buy falls. Speed decides how much.
+        </li>
+        <li>
+          <b>The stopwatch</b> (time stop) looks at the buys from step 3 and 4 that were “crash buys” and undoes the ones that did not bounce.
+        </li>
+        <li>
+          <b>The seat belts</b> (loss guard, fees, chase) sit around everything.
+        </li>
+      </ol>
+
+      <h2>1. The weather report: bitcoin</h2>
+      <p>
+        The bot trades ether but asks bitcoin whether the mood is good. Like checking if the whole class is happy before deciding how loud to be.
+      </p>
+      <DialTable rows={DIALS_BITCOIN} />
+      <p className="small soft">
+        <b>Connected:</b> btc_days and btc_exit_days together decide “sun or clouds”. Sun is on only while bitcoin is over its 140-day average <i>and</i> over its
+        75-day one. Every other “bull_” dial only matters in the sun, so none of them does anything on a cloudy day.
+      </p>
+
+      <h2>2. The rides: following winners</h2>
+      <p>
+        A ride is simple: when the price jumps higher than it has in a month, jump on, and stay until it falls back too far. There are two of them.
+      </p>
+      <DialTable rows={DIALS_RIDE} />
+      <p className="small soft">
+        <b>Connected:</b> the size of a ride is target_vol divided by the coin’s wildness, then multiplied by bull_size in the sun. The giveback tells it when to
+        leave, take_gain and take_frac tell it when to take some winnings, and in the sun bull_gain and bull_take change those. hvol_days sets what a
+        “daily swing” is, which is the ruler for giveback.
+      </p>
+
+      <h2>3. The dips: buying falls</h2>
+      <p>
+        Dips are the opposite of rides: the price drops, and the bot bets it will come back. There are three kinds that work together.
+      </p>
+      <DialTable rows={DIALS_DIPS} />
+      <p className="small soft">
+        <b>Connected:</b> the snap and the slow dip decide <i>whether</i> to buy. The ladder decides <i>how much at first</i>. Speed (fast_z, fast_gain,
+        speed_vdip) decides <i>how much more</i>. Sizes only go up while a dip is being held. They never go down by themselves.
+      </p>
+
+      <h2>4. The overheating check: the long walk</h2>
+      <p>
+        Rides are for coins that have room to run. A coin that has already run to almost four times its long-run average is more likely to turn than to keep
+        going. This check says “not now” when that happens. It is the reason the bot sat out a couple of ether’s biggest spikes.
+      </p>
+      <DialTable rows={DIALS_CYCLE} />
+      <p className="small soft">
+        <b>Connected:</b> cyc_hot and hot_size are the pair that matters: cross the line, and the size drops to zero.
+      </p>
+
+      <h2>5. The stopwatch: the crash-buy time stop</h2>
+      <p>
+        This is the one extra helper bolted on in Session 13. It watches the buys made while the coin is in a deep fall. If the bounce has not come within
+        six hours, it takes those buys back, and the position stays small until the main strategy is flat again. Rides and everything else are left alone.
+      </p>
+      <DialTable rows={DIALS_STOP} />
+      <p className="small soft">
+        <b>Connected:</b> the stopwatch uses the buys from the dips (and any ride that happens to buy deep). It does not change a single dial above. It only
+        takes buys back.
+      </p>
+
+      <h2>6. The seat belts around everything</h2>
+      <p>These are not part of the strategy. They are the rules of the house, and they can be changed in the bot’s settings.</p>
+      <DialTable rows={DIALS_BOT} />
+
+      <h2>A day in the life, in six sentences</h2>
+      <ol>
+        <li>Every 15 minutes the bot looks at ether and at bitcoin’s weather.</li>
+        <li>Sunny: it sizes the rides four times bigger. Cloudy: the normal size.</li>
+        <li>Ether jumps above its one-month high: a ride starts, small if ether is wild and big if it is calm.</li>
+        <li>The price rises 16%: the bot takes half of the ride’s money out, and again at 35%.</li>
+        <li>Ether crashes hard instead: the dip buyers pick it up in steps, more if it fell fast.</li>
+        <li>If that crash buy has not bounced in six hours, the stopwatch undoes it.</li>
+      </ol>
+
+      <div className="callout">
+        <p>
+          <b>About the numbers.</b> Dials like 27 days or 3.9 swings were found by testing on the past, and they sit on a plateau: nudging one by 15% costs a
+          little, but nothing breaks. That is why the research articles keep asking how many dials are really needed. These are the live bot’s settings
+          as of today. If the owner switches strategy, this list changes.
+        </p>
+      </div>
+      <p className="small soft">
+        Research, not financial advice. Past results say nothing certain about the future.
+      </p>
+    </>
+  );
+}
+
 export const ARTICLES: Article[] = [
+  {
+    slug: 'every-dial',
+    title: 'Every dial on the bot, explained like you are five',
+    blurb: 'All forty-four settings the live bot trades on, in plain words, grouped by job, with how they hand things to each other: the weather report, the rides, the dips, the overheating check and the stopwatch.',
+    date: '2026-10-31T17:00:00+01:00',
+    minutes: 10,
+    tag: 'How it works',
+    body: EveryDial,
+  },
   {
     slug: 'less-bitcoin',
     title: 'Less bitcoin, 50 tries: can the new #1 move on its own?',
