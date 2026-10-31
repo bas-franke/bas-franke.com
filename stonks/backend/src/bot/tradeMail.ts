@@ -230,7 +230,7 @@ async function send(trades: Trade[], account: TradeAccount) {
 
 /** POST /api/bot/test-alert: a trade mail with sample numbers, right now. */
 export async function sendTestAlert(): Promise<{ ok: boolean; configured: boolean; error?: string }> {
-  if (!alertsConfigured()) return { ok: false, configured: false, error: 'Mail is not set up: SENDGRID_API_KEY and STONKS_ALERT_EMAIL must all be set on the server.' };
+  if (!alertsConfigured()) return { ok: false, configured: false, error: 'Mail is not set up: SENDGRID_API_KEY must be set on the server.' };
   const trade = sampleTrade();
   const account = sampleAccount();
   const r = await deliver(tradeSubject(trade, account.equityEur), tradeText(trade, account), tradeHtml(trade, account));

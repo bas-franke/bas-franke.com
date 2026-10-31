@@ -38,7 +38,6 @@ const account = () => ({ ...sampleAccount(), test: false, equityEur: 250 });
 
 beforeEach(() => {
   process.env.SENDGRID_API_KEY = 'SG.key.value';
-  process.env.STONKS_ALERT_EMAIL = 'owner@example.com';
   fillRows = [];
   working = [];
   mailed = [];
@@ -53,7 +52,6 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
   delete process.env.SENDGRID_API_KEY;
-  delete process.env.STONKS_ALERT_EMAIL;
 });
 
 describe('trade mails', () => {

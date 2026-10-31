@@ -16,16 +16,17 @@ const NOT_BOT_FAILURES = new Set(['login_disabled', 'login_paused', 'family_code
 
 /** Sender address; bas-franke.com must be authenticated in SendGrid (or this address verified as a single sender). */
 const MAIL_FROM = 'stonks@bas-franke.com';
+/** The owner: every stonks mail goes here. */
+const MAIL_TO = 'bas.franke.89@gmail.com';
 
 const settings = () => ({
   key: process.env.SENDGRID_API_KEY ?? '',
   from: MAIL_FROM,
-  to: process.env.STONKS_ALERT_EMAIL ?? '',
+  to: MAIL_TO,
 });
 
 export function alertsConfigured(): boolean {
-  const { key, to } = settings();
-  return Boolean(key && to);
+  return Boolean(settings().key);
 }
 
 export const shouldAlert = (level: string, event: string) => (level === 'error' && !NOT_BOT_FAILURES.has(event)) || (level === 'warn' && WARN_EVENTS.has(event));

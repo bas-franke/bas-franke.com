@@ -225,7 +225,7 @@ entries come from the fills. Ids keep counting, so the cursors stay valid, but a
 
 Stonks sends two kinds of mail: a finished trade, and an alert that the bot is not working. Nothing else mails.
 
-Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`, `STONKS_ALERT_EMAIL`; the sender `stonks@bas-franke.com` is in code): every `error` except
+Alerts (`bot/alerts.ts`) mail through SendGrid (`SENDGRID_API_KEY`; the sender `stonks@bas-franke.com` and the owner's address are in code): every `error` except
 `login_disabled`, `login_paused` and `family_code_changed`, and the warnings `decision_held`, `stale_candles`, `stop_skipped`, one mail per event name per 30 minutes.
 Unconfigured it does nothing.
 

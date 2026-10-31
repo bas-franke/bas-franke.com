@@ -49,7 +49,7 @@ export function startBot(): void {
   // Informative BTC/ETH/portfolio tracking for the Overview chart: separate from the trading loop.
   startTracking();
   startShadow();
-  if (!alertsConfigured()) void log('info', 'alerts_off', 'Alert mails are off: SENDGRID_API_KEY and STONKS_ALERT_EMAIL are not both set');
+  if (!alertsConfigured()) void log('info', 'alerts_off', 'Alert mails are off: SENDGRID_API_KEY is not set');
   try {
     start();
   } catch (err) {
