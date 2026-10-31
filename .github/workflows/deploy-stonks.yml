@@ -218,4 +218,9 @@ jobs:
       # `[test-mail]` in the commit message sends the sample trade mail from the server, with the real mail settings.
       - name: Send test mail
         if: contains(github.event.head_commit.message, '[test-mail]')
-        run: ssh server "cd /srv/apps/$PROJECT/backend && node --env-file-if-exists=/srv/apps/$PROJECT/.env dist/bot/testMail.js"
+        run: |
+          out=$(ssh server "cd /srv/apps/$PROJECT/backend && node --env-file-if-exists=/srv/apps/$PROJECT/.env dist/bot/testMail.js" 2>&1) || {
+            echo "::error::${out//$'\n'/ | }"
+            exit 1
+          }
+          echo "$out"

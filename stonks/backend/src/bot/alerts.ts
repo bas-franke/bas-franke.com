@@ -64,7 +64,7 @@ export async function deliver(subject: string, text: string, html?: string): Pro
       alertStats.lastError = null;
       return { ok: true };
     }
-    return failed(`SendGrid answered ${res.status}`);
+    return failed(scrub(`SendGrid answered ${res.status}: ${(await res.text()).slice(0, 200)}`));
   } catch (err) {
     return failed(scrub(err instanceof Error ? err.message : String(err)));
   }
