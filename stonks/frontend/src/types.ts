@@ -365,6 +365,10 @@ export interface BoardRow {
   meanYearly?: number | null;
   meanHoldYearly?: number | null;
   meanDrop?: number | null;
+  /** Session 15: the share of a coin's rise kept when it overtook bitcoin, all coins / ether / the other eight. */
+  overtakeKept?: number | null;
+  overtakeEth?: number | null;
+  overtakeOthers?: number | null;
   status?: string | null;
   running?: boolean | null;
 }

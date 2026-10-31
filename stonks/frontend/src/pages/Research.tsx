@@ -342,6 +342,7 @@ function Research({
 
 function LiveBoard({ board: whole }: { board: NonNullable<ResearchBucket['board']> }) {
   // A finished session lists no "running" book: the flag is a leftover of the live board (the bot's own row carries it).
+  const overtake = whole.rows.some((r) => r.overtakeKept !== undefined && r.overtakeKept !== null);
   const board = whole.live ? whole : { ...whole, rows: whole.rows.filter((r) => !r.running) };
   const yr = (v: unknown) => fx(v, (n) => pct(n, 0, true));
   const drop = (v: unknown) => fx(v, (n) => pct(-Math.abs(n), 0));
@@ -353,6 +354,7 @@ function LiveBoard({ board: whole }: { board: NonNullable<ResearchBucket['board'
               <th>#</th>
               <th>Book</th>
               <th className="r">Rank</th>
+              {overtake && <th className="r">Overtake kept</th>}
               <th className="r">ETH yearly vs holding</th>
               <th className="r">ETH drop</th>
               <th className="r">10 coins yearly vs holding</th>
@@ -372,6 +374,14 @@ function LiveBoard({ board: whole }: { board: NonNullable<ResearchBucket['board'
                 <td className="r tnum">
                   <b>{fx(r.rank, (n) => n.toFixed(1))}</b>
                 </td>
+                {overtake && (
+                  <td className="r tnum nowrap">
+                    <b>{fx(r.overtakeKept, (n) => n.toFixed(1))}</b>
+                    <div className="tiny soft">
+                      ETH {fx(r.overtakeEth, (n) => n.toFixed(0))} · others {fx(r.overtakeOthers, (n) => n.toFixed(0))}
+                    </div>
+                  </td>
+                )}
                 <td className="r tnum nowrap">
                   {yr(r.ethYearly)} vs {yr(r.holdYearly)}
                 </td>
@@ -495,6 +505,13 @@ function BucketIntro({ name, b }: { name: string; b: ResearchBucket }) {
             No new strategies here: the number one of Sessions 6 to 10, unchanged, run on all 29 coins the lab has candles for. Nineteen of them were
             never used by any research agent, so this is the first real test on unseen coins. Ranked on the absolute score over all 29. The table’s
             euro numbers are the ether run.
+          </p>
+        )}
+        {name === 'session15' && (
+          <p>
+            Session 15 asks how much of a coin’s rise the book keeps in the stretches where that coin overtakes bitcoin (it rose 15 % or more and beat
+            bitcoin by 15 points or more): “overtake kept”. The books start from Session 14’s number one, and the ranking is by that independence from
+            bitcoin, less a penalty for giving up strength against the start. The table’s euro numbers are the ether run.
           </p>
         )}
       {name === 'custom' && (
