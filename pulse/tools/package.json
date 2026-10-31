@@ -1,0 +1,10 @@
+{
+  "name": "pulse-tools",
+  "private": true,
+  "type": "module",
+  "description": "Art import tooling. Install with: npm --prefix tools install",
+  "dependencies": {
+    "pulse": "file:..",
+    "sharp": "^0.33.5"
+  }
+}
