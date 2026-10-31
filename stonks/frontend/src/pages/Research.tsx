@@ -343,15 +343,7 @@ function Research({
 function LiveBoard({ board }: { board: NonNullable<ResearchBucket['board']> }) {
   const yr = (v: unknown) => fx(v, (n) => pct(n, 0, true));
   const drop = (v: unknown) => fx(v, (n) => pct(-Math.abs(n), 0));
-  return (
-    <section className="card live-board" aria-label="Rankings so far">
-      <div className="card-head">
-        <h2 style={{ marginRight: 'auto' }}>{board.live ? 'Rankings so far' : 'All the books'}</h2>
-        <span className={`chip ${board.live ? 'brass' : 'outline'}`}>
-          {board.live && <span className="dot" />} {board.finished} of {board.total} finished
-        </span>
-      </div>
-      {board.note && <p className="small soft">{board.note}</p>}
+  const table = (rows: typeof board.rows) => (
       <div className="table-wrap">
         <table className="data live-board-table">
           <thead>
@@ -366,7 +358,7 @@ function LiveBoard({ board }: { board: NonNullable<ResearchBucket['board']> }) {
             </tr>
           </thead>
           <tbody>
-            {board.rows.map((r) => (
+            {rows.map((r) => (
               <tr key={r.name} className={r.running ? 'is-running' : undefined}>
                 <td className="tnum">{r.place ?? '–'}</td>
                 <td>
@@ -391,6 +383,18 @@ function LiveBoard({ board }: { board: NonNullable<ResearchBucket['board']> }) {
           </tbody>
         </table>
       </div>
+  );
+  return (
+    <section className="card live-board" aria-label="Rankings so far">
+      <div className="card-head">
+        <h2 style={{ marginRight: 'auto' }}>{board.live ? 'Rankings so far' : 'All the books'}</h2>
+        <span className={`chip ${board.live ? 'brass' : 'outline'}`}>
+          {board.live && <span className="dot" />} {board.finished} of {board.total} finished
+        </span>
+      </div>
+      {board.note && <p className="small soft">{board.note}</p>}
+      {board.rows.some((r) => r.running) && table(board.rows.filter((r) => r.running))}
+      <Fold title={`All ${board.rows.length} books`}>{table(board.rows)}</Fold>
     </section>
   );
 }
