@@ -212,6 +212,19 @@ jobs:
         run: |
           ssh server "for i in \$(seq 1 15); do curl -fsS http://127.0.0.1:$BACKEND_PORT/api/health && exit 0; sleep 2; done; pm2 logs $PROJECT --lines 50 --nostream; exit 1"
 
+      # The owner gets one mail for each new article, once the page is really live (the published script bundle carries its
+      # slug). The first run only records the existing articles. A failure warns but does not fail the deploy; the next deploy retries.
+      - name: Mail new articles
+        run: |
+          node stonks/backend/scripts/list-articles.mjs > articles.json
+          scp articles.json server:/srv/apps/$PROJECT/backend/articles.json
+          out=$(ssh server "cd /srv/apps/$PROJECT/backend && node --env-file-if-exists=/srv/apps/$PROJECT/.env dist/bot/articleMail.js articles.json /srv/apps/$PROJECT/notified-articles.json" 2>&1) || {
+            echo "::warning::Article mail: ${out//$'
+'/ | }"
+            exit 0
+          }
+          echo "$out"
+
       # `[test-mail]` in the commit message sends the sample trade mail from the server, with the real mail settings.
       - name: Send test mail
         if: contains(github.event.head_commit.message, '[test-mail]')
