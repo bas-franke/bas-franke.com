@@ -107,6 +107,22 @@ jobs:
               sudo systemctl reload nginx
             fi"
 
+      # The login passphrase comes from the repository secret PULSE_PASSPHRASE. Without it the value already in
+      # /srv/apps/pulse/.env stays, and with none there production refuses every login.
+      - name: Sync login passphrase
+        env:
+          PULSE_PASSPHRASE: ${{ secrets.PULSE_PASSPHRASE }}
+        run: |
+          if [ -z "$PULSE_PASSPHRASE" ]; then
+            echo "::warning::PULSE_PASSPHRASE is not set; keeping whatever is in /srv/apps/$PROJECT/.env."
+            exit 0
+          fi
+          # The value goes over stdin so it never shows up in a command line; umask keeps the temp file private.
+          printf '%s\n' "$PULSE_PASSPHRASE" | ssh server "umask 077 && read -r key \
+            && f=/srv/apps/$PROJECT/.env && touch \$f \
+            && { grep -v '^PULSE_PASSPHRASE=' \$f || true; printf 'PULSE_PASSPHRASE=%s\n' \"\$key\"; } > \$f.new \
+            && mv \$f.new \$f"
+
       - name: Install and restart backend
         run: |
           ssh server "cd /srv/apps/$PROJECT/backend \

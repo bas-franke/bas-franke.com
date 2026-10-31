@@ -120,3 +120,9 @@
   .card-title { font-size: 1rem; }
 }
 @media (max-width: 760px) { .board-col.is-over { background: var(--bg-2); } }
+
+/* Calmer cards: the quick date chips and the foot actions appear on hover or focus (always on touch screens). */
+@media (hover: hover) {
+  .card .due-chips, .card .card-foot { display: none; }
+  .card:hover .due-chips, .card:hover .card-foot, .card:focus-within .due-chips, .card:focus-within .card-foot { display: flex; }
+}
