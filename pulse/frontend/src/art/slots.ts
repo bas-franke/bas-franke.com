@@ -57,7 +57,27 @@ export const SLOTS: SlotDef[] = [
   { slot: 'icon', w: 512, h: 512, scene: 'a soft rounded heartbeat line glowing like a candle flame', use: 'favicon and app icon' },
 ];
 
-/** The covers a note can pick, in the order the editor shows them. */
-export const COVERS = SLOTS.filter((s) => s.slot.startsWith('cover-')).map((s) => s.slot);
+/** The 16 generated picture files (ART.md); each is src/assets/art/<slot>.webp. The usage slots above map onto these. */
+export const FILES: SlotDef[] = [
+  { slot: 'dashboard-hero', w: 1800, h: 600, scene: 'sunny desk by a window with plants, a notebook and a mug', use: 'dashboard hero, daytime' },
+  { slot: 'notes-hero', w: 1800, h: 600, scene: 'a notes desk with stacked books, a fountain pen and a candle', use: 'notes page hero' },
+  { slot: 'rainy-banner', w: 1800, h: 600, scene: 'rain on a window with a warm lamp and a mug', use: 'banner' },
+  { slot: 'night-hero', w: 1800, h: 600, scene: 'night window with a lit lamp and an open book', use: 'dashboard hero, dark mode' },
+  { slot: 'column-todo', w: 1600, h: 400, scene: 'a seed packet and a watering can', use: 'To do column header' },
+  { slot: 'column-doing', w: 1600, h: 400, scene: 'a seedling pushing through soil', use: 'In progress column header' },
+  { slot: 'column-done', w: 1600, h: 400, scene: 'a full fruit bowl on a table', use: 'Done column header' },
+  { slot: 'empty-tasks', w: 800, h: 800, scene: 'a hedgehog sitting on a cloth with a pebble', use: 'empty board / column' },
+  { slot: 'empty-notes', w: 800, h: 800, scene: 'an owl on a branch beside a blank notebook', use: 'no notes yet' },
+  { slot: 'overdue', w: 800, h: 800, scene: 'a fox holding a pocket watch', use: 'overdue' },
+  { slot: 'loading-404', w: 800, h: 800, scene: 'a paper boat drifting on a calm pond', use: 'loading and 404' },
+  { slot: 'celebrate', w: 800, h: 800, scene: 'a bear holding a bunch of balloons', use: 'all done' },
+  { slot: 'cover-tea', w: 1200, h: 900, scene: 'a teapot, two cups and steam on a wooden tray', use: 'note cover' },
+  { slot: 'cover-lighthouse', w: 1200, h: 900, scene: 'a lighthouse on a cliff at golden hour', use: 'note cover' },
+  { slot: 'cover-meadow', w: 1200, h: 900, scene: 'a wildflower meadow in summer with soft clouds', use: 'note cover' },
+  { slot: 'cover-winter', w: 1200, h: 900, scene: 'a snowy cabin with a lit window at dusk', use: 'note cover' },
+];
 
-export const slotDef = (slot: string) => SLOTS.find((s) => s.slot === slot);
+/** The covers a note can pick, in the order the editor shows them. */
+export const COVERS = FILES.filter((s) => s.slot.startsWith('cover-')).map((s) => s.slot);
+
+export const slotDef = (slot: string) => SLOTS.find((s) => s.slot === slot) ?? FILES.find((s) => s.slot === slot);

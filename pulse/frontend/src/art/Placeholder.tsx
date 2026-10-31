@@ -16,6 +16,9 @@ const SCENES: Record<string, Scene> = {
   'cover-rain-window': C.coverRainWindow, 'cover-tea': C.coverTea, 'cover-plants': C.coverPlants, 'cover-books': C.coverBooks,
   'cover-meadow': C.coverMeadow, 'cover-autumn': C.coverAutumn, 'cover-snow': C.coverSnow, 'cover-bread': C.coverBread,
   'cover-hills': C.coverHills, 'cover-shapes': C.coverShapes, 'cover-fox': C.coverFox, 'cover-owl': C.coverOwl,
+  'dashboard-hero': H.heroDay, 'notes-hero': H.bannerNotes, 'rainy-banner': C.coverRainWindow, 'night-hero': H.heroNight,
+  'empty-tasks': S.emptyColumn, overdue: S.cardOverdue, 'loading-404': C.notFound, celebrate: S.emptyToday,
+  'cover-lighthouse': C.coverLighthouse, 'cover-winter': C.coverSnow,
   loading: C.loadingScene, notfound: C.notFound, login: C.loginScene, icon: C.iconScene,
 };
 

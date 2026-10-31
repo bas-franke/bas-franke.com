@@ -291,3 +291,23 @@ export const iconScene: Scene = (W, H, k) => (
     <path d="M256 70Q300 130 256 170Q212 130 256 70Z" {...f('#fff6e8', { opacity: 0.9 })} />
   </>
 );
+
+export const coverLighthouse: Scene = (W, H, k) => (
+  <>
+    <defs><Grad id={`${k}b`} a={m('rose', 40, 'bg-2')} b={m('gold', 60, 'bg-2')} /><Glow id={`${k}g`} c="#fff0b0" /></defs>
+    <Bg id={`${k}b`} w={W} h={H} />
+    <Sun x={300} y={520} r={70} c="#ffe0a0" />
+    <Cloud x={900} y={160} s={2} c="#ffd9c0" o={0.7} />
+    <rect x="0" y="560" width={W} height="340" {...f(m('blue', 55))} />
+    <path d="M0 620Q300 600 600 620T1200 610M0 700Q300 680 600 700T1200 690" {...st('#fff', 5, { opacity: 0.35 })} />
+    <path d="M620 900Q700 560 820 520Q960 500 1200 560V900Z" {...f(m('green', 50, 'ink'))} />
+    <G x={900} y={540}>
+      <circle cy="-300" r="190" fill={`url(#${k}g)`} />
+      <path d="M-50 0L-30 -280H30L50 0Z" {...f('#fff6e8')} />
+      <path d="M-44 -60L44 -100L40 -150L-38 -112ZM-32 -190L32 -214L30 -250L-28 -228Z" {...f(m('rose', 70))} />
+      <rect x="-40" y="-310" width="80" height="34" rx="6" {...f(m('ink', 55, 'bg-2'))} />
+      <rect x="-26" y="-350" width="52" height="42" rx="8" {...f('#ffe08a')} />
+      <path d="M-40 -350L0 -392L40 -350Z" {...f(m('rose', 70))} />
+    </G>
+  </>
+);
