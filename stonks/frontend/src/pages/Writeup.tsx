@@ -237,7 +237,7 @@ function CoinTable({ s }: { s: WriteupSection }) {
                       const at = j === 0 ? 0 : t.head.indexOf(s.head![j]);
                       return (
                         <td key={j} className={j ? 'r' : undefined}>
-                          {j === 0 ? <span className="cmp-name" title={o.label}>{o.label}</span> : at >= 0 ? <Cell text={row[at] ?? ''} /> : '–'}
+                          {j === 0 ? <span className="cmp-name" title={o.label}>{o.short}</span> : at >= 0 ? <Cell text={row[at] ?? ''} /> : '–'}
                         </td>
                       );
                     })}

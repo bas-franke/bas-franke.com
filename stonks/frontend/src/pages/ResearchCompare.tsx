@@ -17,7 +17,7 @@ type Curves = Record<string, { equity: Pts; holdEquity: Pts }>;
 
 const curveCache = new Map<string, Promise<Curves>>();
 
-export type Compared = { key: string; id: string; label: string };
+export type Compared = { key: string; id: string; label: string; short: string };
 export type CoinTableData = { head: string[]; rows: string[][] };
 const tableCache = new Map<string, Promise<CoinTableData | null>>();
 
@@ -153,7 +153,7 @@ export function ResearchGraph({
         const cut = key.indexOf(':');
         const t = tabs.find((x) => x.key === key.slice(0, cut));
         const e: ResearchEntry | undefined = t?.top.find((x) => x.spec.id === key.slice(cut + 1));
-        return t && e ? [{ key, id: e.spec.id, label: `${e.spec.name.replace(/, ETH \d+\w$/, '')} · ${t.title}` }] : [];
+        return t && e ? [{ key, id: e.spec.id, short: /^session\d+$/.test(t.key) ? `S${sessionNo(t.key)} #${e.rank}` : `${t.title} #${e.rank}`, label: `${e.spec.name.replace(/, ETH \d+\w$/, '')} · ${t.title}` }] : [];
       }),
     [picked, tabs],
   );

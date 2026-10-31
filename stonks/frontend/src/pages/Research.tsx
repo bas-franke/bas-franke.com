@@ -340,7 +340,9 @@ function Research({
   );
 }
 
-function LiveBoard({ board }: { board: NonNullable<ResearchBucket['board']> }) {
+function LiveBoard({ board: whole }: { board: NonNullable<ResearchBucket['board']> }) {
+  // A finished session lists no "running" book: the flag is a leftover of the live board (the bot's own row carries it).
+  const board = whole.live ? whole : { ...whole, rows: whole.rows.filter((r) => !r.running) };
   const yr = (v: unknown) => fx(v, (n) => pct(n, 0, true));
   const drop = (v: unknown) => fx(v, (n) => pct(-Math.abs(n), 0));
   const table = (rows: typeof board.rows) => (
