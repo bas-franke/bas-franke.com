@@ -39,6 +39,9 @@ html:has(.login) {
   border-radius: 12px;
   box-shadow: 0 0 0 1px var(--line-strong);
 }
+.login-card p {
+  text-wrap: balance;
+}
 .login-card h1 {
   font-style: italic;
   margin: 10px 0 6px;

@@ -104,6 +104,13 @@
   font-size: 0.88rem;
   line-height: 1.5;
 }
+/* Routine lines step back, so what the bot did and what went wrong are what you read. */
+.logs-page .log-row.lv-debug .msg {
+  color: var(--ink-2);
+}
+.logs-page .log-row.lv-debug .event {
+  color: var(--ink-3);
+}
 .logs-page .log-row pre {
   font-family: var(--mono);
 }

@@ -100,6 +100,10 @@
   object-fit: cover;
   box-shadow: 0 0 0 1px var(--line);
 }
+.section-spot.art-ph,
+.modal-art.art-ph {
+  display: flex;
+}
 .shell .settings-page .settings-section .intro .eyebrow {
   display: block;
   margin-bottom: 4px;
@@ -139,6 +143,7 @@
   letter-spacing: -0.01em;
 }
 .shell .settings-page .settings-section .intro p {
+  color: var(--ink-2);
   font-size: 0.88rem;
   line-height: 1.5;
 }
@@ -158,7 +163,20 @@
   min-height: 42px;
 }
 .shell .settings-page .field .hint {
+  color: var(--ink-2);
   line-height: 1.45;
+}
+/* What follows a row of fields sits clear of it, and a row of choices is only as wide as its choices. */
+.shell .settings-page .form-grid + details {
+  margin-top: 18px;
+}
+.shell .settings-page .settings-section .segmented {
+  align-self: flex-start;
+  justify-self: start;
+  max-width: 100%;
+}
+.shell .settings-page .activity-list li.lv-warn {
+  color: var(--brass-ink);
 }
 .shell .settings-page .segmented button {
   min-height: 34px;
@@ -251,6 +269,19 @@
   .shell .settings-page .settings-section .intro p {
     margin-bottom: 0;
   }
+  /* The picture sits beside the title, so a section starts with its fields, not a tall stack. */
+  .section-spot,
+  .section-spot.art-ph {
+    float: left;
+    width: 44px;
+    height: 44px;
+    margin: 0 12px 6px 0;
+  }
+  .shell .settings-page .settings-section .intro::after {
+    content: '';
+    display: block;
+    clear: both;
+  }
   .shell .settings-page .form-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
@@ -269,6 +300,7 @@
   .shell .settings-page .segmented {
     display: flex;
     width: 100%;
+    align-self: stretch;
   }
   .shell .settings-page .segmented button {
     flex: 1 1 0;
