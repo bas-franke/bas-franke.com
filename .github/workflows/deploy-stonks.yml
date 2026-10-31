@@ -219,8 +219,7 @@ jobs:
           node stonks/backend/scripts/list-articles.mjs > articles.json
           scp articles.json server:/srv/apps/$PROJECT/backend/articles.json
           out=$(ssh server "cd /srv/apps/$PROJECT/backend && node --env-file-if-exists=/srv/apps/$PROJECT/.env dist/bot/articleMail.js articles.json /srv/apps/$PROJECT/notified-articles.json" 2>&1) || {
-            echo "::warning::Article mail: ${out//$'
-'/ | }"
+            echo "::warning::Article mail: $(printf '%s' "$out" | tr '\n' ' ')"
             exit 0
           }
           echo "$out"
