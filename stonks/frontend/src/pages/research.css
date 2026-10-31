@@ -106,11 +106,11 @@
 }
 .shell .research-page .bucket-tabs #tab-hall[aria-selected='true'] {
   background: var(--brass);
-  color: #18223a;
+  color: var(--fill-ink);
 }
 .shell .research-page .bucket-tabs #tab-hall[aria-selected='true'] .count {
-  background: rgba(24, 34, 58, 0.14);
-  color: #18223a;
+  background: color-mix(in srgb, var(--fill-ink) 14%, transparent);
+  color: var(--fill-ink);
 }
 
 /* ---------- session intro ---------- */
@@ -142,6 +142,7 @@
 .shell .research-page .rank-card {
   gap: 12px;
   padding: 18px 20px 6px;
+  scroll-margin-top: calc(var(--sticky-top) + 72px);
   transition: box-shadow 0.2s;
 }
 .shell .research-page .rank-card.is-active {
@@ -224,6 +225,14 @@
 }
 .shell .research-page .stat-value.loss {
   color: var(--loss-ink);
+}
+
+/* Return against holding is what a card is judged on, so those two read first and the score last. */
+.shell .research-page .stat:nth-child(-n + 2) .stat-value {
+  font-size: 1.5rem;
+}
+.shell .research-page .stat:nth-child(5) .stat-value {
+  color: var(--ink-2);
 }
 
 /* Details holds the rest of the figures; they wrap evenly whatever their number. */
@@ -311,6 +320,13 @@
   filter: var(--hero-art);
   mask-image: linear-gradient(90deg, transparent, #000 52%);
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 52%);
+}
+.shell .research-page .hall-art.art-ph {
+  padding-left: 8%;
+}
+.shell .research-page .empty-art {
+  width: 220px;
+  height: auto;
 }
 
 .shell .research-page .hall-item {
@@ -404,7 +420,7 @@
     background: var(--surface);
   }
   .shell .research-page .bucket-tabs button[aria-selected='true'] {
-    border-color: var(--ink);
+    border-color: var(--brass);
   }
   .shell .research-page .bucket-tabs #tab-hall[aria-selected='true'] {
     border-color: var(--brass);
@@ -475,6 +491,17 @@
   }
   .shell .research-page .stat:nth-child(even) {
     border-left: 1px solid var(--line);
+  }
+  /* An odd one out takes the whole row, label left and value right. */
+  .shell .research-page .stat:nth-child(odd):last-child {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .shell .research-page .stat:nth-child(-n + 2) .stat-value {
+    font-size: 1.34rem;
   }
   .shell .research-page .hall-intro > :not(.hall-art) {
     max-width: 78%;

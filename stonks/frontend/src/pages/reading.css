@@ -5,7 +5,8 @@
 
 .shell .article-page {
   width: 100%;
-  max-width: 900px;
+  /* Long lines tire the eye: the sheet is as wide as the text it holds. */
+  max-width: 800px;
   margin-inline: auto;
   gap: 10px;
 }
@@ -19,6 +20,9 @@
   object-fit: cover;
   filter: var(--hero-art);
   border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+}
+.article-hero.art-ph {
+  display: flex;
 }
 .article-head {
   padding: 26px 40px 0;
@@ -69,9 +73,29 @@
 .shell .article-page .article-body .table-wrap {
   margin-inline: -40px;
   padding-inline: 40px;
+  /* A soft edge shows up on the side that can still scroll, and leaves with it. */
+  background:
+    linear-gradient(90deg, var(--surface) 40%, transparent) left / 32px 100% local no-repeat,
+    linear-gradient(270deg, var(--surface) 40%, transparent) right / 32px 100% local no-repeat,
+    linear-gradient(90deg, color-mix(in srgb, var(--ink) 10%, transparent), transparent) left / 12px 100% scroll no-repeat,
+    linear-gradient(270deg, color-mix(in srgb, var(--ink) 10%, transparent), transparent) right / 12px 100% scroll no-repeat;
 }
 .shell .article-page .article-body table.data {
   font-size: 0.9rem;
+}
+.shell .article-page .article-body table.data th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+.shell .article-page .article-body table.data th,
+.shell .article-page .article-body table.data td {
+  padding-inline: 10px;
+}
+.shell .article-page .article-body table.data :is(th, td):first-child {
+  padding-left: 0;
+}
+.shell .article-page .article-body table.data :is(th, td):last-child {
+  padding-right: 0;
 }
 .shell .article-page .article-body .callout {
   max-width: 68ch;
@@ -148,10 +172,13 @@
   }
   .shell .article-page .article-body .table-wrap {
     margin-inline: -18px;
-    padding-inline: 0;
+    padding-inline: 18px;
   }
   .shell .article-page .article-body table.data {
     font-size: 0.82rem;
+  }
+  .shell .article-page .article-body table.data th {
+    min-width: 6.5em;
   }
 
   .shell .writeup .lede {
@@ -207,6 +234,9 @@
   gap: 6px;
   align-items: center;
   font-size: 13px;
+}
+.compare-research .compare-hold input {
+  accent-color: var(--brass);
 }
 .compare-research .compare-missing {
   display: flex;
