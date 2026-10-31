@@ -98,18 +98,16 @@ export const dateOnly = (v: unknown) => {
 export const whenPosted = (v: unknown) => {
   const d = toDate(v);
   if (!d) return '–';
-  const ms = Date.now() - d.getTime();
-  const days = Math.floor(ms / 86_400_000);
+  const secs = Math.max(1, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (secs < 60) return `${secs} s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return mins % 60 ? `${hours} h ${mins % 60} min ago` : `${hours} h ago`;
+  const days = Math.floor(hours / 24);
   if (days > 61) return dateOnly(d);
-  if (days <= 0) {
-    const mins = Math.max(0, Math.round(ms / 60_000));
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins} min ago`;
-    return `${Math.round(mins / 60)} h ago`;
-  }
-  if (days === 1) return 'yesterday';
-  if (days < 14) return `${days} days ago`;
-  return `${Math.round(days / 7)} weeks ago`;
+  if (days < 14) return hours % 24 ? `${days} ${days === 1 ? 'day' : 'days'} ${hours % 24} h ago` : `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  return `${Math.floor(days / 7)} weeks ago`;
 };
 
 export const timeOnly = (v: unknown) => {

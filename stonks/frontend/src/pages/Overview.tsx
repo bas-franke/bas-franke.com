@@ -99,15 +99,7 @@ export default function OverviewPage() {
 }
 
 function ReadingCard() {
-  return (
-    <section className="card" aria-labelledby="reading-h">
-      <div className="card-head">
-        <span className="eyebrow" id="reading-h">
-          Reading
-        </span>
-      </div>
-      <div className="article-cards">
-        {ARTICLES.map((a) => (
+  const card = (a: (typeof ARTICLES)[number]) => (
           <a
             key={a.slug}
             className="article-card"
@@ -126,8 +118,20 @@ function ReadingCard() {
             <p className="small soft">{a.blurb}</p>
             <span className="small article-more">Read the full article →</span>
           </a>
-        ))}
+  );
+  return (
+    <section className="card" aria-labelledby="reading-h">
+      <div className="card-head">
+        <span className="eyebrow" id="reading-h">
+          Reading
+        </span>
       </div>
+      <div className="article-cards">{ARTICLES.slice(0, 2).map(card)}</div>
+      {ARTICLES.length > 2 && (
+        <Fold title={`More articles (${ARTICLES.length - 2})`}>
+          <div className="article-cards">{ARTICLES.slice(2).map(card)}</div>
+        </Fold>
+      )}
     </section>
   );
 }
