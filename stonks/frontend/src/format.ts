@@ -73,7 +73,7 @@ export const price = (v: unknown) => {
   const n = num(v);
   if (!Number.isFinite(n)) return '–';
   const digits = n >= 1000 ? 2 : n >= 1 ? 4 : 6;
-  return '€' + n.toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: n >= 1000 ? 2 : 0 });
+  return '€ ' + n.toLocaleString('nl-NL', { maximumFractionDigits: digits, minimumFractionDigits: n >= 1000 ? 2 : 0 });
 };
 
 export const toDate = (v: unknown): Date | null => {
@@ -120,7 +120,8 @@ export const ago = (v: unknown) => {
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  return `${Math.round(s / 86400)} days ago`;
+  const days = Math.round(s / 86400);
+  return days === 1 ? '1 day ago' : `${days} days ago`;
 };
 
 export const familyLabel = (f: string) =>
