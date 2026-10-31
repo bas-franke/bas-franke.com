@@ -34,14 +34,14 @@ export default function OverviewPage() {
             <div className="hero-total">
               <div className="soft small">Everything together is worth</div>
               <div className="hero-total-row">
-                <div className="hero-num">{eur(o.equityEur)}</div>
+                <div className="hero-num money">{eur(o.equityEur)}</div>
                 <QuoteShare o={o} />
               </div>
             </div>
             <div className="hero-chips">
               {o.todayPnlEur !== null && (
                 <span className={`chip ${o.todayPnlEur >= 0 ? 'gain' : 'loss'}`}>
-                  {signedEur(o.todayPnlEur)}
+                  <span className="money">{signedEur(o.todayPnlEur)}</span>
                   {today !== null && ` · ${pct(today, 1, true)}`} today
                 </span>
               )}
@@ -347,7 +347,7 @@ function RecentTradesCard({ o }: { o: Overview }) {
                 <b>{x.market.split('-')[0]}</b>
                 <span className="tiny muted">{ago(x.createdAt ?? x.created_at)}</span>
               </span>
-              <span className="tnum recent-value">{value === null ? '–' : eur(value)}</span>
+              <span className="tnum recent-value money">{value === null ? '–' : eur(value)}</span>
               <span className={`chip tnum ${change === null ? '' : change >= 0 ? 'gain' : 'loss'}`} title={x.side === 'buy' ? 'Since the buy' : 'Against the buy before it'}>
                 {change === null ? '–' : pct(change, 1, true)}
               </span>
@@ -401,7 +401,7 @@ function LossCard({ o }: { o: Overview }) {
         </Tip>
       </div>
       <div className="row loss-line">
-        <span className={`mid-num ${pnl === null ? 'muted' : pnl >= 0 ? 'gain' : 'loss'}`}>{pnl === null ? '€ 0,00' : signedEur(pnl)}</span>
+        <span className={`mid-num money ${pnl === null ? 'muted' : pnl >= 0 ? 'gain' : 'loss'}`}>{pnl === null ? '€ 0,00' : signedEur(pnl)}</span>
         {changePct !== null && <span className={`small ${changePct >= 0 ? 'gain' : 'loss'}`}>{pct(changePct, 1, true)}</span>}
         <span className="spacer" />
         <span className="small muted">max loss {lossLimitText(o.dailyLossLimit, limit)}</span>
@@ -518,7 +518,7 @@ function CompareCard({ mode }: { mode: string }) {
                 <div style={{ minWidth: 0 }}>
                   <div className="small">{l.name}</div>
                   <div className={`mid-num ${l.change >= 0 ? 'gain' : 'loss'}`}>{pct(l.change, 1, true)}</div>
-                  <div className="tiny soft">
+                  <div className="tiny soft money">
                     {l.unit} {eur(l.base)} → {eur(l.last)}
                   </div>
                 </div>

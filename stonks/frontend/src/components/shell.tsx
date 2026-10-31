@@ -5,8 +5,9 @@ import { ago, eur, pct, signedEur } from '../format';
 import { feedLevel, useHealth } from '../health';
 import { navigate, useLocation } from '../router';
 import { useIsDark, useTheme } from '../theme';
+import { usePrivacy } from '../privacy';
 import { Art, CatArt } from './art';
-import { IconHealth, IconHome, IconLogout, IconLogs, IconMoon, IconMore, IconNotes, IconResearch, IconSettings, IconSun, IconTrades } from './icons';
+import { IconEye, IconEyeOff, IconHealth, IconHome, IconLogout, IconLogs, IconMoon, IconMore, IconNotes, IconResearch, IconSettings, IconSun, IconTrades } from './icons';
 import { ModeBadge } from './ui';
 
 const GROUPS = [
@@ -83,9 +84,13 @@ function useBarColor() {
 
 function Actions({ onLogout }: { onLogout: () => void }) {
   const theme = useTheme();
+  const privacy = usePrivacy();
   useBarColor();
   return (
     <div className="top-actions">
+      <button className="icon-btn" onClick={privacy.toggle} aria-pressed={!privacy.hidden} aria-label={privacy.hidden ? 'Show portfolio numbers' : 'Blur portfolio numbers'} title={privacy.hidden ? 'Numbers are blurred: click to show' : 'Numbers are visible: click to blur'}>
+        {privacy.hidden ? <IconEyeOff width={18} /> : <IconEye width={18} />}
+      </button>
       <button className="icon-btn" onClick={theme.toggle} aria-label={theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'} title={theme.isDark ? 'Light mode' : 'Dark mode'}>
         {theme.isDark ? <IconSun width={18} /> : <IconMoon width={18} />}
       </button>
@@ -163,13 +168,13 @@ export function Ticker() {
     <div className="ticker" role="group" aria-label="Today at a glance">
       <div className="tick">
         <span className="tick-name">Portfolio</span>
-        <span className="tick-value">{o ? eur(o.equityEur) : '–'}</span>
+        <span className="tick-value money">{o ? eur(o.equityEur) : '–'}</span>
         {o && <Mover change={todayPct(o)} />}
       </div>
       {o?.todayPnlEur !== null && o?.todayPnlEur !== undefined && (
         <div className="tick">
           <span className="tick-name">Today</span>
-          <span className={`tick-value ${o.todayPnlEur >= 0 ? 'up' : 'down'}`}>{signedEur(o.todayPnlEur)}</span>
+          <span className={`tick-value money ${o.todayPnlEur >= 0 ? 'up' : 'down'}`}>{signedEur(o.todayPnlEur)}</span>
         </div>
       )}
       {(['btc', 'eth'] as const).map((k) => (

@@ -2362,3 +2362,7 @@ tr.is-picked td {
 .recent-trades .chip {
   justify-content: center;
 }
+
+/* Portfolio numbers stay blurred until the eye in the header is clicked (privacy.ts). */
+.money { transition: filter 0.15s ease; }
+[data-hide-money='1'] .money { filter: blur(7px); user-select: none; pointer-events: none; }
