@@ -90,7 +90,7 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 10px;
   border-radius: 11px;
   color: var(--desk-ink-2);
@@ -115,7 +115,10 @@
   height: 19px;
 }
 .rail :focus-visible,
-.ticker :focus-visible {
+.ticker :focus-visible,
+.topbar :focus-visible,
+.tabbar :focus-visible,
+.more-sheet :focus-visible {
   outline-color: var(--desk-gold);
 }
 .rail-foot {
@@ -143,7 +146,7 @@
   border-radius: 10px;
   overflow: hidden;
   background: var(--desk-tile);
-  color: #4f5668;
+  color: color-mix(in srgb, var(--desk-on-ink) 72%, var(--desk-tile));
 }
 .rail-cat img,
 .rail-cat svg {
@@ -348,6 +351,17 @@
   box-shadow: 0 0 8px var(--tape-down);
 }
 
+/* Too wide for the screen: the tape fades at the edge, so it reads as something to swipe. */
+@media (max-width: 1120px) {
+  .ticker {
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  }
+  .tick-end {
+    padding-right: 30px;
+  }
+}
+
 /* ---------- painted page banner ---------- */
 
 .page-banner {
@@ -401,15 +415,17 @@
 
 /* ---------- a picture still to come ---------- */
 
-.art-ph {
-  display: inline-flex;
+.art-ph.art-ph {
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 4px;
   min-width: 0;
   overflow: hidden;
-  color: var(--ink-3);
+  color: color-mix(in srgb, var(--ink-2) 80%, transparent);
+  outline: 1px dashed var(--line-strong);
+  outline-offset: -9px;
   background:
     repeating-linear-gradient(135deg, transparent 0 11px, color-mix(in srgb, var(--line) 45%, transparent) 11px 12px),
     linear-gradient(135deg, var(--surface-2), var(--surface-3));
@@ -423,12 +439,13 @@
   font-size: 0.66rem;
 }
 .page-banner-art.art-ph {
-  padding-left: 34%;
+  padding-left: 16%;
 }
 .section-spot.art-ph {
   width: 56px;
   height: 56px;
   border-radius: 50%;
+  outline-offset: -4px;
 }
 .section-spot.art-ph .art-ph-name {
   display: none;
@@ -489,7 +506,6 @@ img[data-night] {
   }
   .tick-end {
     margin-left: 0;
-    padding-right: 14px;
   }
 
   .page-banner {
@@ -501,6 +517,15 @@ img[data-night] {
     opacity: 0.7;
     mask-image: linear-gradient(90deg, transparent 15%, #000 90%);
     -webkit-mask-image: linear-gradient(90deg, transparent 15%, #000 90%);
+  }
+  .page-banner-art.art-ph {
+    align-items: flex-end;
+    justify-content: flex-start;
+    padding: 18px 20px 0 0;
+    opacity: 1;
+  }
+  .page-banner-art .art-ph-name {
+    font-size: 0.58rem;
   }
   .page-banner-copy {
     max-width: 80%;
@@ -611,7 +636,12 @@ img[data-night] {
     aspect-ratio: 4 / 3;
     object-fit: cover;
   }
-  .more-tile span {
+  .more-tile .art-ph {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    outline-offset: -6px;
+  }
+  .more-tile > span:not(.art-ph) {
     display: inline-flex;
     align-items: center;
     justify-content: center;

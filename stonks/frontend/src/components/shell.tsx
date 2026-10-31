@@ -4,7 +4,7 @@ import { botLine, botMood, sinceMidnight, todayPct, useDesk } from '../desk';
 import { ago, eur, pct, signedEur } from '../format';
 import { feedLevel, useHealth } from '../health';
 import { navigate, useLocation } from '../router';
-import { useTheme } from '../theme';
+import { useIsDark, useTheme } from '../theme';
 import { Art, CatArt } from './art';
 import { IconHealth, IconHome, IconLogout, IconLogs, IconMoon, IconMore, IconNotes, IconResearch, IconSettings, IconSun, IconTrades } from './icons';
 import { ModeBadge } from './ui';
@@ -72,8 +72,18 @@ function NavIcon({ path, Icon }: { path: string; Icon: typeof IconHome }) {
   );
 }
 
+/** The phone's status bar matches the top bar, also when the theme was picked by hand instead of by the system. */
+function useBarColor() {
+  const dark = useIsDark();
+  useEffect(() => {
+    const color = getComputedStyle(document.documentElement).getPropertyValue('--desk').trim();
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', color));
+  }, [dark]);
+}
+
 function Actions({ onLogout }: { onLogout: () => void }) {
   const theme = useTheme();
+  useBarColor();
   return (
     <div className="top-actions">
       <button className="icon-btn" onClick={theme.toggle} aria-label={theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'} title={theme.isDark ? 'Light mode' : 'Dark mode'}>
