@@ -202,54 +202,111 @@
   }
 }
 
-/* Compare this research with others, one coin at a time */
-.compare-research {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-  scroll-margin-top: 72px;
-}
-.compare-research .compare-pick {
+/* The one graph of a research page */
+.shell .research-graph {
   display: grid;
-  grid-template-columns: minmax(90px, 0.7fr) minmax(120px, 1fr) minmax(0, 2.4fr) auto;
   gap: 10px;
-  align-items: end;
-  margin: 10px 0 12px;
-}
-.compare-research .compare-pick .field {
   min-width: 0;
+  scroll-margin-top: calc(var(--sticky-top) + 72px);
 }
-.compare-research .compare-pick select {
-  width: 100%;
+.shell .research-graph .writeup-picks {
+  margin: 0;
 }
-.compare-research .compare-controls {
+.shell .graph-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 2px 0 0;
+}
+.shell .graph-stats dt {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+.shell .graph-stats dd {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  letter-spacing: -0.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell .graph-lines {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 14px;
-  align-items: center;
-  margin-bottom: 10px;
-}
-.compare-research .compare-hold {
-  display: inline-flex;
   gap: 6px;
   align-items: center;
-  font-size: 13px;
 }
-.compare-research .compare-hold input {
-  accent-color: var(--brass);
+.shell .graph-line {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  max-width: 100%;
+  min-height: 34px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
 }
-.compare-research .compare-missing {
+.shell button.graph-line {
+  cursor: pointer;
+}
+.shell button.graph-line[aria-pressed='false'] {
+  opacity: 0.55;
+}
+.shell .graph-line-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell .graph-line b {
+  flex: none;
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.shell .graph-line > button {
+  min-width: 26px;
+  min-height: 26px;
+  margin-right: -6px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.shell .graph-line.is-missing {
+  color: var(--ink-3);
+}
+.shell .graph-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  justify-content: space-between;
+}
+.shell .research-graph .compare-pick {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2.4fr) auto;
+  gap: 8px;
+}
+.shell .research-graph .compare-pick select {
+  width: 100%;
+  min-width: 0;
 }
 @media (max-width: 760px) {
-  .compare-research .compare-pick {
-    grid-template-columns: 1fr 1fr;
+  .shell .research-graph .compare-pick {
+    grid-template-columns: 1fr;
   }
-  .compare-research .compare-pick .field:nth-child(3),
-  .compare-research .compare-pick .btn {
-    grid-column: 1 / -1;
+  .shell .graph-line {
+    min-height: 38px;
+  }
+  .shell .graph-stats dd {
+    font-size: 0.95rem;
   }
 }
 
@@ -297,17 +354,6 @@
   margin-top: 4px;
 }
 @media (max-width: 760px) {
-  /* Long euro figures: one label and value per line instead of three squeezed columns. */
-  .shell .writeup-compare {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-  .shell .writeup-compare > div {
-    display: flex;
-    gap: 12px;
-    align-items: baseline;
-    justify-content: space-between;
-  }
   .shell .writeup-jumps {
     top: 6px;
   }

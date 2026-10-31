@@ -5,9 +5,9 @@ import { LineChart, type LineSeries } from '../components/charts';
 import { ErrorBox, Fold, Skeleton, useAsync } from '../components/ui';
 import { eur } from '../format';
 import { navigate, useLocation } from '../router';
-import { CompareResearch } from './ResearchCompare';
+import { ResearchGraph } from './ResearchCompare';
 import './reading.css';
-import type { Writeup, WriteupChart, WriteupCoin, WriteupSection } from '../types';
+import type { Writeup, WriteupChart, WriteupSection } from '../types';
 
 // A long-form explanation of one strategy (SPEC §8b): /writeup?spec=<spec id>. The content is stored in the database.
 
@@ -28,12 +28,6 @@ const FORMATS: Record<string, (v: number) => string> = {
     return v.toPrecision(3);
   },
 };
-
-function fromStart(points: [number, number][], to: number): [number, number][] {
-  const base = points[0]?.[1];
-  if (!base) return points;
-  return points.map(([t, v]) => [t, Math.round((v / base) * to * 1e6) / 1e6]);
-}
 
 export default function WriteupPage() {
   const { query } = useLocation();
@@ -70,8 +64,7 @@ function Sections({ doc }: { doc: Writeup }) {
   const jumps = [
     ...(board
       ? [
-          { id: 'coin-charts', label: 'Coin charts' },
-          { id: 'compare-research', label: 'Compare' },
+          { id: 'coin-charts', label: 'Graph' },
           { id: 'coin-numbers', label: 'Every coin' },
         ]
       : []),
@@ -167,7 +160,6 @@ function CoinTable({ s }: { s: WriteupSection }) {
   };
   const table = (
     <>
-      {coins.length > 0 && <p className="small soft writeup-hint">Tap a coin to see its charts.</p>}
       {s.compact && s.compact.length < (s.head ?? []).length && (
         <button type="button" className="chip outline writeup-cols" aria-pressed={all} onClick={() => setAll((v) => !v)}>
           {all ? 'Show fewer columns' : 'Show all columns'}
@@ -216,124 +208,11 @@ function CoinTable({ s }: { s: WriteupSection }) {
   return (
     <section className="card" id="coin-board">
       <h2>{s.title}</h2>
-      {coin && range && <CoinCharts coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} />}
-      {coin && specId && <CompareResearch specId={specId} coin={coin} coins={coins} onCoin={setCoinId} />}
+      {coin && range && <ResearchGraph specId={specId} coins={coins} coin={coin} rangeId={range.id} onCoin={setCoinId} onRange={setRangeId} />}
       <div className="writeup-numbers" id="coin-numbers" data-fold>
         <Fold title={`Every coin, the numbers (${coins.length})`}>{table}</Fold>
       </div>
     </section>
-  );
-}
-
-function CoinCharts({
-  coins,
-  coin,
-  rangeId,
-  onCoin,
-  onRange,
-}: {
-  coins: WriteupCoin[];
-  coin: WriteupCoin;
-  rangeId: string;
-  onCoin: (id: string) => void;
-  onRange: (id: string) => void;
-}) {
-  const range = coin.ranges.find((r) => r.id === rangeId) ?? coin.ranges[0];
-  const charts = useMemo(() => {
-    const gap = range.equity.map(([t, v], i) => [t, Math.round((v - (range.holdEquity[i]?.[1] ?? v)) * 100) / 100] as [number, number]);
-    const out: WriteupChart[] = [];
-    const label = range.label.toLowerCase();
-    if (range.equity.length && range.holdEquity.length) {
-      out.push({
-        title: `Indexed at 100, ${label}`,
-        yFormat: 'idx',
-        height: 220,
-        baseline: 100,
-        baselineLabel: '100 at the start',
-        series: [
-          { name: 'This strategy', color: 'brass', points: fromStart(range.equity, 100) },
-          { name: `Holding ${coin.id}`, color: 'ink2', dash: '7 5', points: fromStart(range.holdEquity, 100) },
-        ],
-      });
-    }
-    if (range.price?.length && range.equity.length && range.holdEquity.length) {
-      const first = range.price[0][1];
-      out.push({
-        title: `${coin.id} price, from its first close`,
-        yFormat: Math.abs(first) < 20 ? 'px' : 'eur',
-        height: 220,
-        series: [
-          { name: 'This strategy', color: 'brass', points: fromStart(range.equity, first) },
-          { name: `Holding ${coin.id}`, color: 'ink2', dash: '7 5', points: fromStart(range.holdEquity, first) },
-        ],
-        band: range.band ? { name: `Share of the portfolio in ${coin.id}`, points: range.band } : undefined,
-      });
-    }
-    out.push({
-      title: 'Strategy minus holding',
-      yFormat: 'eur',
-      height: 170,
-      baseline: 0,
-      baselineLabel: 'level',
-      series: [{ name: 'Ahead of holding', color: 'brass', points: gap }],
-    });
-    return out;
-  }, [coin, range]);
-  const gap = range.strategy - range.hold;
-  // On a phone the coins are one scrolling row: keep the picked coin in view when it is picked from elsewhere.
-  const coinRow = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const row = coinRow.current;
-    const on = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
-    if (row && on) row.scrollTo({ left: on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2, behavior: 'smooth' });
-  }, [coin.id]);
-  return (
-    <div className="writeup-board" id="coin-charts">
-      <div className="writeup-picks" role="group" aria-label="Coin" ref={coinRow}>
-        {coins.map((c) => (
-          <button key={c.id} type="button" className={`chip ${c.id === coin.id ? 'brass' : 'outline'}`} aria-pressed={c.id === coin.id} onClick={() => onCoin(c.id)}>
-            {c.id}
-          </button>
-        ))}
-      </div>
-      <div className="writeup-picks" role="group" aria-label="Stretch">
-        {coin.ranges.map((r) => (
-          <button key={r.id} type="button" className={`chip ${r.id === range.id ? 'brass' : 'outline'}`} aria-pressed={r.id === range.id} onClick={() => onRange(r.id)}>
-            {r.label}
-          </button>
-        ))}
-      </div>
-      <div className="writeup-compare">
-        <div>
-          <div className="eyebrow">This strategy</div>
-          <b className={range.strategy >= range.hold ? 'gain' : 'loss'}>{eur(range.strategy)}</b>
-        </div>
-        <div>
-          <div className="eyebrow">Holding {coin.id}</div>
-          <b>{eur(range.hold)}</b>
-        </div>
-        <div>
-          <div className="eyebrow">{gap >= 0 ? 'Ahead of holding' : 'Behind holding'}</div>
-          <b className={gap >= 0 ? 'gain' : 'loss'}>{eur(Math.abs(gap))}</b>
-        </div>
-      </div>
-      {charts[0] && <Chart key={`${coin.id}-${range.id}-0`} c={charts[0]} />}
-      {charts.length > 1 && (
-        <Fold title={`More ${coin.id} charts`}>
-          <div className="writeup-charts">
-            {charts.slice(1).map((c, i) => (
-              <Chart key={`${coin.id}-${range.id}-${i + 1}`} c={c} />
-            ))}
-          </div>
-          <p className="small soft">
-            The first chart starts both lines at 100, so coins can be compared. The price chart starts both lines at this coin’s first close, so holding tracks the coin. The lower chart is the strategy minus holding, in euros.
-            {range.fees !== undefined ? ` Fees in this stretch ${eur(range.fees)}.` : ''}
-            {range.trips !== undefined ? ` ${range.trips} full exits.` : ''}
-            {range.exposure !== undefined && range.exposure !== null ? ` In the market ${Math.round(range.exposure)}% of the time.` : ''}
-          </p>
-        </Fold>
-      )}
-    </div>
   );
 }
 

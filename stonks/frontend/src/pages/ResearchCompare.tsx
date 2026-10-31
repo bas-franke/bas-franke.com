@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { LineChart, type LineSeries } from '../components/charts';
 import { Segmented, useAsync } from '../components/ui';
-import { dateOnly, eur, pct } from '../format';
+import { eur, pct } from '../format';
 import type { ResearchBucket, ResearchEntry, WriteupCoin } from '../types';
 
 const STORE = 'stonks.research.compare';
@@ -60,31 +60,52 @@ const rebase = (pts: Pts, from: number, to: number): Pts => {
   return cut.length ? cut.map(([t, v]) => [t, (v / cut[0][1]) * 1000]) : cut;
 };
 
-/**
- * Yearly return on calendar time, so old and new research read the same way. Curves hold about 220 points, so the
- * span is the graph's, not the distance between one curve's own samples. Too coarse for a worst drop: crashes fall between points.
- */
-function yearly(pts: Pts, spanMs: number): number | null {
-  if (pts.length < 2) return null;
+/** A year or more reads as yearly return on calendar time, a shorter stretch as its plain return. */
+function resultOf(pts: Pts, spanMs: number): string {
+  if (pts.length < 2) return '–';
+  const growth = pts[pts.length - 1][1] / pts[0][1];
   const years = spanMs / YEAR_MS;
-  return years * 365 < 30 ? null : ((pts[pts.length - 1][1] / pts[0][1]) ** (1 / years) - 1) * 100;
+  return years >= 1 ? `${pct((growth ** (1 / years) - 1) * 100, 0, true)} a year` : pct((growth - 1) * 100, 0, true);
 }
 
-const fmtYearly = (v: number | null) => (v === null ? '–' : pct(v, 1, true));
 const euroAxis = (v: number) => `€${Math.round(v).toLocaleString('en-US')}`;
 const sessionNo = (b: string) => Number(/^session(\d+)$/.exec(b)?.[1] ?? -1);
 
-/** This research on one coin against any other research on that same coin. Lives under the coin charts of a write-up. */
-export function CompareResearch({ specId, coin, coins, onCoin }: { specId: string; coin: WriteupCoin; coins: WriteupCoin[]; onCoin: (id: string) => void }) {
+/** The one graph of a write-up: pick a coin and a stretch, then add any other research on that coin. */
+export function ResearchGraph({
+  specId,
+  coins,
+  coin,
+  rangeId,
+  onCoin,
+  onRange,
+}: {
+  specId: string;
+  coins: WriteupCoin[];
+  coin: WriteupCoin;
+  rangeId: string;
+  onCoin: (id: string) => void;
+  onRange: (id: string) => void;
+}) {
+  const range = coin.ranges.find((r) => r.id === rangeId) ?? coin.ranges[0];
   const coinId = coinOf(coin.id);
   const research = useAsync(() => api.research(), []);
   const writeups = useAsync(() => api.writeups().then((r) => new Set(r.writeups.map((w) => w.specId))), []);
   const [picked, setPicked] = useState<string[]>(loadPicked);
+  const [adding, setAdding] = useState(false);
   const [from, setFrom] = useState('');
   const [choice, setChoice] = useState('');
   const [scale, setScale] = useState<Scale>('log');
   const [hold, setHold] = useState(true);
   const [loaded, setLoaded] = useState<Record<string, Curves | 'failed'>>({});
+
+  // On a phone the coins are one scrolling row: keep the picked coin in view when it is picked from the table.
+  const coinRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = coinRow.current;
+    const on = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (row && on) row.scrollTo({ left: on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2, behavior: 'smooth' });
+  }, [coin.id]);
 
   /** Research tabs that have strategies with coin curves, sessions newest first. */
   const tabs = useMemo(() => {
@@ -112,7 +133,7 @@ export function CompareResearch({ specId, coin, coins, onCoin }: { specId: strin
         const cut = key.indexOf(':');
         const t = tabs.find((x) => x.key === key.slice(0, cut));
         const e: ResearchEntry | undefined = t?.top.find((x) => x.spec.id === key.slice(cut + 1));
-        return t && e ? [{ key, id: e.spec.id, label: `${e.spec.name} (${t.title})` }] : [];
+        return t && e ? [{ key, id: e.spec.id, label: `${e.spec.name.replace(/, ETH \d+\w$/, '')} · ${t.title}` }] : [];
       }),
     [picked, tabs],
   );
@@ -128,75 +149,147 @@ export function CompareResearch({ specId, coin, coins, onCoin }: { specId: strin
   }, [others, loaded]);
 
   const view = useMemo(() => {
-    const own = coin.ranges.find((r) => r.id === 'all') ?? coin.ranges[0];
+    const own = positive(range.equity);
+    const curves = others.flatMap((o, i) => {
+      const c = loaded[o.id];
+      const curve = c && c !== 'failed' ? c[coinId] : undefined;
+      return curve ? [{ ...o, color: COLORS[i % COLORS.length], pts: positive(curve.equity) }] : [];
+    });
+    const lo = own.length ? own[0][0] : 0;
+    const hi = own.length ? own[own.length - 1][0] : 0;
+    const inRange = curves.filter((c) => c.pts.some(([t]) => t >= lo && t <= hi));
+    const start = Math.max(lo, ...inRange.map((c) => c.pts[0][0]));
+    const end = Math.min(hi, ...inRange.map((c) => c.pts[c.pts.length - 1][0]));
+    const span = end - start;
     const lines = [
-      { key: 'self', label: 'This research', color: 'var(--s1)', equity: positive(own?.equity ?? []), holdEquity: positive(own?.holdEquity ?? []) },
-      ...others.flatMap((o, i) => {
-        const c = loaded[o.id];
-        const curve = c && c !== 'failed' ? c[coinId] : undefined;
-        return curve ? [{ key: o.key, label: o.label, color: COLORS[i % COLORS.length], equity: positive(curve.equity), holdEquity: positive(curve.holdEquity) }] : [];
-      }),
-    ].filter((l) => l.equity.length > 1);
-    const start = Math.max(...lines.map((l) => l.equity[0][0]));
-    const end = Math.min(...lines.map((l) => l.equity[l.equity.length - 1][0]));
-    const rows = lines.map((l) => ({ ...l, equity: rebase(l.equity, start, end), holdEquity: rebase(l.holdEquity, start, end) })).filter((l) => l.equity.length > 1);
-    const series: LineSeries[] = rows.map((r) => ({ name: r.label, color: r.color, points: r.equity, width: r.key === 'self' ? 2.4 : 1.8 }));
-    // Holding the coin is one line: take the curve whose samples reach closest to the end.
-    const holdCurve = rows.map((r) => r.holdEquity).reduce<Pts>((best, c) => (c.length && (!best.length || c[c.length - 1][0] > best[best.length - 1][0]) ? c : best), []);
-    if (hold && holdCurve.length) series.push({ name: `Holding ${coinId}`, color: 'var(--ink-3)', dash: '6 5', points: holdCurve, width: 1.6 });
-    return { rows, series, start, end, holdYearly: yearly(holdCurve, end - start) };
-  }, [coin, coinId, others, loaded, hold]);
+      { key: 'self', label: 'This research', color: 'var(--s1)', pts: rebase(own, start, end) },
+      ...inRange.map((c) => ({ key: c.key, label: c.label, color: c.color, pts: rebase(c.pts, start, end) })),
+    ].filter((l) => l.pts.length > 1);
+    const holdPts = rebase(positive(range.holdEquity), start, end);
+    const series: LineSeries[] = lines.map((l) => ({ name: l.label, color: l.color, points: l.pts, width: l.key === 'self' ? 2.4 : 1.8 }));
+    if (hold && holdPts.length > 1) series.push({ name: `Holding ${coinId}`, color: 'var(--ink-3)', dash: '6 5', points: holdPts, width: 1.6 });
+    return { lines, series, span, holdResult: resultOf(holdPts, span) };
+  }, [range, others, loaded, coinId, hold]);
 
-  const waiting = others.filter((o) => !(o.id in loaded));
-  const without = others.filter((o) => loaded[o.id] && (loaded[o.id] === 'failed' || !(loaded[o.id] as Curves)[coinId]));
+  const missing = others.filter((o) => loaded[o.id] && !view.lines.some((l) => l.key === o.key));
+  const waiting = others.some((o) => !(o.id in loaded));
+  const gap = range.strategy - range.hold;
 
   return (
-    <div className="compare-research" id="compare-research">
-      <h3>Compare with other research</h3>
-      <p className="small soft writeup-hint">Every line trades the same coin, from the first day they all share.</p>
-      {research.error || writeups.error ? (
-        <p className="small soft">The other research could not be loaded.</p>
-      ) : (
+    <div className="research-graph" id="coin-charts">
+      <div className="writeup-picks" role="group" aria-label="Coin" ref={coinRow}>
+        {coins.map((c) => (
+          <button key={c.id} type="button" className={`chip ${c.id === coin.id ? 'brass' : 'outline'}`} aria-pressed={c.id === coin.id} onClick={() => onCoin(c.id)}>
+            {c.id}
+          </button>
+        ))}
+      </div>
+      {coin.ranges.length > 1 && (
+        <div className="writeup-picks" role="group" aria-label="Period">
+          {coin.ranges.map((r) => (
+            <button key={r.id} type="button" className={`chip ${r.id === range.id ? 'brass' : 'outline'}`} aria-pressed={r.id === range.id} onClick={() => onRange(r.id)}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <dl className="graph-stats">
+        <div>
+          <dt>This research</dt>
+          <dd className={gap >= 0 ? 'gain' : 'loss'}>{eur(range.strategy, true)}</dd>
+        </div>
+        <div>
+          <dt>Holding {coinId}</dt>
+          <dd>{eur(range.hold, true)}</dd>
+        </div>
+        <div>
+          <dt>{gap >= 0 ? 'Ahead' : 'Behind'}</dt>
+          <dd className={gap >= 0 ? 'gain' : 'loss'}>{eur(Math.abs(gap), true)}</dd>
+        </div>
+      </dl>
+
+      <LineChart
+        series={view.series}
+        height={250}
+        legend={false}
+        log={scale === 'log'}
+        ariaLabel={`Value of €1,000 on ${coinId}`}
+        yFormat={euroAxis}
+        tipFormat={(v) => eur(v, true)}
+        baseline={1000}
+      />
+
+      <div className="graph-lines">
+        {view.lines.map((l) => (
+          <span className="graph-line" key={l.key}>
+            <span className="swatch" style={{ color: l.color }} />
+            <span className="graph-line-name">{l.label}</span>
+            <b>{resultOf(l.pts, view.span)}</b>
+            {l.key !== 'self' && (
+              <button type="button" aria-label={`Remove ${l.label}`} onClick={() => change(picked.filter((k) => k !== l.key))}>
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+        <button type="button" className="graph-line" aria-pressed={hold} onClick={() => setHold((v) => !v)}>
+          <span className="swatch dashed" style={{ color: 'var(--ink-3)' }} />
+          <span className="graph-line-name">Holding {coinId}</span>
+          <b>{hold ? view.holdResult : 'off'}</b>
+        </button>
+        {missing.map((o) => (
+          <span className="graph-line is-missing" key={o.key}>
+            <span className="graph-line-name">{o.label}: no {coinId}</span>
+            <button type="button" aria-label={`Remove ${o.label}`} onClick={() => change(picked.filter((k) => k !== o.key))}>
+              ×
+            </button>
+          </span>
+        ))}
+        {waiting && <span className="tiny soft">Loading…</span>}
+      </div>
+
+      <div className="graph-actions" id="compare-research">
+        <button type="button" className="btn small" aria-expanded={adding} disabled={!!research.error || !!writeups.error} onClick={() => setAdding((v) => !v)}>
+          {adding ? 'Done' : '+ Compare'}
+        </button>
+        <Segmented<Scale>
+          label="Graph scale"
+          value={scale}
+          onChange={setScale}
+          options={[
+            { value: 'log', label: 'Growth' },
+            { value: 'euro', label: 'Euros' },
+          ]}
+        />
+      </div>
+
+      {adding && (
         <div className="compare-pick">
-          <div className="field">
-            <label htmlFor="compare-coin">Coin</label>
-            <select id="compare-coin" className="input" value={coin.id} onChange={(ev) => onCoin(ev.target.value)}>
-              {coins.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.id}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="compare-from">Research</label>
-            <select
-              id="compare-from"
-              className="input"
-              value={tab?.key ?? ''}
-              onChange={(ev) => {
-                setFrom(ev.target.value);
-                setChoice('');
-              }}
-            >
-              {tabs.map((t) => (
-                <option key={t.key} value={t.key}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="compare-choice">Strategy</label>
-            <select id="compare-choice" className="input" value={chosen?.spec.id ?? ''} onChange={(ev) => setChoice(ev.target.value)}>
-              {tab?.top.map((e) => (
-                <option key={e.spec.id} value={e.spec.id}>
-                  #{e.rank} {e.spec.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <select
+            className="input"
+            aria-label="Research"
+            value={tab?.key ?? ''}
+            onChange={(ev) => {
+              setFrom(ev.target.value);
+              setChoice('');
+            }}
+          >
+            {tabs.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.title}
+              </option>
+            ))}
+          </select>
+          <select className="input" aria-label="Strategy" value={chosen?.spec.id ?? ''} onChange={(ev) => setChoice(ev.target.value)}>
+            {tab?.top.map((e) => (
+              <option key={e.spec.id} value={e.spec.id}>
+                #{e.rank} {e.spec.name}
+              </option>
+            ))}
+          </select>
           <button
+            type="button"
             className="btn brass"
             disabled={!canAdd}
             onClick={() => {
@@ -205,101 +298,10 @@ export function CompareResearch({ specId, coin, coins, onCoin }: { specId: strin
               setChoice('');
             }}
           >
-            Add to graph
+            Add
           </button>
         </div>
       )}
-
-      {view.rows.length > 0 && (
-        <>
-          <div className="compare-controls">
-            <Segmented<Scale>
-              label="Graph scale"
-              value={scale}
-              onChange={setScale}
-              options={[
-                { value: 'log', label: 'Even growth' },
-                { value: 'euro', label: 'Euros' },
-              ]}
-            />
-            <label className="compare-hold">
-              <input type="checkbox" checked={hold} onChange={(ev) => setHold(ev.target.checked)} /> Holding
-            </label>
-          </div>
-          <LineChart
-            series={view.series}
-            height={280}
-            log={scale === 'log'}
-            ariaLabel={`Value of €1,000 on ${coinId} in this research and the chosen ones`}
-            yFormat={euroAxis}
-            tipFormat={(v) => eur(v, true)}
-            baseline={1000}
-            baselineLabel="€1,000 start"
-          />
-          <p className="small soft">
-            Every line starts at €1,000 on {dateOnly(view.start)} and ends on {dateOnly(view.end)}. Even growth draws doubling as the same height wherever it happens. Yearly figures
-            use calendar years over these dates. Each write-up has its true worst drop; the graph&rsquo;s points are too far apart to measure one.
-          </p>
-          <div className="table-wrap">
-            <table className="data cards">
-              <thead>
-                <tr>
-                  <th>Strategy</th>
-                  <th className="r">Yearly</th>
-                  <th className="r">Holding yearly</th>
-                  <th className="r">Ahead of holding</th>
-                  <th className="r">€1,000 became</th>
-                  <th aria-label="Remove" />
-                </tr>
-              </thead>
-              <tbody>
-                {view.rows.map((r) => {
-                  const y = yearly(r.equity, view.end - view.start);
-                  const h = view.holdYearly;
-                  return (
-                    <tr key={r.key}>
-                      <td className="full">
-                        <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
-                          <span className="swatch" style={{ color: r.color }} />
-                          <span style={{ minWidth: 0 }}>{r.label}</span>
-                        </span>
-                      </td>
-                      <td className="r" data-label="Yearly">
-                        {fmtYearly(y)}
-                      </td>
-                      <td className="r" data-label="Holding yearly">
-                        {fmtYearly(h)}
-                      </td>
-                      <td className="r" data-label="Ahead of holding">
-                        {y !== null && h !== null ? `${y - h >= 0 ? '+' : '−'}${Math.abs(y - h).toFixed(1)} pts` : '–'}
-                      </td>
-                      <td className="r" data-label="€1,000 became">
-                        {eur(r.equity[r.equity.length - 1][1], true)}
-                      </td>
-                      <td className="r">
-                        {r.key !== 'self' && (
-                          <button className="btn ghost small" aria-label={`Remove ${r.label}`} onClick={() => change(picked.filter((k) => k !== r.key))}>
-                            Remove
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-      {waiting.length > 0 && <p className="small soft">Loading {waiting.length === 1 ? waiting[0].label : `${waiting.length} strategies`}…</p>}
-      {without.map((o) => (
-        <p className="small soft compare-missing" key={o.key}>
-          {o.label} has no {coinId} curve.{' '}
-          <button className="btn ghost small" onClick={() => change(picked.filter((k) => k !== o.key))}>
-            Remove
-          </button>
-        </p>
-      ))}
     </div>
   );
 }
